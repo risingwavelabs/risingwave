@@ -60,6 +60,10 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Pattern HISTORY_FILE_PATTERN =
             Pattern.compile("schema_history_(\\d+)\\.dat");
 
+    // Cache the latest file information to avoid listing files on every store operation
+    private String cachedLatestFile = null;
+    private int cachedFileRecordCount = 0;
+
     // Override ALL_FIELDS to include our custom configuration fields
     // This ensures that our custom fields are properly validated by Debezium
     public static final Field.Set ALL_FIELDS =
@@ -123,18 +127,14 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     protected void doStart() {
         try {
             // 1. List and sort history files by timestamp
-            List<String> historyFiles = new ArrayList<>();
-            String[] fileArray = listObject(objectDir);
-            if (fileArray != null) {
-                Collections.addAll(historyFiles, fileArray);
-            }
-            historyFiles.removeIf(file -> !HISTORY_FILE_PATTERN.matcher(file).find());
-            Collections.sort(
-                    historyFiles, Comparator.comparingLong(this::extractTimestampFromFileName));
+            List<String> historyFiles = listAndSortHistoryFiles();
 
             // 2. Simple sequential loading approach - much more efficient than lazy loading
             // For most cases, loading all records sequentially is faster and simpler
             this.records = loadAllHistoryRecords(historyFiles);
+
+            // 3. Initialize cache for the latest file to optimize future store operations
+            initializeLatestFileCache(historyFiles);
 
             LOGGER.info(
                     "Loaded schema history with {} total records from {} files.",
@@ -162,40 +162,34 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     protected void doStoreRecord(HistoryRecord record) {
         LOGGER.info("Storing new schema history record.");
         try {
-            // 1. Find the latest schema_history_*.dat file
-            List<String> files = new ArrayList<>();
-            String[] fileArray = listObject(objectDir);
-            if (fileArray != null) {
-                Collections.addAll(files, fileArray);
-            }
-            files.removeIf(file -> !HISTORY_FILE_PATTERN.matcher(file).find());
-            if (!files.isEmpty()) {
-                files.sort(Comparator.comparingLong(this::extractTimestampFromFileName));
-            }
-            String latestFile = files.isEmpty() ? null : files.get(files.size() - 1);
+            // Use cached information to avoid expensive list operations
+            if (cachedLatestFile != null && cachedFileRecordCount < maxRecordsPerFile) {
+                // 1. Append to existing file using cached information
+                byte[] data = getObject(cachedLatestFile);
+                List<HistoryRecord> records = toHistoryRecords(data);
+                records.add(record);
+                putObject(cachedLatestFile, fromHistoryRecords(records));
 
-            List<HistoryRecord> records;
-            if (latestFile != null) {
-                // 2. Read the latest file content
-                byte[] data = getObject(latestFile);
-                records = toHistoryRecords(data);
-                if (records.size() < maxRecordsPerFile) {
-                    // 3. Append and overwrite the file
-                    records.add(record);
-                    putObject(latestFile, fromHistoryRecords(records));
-                    LOGGER.info(
-                            "Appended record to existing file: {} (now {} records)",
-                            latestFile,
-                            records.size());
-                    return;
-                }
+                // Update cache
+                cachedFileRecordCount++;
+
+                LOGGER.info(
+                        "Appended record to existing file: {} (now {} records)",
+                        cachedLatestFile,
+                        cachedFileRecordCount);
+            } else {
+                // 2. Create new file when current file is full or doesn't exist
+                String newFile =
+                        String.format(
+                                "%s/schema_history_%d.dat", objectDir, System.currentTimeMillis());
+                putObject(newFile, fromHistoryRecords(Collections.singletonList(record)));
+
+                // Update cache to point to new file
+                cachedLatestFile = newFile;
+                cachedFileRecordCount = 1;
+
+                LOGGER.info("Created new schema history file: {}", newFile);
             }
-            // 4. Create a new file
-            String newFile =
-                    String.format(
-                            "%s/schema_history_%d.dat", objectDir, System.currentTimeMillis());
-            putObject(newFile, fromHistoryRecords(Collections.singletonList(record)));
-            LOGGER.info("Created new schema history file: {}", newFile);
         } catch (Exception e) {
             throw new SchemaHistoryException("Failed to store schema history record", e);
         }
@@ -294,5 +288,49 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
         LOGGER.info("Successfully loaded {} total history records", allRecords.size());
         return allRecords;
+    }
+
+    /** List and sort history files by timestamp. Extracted from doStart() to be reusable. */
+    private List<String> listAndSortHistoryFiles() {
+        List<String> historyFiles = new ArrayList<>();
+        String[] fileArray = listObject(objectDir);
+        if (fileArray != null) {
+            Collections.addAll(historyFiles, fileArray);
+        }
+        historyFiles.removeIf(file -> !HISTORY_FILE_PATTERN.matcher(file).find());
+        Collections.sort(
+                historyFiles, Comparator.comparingLong(this::extractTimestampFromFileName));
+        return historyFiles;
+    }
+
+    /**
+     * Initialize cache for the latest file information to optimize future store operations. This
+     * avoids expensive list operations on every doStoreRecord call.
+     */
+    private void initializeLatestFileCache(List<String> historyFiles) {
+        if (!historyFiles.isEmpty()) {
+            cachedLatestFile = historyFiles.get(historyFiles.size() - 1);
+            try {
+                // Get the current record count in the latest file
+                byte[] data = getObject(cachedLatestFile);
+                List<HistoryRecord> records = toHistoryRecords(data);
+                cachedFileRecordCount = records.size();
+
+                LOGGER.debug(
+                        "Initialized cache: latest file {} with {} records",
+                        cachedLatestFile,
+                        cachedFileRecordCount);
+            } catch (Exception e) {
+                LOGGER.warn("Failed to initialize cache for latest file: {}", cachedLatestFile, e);
+                // Reset cache on error
+                cachedLatestFile = null;
+                cachedFileRecordCount = 0;
+            }
+        } else {
+            // No existing files
+            cachedLatestFile = null;
+            cachedFileRecordCount = 0;
+            LOGGER.debug("No existing history files found, cache initialized as empty");
+        }
     }
 }
