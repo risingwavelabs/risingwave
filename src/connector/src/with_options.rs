@@ -177,6 +177,14 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         connector == ICEBERG_CONNECTOR
     }
 
+    #[inline(always)]
+    fn is_bigquery_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector == BATCH_BIGQUERY_CONNECTOR
+    }
+
     fn connector_need_pk(&self) -> bool {
         // Currently only iceberg connector doesn't need primary key
         // introduced in https://github.com/risingwavelabs/risingwave/pull/14971
