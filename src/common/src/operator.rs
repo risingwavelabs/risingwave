@@ -31,6 +31,12 @@ pub fn unique_executor_id_into_parts(unique_executor_id: u64) -> (u32, u32) {
     (actor_id, operator_id)
 }
 
+pub fn unique_operator_id_into_parts(unique_operator_id: u64) -> (u32, u32) {
+    let fragment_id = (unique_operator_id >> 32) as u32;
+    let operator_id = (unique_operator_id & 0xFFFFFFFF) as u32;
+    (fragment_id, operator_id)
+}
+
 pub fn unique_executor_id_from_unique_operator_id(actor_id: u32, unique_operator_id: u64) -> u64 {
     // keep only low-32 bits
     let unique_operator_id = unique_operator_id & 0xFFFFFFFF;

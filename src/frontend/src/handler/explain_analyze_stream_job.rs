@@ -65,7 +65,7 @@ pub async fn handle_explain_analyze_stream_job(
         ?root_node,
         ?dispatcher_fragment_ids,
         ?adjacency_list,
-        "init info"
+        "explain analyze metadata"
     );
 
     let worker_nodes = net::list_stream_worker_nodes(handler_args.session.env()).await?;
@@ -563,11 +563,13 @@ mod metrics {
 /// rendering, extracting, etc.
 mod graph {
     use std::collections::{HashMap, HashSet};
+    use std::fmt::Debug;
     use std::time::Duration;
 
     use itertools::Itertools;
     use risingwave_common::operator::{
         unique_executor_id_from_unique_operator_id, unique_operator_id,
+        unique_operator_id_into_parts,
     };
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::stream_plan::stream_node::{NodeBody, NodeBodyDiscriminants};
@@ -581,13 +583,27 @@ mod graph {
     pub(super) type ExecutorId = u64;
 
     /// This is an internal struct used ONLY for explain analyze stream job.
-    #[derive(Debug)]
     pub(super) struct StreamNode {
         operator_id: OperatorId,
         fragment_id: u32,
         identity: NodeBodyDiscriminants,
         actor_ids: HashSet<u32>,
         dependencies: Vec<u64>,
+    }
+
+    impl Debug for StreamNode {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let (actor_id, operator_id) = unique_operator_id_into_parts(self.operator_id);
+            let operator_id_str = format!(
+                "{}: (actor_id: {}, operator_id: {})",
+                self.operator_id, actor_id, operator_id
+            );
+            write!(
+                f,
+                "StreamNode {{ operator_id: {}, fragment_id: {}, identity: {:?}, actor_ids: {:?}, dependencies: {:?} }}",
+                operator_id_str, self.fragment_id, self.identity, self.actor_ids, self.dependencies
+            )
+        }
     }
 
     impl StreamNode {
