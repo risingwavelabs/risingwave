@@ -1,104 +1,64 @@
 statement ok
-create table t(v1 int primary key, v2 int);
+create table t(v1 int, v2 int);
 
 statement ok
-create table t2(v1 int primary key, v2 int);
+create table t2(v1 int, v2 int);
 
 statement ok
-create table t3(v1 int primary key, v2 int);
+create table t3(v1 int, v2 int);
 
 statement ok
-create table t4(v1 int primary key, v2 int);
+create table t4(v1 int, v2 int);
 
 statement ok
-create table t5(v1 int primary key, v2 int);
+create table t5(v1 int, v2 int);
 
-# Materialized View 1: Join t, t2, t3
 statement ok
-create materialized view mv1 as
-select t.v1 as t_v1, t.v2 as t_v2, t2.v1 as t2_v1, t2.v2 as t2_v2, t3.v1 as t3_v1, t3.v2 as t3_v2
-from t join t2 on t.v1 = t2.v1 join t3 on t2.v1 = t3.v1;
+create materialized view mv1 as 
+select t.v1, t.v2, t2.v1 as t2_v1, t2.v2 as t2_v2
+from t join t2 on t.v1 = t2.v1;
 
-# Materialized View 2: Join t, t2, t4
 statement ok
-create materialized view mv2 as
-select t.v1 as t_v1, t.v2 as t_v2, t2.v1 as t2_v1, t2.v2 as t2_v2, t4.v1 as t4_v1, t4.v2 as t4_v2
-from t join t2 on t.v1 = t2.v1 join t4 on t2.v1 = t4.v1;
+create materialized view mv2 as 
+select t3.v1, t3.v2, t4.v1 as t4_v1, t4.v2 as t4_v2
+from t3 join t4 on t3.v2 = t4.v2;
 
-# Materialized View 3: Join t, t2, t5
 statement ok
-create materialized view mv3 as
-select t.v1 as t_v1, t.v2 as t_v2, t2.v1 as t2_v1, t2.v2 as t2_v2, t5.v1 as t5_v1, t5.v2 as t5_v2
-from t join t2 on t.v1 = t2.v1 join t5 on t2.v1 = t5.v1;
+create materialized view mv3 as 
+select mv1.v1, mv1.t2_v1, t5.v1 as t5_v1, t5.v2 as t5_v2
+from mv1 join t5 on mv1.v1 = t5.v1;
 
-# Materialized View 4: Join t, t3, t4
 statement ok
-create materialized view mv4 as
-select t.v1 as t_v1, t.v2 as t_v2, t3.v1 as t3_v1, t3.v2 as t3_v2, t4.v1 as t4_v1, t4.v2 as t4_v2
-from t join t3 on t.v1 = t3.v1 join t4 on t3.v1 = t4.v1;
+create materialized view mv4 as 
+select mv2.v1, mv2.t4_v1, mv3.t5_v1, mv3.t5_v2
+from mv2 join mv3 on mv2.v1 = mv3.v1;
 
-# Materialized View 5: Join t, t3, t5
 statement ok
-create materialized view mv5 as
-select t.v1 as t_v1, t.v2 as t_v2, t3.v1 as t3_v1, t3.v2 as t3_v2, t5.v1 as t5_v1, t5.v2 as t5_v2
-from t join t3 on t.v1 = t3.v1 join t5 on t3.v1 = t5.v1;
+create materialized view mv5 as 
+select t.v1, t.v2, mv4.v1 as mv4_v1, mv4.t4_v1
+from t join mv4 on t.v2 = mv4.v1;
 
-# Materialized View 6: Join t, t4, t5
 statement ok
-create materialized view mv6 as
-select t.v1 as t_v1, t.v2 as t_v2, t4.v1 as t4_v1, t4.v2 as t4_v2, t5.v1 as t5_v1, t5.v2 as t5_v2
-from t join t4 on t.v1 = t4.v1 join t5 on t4.v1 = t5.v1;
+create materialized view mv6 as 
+select mv1.v1, mv1.t2_v1, mv2.v1 as mv2_v1, mv2.t4_v1
+from mv1 join mv2 on mv1.t2_v1 = mv2.t4_v1;
 
-# Materialized View 7: Join t2, t3, t4
 statement ok
-create materialized view mv7 as
-select t2.v1 as t2_v1, t2.v2 as t2_v2, t3.v1 as t3_v1, t3.v2 as t3_v2, t4.v1 as t4_v1, t4.v2 as t4_v2
-from t2 join t3 on t2.v1 = t3.v1 join t4 on t3.v1 = t4.v1;
+create materialized view mv7 as 
+select t3.v1, t3.v2, mv3.t5_v1, mv3.t5_v2, t5.v1 as t5_orig_v1
+from t3 join mv3 on t3.v1 = mv3.v1 join t5 on mv3.t5_v1 = t5.v1;
 
-# Materialized View 8: Join t2, t3, t5
 statement ok
-create materialized view mv8 as
-select t2.v1 as t2_v1, t2.v2 as t2_v2, t3.v1 as t3_v1, t3.v2 as t3_v2, t5.v1 as t5_v1, t5.v2 as t5_v2
-from t2 join t3 on t2.v1 = t3.v1 join t5 on t3.v1 = t5.v1;
+create materialized view mv8 as 
+select mv4.v1, mv4.t4_v1, mv5.v1 as mv5_v1, mv5.mv4_v1
+from mv4 join mv5 on mv4.v1 = mv5.mv4_v1;
 
-# Materialized View 9: Join t2, t4, t5
 statement ok
-create materialized view mv9 as
-select t2.v1 as t2_v1, t2.v2 as t2_v2, t4.v1 as t4_v1, t4.v2 as t4_v2, t5.v1 as t5_v1, t5.v2 as t5_v2
-from t2 join t4 on t2.v1 = t4.v1 join t5 on t4.v1 = t5.v1;
+create materialized view mv9 as 
+select t2.v1, t2.v2, mv6.mv2_v1, mv7.t5_v1
+from t2 join mv6 on t2.v1 = mv6.v1 join mv7 on mv6.mv2_v1 = mv7.v1;
 
-# Materialized View 10: Join t3, t4, t5
 statement ok
-create materialized view mv10 as
-select t3.v1 as t3_v1, t3.v2 as t3_v2, t4.v1 as t4_v1, t4.v2 as t4_v2, t5.v1 as t5_v1, t5.v2 as t5_v2
-from t3 join t4 on t3.v1 = t4.v1 join t5 on t4.v1 = t5.v1;
-
-# Materialized View 11: Join mv1 with table t4
-statement ok
-create materialized view mv11 as
-select mv1.t_v1, mv1.t_v2, mv1.t2_v1, mv1.t2_v2, mv1.t3_v1, mv1.t3_v2, t4.v1 as t4_v1, t4.v2 as t4_v2
-from mv1 join t4 on mv1.t_v1 = t4.v1;
-
-# Materialized View 12: Join mv2 with mv7
-statement ok
-create materialized view mv12 as
-select mv2.t_v1, mv2.t_v2, mv2.t2_v1, mv2.t2_v2, mv2.t4_v1, mv2.t4_v2, mv7.t3_v1, mv7.t3_v2, mv7.t4_v1 as mv7_t4_v1, mv7.t4_v2 as mv7_t4_v2
-from mv2 join mv7 on mv2.t_v1 = mv7.t2_v1;
-
-# Materialized View 13: Join mv3 with mv8
-statement ok
-create materialized view mv13 as
-select mv3.t_v1, mv3.t_v2, mv3.t2_v1, mv3.t2_v2, mv3.t5_v1, mv3.t5_v2, mv8.t3_v1, mv8.t3_v2, mv8.t5_v1 as mv8_t5_v1, mv8.t5_v2 as mv8_t5_v2
-from mv3 join mv8 on mv3.t_v1 = mv8.t2_v1;
-
-# Materialized View 14: Join mv4 with table t5
-statement ok
-create materialized view mv14 as
-select mv4.t_v1, mv4.t_v2, mv4.t3_v1, mv4.t3_v2, mv4.t4_v1, mv4.t4_v2, t5.v1 as t5_v1, t5.v2 as t5_v2
-from mv4 join t5 on mv4.t_v1 = t5.v1;
-
-# Materialized View 15: Join mv5 with mv9
-statement ok
-create materialized view mv15 as
-select mv5.t_v1, mv5.t_v2, mv5.t3_v1, mv5.t3_v2, mv5.t5_v1, mv5.t5_v2, mv9.t2_v1, mv9.t2_v2, mv9.t4_v1, mv9.t4_v2, mv9.t5_v1 as mv9_t5_v1, mv9.t5_v2 as mv9_t5_v2
-from mv5 join mv9 on mv5.t_v1 = mv9.t2_v1;
+create materialized view mv10 as 
+select mv8.v1, mv8.mv5_v1, mv9.v1 as mv9_v1, mv9.t5_v1
+from mv8 join mv9 on mv8.mv5_v1 = mv9.v1;
