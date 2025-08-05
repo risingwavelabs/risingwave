@@ -126,7 +126,7 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
 }
 
 pub fn infer_left_internal_table_catalog(
-    me: impl stream::StreamPlanRef,
+    me: impl stream::StreamPlanNodeMetadata,
     left_key_index: usize,
 ) -> TableCatalog {
     let schema = me.schema();
@@ -156,7 +156,9 @@ pub fn infer_left_internal_table_catalog(
     internal_table_catalog_builder.build(dist_keys, read_prefix_len_hint)
 }
 
-pub fn infer_right_internal_table_catalog(input: impl stream::StreamPlanRef) -> TableCatalog {
+pub fn infer_right_internal_table_catalog(
+    input: impl stream::StreamPlanNodeMetadata,
+) -> TableCatalog {
     let schema = input.schema();
 
     // We require that the right table has distribution `Single`

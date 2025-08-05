@@ -82,14 +82,7 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
     }
 
     fn build_scan(ctx: Rc<OptimizerContext>, table: Arc<TableCatalog>) -> LogicalScan {
-        LogicalScan::create(
-            table.name.clone(),
-            table,
-            vec![],
-            ctx.clone(),
-            None,
-            Default::default(),
-        )
+        LogicalScan::create(table, ctx.clone(), None)
     }
 
     fn build_project(

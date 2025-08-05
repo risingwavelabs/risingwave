@@ -18,7 +18,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -47,7 +48,7 @@ impl BatchGroupTopN {
 
 impl_distill_by_unit!(BatchGroupTopN, core, "BatchGroupTopN");
 
-impl PlanTreeNodeUnary for BatchGroupTopN {
+impl PlanTreeNodeUnary<Batch> for BatchGroupTopN {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -59,13 +60,13 @@ impl PlanTreeNodeUnary for BatchGroupTopN {
     }
 }
 
-impl_plan_tree_node_for_unary! {BatchGroupTopN}
+impl_plan_tree_node_for_unary! { Batch, BatchGroupTopN}
 
 impl ToDistributedBatch for BatchGroupTopN {
     fn to_distributed(&self) -> Result<PlanRef> {
         let input = self.input().to_distributed()?;
         let input = RequiredDist::hash_shard(self.group_key())
-            .enforce_if_not_satisfies(input, &Order::any())?;
+            .batch_enforce_if_not_satisfies(input, &Order::any())?;
         Ok(self.clone_with_input(input).into())
     }
 }
@@ -86,11 +87,11 @@ impl ToBatchPb for BatchGroupTopN {
 impl ToLocalBatch for BatchGroupTopN {
     fn to_local(&self) -> Result<PlanRef> {
         let input = self.input().to_local()?;
-        let input = RequiredDist::single().enforce_if_not_satisfies(input, &Order::any())?;
+        let input = RequiredDist::single().batch_enforce_if_not_satisfies(input, &Order::any())?;
         Ok(self.clone_with_input(input).into())
     }
 }
 
-impl ExprRewritable for BatchGroupTopN {}
+impl ExprRewritable<Batch> for BatchGroupTopN {}
 
 impl ExprVisitable for BatchGroupTopN {}

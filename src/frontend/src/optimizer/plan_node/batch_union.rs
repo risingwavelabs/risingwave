@@ -17,7 +17,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{ExprRewritable, PlanRef, ToBatchPb, ToDistributedBatch, generic};
+use super::{BatchPlanRef as PlanRef, ExprRewritable, ToBatchPb, ToDistributedBatch, generic};
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, ToLocalBatch};
@@ -49,12 +49,12 @@ impl BatchUnion {
 
 impl_distill_by_unit!(BatchUnion, core, "BatchUnion");
 
-impl PlanTreeNode for BatchUnion {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Batch> for BatchUnion {
+    fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         smallvec::SmallVec::from_vec(self.core.inputs.clone())
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         // For batch query, we don't need to clone `source_col`, so just use new.
         let mut new = self.core.clone();
         new.inputs = inputs.to_vec();
@@ -70,7 +70,7 @@ impl ToDistributedBatch for BatchUnion {
             .iter()
             .map(|input| {
                 RequiredDist::single()
-                    .enforce_if_not_satisfies(input.to_distributed()?, &Order::any())
+                    .batch_enforce_if_not_satisfies(input.to_distributed()?, &Order::any())
             })
             .collect();
         Ok(self.clone_with_inputs(&new_inputs?))
@@ -89,13 +89,14 @@ impl ToLocalBatch for BatchUnion {
             .inputs()
             .iter()
             .map(|input| {
-                RequiredDist::single().enforce_if_not_satisfies(input.to_local()?, &Order::any())
+                RequiredDist::single()
+                    .batch_enforce_if_not_satisfies(input.to_local()?, &Order::any())
             })
             .collect();
         Ok(self.clone_with_inputs(&new_inputs?))
     }
 }
 
-impl ExprRewritable for BatchUnion {}
+impl ExprRewritable<Batch> for BatchUnion {}
 
 impl ExprVisitable for BatchUnion {}

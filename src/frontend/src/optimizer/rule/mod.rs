@@ -22,7 +22,7 @@ use thiserror_ext::AsReport;
 use super::PlanRef;
 use crate::error::RwError;
 
-/// Result when applying a [`Rule`] to a [`PlanNode`](super::plan_node::PlanNode).
+/// Result when applying a [`Rule`] to a `PlanNode`
 pub enum ApplyResult<T> {
     /// Successfully applied the rule and returned a new plan.
     Ok(T),
@@ -68,7 +68,7 @@ where
     }
 }
 
-/// An one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode).
+/// An one-to-one transform for the `PlanNode`.
 ///
 /// It's a convenient trait to implement [`FallibleRule`], thus made available only within this module.
 trait InfallibleRule<C: ConventionMarker>: Send + Sync + Description {
@@ -76,12 +76,12 @@ trait InfallibleRule<C: ConventionMarker>: Send + Sync + Description {
     ///
     /// - Returns `Some` if the apply is successful.
     /// - Returns `None` if it's not applicable. The optimizer may try other rules.
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef>;
+    fn apply(&self, plan: PlanRef<C>) -> Option<PlanRef<C>>;
 }
 
 use InfallibleRule as Rule;
 
-/// An one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode) that may return an
+/// An one-to-one transform for the `PlanNode` that may return an
 /// unrecoverable error that stops further optimization.
 ///
 /// An [`InfallibleRule`] is always a [`FallibleRule`].
@@ -92,14 +92,14 @@ pub trait FallibleRule<C: ConventionMarker>: Send + Sync + Description {
     /// - Returns `ApplyResult::NotApplicable` if it's not applicable. The optimizer may try other rules.
     /// - Returns `ApplyResult::Err` if an unrecoverable error occurred. The optimizer should stop applying
     ///   other rules and report the error to the user.
-    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef>;
+    fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>>;
 }
 
 impl<C: ConventionMarker, R> FallibleRule<C> for R
 where
     R: InfallibleRule<C>,
 {
-    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
+    fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>> {
         match InfallibleRule::apply(self, plan) {
             Some(plan) => ApplyResult::Ok(plan),
             None => ApplyResult::NotApplicable,
@@ -113,6 +113,7 @@ pub trait Description {
 
 pub(super) type BoxedRule<C> = Box<dyn FallibleRule<C>>;
 
+mod correlated_expr_rewriter;
 mod logical_filter_expression_simplify_rule;
 pub use logical_filter_expression_simplify_rule::*;
 mod over_window_merge_rule;
@@ -125,6 +126,8 @@ mod project_merge_rule;
 pub use project_merge_rule::*;
 mod pull_up_correlated_predicate_rule;
 pub use pull_up_correlated_predicate_rule::*;
+mod pull_up_correlated_project_value_rule;
+pub use pull_up_correlated_project_value_rule::*;
 mod index_delta_join_rule;
 pub use index_delta_join_rule::*;
 mod left_deep_tree_join_ordering_rule;
@@ -291,6 +294,7 @@ macro_rules! for_all_rules {
             , { ProjectJoinMergeRule }
             , { ProjectMergeRule }
             , { PullUpCorrelatedPredicateRule }
+            , { PullUpCorrelatedProjectValueRule }
             , { LeftDeepTreeJoinOrderingRule }
             , { TranslateApplyRule }
             , { PushCalculationOfJoinRule }
@@ -374,7 +378,7 @@ macro_rules! impl_description {
 for_all_rules! {impl_description}
 
 mod prelude {
-    pub(super) use crate::optimizer::plan_node::{Logical, PlanRef};
+    pub(super) use crate::optimizer::plan_node::{Logical, LogicalPlanRef as PlanRef};
     pub(super) use crate::optimizer::rule::Rule;
 
     pub(super) type BoxedRule = crate::optimizer::rule::BoxedRule<Logical>;

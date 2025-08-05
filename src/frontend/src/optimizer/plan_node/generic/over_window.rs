@@ -153,6 +153,13 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
         }
     }
 
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> OverWindow<OtherPlanRef> {
+        OverWindow {
+            window_functions: self.window_functions.clone(),
+            input,
+        }
+    }
+
     pub fn input_len(&self) -> usize {
         self.input.schema().len()
     }
