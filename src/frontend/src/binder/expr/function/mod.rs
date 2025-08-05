@@ -62,12 +62,6 @@ pub(super) fn is_sys_function_without_args(ident: &Ident) -> bool {
         .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
 }
 
-/// The global max calling depth for the global counter in `udf_context`
-/// To reduce the chance that the current running rw thread
-/// be killed by os, the current allowance depth of calling
-/// stack is set to `16`.
-const SQL_UDF_MAX_CALLING_DEPTH: usize = 16;
-
 macro_rules! reject_syntax {
     ($pred:expr, $msg:expr) => {
         if $pred {
@@ -690,7 +684,6 @@ impl Binder {
 
     pub fn bind_sql_udf_inner(
         &mut self,
-        name: &str,
         body: &str,
         arg_names: &[String],
         args: Vec<ExprImpl>,
@@ -699,10 +692,11 @@ impl Binder {
         let ast = Parser::parse_sql(body)?;
 
         // Stash the current arguments.
+        // For subquery SQL UDF, as we always push a new context, there should be no arguments to stash.
+        // For inline SQL UDF, we need to stash the arguments in case of nesting.
         let stashed_udf_arguments = self.context.udf_arguments.take();
 
-        // The actual inline logic for sql udf
-        // Note that we will always create new udf context for each sql udf
+        // The actual inline logic for sql udf.
         let mut udf_arguments = HashMap::new();
         for (i, arg) in args.into_iter().enumerate() {
             if arg_names[i].is_empty() {
@@ -714,20 +708,6 @@ impl Binder {
             }
         }
         self.context.udf_arguments = Some(udf_arguments);
-
-        // Check for potential recursive calling
-        if self
-            .upper_subquery_contexts
-            .iter()
-            .filter(|(c, _)| c.udf_arguments.is_some())
-            .count()
-            >= SQL_UDF_MAX_CALLING_DEPTH
-        {
-            return Err(ErrorCode::BindError(format!(
-                "function {name} calling stack depth limit exceeded"
-            ))
-            .into());
-        }
 
         let Ok(expr) = Self::extract_udf_expr(ast) else {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -756,7 +736,7 @@ impl Binder {
             );
         };
 
-        self.bind_sql_udf_inner(&func.name, body, &func.arg_names, args)
+        self.bind_sql_udf_inner(body, &func.arg_names, args)
     }
 
     pub(in crate::binder) fn bind_function_expr_arg(

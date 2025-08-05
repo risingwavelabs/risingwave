@@ -213,12 +213,12 @@ pub async fn handle_create_sql_function(
             .map(|ty| Literal::new(None, ty.clone()).into() /* NULL */)
             .collect();
 
-        match binder.bind_sql_udf_inner(&function_name, &body, &arg_names, args) {
+        match binder.bind_sql_udf_inner(&body, &arg_names, args) {
             Ok(expr) => {
                 // Check if the return type mismatches
                 if expr.return_type() != return_type {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
+                        "return type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
                         return_type,
                         expr.return_type()
                     ))
