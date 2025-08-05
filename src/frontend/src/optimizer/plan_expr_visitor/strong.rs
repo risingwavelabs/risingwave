@@ -302,6 +302,7 @@ impl Strong {
             | ExprType::JsonbPathQueryArray
             | ExprType::JsonbPathQueryFirst
             | ExprType::JsonbPopulateRecord
+            | ExprType::JsonbToArray
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
             | ExprType::JsonbPopulateMap
