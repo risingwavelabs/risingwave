@@ -81,6 +81,7 @@ pub struct StreamingMetrics {
     sink_input_row_count: LabelGuardedIntCounterVec,
     sink_input_bytes: LabelGuardedIntCounterVec,
     sink_chunk_buffer_size: LabelGuardedIntGaugeVec,
+    sink_barrier_unix_timestamp_millis: LabelGuardedIntGaugeVec,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: LabelGuardedIntCounterVec,
@@ -297,6 +298,14 @@ impl StreamingMetrics {
         let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_sink_chunk_buffer_size",
             "Total size of chunks buffered in a barrier",
+            &["sink_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let sink_barrier_unix_timestamp_millis = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sink_barrier_unix_timestamp_millis",
+            "The lag between the barrier's epoch time and the current time.",
             &["sink_id", "actor_id", "fragment_id"],
             registry
         )
@@ -1202,6 +1211,7 @@ impl StreamingMetrics {
             sink_input_row_count,
             sink_input_bytes,
             sink_chunk_buffer_size,
+            sink_barrier_unix_timestamp_millis,
             exchange_frag_recv_size,
             merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
@@ -1390,6 +1400,9 @@ impl StreamingMetrics {
             sink_input_bytes: self.sink_input_bytes.with_guarded_label_values(label_list),
             sink_chunk_buffer_size: self
                 .sink_chunk_buffer_size
+                .with_guarded_label_values(label_list),
+            sink_barrier_unix_timestamp_millis: self
+                .sink_barrier_unix_timestamp_millis
                 .with_guarded_label_values(label_list),
         }
     }
@@ -1684,6 +1697,7 @@ pub struct SinkExecutorMetrics {
     pub sink_input_row_count: LabelGuardedIntCounter,
     pub sink_input_bytes: LabelGuardedIntCounter,
     pub sink_chunk_buffer_size: LabelGuardedIntGauge,
+    pub sink_barrier_unix_timestamp_millis: LabelGuardedIntGauge,
 }
 
 pub struct MaterializeMetrics {

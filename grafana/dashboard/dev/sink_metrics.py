@@ -232,6 +232,16 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries(
+                    "Sink Barrier Lag (millisecond)",
+                    "The lag between the barrier's epoch time and the current time.",
+                    [
+                        panels.target(
+                            f"timestamp({metric('stream_sink_barrier_unix_timestamp_millis')}) * 1000 - {metric('stream_sink_barrier_unix_timestamp_millis')}",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]

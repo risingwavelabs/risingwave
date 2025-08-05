@@ -24,6 +24,7 @@ use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_rate_limit::RateLimit;
@@ -226,6 +227,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.input_data_types,
             self.sink_param.downstream_pk.clone(),
             metrics.sink_chunk_buffer_size,
+            metrics.sink_barrier_unix_timestamp_millis,
             self.compact_chunk,
         );
 
@@ -419,6 +421,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input_data_types: Vec<DataType>,
         down_stream_pk: Vec<usize>,
         sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
+        sink_barrier_unix_timestamp_millis: LabelGuardedIntGauge,
         compact_chunk: bool,
     ) {
         // need to buffer chunks during one barrier
@@ -435,6 +438,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         sink_chunk_buffer_size_metrics.set(chunk_buffer.estimated_size() as i64);
                     }
                     Message::Barrier(barrier) => {
+                        sink_barrier_unix_timestamp_millis
+                            .set(Epoch::from(barrier.epoch.curr).as_unix_millis() as i64);
                         let chunks = mem::take(&mut chunk_buffer).into_inner();
                         let chunks = if need_advance_delete {
                             let mut delete_chunks = vec![];
@@ -520,6 +525,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         }
                     }
                     Message::Barrier(barrier) => {
+                        sink_barrier_unix_timestamp_millis
+                            .set(Epoch::from(barrier.epoch.curr).as_unix_millis() as i64);
                         yield Message::Barrier(barrier);
                     }
                 }
