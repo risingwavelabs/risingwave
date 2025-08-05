@@ -74,14 +74,12 @@ impl Query {
                     distinct: Distinct::All,
                     projection,
                     from,
-                    lateral_views,
                     selection: None,
                     group_by,
                     having: None,
                     window,
                 } if projection.len() == 1
                     && from.is_empty()
-                    && lateral_views.is_empty()
                     && group_by.is_empty()
                     && window.is_empty() =>
                 {
@@ -235,8 +233,6 @@ pub struct Select {
     pub projection: Vec<SelectItem>,
     /// FROM
     pub from: Vec<TableWithJoins>,
-    /// LATERAL VIEWs
-    pub lateral_views: Vec<LateralView>,
     /// WHERE
     pub selection: Option<Expr>,
     /// GROUP BY
@@ -253,11 +249,6 @@ impl fmt::Display for Select {
         write!(f, " {}", display_comma_separated(&self.projection))?;
         if !self.from.is_empty() {
             write!(f, " FROM {}", display_comma_separated(&self.from))?;
-        }
-        if !self.lateral_views.is_empty() {
-            for lv in &self.lateral_views {
-                write!(f, "{}", lv)?;
-            }
         }
         if let Some(ref selection) = self.selection {
             write!(f, " WHERE {}", selection)?;
@@ -308,40 +299,6 @@ impl fmt::Display for Distinct {
                 write!(f, " DISTINCT ON ({})", display_comma_separated(exprs))
             }
         }
-    }
-}
-
-/// A hive LATERAL VIEW with potential column aliases
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct LateralView {
-    /// LATERAL VIEW
-    pub lateral_view: Expr,
-    /// LATERAL VIEW table name
-    pub lateral_view_name: ObjectName,
-    /// LATERAL VIEW optional column aliases
-    pub lateral_col_alias: Vec<Ident>,
-    /// LATERAL VIEW OUTER
-    pub outer: bool,
-}
-
-impl fmt::Display for LateralView {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            " LATERAL VIEW{outer} {} {}",
-            self.lateral_view,
-            self.lateral_view_name,
-            outer = if self.outer { " OUTER" } else { "" }
-        )?;
-        if !self.lateral_col_alias.is_empty() {
-            write!(
-                f,
-                " AS {}",
-                display_comma_separated(&self.lateral_col_alias)
-            )?;
-        }
-        Ok(())
     }
 }
 

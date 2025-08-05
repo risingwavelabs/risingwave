@@ -4685,36 +4685,6 @@ impl Parser<'_> {
         } else {
             vec![]
         };
-        let mut lateral_views = vec![];
-        loop {
-            if self.parse_keywords(&[Keyword::LATERAL, Keyword::VIEW]) {
-                let outer = self.parse_keyword(Keyword::OUTER);
-                let lateral_view = self.parse_expr()?;
-                let lateral_view_name = self.parse_object_name()?;
-                let lateral_col_alias = self
-                    .parse_comma_separated(|parser| {
-                        parser.parse_optional_alias(&[
-                            Keyword::WHERE,
-                            Keyword::GROUP,
-                            Keyword::CLUSTER,
-                            Keyword::HAVING,
-                            Keyword::LATERAL,
-                        ]) // This couldn't possibly be a bad idea
-                    })?
-                    .into_iter()
-                    .flatten()
-                    .collect();
-
-                lateral_views.push(LateralView {
-                    lateral_view,
-                    lateral_view_name,
-                    lateral_col_alias,
-                    outer,
-                });
-            } else {
-                break;
-            }
-        }
 
         let selection = if self.parse_keyword(Keyword::WHERE) {
             Some(self.parse_expr()?)
@@ -4744,7 +4714,6 @@ impl Parser<'_> {
             distinct,
             projection,
             from,
-            lateral_views,
             selection,
             group_by,
             having,

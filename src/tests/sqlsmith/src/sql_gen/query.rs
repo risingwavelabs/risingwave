@@ -221,7 +221,6 @@ impl<R: Rng> SqlGenerator<'_, R> {
             distinct: Distinct::All,
             projection: select_list,
             from,
-            lateral_views: vec![],
             selection,
             group_by,
             having,

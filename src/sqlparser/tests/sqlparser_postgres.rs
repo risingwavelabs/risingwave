@@ -1043,7 +1043,6 @@ fn parse_array() {
                     named: true
                 }))],
                 from: vec![],
-                lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
                 having: None,
@@ -1083,7 +1082,6 @@ fn parse_array() {
                     named: true
                 }))],
                 from: vec![],
-                lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
                 having: None,
@@ -1129,7 +1127,6 @@ fn parse_array() {
                     named: true
                 }))],
                 from: vec![],
-                lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
                 having: None,

@@ -46,9 +46,9 @@ pub use self::ddl::{
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
-    Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,
-    NamedWindow, OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias,
-    TableFactor, TableWithJoins, Top, Values, With,
+    Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, NamedWindow,
+    OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor,
+    TableWithJoins, Top, Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
