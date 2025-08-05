@@ -15,7 +15,6 @@
 use std::sync::atomic::Ordering;
 
 use risingwave_common::monitor::in_mem::GuardedCount;
-use risingwave_common::operator::unique_executor_id_into_parts;
 
 use crate::executor::monitor::StreamingMetrics;
 
