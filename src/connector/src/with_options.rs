@@ -24,8 +24,9 @@ use crate::source::cdc::MYSQL_CDC_CONNECTOR;
 use crate::source::cdc::external::CdcTableType;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
-    AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR,
-    LEGACY_S3_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, UPSTREAM_SOURCE_KEY,
+    AZBLOB_CONNECTOR, BATCH_BIGQUERY_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR,
+    KAFKA_CONNECTOR, LEGACY_S3_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    UPSTREAM_SOURCE_KEY,
 };
 
 /// Marker trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
@@ -176,6 +177,14 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         connector == ICEBERG_CONNECTOR
     }
 
+    #[inline(always)]
+    fn is_bigquery_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector == BATCH_BIGQUERY_CONNECTOR
+    }
+
     fn connector_need_pk(&self) -> bool {
         // Currently only iceberg connector doesn't need primary key
         // introduced in https://github.com/risingwavelabs/risingwave/pull/14971
@@ -205,7 +214,10 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
     /// See [`crate::source::batch::BatchSourceSplit`] for more details.
     fn is_batch_connector(&self) -> bool {
         self.get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR))
+            .map(|s| {
+                s.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(BATCH_BIGQUERY_CONNECTOR)
+            })
             .unwrap_or(false)
     }
 

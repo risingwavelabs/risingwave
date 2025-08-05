@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::source::big_query_batch::BatchBigQuerySplit;
 use crate::source::filesystem::opendal_source::BatchPosixFsSplit;
 use crate::source::{SplitImpl, SplitMetaData};
 
@@ -25,6 +26,8 @@ use crate::source::{SplitImpl, SplitMetaData};
 ///   refreshed by running `REFRESH TABLE t` SQL command.
 ///
 /// See <https://github.com/risingwavelabs/risingwave/issues/22690> for the whole picture of the user journey.
+///
+/// When implementing a new batch source, add its name to `is_refreshable_connector`, and `into_batch_split`.
 ///
 /// ## Failover
 ///
@@ -47,6 +50,7 @@ pub trait BatchSourceSplit: SplitMetaData {
 
 pub enum BatchSourceSplitImpl {
     BatchPosixFs(BatchPosixFsSplit),
+    BatchBigQuery(BatchBigQuerySplit),
 }
 
 /// See [`BatchSourceSplit`] for more details.
@@ -54,6 +58,7 @@ impl BatchSourceSplitImpl {
     pub fn finished(&self) -> bool {
         match self {
             BatchSourceSplitImpl::BatchPosixFs(split) => split.finished(),
+            BatchSourceSplitImpl::BatchBigQuery(split) => split.finished(),
         }
     }
 
@@ -61,6 +66,7 @@ impl BatchSourceSplitImpl {
         tracing::info!("finishing batch source split");
         match self {
             BatchSourceSplitImpl::BatchPosixFs(split) => split.finish(),
+            BatchSourceSplitImpl::BatchBigQuery(split) => split.finish(),
         }
     }
 
@@ -68,6 +74,7 @@ impl BatchSourceSplitImpl {
         tracing::info!("refreshing batch source split");
         match self {
             BatchSourceSplitImpl::BatchPosixFs(split) => split.refresh(),
+            BatchSourceSplitImpl::BatchBigQuery(split) => split.refresh(),
         }
     }
 }
@@ -76,6 +83,7 @@ impl From<BatchSourceSplitImpl> for SplitImpl {
     fn from(batch_split: BatchSourceSplitImpl) -> Self {
         match batch_split {
             BatchSourceSplitImpl::BatchPosixFs(split) => SplitImpl::BatchPosixFs(split),
+            BatchSourceSplitImpl::BatchBigQuery(split) => SplitImpl::BatchBigQuery(split),
         }
     }
 }
