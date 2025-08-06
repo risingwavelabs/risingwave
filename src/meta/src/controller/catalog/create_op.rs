@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::system_param::{OverrideValidate, Validate};
+use risingwave_common::util::epoch::Epoch;
 
 use super::*;
 use crate::barrier::SnapshotBackfillInfo;
@@ -256,7 +257,9 @@ impl CatalogController {
         )
         .await?;
         pb_function.id = function_obj.oid as _;
-        pb_function.created_at_epoch = Some(function_obj.created_at.and_utc().timestamp_millis() as u64);
+        pb_function.created_at_epoch = Some(
+            Epoch::from_unix_millis(function_obj.created_at.and_utc().timestamp_millis() as _).0,
+        );
         pb_function.created_at_cluster_version = function_obj.created_at_cluster_version;
         let function: function::ActiveModel = pb_function.clone().into();
         Function::insert(function).exec(&txn).await?;
