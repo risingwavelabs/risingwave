@@ -36,7 +36,7 @@ use super::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::error::ConnectorResult;
 
 /// SQL query to discover primary key columns directly from PostgreSQL system tables.
-/// This bypasses `information_schema.table_constraints` to avoid permission issues.
+/// This bypasses querying `information_schema.table_constraints` to avoid permission issues.
 const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     SELECT a.attname as column_name
     FROM pg_index i
@@ -78,7 +78,7 @@ pub struct PostgresExternalTable {
 
 impl PostgresExternalTable {
     /// Discover primary key columns directly from PostgreSQL system tables.
-    /// This bypasses `information_schema.table_constraints` to avoid requiring table owner permissions.
+    /// This bypasses querying `information_schema.table_constraints` to avoid requiring table owner permissions.
     async fn discover_primary_key(
         connection: &PgPool,
         schema_name: &str,
@@ -101,7 +101,7 @@ impl PostgresExternalTable {
 
     /// Discover schema with workaround for primary key discovery
     /// This method uses direct PostgreSQL system table queries for primary keys
-    /// to avoid permission issues with `information_schema.table_constraints`
+    /// to avoid permission issues when querying `information_schema.table_constraints`
     async fn discover_pk_and_full_columns(
         username: &str,
         password: &str,
