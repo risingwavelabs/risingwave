@@ -157,8 +157,8 @@ impl Debug for VectorVal {
 }
 
 impl PartialEq for VectorVal {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!("VECTOR_PLACEHOLDER")
+    fn eq(&self, other: &Self) -> bool {
+        self.as_scalar_ref() == other.as_scalar_ref()
     }
 }
 impl Eq for VectorVal {}
@@ -268,8 +268,8 @@ impl Debug for VectorRef<'_> {
 }
 
 impl PartialEq for VectorRef<'_> {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!("VECTOR_PLACEHOLDER")
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
     }
 }
 impl Eq for VectorRef<'_> {}
