@@ -31,7 +31,6 @@ use crate::expr::{
     Expr as _, ExprImpl, ExprRewriter as _, ExprType, FunctionCall, InputRef,
     InputRefDepthRewriter, Parameter, SubqueryKind,
 };
-use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 mod binary_op;
 mod column;
@@ -475,7 +474,7 @@ impl Binder {
         }
 
         Err(ErrorCode::BindError(format!(
-            "{SQL_UDF_PATTERN} failed to find {} parameter {name}",
+            "failed to find {} parameter {name}",
             if name.starts_with('$') {
                 "unnamed"
             } else {
