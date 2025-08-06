@@ -244,9 +244,10 @@ impl StreamActorManager {
             );
         }
 
-        // Use the union node to fill in the info of the new node.
-        let executor_id = Self::get_executor_id(actor_context, union_node);
-        let mut info = Self::get_executor_info(union_node, executor_id);
+        // Use the first MergeNode to fill in the info of the new node.
+        let first_merge = merge_projects.first().unwrap().0;
+        let executor_id = Self::get_executor_id(actor_context, first_merge);
+        let mut info = Self::get_executor_info(first_merge, executor_id);
         info.identity = format!("UpstreamSinkUnion {:X}", executor_id);
         let eval_error_report = ActorEvalErrorReport {
             actor_context: actor_context.clone(),
