@@ -74,8 +74,8 @@ pub(super) mod handlers {
     };
     use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
     use risingwave_pb::monitor_service::{
-        GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
-        StackTraceResponse,
+        ChannelStats, FragmentStats, GetStreamingStatsResponse, HeapProfilingResponse,
+        ListHeapProfilingResponse, RelationStats, StackTraceResponse,
     };
     use risingwave_pb::user::PbUserInfo;
     use serde::{Deserialize, Serialize};
@@ -687,6 +687,228 @@ pub(super) mod handlers {
         Ok(all.into())
     }
 
+    /// NOTE(kwannoel): Although we fetch the BP for the entire graph via this API,
+    /// the workload should be reasonable.
+    /// In most cases, we can safely assume each node has most 2 outgoing edges (e.g. join).
+    /// In such a scenario, the number of edges is linear to the number of nodes.
+    /// So the workload is proportional to the relation id graph we fetch in `get_relation_id_infos`.
+    pub async fn get_streaming_stats_from_prometheus(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<GetStreamingStatsResponse>> {
+        if let Some(ref client) = srv.prometheus_client {
+            let mut all = GetStreamingStatsResponse::default();
+
+            // Query fragment stats: actor count and current epoch
+            let fragment_actor_count_query = format!(
+                "sum(stream_actor_count{{{}}}) by (fragment_id)",
+                srv.prometheus_selector
+            );
+            let fragment_epoch_query = format!(
+                "sum(stream_actor_current_epoch{{{}}}) by (fragment_id)",
+                srv.prometheus_selector
+            );
+
+            // Query relation stats: actor count and current epoch
+            let relation_actor_count_query = format!(
+                "sum(stream_actor_count{{{}}}) by (relation_id)",
+                srv.prometheus_selector
+            );
+            let relation_epoch_query = format!(
+                "sum(stream_actor_current_epoch{{{}}}) by (relation_id)",
+                srv.prometheus_selector
+            );
+
+            // Query channel stats: input/output row counts and blocking duration
+            let channel_input_query = format!(
+                "sum(rate(stream_actor_in_record_cnt{{{}}}[60s])) by (fragment_id, upstream_fragment_id)",
+                srv.prometheus_selector
+            );
+            let channel_output_query = format!(
+                "sum(rate(stream_actor_out_record_cnt{{{}}}[60s])) by (fragment_id, upstream_fragment_id)",
+                srv.prometheus_selector
+            );
+            let channel_blocking_query = format!(
+                "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, upstream_fragment_id)",
+                srv.prometheus_selector
+            );
+
+            // Execute all queries concurrently
+            let (
+                fragment_actor_count_result,
+                fragment_epoch_result,
+                relation_actor_count_result,
+                relation_epoch_result,
+                channel_input_result,
+                channel_output_result,
+                channel_blocking_result,
+            ) = tokio::try_join!(
+                client.query(fragment_actor_count_query).get(),
+                client.query(fragment_epoch_query).get(),
+                client.query(relation_actor_count_query).get(),
+                client.query(relation_epoch_query).get(),
+                client.query(channel_input_query).get(),
+                client.query(channel_output_query).get(),
+                client.query(channel_blocking_query).get(),
+            )
+            .map_err(err)?;
+
+            // Process fragment stats
+            if let Some(fragment_actor_count_data) = fragment_actor_count_result.data().as_vector()
+            {
+                for sample in fragment_actor_count_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Ok(fragment_id) = fragment_id_str.parse::<u32>()
+                    {
+                        let actor_count = sample.sample().value() as u32;
+                        all.fragment_stats.insert(
+                            fragment_id,
+                            FragmentStats {
+                                actor_count,
+                                current_epoch: 0, // Will be filled from epoch query
+                            },
+                        );
+                    }
+                }
+            }
+
+            if let Some(fragment_epoch_data) = fragment_epoch_result.data().as_vector() {
+                for sample in fragment_epoch_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Ok(fragment_id) = fragment_id_str.parse::<u32>()
+                        && let Some(stats) = all.fragment_stats.get_mut(&fragment_id)
+                    {
+                        stats.current_epoch = sample.sample().value() as u64;
+                    }
+                }
+            }
+
+            // Process relation stats
+            if let Some(relation_actor_count_data) = relation_actor_count_result.data().as_vector()
+            {
+                for sample in relation_actor_count_data {
+                    if let Some(relation_id_str) = sample.metric().get("relation_id")
+                        && let Ok(relation_id) = relation_id_str.parse::<u32>()
+                    {
+                        let actor_count = sample.sample().value() as u32;
+                        all.relation_stats.insert(
+                            relation_id,
+                            RelationStats {
+                                actor_count,
+                                current_epoch: 0, // Will be filled from epoch query
+                            },
+                        );
+                    }
+                }
+            }
+
+            if let Some(relation_epoch_data) = relation_epoch_result.data().as_vector() {
+                for sample in relation_epoch_data {
+                    if let Some(relation_id_str) = sample.metric().get("relation_id")
+                        && let Ok(relation_id) = relation_id_str.parse::<u32>()
+                        && let Some(stats) = all.relation_stats.get_mut(&relation_id)
+                    {
+                        stats.current_epoch = sample.sample().value() as u64;
+                    }
+                }
+            }
+
+            // Process channel stats
+            let mut channel_data = HashMap::new();
+
+            // Collect input row counts
+            if let Some(channel_input_data) = channel_input_result.data().as_vector() {
+                for sample in channel_input_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Some(upstream_fragment_id_str) =
+                            sample.metric().get("upstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(upstream_fragment_id)) = (
+                            fragment_id_str.parse::<u32>(),
+                            upstream_fragment_id_str.parse::<u32>(),
+                        )
+                    {
+                        let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                        channel_data
+                            .entry(key)
+                            .or_insert_with(|| ChannelStats {
+                                actor_count: 0,
+                                output_blocking_duration: 0.0,
+                                recv_row_count: 0,
+                                send_row_count: 0,
+                            })
+                            .recv_row_count = (sample.sample().value() * 60.0) as u64; // Convert rate to count
+                    }
+                }
+            }
+
+            // Collect output row counts
+            if let Some(channel_output_data) = channel_output_result.data().as_vector() {
+                for sample in channel_output_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Some(upstream_fragment_id_str) =
+                            sample.metric().get("upstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(upstream_fragment_id)) = (
+                            fragment_id_str.parse::<u32>(),
+                            upstream_fragment_id_str.parse::<u32>(),
+                        )
+                    {
+                        let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                        channel_data
+                            .entry(key)
+                            .or_insert_with(|| ChannelStats {
+                                actor_count: 0,
+                                output_blocking_duration: 0.0,
+                                recv_row_count: 0,
+                                send_row_count: 0,
+                            })
+                            .send_row_count = (sample.sample().value() * 60.0) as u64; // Convert rate to count
+                    }
+                }
+            }
+
+            // Collect blocking duration
+            if let Some(channel_blocking_data) = channel_blocking_result.data().as_vector() {
+                for sample in channel_blocking_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Some(upstream_fragment_id_str) =
+                            sample.metric().get("upstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(upstream_fragment_id)) = (
+                            fragment_id_str.parse::<u32>(),
+                            upstream_fragment_id_str.parse::<u32>(),
+                        )
+                    {
+                        let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                        channel_data
+                            .entry(key)
+                            .or_insert_with(|| ChannelStats {
+                                actor_count: 0,
+                                output_blocking_duration: 0.0,
+                                recv_row_count: 0,
+                                send_row_count: 0,
+                            })
+                            .output_blocking_duration = sample.sample().value() / 1_000_000_000.0; // Convert ns to seconds
+                    }
+                }
+            }
+
+            // Set actor count for channels (using fragment actor count as approximation)
+            for (key, channel_stats) in &mut channel_data {
+                let parts: Vec<&str> = key.split('_').collect();
+                if parts.len() == 2
+                    && let Ok(fragment_id) = parts[1].parse::<u32>()
+                    && let Some(fragment_stats) = all.fragment_stats.get(&fragment_id)
+                {
+                    channel_stats.actor_count = fragment_stats.actor_count;
+                }
+            }
+
+            all.channel_stats = channel_data;
+
+            Ok(Json(all))
+        } else {
+            Err(err(anyhow!("Prometheus endpoint is not set")))
+        }
+    }
+
     pub async fn get_version(Extension(_srv): Extension<Service>) -> Result<Json<String>> {
         Ok(Json(risingwave_common::current_cluster_version()))
     }
@@ -727,6 +949,10 @@ impl DashboardService {
             .route("/object_dependencies", get(list_object_dependencies))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route("/metrics/streaming_stats", get(get_streaming_stats))
+            .route(
+                "/metrics/streaming_stats_prometheus",
+                get(get_streaming_stats_from_prometheus),
+            )
             // /monitor/await_tree/{worker_id}/?format={text or json}
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             // /monitor/await_tree/?format={text or json}
