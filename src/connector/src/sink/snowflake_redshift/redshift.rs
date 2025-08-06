@@ -598,38 +598,41 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 }))
             })
             .collect::<Result<Vec<_>>>()?;
-        let s3_operator = FileSink::<S3Sink>::new_s3_sink(&self.config.s3_inner)?;
-        let (mut writer, path) =
-            build_opendal_writer(&self.config.s3_inner, 0, &s3_operator, &None).await?;
-        let manifest_json = json!({
-            "entries": paths
-        });
-        let mut chunk_buf = BytesMut::new();
-        writeln!(chunk_buf, "{}", manifest_json).unwrap();
-        writer.write(chunk_buf.freeze()).await?;
-        writer
-            .close()
-            .await
-            .map_err(|e| SinkError::File(e.to_report_string()))?;
-        let table = if self.is_append_only {
-            &self.config.table
-        } else {
-            self.config.cdc_table.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!(
-                    "intermediate.table.name is required for non-append-only sink"
-                ))
-            })?
-        };
-        let copy_into_sql = build_copy_into_sql(
-            self.config.schema.as_deref(),
-            table,
-            &path,
-            &self.config.s3_inner.access,
-            &self.config.s3_inner.secret,
-            &self.config.s3_inner.assume_role,
-        )?;
-        // run copy into
-        self.client.execute_sql_sync(&vec![copy_into_sql])?;
+        if !paths.is_empty() {
+            let s3_operator = FileSink::<S3Sink>::new_s3_sink(&self.config.s3_inner)?;
+            let (mut writer, path) =
+                build_opendal_writer(&self.config.s3_inner, 0, &s3_operator, &None).await?;
+            let manifest_json = json!({
+                "entries": paths
+            });
+            println!("Manifest JSON: {}", manifest_json);
+            let mut chunk_buf = BytesMut::new();
+            writeln!(chunk_buf, "{}", manifest_json).unwrap();
+            writer.write(chunk_buf.freeze()).await?;
+            writer
+                .close()
+                .await
+                .map_err(|e| SinkError::File(e.to_report_string()))?;
+            let table = if self.is_append_only {
+                &self.config.table
+            } else {
+                self.config.cdc_table.as_ref().ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "intermediate.table.name is required for non-append-only sink"
+                    ))
+                })?
+            };
+            let copy_into_sql = build_copy_into_sql(
+                self.config.schema.as_deref(),
+                table,
+                &path,
+                &self.config.s3_inner.access,
+                &self.config.s3_inner.secret,
+                &self.config.s3_inner.assume_role,
+            )?;
+            // run copy into
+            self.client.execute_sql_sync(&vec![copy_into_sql])?;
+        }
 
         if let Some(add_columns) = add_columns {
             if let Some(shutdown_sender) = &self.shutdown_sender {
