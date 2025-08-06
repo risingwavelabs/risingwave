@@ -9,4 +9,4 @@ include create_graph.slt.part
 sleep 5s
 
 -- Include the cleanup script
-include drop_graph.slt.part 
+include drop_graph.slt.part
