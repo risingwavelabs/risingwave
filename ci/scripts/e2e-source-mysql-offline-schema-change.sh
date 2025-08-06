@@ -93,6 +93,7 @@ echo "\n\n\n-------------Change Schema------------\n\n\n"
 mysql -u root -D risedev -e "insert into t values (2, 'def'); alter table t add column v2 int default 42; insert into t values (3, 'ghi', 88);"
 mysql -u root -D test_db -e "insert into t1 values (2, 'def'); alter table t1 add column v2 int default 55; insert into t1 values (4, 'ghi', 88);"
 
+./risedev k
 
 echo "\n\n\n-------------Resume RW CDC------------\n\n\n"
 sleep 5
