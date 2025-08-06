@@ -686,7 +686,7 @@ mod tests {
             actor_context: ActorContext::for_test(123),
             identity: "NowExecutor".into(),
         };
-        let progress_ratio = Some(2.0);
+        let progress_ratio = None;
         let barrier_interval_ms = 1000;
         let now_executor = NowExecutor::new(
             vec![DataType::Timestamptz],
