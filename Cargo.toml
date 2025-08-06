@@ -156,6 +156,9 @@ foyer = { git = "http://github.com/foyer-rs/foyer", rev = "a828e00dd39cc7bec6e43
     "nightly",
 ] }
 futures-async-stream = "0.2.9"
+rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
+    "cmake-build",
+] }
 governor = { version = "0.8", default-features = false, features = ["std"] }
 hashbrown = { version = "0.15", features = [
     "default-hasher",
@@ -194,9 +197,6 @@ pin-project-lite = "0.2"
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { package = "madsim-rdkafka", version = "0.4.3", features = [
-    "cmake-build",
-] }
 redis = { version = "0.28" }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
