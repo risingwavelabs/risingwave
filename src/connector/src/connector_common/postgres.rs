@@ -34,6 +34,17 @@ use tokio_postgres::{Client as PgClient, NoTls};
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::error::ConnectorResult;
 
+/// SQL query to discover primary key columns directly from PostgreSQL system tables.
+/// This bypasses querying `information_schema.table_constraints` to avoid permission issues.
+const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
+    SELECT a.attname as column_name
+    FROM pg_index i
+    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+    WHERE i.indrelid = ($1 || '.' || $2)::regclass
+      AND i.indisprimary = true
+    ORDER BY array_position(i.indkey, a.attnum)
+"#;
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
@@ -65,6 +76,81 @@ pub struct PostgresExternalTable {
 }
 
 impl PostgresExternalTable {
+    /// Discover primary key columns directly from PostgreSQL system tables.
+    /// This bypasses querying `information_schema.table_constraints` to avoid requiring table owner permissions.
+    async fn discover_primary_key(
+        connection: &PgPool,
+        schema_name: &str,
+        table_name: &str,
+    ) -> ConnectorResult<Vec<String>> {
+        let rows = sqlx::query(DISCOVER_PRIMARY_KEY_QUERY)
+            .bind(schema_name)
+            .bind(table_name)
+            .fetch_all(connection)
+            .await
+            .map_err(|e| anyhow!("Failed to discover primary key columns: {}", e))?;
+
+        let pk_columns = rows
+            .into_iter()
+            .map(|row| row.get::<String, _>("column_name"))
+            .collect();
+
+        Ok(pk_columns)
+    }
+
+    /// Discover schema with workaround for primary key discovery
+    /// This method uses direct PostgreSQL system table queries for primary keys
+    /// to avoid permission issues when querying `information_schema.table_constraints`
+    async fn discover_pk_and_full_columns(
+        username: &str,
+        password: &str,
+        host: &str,
+        port: u16,
+        database: &str,
+        schema: &str,
+        table: &str,
+        ssl_mode: &SslMode,
+        ssl_root_cert: &Option<String>,
+    ) -> ConnectorResult<(Vec<sea_schema::postgres::def::ColumnInfo>, Vec<String>)> {
+        let mut options = PgConnectOptions::new()
+            .username(username)
+            .password(password)
+            .host(host)
+            .port(port)
+            .database(database)
+            .ssl_mode(match ssl_mode {
+                SslMode::Disabled => PgSslMode::Disable,
+                SslMode::Preferred => PgSslMode::Prefer,
+                SslMode::Required => PgSslMode::Require,
+                SslMode::VerifyCa => PgSslMode::VerifyCa,
+                SslMode::VerifyFull => PgSslMode::VerifyFull,
+            });
+
+        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
+            && let Some(root_cert) = ssl_root_cert
+        {
+            options = options.ssl_root_cert(root_cert.as_str());
+        }
+
+        let connection = PgPool::connect_with(options).await?;
+
+        // Use sea-schema only for column discovery (no permission issues)
+        let schema_discovery = SchemaDiscovery::new(connection.clone(), schema);
+        let empty_map: HashMap<String, Vec<String>> = HashMap::new();
+        let columns = schema_discovery
+            .discover_columns(
+                Alias::new(schema).into_iden(),
+                Alias::new(table).into_iden(),
+                &empty_map,
+            )
+            .await?;
+
+        // Use direct system table query for primary key discovery
+        let pk_columns = Self::discover_primary_key(&connection, schema, table).await?;
+
+        Ok((columns, pk_columns))
+    }
+
     async fn discover_schema(
         username: &str,
         password: &str,
