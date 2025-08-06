@@ -87,14 +87,7 @@ use crate::model::{
 use crate::stream::cdc::{
     is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
 };
-use crate::stream::{
-    ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
-    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, check_sink_fragments_support_refresh_schema, create_source_worker,
-    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
-};
+use crate::stream::{ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext, CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption, FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef, StreamFragmentGraph, check_sink_fragments_support_refresh_schema, create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink, RescheduleTarget};
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
 
@@ -499,7 +492,7 @@ impl DdlController {
     pub async fn reschedule_streaming_job(
         &self,
         job_id: u32,
-        target: JobRescheduleTarget,
+        target: RescheduleTarget,
         mut deferred: bool,
     ) -> MetaResult<()> {
         tracing::info!("alter parallelism");
@@ -511,7 +504,7 @@ impl DdlController {
         }
 
         self.stream_manager
-            .reschedule_streaming_job(job_id, target, deferred)
+            .reschedule_streaming_job_v2(job_id, target, deferred)
             .await
     }
 
