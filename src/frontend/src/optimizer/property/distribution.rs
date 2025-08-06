@@ -199,10 +199,11 @@ impl Distribution {
     /// valid.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
-            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
-                Default::default()
-            }
+            Distribution::Single => &[],
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => dists,
+            Distribution::SomeShard | Distribution::Broadcast => {
+                panic!("cannot obtain distribution columns for {self:?}")
+            }
         }
     }
 
