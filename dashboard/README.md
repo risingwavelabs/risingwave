@@ -31,10 +31,14 @@ TODO: Find a suitable testing framework
 Start a RisingWave cluster, create some tables and materialized views for testing purposes.
 
 ```bash
-./risedev d
-# Nexmark and tpch do not have nested MV-on-MV structures.
+# Start full cluster so prometheus is available.
+./risedev k
+./risedev clean-data
+./risedev d full
 # We maintain our own separate test data for testing the dashboard's rendering
-./risedev slt e2e_test/dashboard/create_graph.slt.part
+# It provides nested MV-on-MV structures (nexmark and tpch only have 1-deep MV-on-MV).
+# It also provides backpressure and lag scenarios.
+./risedev slt e2e_test/dashboard/create_graph.slt.part --label dashboard
 ```
 
 Install dependencies and start the development server.

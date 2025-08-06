@@ -1,3 +1,4 @@
+onlyif dashboard
 statement ok
 create table t(v1 int, v2 int) with (
     connector = 'datagen',
@@ -11,6 +12,10 @@ create table t(v1 int, v2 int) with (
 );
 
 statement ok
+create table if not exists t(v1 int, v2 int);
+
+onlyif dashboard
+statement ok
 create table t2(v1 int, v2 int) with (
     connector = 'datagen',
     fields.v1.kind = 'sequence',
@@ -22,6 +27,10 @@ create table t2(v1 int, v2 int) with (
     datagen.rows.per.second = 100
 );
 
+statement ok
+create table if not exists t2(v1 int, v2 int);
+
+onlyif dashboard
 statement ok
 create table t3(v1 int, v2 int) with (
     connector = 'datagen',
@@ -35,6 +44,10 @@ create table t3(v1 int, v2 int) with (
 );
 
 statement ok
+create table if not exists t3(v1 int, v2 int);
+
+onlyif dashboard
+statement ok
 create table t4(v1 int, v2 int) with (
     connector = 'datagen',
     fields.v1.kind = 'sequence',
@@ -47,6 +60,10 @@ create table t4(v1 int, v2 int) with (
 );
 
 statement ok
+create table if not exists t4(v1 int, v2 int);
+
+onlyif dashboard
+statement ok
 create table t5(v1 int, v2 int) with (
     connector = 'datagen',
     fields.v1.kind = 'sequence',
@@ -57,6 +74,9 @@ create table t5(v1 int, v2 int) with (
     fields.v2.max = 100,
     datagen.rows.per.second = 100
 );
+
+statement ok
+create table if not exists t5(v1 int, v2 int);
 
 statement ok
 create materialized view mv1 as 
