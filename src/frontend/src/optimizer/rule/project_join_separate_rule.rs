@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
+use crate::optimizer::plan_node::*;
 pub struct ProjectJoinSeparateRule {}
 
 impl ProjectJoinSeparateRule {
@@ -22,7 +22,7 @@ impl ProjectJoinSeparateRule {
     }
 }
 
-impl Rule for ProjectJoinSeparateRule {
+impl Rule<Logical> for ProjectJoinSeparateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_join()?;
         if join.output_indices_are_trivial() {

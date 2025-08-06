@@ -21,9 +21,11 @@ use crate::binder::{BoundUpdate, UpdateProject};
 use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalProject, LogicalUpdate, generic};
+use crate::optimizer::plan_node::{
+    LogicalPlanRef as PlanRef, LogicalProject, LogicalUpdate, generic,
+};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{LogicalPlanRoot, PlanRef, PlanRoot};
+use crate::optimizer::{LogicalPlanRoot, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<LogicalPlanRoot> {

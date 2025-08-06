@@ -62,7 +62,7 @@ use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
     EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    SystemParams,
+    RefreshRequest, RefreshResponse, SystemParams,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -574,7 +574,7 @@ impl CatalogWriter for MockCatalogWriter {
             schema_catalog.get_index_by_id(&index_id).unwrap().clone()
         };
 
-        let index_table_id = index.index_table.id;
+        let index_table_id = index.index_table().id;
         let (database_id, schema_id) = self.drop_table_or_index_id(index_id.index_id);
         self.catalog
             .write()
@@ -1216,6 +1216,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<u64> {
         Ok(1)
+    }
+
+    async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
+        Ok(RefreshResponse { status: None })
     }
 }
 

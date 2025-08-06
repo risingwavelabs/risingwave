@@ -70,7 +70,7 @@ impl StreamSource {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamSource }
+impl_plan_tree_node_for_leaf! { Stream, StreamSource }
 
 impl Distill for StreamSource {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -116,6 +116,6 @@ impl StreamNode for StreamSource {
     }
 }
 
-impl ExprRewritable for StreamSource {}
+impl ExprRewritable<Stream> for StreamSource {}
 
 impl ExprVisitable for StreamSource {}

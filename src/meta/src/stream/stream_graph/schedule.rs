@@ -30,6 +30,7 @@ use risingwave_common::hash::{
 };
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_common::{bail, hash};
+use risingwave_connector::source::cdc::{CDC_BACKFILL_MAX_PARALLELISM, CdcScanOptions};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::{
@@ -201,7 +202,7 @@ pub(super) struct Scheduler {
     default_singleton_worker: WorkerId,
 
     /// Use to generate mapping if a vnode count other than the default is required.
-    dynamic_mapping_fn: Box<dyn Fn(usize) -> anyhow::Result<ActorAlignmentMapping>>,
+    dynamic_mapping_fn: Box<dyn Fn(usize, Option<usize>) -> anyhow::Result<ActorAlignmentMapping>>,
 }
 
 impl Scheduler {
@@ -252,18 +253,23 @@ impl Scheduler {
         let default_singleton_worker =
             single_assignment.keys().exactly_one().cloned().unwrap() as _;
 
-        let dynamic_mapping_fn = Box::new(move |limited_count: usize| {
-            let parallelism = parallelism.min(limited_count);
+        let dynamic_mapping_fn = Box::new(
+            move |limited_count: usize, force_parallelism: Option<usize>| {
+                let parallelism = if let Some(force_parallelism) = force_parallelism {
+                    force_parallelism.min(limited_count)
+                } else {
+                    parallelism.min(limited_count)
+                };
+                let assignment = assigner.assign_hierarchical(
+                    &worker_weights,
+                    &(0..parallelism).collect_vec(),
+                    &(0..limited_count).collect_vec(),
+                )?;
 
-            let assignment = assigner.assign_hierarchical(
-                &worker_weights,
-                &(0..parallelism).collect_vec(),
-                &(0..limited_count).collect_vec(),
-            )?;
-
-            let mapping = ActorAlignmentMapping::from_assignment(assignment, limited_count);
-            Ok(mapping)
-        });
+                let mapping = ActorAlignmentMapping::from_assignment(assignment, limited_count);
+                Ok(mapping)
+            },
+        );
         Ok(Self {
             default_hash_mapping,
             default_singleton_worker,
@@ -303,6 +309,7 @@ impl Scheduler {
                 });
             }
         }
+        let mut force_parallelism_fragment_ids: HashMap<_, _> = HashMap::default();
         // Vnode count requirements: if a fragment is going to look up an existing table,
         // it must have the same vnode count as that table.
         for (&id, fragment) in graph.building_fragments() {
@@ -326,6 +333,19 @@ impl Scheduler {
                         .get_table_desc()
                         .unwrap()
                         .vnode_count(),
+                    NodeBody::StreamCdcScan(node) => {
+                        let Some(ref options) = node.options else {
+                            return;
+                        };
+                        let options = CdcScanOptions::from_proto(options);
+                        if options.is_parallelized_backfill() {
+                            force_parallelism_fragment_ids
+                                .insert(id, options.backfill_parallelism as usize);
+                            CDC_BACKFILL_MAX_PARALLELISM as usize
+                        } else {
+                            return;
+                        }
+                    }
                     _ => return,
                 };
                 facts.push(Fact::Req {
@@ -381,7 +401,9 @@ impl Scheduler {
                         }
                         Req::AnySingleton => Distribution::Singleton(self.default_singleton_worker),
                         Req::AnyVnodeCount(vnode_count) => {
-                            let mapping = (self.dynamic_mapping_fn)(vnode_count)
+                            let force_parallelism =
+                                force_parallelism_fragment_ids.get(&id).copied();
+                            let mapping = (self.dynamic_mapping_fn)(vnode_count, force_parallelism)
                                 .with_context(|| {
                                     format!(
                                         "failed to build dynamic mapping for fragment {id:?} with vnode count {vnode_count}"

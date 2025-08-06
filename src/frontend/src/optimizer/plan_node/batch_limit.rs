@@ -18,7 +18,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -82,7 +83,7 @@ impl BatchLimit {
     }
 }
 
-impl PlanTreeNodeUnary for BatchLimit {
+impl PlanTreeNodeUnary<Batch> for BatchLimit {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -93,7 +94,7 @@ impl PlanTreeNodeUnary for BatchLimit {
         Self::new(core)
     }
 }
-impl_plan_tree_node_for_unary! {BatchLimit}
+impl_plan_tree_node_for_unary! { Batch, BatchLimit}
 impl_distill_by_unit!(BatchLimit, core, "BatchLimit");
 
 impl ToDistributedBatch for BatchLimit {
@@ -117,6 +118,6 @@ impl ToLocalBatch for BatchLimit {
     }
 }
 
-impl ExprRewritable for BatchLimit {}
+impl ExprRewritable<Batch> for BatchLimit {}
 
 impl ExprVisitable for BatchLimit {}

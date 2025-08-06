@@ -201,6 +201,19 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
             })
             .unwrap_or(false)
     }
+
+    /// See [`crate::source::batch::BatchSourceSplit`] for more details.
+    fn is_batch_connector(&self) -> bool {
+        false
+        // TODO: enable this when implementation done
+        // self.get(UPSTREAM_SOURCE_KEY)
+        //     .map(|s| s.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR))
+        //     .unwrap_or(false)
+    }
+
+    fn requires_singleton(&self) -> bool {
+        self.is_new_fs_connector() || self.is_iceberg_connector() || self.is_batch_connector()
+    }
 }
 
 impl<T: Get + GetKeyIter> WithPropertiesExt for T {}

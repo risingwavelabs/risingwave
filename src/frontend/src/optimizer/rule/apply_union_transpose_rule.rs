@@ -14,8 +14,7 @@
 
 use itertools::Itertools;
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalApply, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary};
 
 /// Transpose `LogicalApply` and `LogicalUnion`.
@@ -40,7 +39,7 @@ use crate::optimizer::plan_node::{LogicalApply, LogicalUnion, PlanTreeNode, Plan
 /// Domain   T1        Domain   T2
 /// ```
 pub struct ApplyUnionTransposeRule {}
-impl Rule for ApplyUnionTransposeRule {
+impl Rule<Logical> for ApplyUnionTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         if apply.max_one_row() {

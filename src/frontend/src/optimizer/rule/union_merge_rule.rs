@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
 
 pub struct UnionMergeRule {}
-impl Rule for UnionMergeRule {
+impl Rule<Logical> for UnionMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_union: &LogicalUnion = plan.as_logical_union()?;
         let top_all = top_union.all();

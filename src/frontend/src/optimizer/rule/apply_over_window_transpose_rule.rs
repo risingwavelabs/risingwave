@@ -14,9 +14,8 @@
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::InputRef;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalOverWindow};
 use crate::utils::Condition;
 
@@ -42,7 +41,7 @@ use crate::utils::Condition;
 ///  Domain        Input
 /// ```
 pub struct ApplyOverWindowTransposeRule {}
-impl Rule for ApplyOverWindowTransposeRule {
+impl Rule<Logical> for ApplyOverWindowTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
