@@ -115,9 +115,8 @@ macro_rules! def_visitor {
 
                             match plan.node_type() {
                                 $(
-                                    PlanNodeType::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
+                                    [<$convention PlanNodeType>]::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
                                 )*
-                                _ => unreachable!(),
                             }
                         })
                     }
