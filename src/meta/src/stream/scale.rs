@@ -29,7 +29,7 @@ use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::{
-    ObjectId, StreamingParallelism, WorkerId, actor, fragment, streaming_job,
+    ObjectId, StreamingParallelism, WorkerId, actor, fragment, fragment_relation, streaming_job,
 };
 use risingwave_pb::common::{PbWorkerNode, WorkerNode, WorkerType};
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
@@ -91,8 +91,12 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::prelude::FragmentRelation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryTrait, TransactionTrait};
+use sea_orm::{
+    ColumnTrait, EntityTrait, FromJsonQueryResult, QueryFilter, QuerySelect, QueryTrait,
+    TransactionTrait,
+};
 
 use super::SourceChange;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -442,7 +446,7 @@ impl ScaleController {
         Ok(actors)
     }
 
-    pub async fn diff_fragment(
+    pub fn diff_fragment(
         &self,
         prev_fragment_info: &SharedFragmentInfo,
         curr_actors: &HashMap<crate::model::ActorId, InflightActorInfo>,
@@ -2251,9 +2255,9 @@ impl ScaleController {
         })
     }
 
-    pub async fn generate_job_reschedule_plan_dynamic(
+    pub async fn reschedule_x(
         &self,
-        policy: JobReschedulePolicy,
+        policy: HashMap<ObjectId, RescheduleTarget>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<Command> {
         println!("aaaaaaaa");
@@ -2264,15 +2268,16 @@ impl ScaleController {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         let txn = inner.db.begin().await?;
 
+        // update
+
         let jobs = policy
-            .targets
             .into_iter()
             .map(|(job_id, target)| {
                 (
                     job_id as ObjectId,
                     TargetResourcePolicy {
                         resource_group: None,
-                        parallelism: StreamingParallelism::Adaptive,
+                        parallelism: StreamingParallelism::Fixed(1),
                     },
                 )
             })
@@ -2293,39 +2298,120 @@ impl ScaleController {
 
         let result = render_jobs(&txn, jobs, workers).await?;
 
-        println!("result {:#?}", result);
+        let mut all_fragments = HashMap::new();
 
         for (database_id, jobs) in result {
-            for (job, fragments) in jobs {
+            for (job, mut fragments) in jobs {
                 for (fragment, fragment_info) in fragments {
-                    let read_gurad = self.env.shared_actor_infos().read_guard();
-                    let prev_fragment = read_gurad.get_fragment(fragment as FragmentId).unwrap();
-
-                    let InflightFragmentInfo {
-                        fragment_id,
-                        job_id,
-                        distribution_type,
-                        fragment_type_mask,
-                        vnode_count,
-                        nodes,
-                        actors,
-                        state_table_ids,
-                    } = fragment_info;
-
-                    // self.diff_fragment(prev_fragment, &actors, );
+                    all_fragments.insert(fragment, fragment_info);
                 }
             }
         }
 
-        //        self.diff_fragment()
+        let fragment_ids = all_fragments.keys().copied().collect_vec();
 
-        //        self.diff_fragment()
+        let upstreams: Vec<(FragmentId, FragmentId, DispatcherType)> = FragmentRelation::find()
+            .select_only()
+            .columns([
+                fragment_relation::Column::TargetFragmentId,
+                fragment_relation::Column::SourceFragmentId,
+                fragment_relation::Column::DispatcherType,
+            ])
+            .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids.clone()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
-        todo!()
+        let downstreams: Vec<(FragmentId, FragmentId, DispatcherType)> = FragmentRelation::find()
+            .select_only()
+            .columns([
+                fragment_relation::Column::SourceFragmentId,
+                fragment_relation::Column::TargetFragmentId,
+                fragment_relation::Column::DispatcherType,
+            ])
+            .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids.clone()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
-        // let jobs = policy.targets.into_iter().map(|target| {
-        //
-        // })
+        let mut all_upstream_fragments = HashMap::new();
+
+        for (fragment, upstream, dispatcher) in upstreams {
+            all_upstream_fragments
+                .entry(fragment)
+                .or_insert(HashMap::new())
+                .insert(upstream, dispatcher);
+        }
+
+        let mut all_downstream_fragments = HashMap::new();
+        for (fragment, downstream, dispatcher) in downstreams {
+            all_downstream_fragments
+                .entry(fragment)
+                .or_insert(HashMap::new())
+                .insert(downstream, dispatcher);
+        }
+
+        let mut all_fragment_actors = HashMap::new();
+        let mut reschedules = HashMap::new();
+        for (fragment_id, fragment_info) in all_fragments {
+            // todo
+
+            let read_gurad = self.env.shared_actor_infos().read_guard();
+            let prev_fragment = read_gurad.get_fragment(fragment_id as FragmentId).unwrap();
+
+            let InflightFragmentInfo {
+                fragment_id,
+                job_id,
+                distribution_type,
+                fragment_type_mask,
+                vnode_count,
+                nodes,
+                actors,
+                state_table_ids,
+            } = fragment_info;
+
+            let upstream_fragments = all_upstream_fragments
+                .remove(&fragment_id)
+                .unwrap_or_default();
+            let downstream_fragments = all_downstream_fragments
+                .remove(&fragment_id)
+                .unwrap_or_default();
+
+            let fragment_actors: HashMap<_, _> = upstream_fragments
+                .keys()
+                .chain(downstream_fragments.keys())
+                .map(|fragment_id| {
+                    let fragment = read_gurad.get_fragment(*fragment_id as FragmentId).unwrap();
+                    (
+                        *fragment_id,
+                        fragment.actors.keys().copied().collect::<HashSet<_>>(),
+                    )
+                })
+                .collect();
+
+            all_fragment_actors.extend(fragment_actors);
+
+            let reschedule = self.diff_fragment(
+                prev_fragment,
+                &actors,
+                upstream_fragments,
+                downstream_fragments,
+            )?;
+
+            println!("res {:#?}", reschedule);
+            reschedules.insert(fragment_id, reschedule);
+        }
+
+        let command = Command::RescheduleFragment {
+            reschedules,
+            fragment_actors: all_fragment_actors,
+            post_updates: JobReschedulePostUpdates {
+                parallelism_updates: Default::default(),
+                resource_group_updates: Default::default(),
+            },
+        };
+
+        Ok(command)
     }
 
     fn diff_worker_slot_changes(
@@ -2571,6 +2657,23 @@ impl ScaleController {
             .map(|id| TableId::new(*id as _))
             .collect())
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct ParallelismTarget {
+    pub parallelism: StreamingParallelism,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResourceGroupTarget {
+    pub resource_group: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub enum RescheduleTarget {
+    Parallelism(ParallelismTarget),
+    ResourceGroup(ResourceGroupTarget),
+    Both(ParallelismTarget, ResourceGroupTarget),
 }
 
 #[derive(Debug, Clone)]

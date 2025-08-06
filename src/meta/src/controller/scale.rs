@@ -746,6 +746,11 @@ pub struct WorkerInfo {
     pub resource_group: Option<String>,
 }
 
+pub struct RenderedJobContext {
+    fragments: HashMap<FragmentId, InflightFragmentInfo>,
+    database_id: DatabaseId,
+}
+
 pub async fn render_jobs<C>(
     txn: &C,
     jobs: HashMap<ObjectId, TargetResourcePolicy>,
