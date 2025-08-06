@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
 use risingwave_common::bail;
@@ -23,9 +23,10 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use sea_schema::postgres::def::{ColumnType as SeaType, TableDef, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
+use sea_schema::sea_query::{Alias, IntoIden};
 use serde_derive::Deserialize;
-use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
+use sqlx::{PgPool, Row};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Kind as PgKind;
 use tokio_postgres::{Client as PgClient, NoTls};
@@ -33,6 +34,17 @@ use tokio_postgres::{Client as PgClient, NoTls};
 #[cfg(not(madsim))]
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::error::ConnectorResult;
+
+/// SQL query to discover primary key columns directly from PostgreSQL system tables.
+/// This bypasses querying `information_schema.table_constraints` to avoid permission issues.
+const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
+    SELECT a.attname as column_name
+    FROM pg_index i
+    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+    WHERE i.indrelid = ($1 || '.' || $2)::regclass
+      AND i.indisprimary = true
+    ORDER BY array_position(i.indkey, a.attnum)
+"#;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -65,6 +77,81 @@ pub struct PostgresExternalTable {
 }
 
 impl PostgresExternalTable {
+    /// Discover primary key columns directly from PostgreSQL system tables.
+    /// This bypasses querying `information_schema.table_constraints` to avoid requiring table owner permissions.
+    async fn discover_primary_key(
+        connection: &PgPool,
+        schema_name: &str,
+        table_name: &str,
+    ) -> ConnectorResult<Vec<String>> {
+        let rows = sqlx::query(DISCOVER_PRIMARY_KEY_QUERY)
+            .bind(schema_name)
+            .bind(table_name)
+            .fetch_all(connection)
+            .await
+            .context("Failed to discover primary key columns")?;
+
+        let pk_columns = rows
+            .into_iter()
+            .map(|row| row.get::<String, _>("column_name"))
+            .collect();
+
+        Ok(pk_columns)
+    }
+
+    /// Discover schema with workaround for primary key discovery
+    /// This method uses direct PostgreSQL system table queries for primary keys
+    /// to avoid permission issues when querying `information_schema.table_constraints`
+    async fn discover_pk_and_full_columns(
+        username: &str,
+        password: &str,
+        host: &str,
+        port: u16,
+        database: &str,
+        schema: &str,
+        table: &str,
+        ssl_mode: &SslMode,
+        ssl_root_cert: &Option<String>,
+    ) -> ConnectorResult<(Vec<sea_schema::postgres::def::ColumnInfo>, Vec<String>)> {
+        let mut options = PgConnectOptions::new()
+            .username(username)
+            .password(password)
+            .host(host)
+            .port(port)
+            .database(database)
+            .ssl_mode(match ssl_mode {
+                SslMode::Disabled => PgSslMode::Disable,
+                SslMode::Preferred => PgSslMode::Prefer,
+                SslMode::Required => PgSslMode::Require,
+                SslMode::VerifyCa => PgSslMode::VerifyCa,
+                SslMode::VerifyFull => PgSslMode::VerifyFull,
+            });
+
+        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
+            && let Some(root_cert) = ssl_root_cert
+        {
+            options = options.ssl_root_cert(root_cert.as_str());
+        }
+
+        let connection = PgPool::connect_with(options).await?;
+
+        // Use sea-schema only for column discovery (no permission issues)
+        let schema_discovery = SchemaDiscovery::new(connection.clone(), schema);
+        let empty_map: HashMap<String, Vec<String>> = HashMap::new();
+        let columns = schema_discovery
+            .discover_columns(
+                Alias::new(schema).into_iden(),
+                Alias::new(table).into_iden(),
+                &empty_map,
+            )
+            .await?;
+
+        // Use direct system table query for primary key discovery
+        let pk_columns = Self::discover_primary_key(&connection, schema, table).await?;
+
+        Ok((columns, pk_columns))
+    }
+
     async fn discover_schema(
         username: &str,
         password: &str,
@@ -125,7 +212,8 @@ impl PostgresExternalTable {
         is_append_only: bool,
     ) -> ConnectorResult<Self> {
         tracing::debug!("connect to postgres external table");
-        let table_schema = Self::discover_schema(
+
+        let (columns, pk_names) = Self::discover_pk_and_full_columns(
             username,
             password,
             host,
@@ -137,8 +225,9 @@ impl PostgresExternalTable {
             ssl_root_cert,
         )
         .await?;
+
         let mut column_descs = vec![];
-        for col in &table_schema.columns {
+        for col in &columns {
             let rw_data_type = sea_type_to_rw_type(&col.col_type)?;
             let column_desc = if let Some(ref default_expr) = col.default {
                 // parse the value of "column_default" field in information_schema.columns,
@@ -168,16 +257,13 @@ impl PostgresExternalTable {
             column_descs.push(column_desc);
         }
 
-        if !is_append_only && table_schema.primary_key_constraints.is_empty() {
+        // Check primary key existence using the directly discovered pk_names
+        if !is_append_only && pk_names.is_empty() {
             return Err(anyhow!(
                 "Postgres table should define the primary key for non-append-only tables"
             )
             .into());
         }
-        let mut pk_names = vec![];
-        table_schema.primary_key_constraints.iter().for_each(|pk| {
-            pk_names.extend(pk.columns.clone());
-        });
 
         Ok(Self {
             column_descs,
