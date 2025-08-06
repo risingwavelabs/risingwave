@@ -43,7 +43,7 @@ use crate::sink::file_sink::s3::{S3Common, S3Sink};
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::remote::CoordinatedRemoteSinkWriter;
 use crate::sink::snowflake_redshift::{
-    __OP, __ROW_ID, AugmentedChunk, SnowflakeRedshiftSinkS3Writer, build_opendal_writer,
+    __OP, __ROW_ID, AugmentedChunk, SnowflakeRedshiftSinkS3Writer, build_opendal_writer_path,
 };
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
@@ -601,11 +601,10 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
         if !paths.is_empty() {
             let s3_operator = FileSink::<S3Sink>::new_s3_sink(&self.config.s3_inner)?;
             let (mut writer, path) =
-                build_opendal_writer(&self.config.s3_inner, 0, &s3_operator, &None).await?;
+                build_opendal_writer_path(&self.config.s3_inner, 0, &s3_operator, &None).await?;
             let manifest_json = json!({
                 "entries": paths
             });
-            println!("Manifest JSON: {}", manifest_json);
             let mut chunk_buf = BytesMut::new();
             writeln!(chunk_buf, "{}", manifest_json).unwrap();
             writer.write(chunk_buf.freeze()).await?;
@@ -889,7 +888,7 @@ fn build_copy_into_sql(
         assume_role
     } else if let (Some(access_key), Some(secret_key)) = (access_key, secret_key) {
         &format!(
-            "aws_access_key_id={},aws_secret_access_key={}",
+            "aws_access_key_id={};aws_secret_access_key={}",
             access_key, secret_key
         )
     } else {
@@ -901,7 +900,8 @@ fn build_copy_into_sql(
         r#"
         COPY {table_name}
         FROM '{manifest_path}'
-        IAM_ROLE '{credentials}'
+        CREDENTIALS '{credentials}'
+        FORMAT AS JSON 'auto'
         MANIFEST;
         "#,
         table_name = table_name,

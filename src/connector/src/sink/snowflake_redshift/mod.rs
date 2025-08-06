@@ -147,12 +147,12 @@ pub struct SnowflakeRedshiftSinkS3Writer {
     s3_config: S3Common,
     s3_operator: Operator,
     augmented_row: AugmentedRow,
-    opendal_writer: Option<(opendal::Writer, String)>,
+    opendal_writer_path: Option<(opendal::Writer, String)>,
     executor_id: u64,
     target_table_name: Option<String>,
 }
 
-pub async fn build_opendal_writer(
+pub async fn build_opendal_writer_path(
     s3_config: &S3Common,
     executor_id: u64,
     operator: &Operator,
@@ -175,9 +175,10 @@ pub async fn build_opendal_writer(
         create_time.as_secs(),
         "json",
     );
+    let all_path = format!("s3://{}/{}", s3_config.bucket_name, object_name);
     Ok((
         operator.writer_with(&object_name).concurrent(8).await?,
-        object_name,
+        all_path,
     ))
 }
 
@@ -193,7 +194,7 @@ impl SnowflakeRedshiftSinkS3Writer {
         Ok(Self {
             s3_config,
             s3_operator,
-            opendal_writer: None,
+            opendal_writer_path: None,
             executor_id,
             augmented_row: AugmentedRow::new(0, is_append_only, schema),
             target_table_name,
@@ -206,22 +207,22 @@ impl SnowflakeRedshiftSinkS3Writer {
     }
 
     pub async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.opendal_writer.is_none() {
-            let opendal_writer = build_opendal_writer(
+        if self.opendal_writer_path.is_none() {
+            let opendal_writer_path = build_opendal_writer_path(
                 &self.s3_config,
                 self.executor_id,
                 &self.s3_operator,
                 &self.target_table_name,
             )
             .await?;
-            self.opendal_writer = Some(opendal_writer);
+            self.opendal_writer_path = Some(opendal_writer_path);
         }
         let mut chunk_buf = BytesMut::new();
         for (op, row) in chunk.rows() {
             let encoded_row = self.augmented_row.augmented_row(row, op)?;
             writeln!(chunk_buf, "{}", Value::Object(encoded_row)).unwrap(); // write to a `BytesMut` should never fail
         }
-        self.opendal_writer
+        self.opendal_writer_path
             .as_mut()
             .ok_or_else(|| SinkError::File("Sink writer is not created.".to_owned()))?
             .0
@@ -231,7 +232,7 @@ impl SnowflakeRedshiftSinkS3Writer {
     }
 
     pub async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<String>> {
-        if is_checkpoint && let Some((mut writer, path)) = self.opendal_writer.take() {
+        if is_checkpoint && let Some((mut writer, path)) = self.opendal_writer_path.take() {
             writer
                 .close()
                 .await
