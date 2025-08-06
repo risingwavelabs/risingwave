@@ -475,6 +475,8 @@ impl From<ObjectModel<function::Model>> for PbFunction {
                 .options
                 .as_ref()
                 .and_then(|o| o.0.get("batch").map(|v| v == "true")),
+            created_at_epoch: Some(value.1.created_at.and_utc().timestamp_millis() as u64),
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }
