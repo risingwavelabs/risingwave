@@ -31,7 +31,6 @@ use risingwave_meta::stream::{
     RescheduleTarget, ResourceGroupTarget,
 };
 use risingwave_meta_model::{ObjectId, StreamingParallelism};
-use risingwave_pb::PbFieldNotFound;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
 use risingwave_pb::common::WorkerType;

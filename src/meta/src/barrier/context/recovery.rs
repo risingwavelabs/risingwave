@@ -27,6 +27,7 @@ use thiserror_ext::AsReport;
 use tracing::{info, warn};
 
 use super::BarrierWorkerRuntimeInfoSnapshot;
+use crate::MetaResult;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
@@ -34,10 +35,7 @@ use crate::controller::fragment::InflightActorInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
-use crate::stream::{
-    SourceChange, StreamFragmentGraph,
-};
-use crate::MetaResult;
+use crate::stream::{SourceChange, StreamFragmentGraph};
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.

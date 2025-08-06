@@ -94,7 +94,7 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::FragmentRelation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use sea_orm::{
-    ColumnTrait, EntityTrait, FromJsonQueryResult, QueryFilter, QuerySelect, QueryTrait,
+    ColumnTrait, EntityTrait, QueryFilter, QuerySelect, QueryTrait,
     TransactionTrait,
 };
 
@@ -2301,7 +2301,7 @@ impl ScaleController {
         let mut all_fragments = HashMap::new();
 
         for (database_id, jobs) in result {
-            for (job, mut fragments) in jobs {
+            for (job, fragments) in jobs {
                 for (fragment, fragment_info) in fragments {
                     all_fragments.insert(fragment, fragment_info);
                 }
