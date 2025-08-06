@@ -230,6 +230,9 @@ pub struct SessionConfig {
     #[parameter(default = JoinEncodingType::default())]
     streaming_join_encoding: JoinEncodingType,
 
+    #[parameter(default = 10u32)]
+    stream_unsafe_extreme_cache_size: u32,
+
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, alias = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
