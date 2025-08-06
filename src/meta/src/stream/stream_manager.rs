@@ -39,7 +39,7 @@ use tracing::Instrument;
 
 use super::{
     FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates,
-    JobRescheduleTarget, JobResourceGroupTarget, Locations, ParallelismTarget, RescheduleOptions,
+    JobRescheduleTarget, JobResourceGroupTarget, Locations, RescheduleOptions,
     RescheduleTarget, ScaleControllerRef,
 };
 use crate::barrier::{
@@ -884,7 +884,9 @@ impl GlobalStreamManager {
             )
             .await?;
 
-        self.barrier_scheduler.run_command(database_id, command).await?;
+        self.barrier_scheduler
+            .run_command(database_id, command)
+            .await?;
 
         // if reschedule_plan.reschedules.is_empty() {
         //     tracing::debug!(
