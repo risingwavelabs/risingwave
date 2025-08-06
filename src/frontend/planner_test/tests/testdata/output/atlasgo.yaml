@@ -15,7 +15,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: LeftOuter, predicate: pg_type.typelem IS NOT DISTINCT FROM pg_type.oid, output: [pg_type.typtype] }
       ├─BatchExchange { order: [], dist: HashShard(pg_type.typelem) }
-      │ └─BatchScan { table: pg_type, columns: [pg_type.typelem], distribution: Single }
+      │ └─BatchSysScan { table: pg_type, columns: [pg_type.typelem], distribution: Single }
       └─BatchExchange { order: [], dist: HashShard(pg_type.oid) }
         └─BatchFilter { predicate: IsNotNull(pg_type.oid) }
-          └─BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typtype], distribution: Single }
+          └─BatchSysScan { table: pg_type, columns: [pg_type.oid, pg_type.typtype], distribution: Single }

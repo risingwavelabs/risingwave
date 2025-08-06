@@ -1046,15 +1046,14 @@
         └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id IS NOT DISTINCT FROM rw_users.id, output: all }
           ├─BatchExchange { order: [], dist: HashShard(rw_users.id) }
           │ └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
-          │   └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login], distribution: Single }
+          │   └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login], distribution: Single }
           └─BatchProject { exprs: [rw_users.id, Coalesce(array_agg(rw_users.name) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr1] }
             └─BatchHashAgg { group_key: [rw_users.id], aggs: [array_agg(rw_users.name) filter(IsNotNull(1:Int32))] }
               └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id IS NOT DISTINCT FROM rw_users.id, output: [rw_users.id, rw_users.name, 1:Int32] }
                 ├─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
                 │ └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                │   └─BatchProject { exprs: [rw_users.id] }
-                │     └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
-                │       └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+                │   └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
+                │     └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
                 └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
                   └─BatchProject { exprs: [rw_users.id, rw_users.name, 1:Int32] }
                     └─BatchHashJoin { type: Inner, predicate: null:Int32 = rw_users.id, output: [rw_users.id, rw_users.name] }
@@ -1064,11 +1063,12 @@
                       │     ├─BatchExchange { order: [], dist: Single }
                       │     │ └─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
                       │     │   └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                      │     │     └─BatchValues { rows: [] }
+                      │     │     └─BatchFilter { predicate: false:Boolean }
+                      │     │       └─BatchSysScan { table: rw_users, columns: [rw_users.id], distribution: Single }
                       │     └─BatchFilter { predicate: false:Boolean }
                       │       └─BatchValues { rows: [] }
                       └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                        └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+                        └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
 - name: correlated array subquery (issue 14423)
   sql: |
     CREATE TABLE array_types ( x BIGINT[] );
