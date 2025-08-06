@@ -41,7 +41,7 @@ const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     SELECT a.attname as column_name
     FROM pg_index i
     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-    WHERE i.indrelid = ($1 || '.' || $2)::regclass 
+    WHERE i.indrelid = ($1 || '.' || $2)::regclass
       AND i.indisprimary = true
     ORDER BY array_position(i.indkey, a.attnum)
 "#;
