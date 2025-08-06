@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use apache_avro::schema::{Name, RecordSchema, Schema as AvroSchema};
 use apache_avro::types::{Record, Value};
+use risingwave_common::array::VECTOR_ITEM_TYPE;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
@@ -583,7 +584,10 @@ fn on_field<D: MaybeData>(
             }
             _ => return no_match_err(),
         },
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Vector(_) => match inner {
+            AvroSchema::Array(avro_elem) => maybe.on_list(&VECTOR_ITEM_TYPE, avro_elem, refs)?,
+            _ => return no_match_err(),
+        },
         // Group D: unsupported
         DataType::Int256 => {
             return no_match_err();
