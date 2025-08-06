@@ -23,9 +23,10 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use sea_schema::postgres::def::{ColumnType as SeaType, TableDef, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
+use sea_schema::sea_query::{Alias, IntoIden};
 use serde_derive::Deserialize;
-use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
+use sqlx::{PgPool, Row};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Kind as PgKind;
 use tokio_postgres::{Client as PgClient, NoTls};
@@ -211,7 +212,8 @@ impl PostgresExternalTable {
         is_append_only: bool,
     ) -> ConnectorResult<Self> {
         tracing::debug!("connect to postgres external table");
-        let table_schema = Self::discover_schema(
+
+        let (columns, pk_names) = Self::discover_pk_and_full_columns(
             username,
             password,
             host,
@@ -223,8 +225,9 @@ impl PostgresExternalTable {
             ssl_root_cert,
         )
         .await?;
+
         let mut column_descs = vec![];
-        for col in &table_schema.columns {
+        for col in &columns {
             let rw_data_type = sea_type_to_rw_type(&col.col_type)?;
             let column_desc = if let Some(ref default_expr) = col.default {
                 // parse the value of "column_default" field in information_schema.columns,
@@ -254,16 +257,13 @@ impl PostgresExternalTable {
             column_descs.push(column_desc);
         }
 
-        if !is_append_only && table_schema.primary_key_constraints.is_empty() {
+        // Check primary key existence using the directly discovered pk_names
+        if !is_append_only && pk_names.is_empty() {
             return Err(anyhow!(
                 "Postgres table should define the primary key for non-append-only tables"
             )
             .into());
         }
-        let mut pk_names = vec![];
-        table_schema.primary_key_constraints.iter().for_each(|pk| {
-            pk_names.extend(pk.columns.clone());
-        });
 
         Ok(Self {
             column_descs,
