@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
 use risingwave_common::bail;
@@ -88,7 +88,7 @@ impl PostgresExternalTable {
             .bind(table_name)
             .fetch_all(connection)
             .await
-            .map_err(|e| anyhow!("Failed to discover primary key columns: {}", e))?;
+            .context("Failed to discover primary key columns")?;
 
         let pk_columns = rows
             .into_iter()
