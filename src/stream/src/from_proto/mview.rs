@@ -56,6 +56,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                 store.clone(),
                 table,
                 node.staging_table.as_ref().unwrap(),
+                node.refresh_progress_table.as_ref(),
                 params.vnode_bitmap.clone().map(Arc::new),
             )
             .await;

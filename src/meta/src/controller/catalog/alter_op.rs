@@ -894,4 +894,74 @@ impl CatalogController {
             .await;
         Ok((version, database))
     }
+
+    /// Set the refresh state of a table
+    pub async fn set_table_refresh_state(&self, table_id: TableId, state: i32) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let active_model = table::ActiveModel {
+            table_id: Set(table_id),
+            refresh_state: Set(Some(state)),
+            ..Default::default()
+        };
+
+        active_model.update(&txn).await?;
+        txn.commit().await?;
+
+        tracing::debug!(
+            table_id = %table_id,
+            state = %state,
+            "Updated table refresh state"
+        );
+
+        Ok(())
+    }
+
+    /// Atomically check and set table refresh state if current state matches expected
+    pub async fn check_and_set_table_refresh_state(
+        &self,
+        table_id: TableId,
+        expected_state: i32,
+        new_state: i32,
+    ) -> MetaResult<bool> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        // Get current state
+        let current_state: Option<i32> = Table::find_by_id(table_id)
+            .select_only()
+            .select_column(table::Column::RefreshState)
+            .into_tuple::<(Option<i32>,)>()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?
+            .0;
+
+        let current_state = current_state.unwrap_or(0);
+
+        if current_state != expected_state {
+            txn.rollback().await?;
+            return Ok(false);
+        }
+
+        // Update to new state
+        let active_model = table::ActiveModel {
+            table_id: Set(table_id),
+            refresh_state: Set(Some(new_state)),
+            ..Default::default()
+        };
+
+        active_model.update(&txn).await?;
+        txn.commit().await?;
+
+        tracing::debug!(
+            table_id = %table_id,
+            expected_state = %expected_state,
+            new_state = %new_state,
+            "Successfully updated table refresh state atomically"
+        );
+
+        Ok(true)
+    }
 }
