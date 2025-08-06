@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
@@ -41,8 +42,10 @@ impl RefreshManager {
     ///
     /// This method:
     /// 1. Validates that the table exists and is refreshable
-    /// 2. Sends a refresh command through the barrier system
-    /// 3. Returns the result of the refresh operation
+    /// 2. Checks current refresh state and ensures no concurrent refresh
+    /// 3. Atomically sets the table state to REFRESHING
+    /// 4. Sends a refresh command through the barrier system
+    /// 5. Returns the result of the refresh operation
     pub async fn refresh_table(&self, request: RefreshRequest) -> MetaResult<RefreshResponse> {
         let table_id = TableId::new(request.table_id);
         let associated_source_id = TableId::new(request.associated_source_id);
@@ -79,9 +82,7 @@ impl RefreshManager {
                     "Refresh command completed successfully"
                 );
 
-                Ok(RefreshResponse {
-                    status: None, // Success indicated by None status
-                })
+                Ok(RefreshResponse { status: None })
             }
             Err(e) => {
                 tracing::error!(
@@ -127,6 +128,32 @@ impl RefreshManager {
                 "Table '{}' is not associated with source '{}'. table.optional_associated_source_id: {:?}",
                 table.name, associated_source_id, table.optional_associated_source_id
             )));
+        }
+
+        let current_state = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_refresh_state(table_id.table_id as _)
+            .await?;
+        match current_state {
+            Some(RefreshState::Idle) => {
+                // the table is not refreshing. issue a refresh
+            }
+            Some(RefreshState::Refreshing) => {
+                return Err(MetaError::invalid_parameter(format!(
+                    "Table '{}' is currently being refreshed. Cannot start a new refresh operation.",
+                    table.name
+                )));
+            }
+            Some(RefreshState::Finishing) => {
+                return Err(MetaError::invalid_parameter(format!(
+                    "Table '{}' is currently finishing a refresh operation. Cannot start a new refresh operation.",
+                    table.name
+                )));
+            }
+            None => {
+                // If refresh_state is None, treat as IDLE for backward compatibility
+            }
         }
 
         tracing::debug!(

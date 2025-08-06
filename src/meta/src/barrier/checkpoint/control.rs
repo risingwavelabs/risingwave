@@ -835,6 +835,20 @@ impl DatabaseCheckpointControl {
                     task.load_finished_source_ids
                         .extend(load_finished_source_ids);
                 }
+                // Process refresh_finished_table_ids for all barrier types (checkpoint and non-checkpoint)
+                let refresh_finished_table_ids: Vec<_> = node
+                    .state
+                    .resps
+                    .iter()
+                    .flat_map(|resp| &resp.refresh_finished_tables)
+                    .cloned()
+                    .collect();
+                if !refresh_finished_table_ids.is_empty() {
+                    // Add refresh_finished_table_ids to the task for processing
+                    let task = task.get_or_insert_default();
+                    task.refresh_finished_table_ids
+                        .extend(refresh_finished_table_ids);
+                }
 
                 let mut finished_jobs = self.create_mview_tracker.apply_collected_command(
                     node.command_ctx.command.as_ref(),

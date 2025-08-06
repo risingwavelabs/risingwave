@@ -91,6 +91,8 @@ pub struct BarrierCompleteResult {
 
     /// The table IDs that should be truncated.
     pub truncate_tables: Vec<u32>,
+    /// The table IDs that have finished refresh.
+    pub refresh_finished_tables: Vec<u32>,
 }
 
 /// Lives in [`crate::task::barrier_worker::LocalBarrierWorker`],
@@ -632,6 +634,7 @@ mod await_epoch_completed_future {
         + 'static;
 
     #[define_opaque(AwaitEpochCompletedFuture)]
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn instrument_complete_barrier_future(
         partial_graph_id: PartialGraphId,
         complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
@@ -640,6 +643,7 @@ mod await_epoch_completed_future {
         create_mview_progress: Vec<PbCreateMviewProgress>,
         load_finished_source_ids: Vec<u32>,
         truncate_tables: Vec<u32>,
+        refresh_finished_tables: Vec<u32>,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -659,6 +663,7 @@ mod await_epoch_completed_future {
                     create_mview_progress,
                     load_finished_source_ids,
                     truncate_tables,
+                    refresh_finished_tables,
                 }),
             )
         });
@@ -735,6 +740,7 @@ impl LocalBarrierWorker {
                 create_mview_progress,
                 load_finished_source_ids,
                 truncate_tables,
+                refresh_finished_tables,
             } = database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
@@ -768,6 +774,7 @@ impl LocalBarrierWorker {
                         create_mview_progress,
                         load_finished_source_ids,
                         truncate_tables,
+                        refresh_finished_tables,
                     )
                 });
         }
@@ -785,6 +792,7 @@ impl LocalBarrierWorker {
             sync_result,
             load_finished_source_ids,
             truncate_tables,
+            refresh_finished_tables,
         } = result;
 
         let (synced_sstables, table_watermarks, old_value_ssts) = sync_result
@@ -832,6 +840,7 @@ impl LocalBarrierWorker {
                         database_id: database_id.database_id,
                         load_finished_source_ids,
                         truncate_tables,
+                        refresh_finished_tables,
                     },
                 )
             }

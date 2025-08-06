@@ -79,6 +79,10 @@ message BarrierCompleteResponse {
   // MaterializeExecutor reports the tables to truncate, and then
   // meta will apply truncate operation in next commit epoch.
   repeated uint32 truncate_tables = 12;
+  // Used for reporting materialized view refresh completion.
+  // MaterializeExecutor reports when refresh has finished, and then
+  // meta will update the table's refresh state to Finished.
+  repeated uint32 refresh_finished_tables = 13;
 }
 
 message StreamingControlStreamRequest {

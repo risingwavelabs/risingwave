@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_meta_model::table::RefreshState;
 
 use super::*;
 use crate::controller::utils::{
@@ -140,6 +141,24 @@ impl CatalogController {
             .into_iter()
             .map(|col| col.into())
             .collect())
+    }
+
+    /// Get the refresh state of a table
+    pub async fn get_table_refresh_state(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<Option<RefreshState>> {
+        let inner = self.inner.read().await;
+        let (refresh_state,): (Option<RefreshState>,) = Table::find_by_id(table_id)
+            .select_only()
+            .select_column(table::Column::RefreshState)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+
+        // Default to IDLE if not set (for backward compatibility)
+        Ok(Some(refresh_state.unwrap_or(RefreshState::Idle)))
     }
 
     pub async fn get_sink_by_ids(&self, sink_ids: Vec<SinkId>) -> MetaResult<Vec<PbSink>> {

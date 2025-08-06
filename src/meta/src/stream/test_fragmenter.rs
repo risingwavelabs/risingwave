@@ -368,6 +368,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
             staging_table: None,
+            refresh_progress_table: None,
         }))),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
