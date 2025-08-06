@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::system_param::{OverrideValidate, Validate};
+use risingwave_meta_model::table::RefreshState;
 use sea_orm::DatabaseTransaction;
 
 use super::*;
@@ -902,7 +903,11 @@ impl CatalogController {
 
         let active_model = table::ActiveModel {
             table_id: Set(table_id),
-            refresh_state: Set(Some(state)),
+            refresh_state: Set(Some(
+                risingwave_pb::catalog::RefreshState::try_from(state)
+                    .unwrap()
+                    .into(),
+            )),
             ..Default::default()
         };
 
@@ -922,23 +927,22 @@ impl CatalogController {
     pub async fn check_and_set_table_refresh_state(
         &self,
         table_id: TableId,
-        expected_state: i32,
-        new_state: i32,
+        expected_state: RefreshState,
+        new_state: RefreshState,
     ) -> MetaResult<bool> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         // Get current state
-        let current_state: Option<i32> = Table::find_by_id(table_id)
+        let current_state: Option<RefreshState> = Table::find_by_id(table_id)
             .select_only()
             .select_column(table::Column::RefreshState)
-            .into_tuple::<(Option<i32>,)>()
+            .into_tuple::<(Option<RefreshState>,)>()
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?
             .0;
-
-        let current_state = current_state.unwrap_or(0);
+        let current_state = current_state.unwrap();
 
         if current_state != expected_state {
             txn.rollback().await?;
@@ -948,7 +952,9 @@ impl CatalogController {
         // Update to new state
         let active_model = table::ActiveModel {
             table_id: Set(table_id),
-            refresh_state: Set(Some(new_state)),
+            refresh_state: Set(Some(
+                risingwave_pb::catalog::RefreshState::from(new_state).into(),
+            )),
             ..Default::default()
         };
 
@@ -957,8 +963,6 @@ impl CatalogController {
 
         tracing::debug!(
             table_id = %table_id,
-            expected_state = %expected_state,
-            new_state = %new_state,
             "Successfully updated table refresh state atomically"
         );
 

@@ -267,7 +267,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
             refreshable: value.0.refreshable,
-            refresh_state: risingwave_pb::catalog::RefreshState::Idle as i32,
+            refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
         }
     }
 }

@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
@@ -165,16 +166,14 @@ impl RefreshManager {
     ///
     /// This prevents concurrent refresh operations on the same table
     async fn check_and_set_refresh_state(&self, table_id: TableId) -> MetaResult<()> {
-        use risingwave_pb::catalog::RefreshState;
-
         // Use the atomic check-and-set operation
         let success = self
             .metadata_manager
             .catalog_controller
             .check_and_set_table_refresh_state(
                 table_id.table_id as _,
-                RefreshState::Idle as i32,
-                RefreshState::Refreshing as i32,
+                RefreshState::Idle,
+                RefreshState::Refreshing,
             )
             .await?;
 

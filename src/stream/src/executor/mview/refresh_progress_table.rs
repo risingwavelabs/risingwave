@@ -15,12 +15,12 @@
 //! Refresh Progress Table
 //!
 //! This module implements a persistent table for tracking refresh operation progress.
-//! It stores progress information for each VirtualNode during refresh operations,
+//! It stores progress information for each `VirtualNode` during refresh operations,
 //! enabling fault-tolerant refresh operations that can be resumed after interruption.
 
 use std::collections::{HashMap, HashSet};
 
-use futures_async_stream::for_await;
+// use futures_async_stream::for_await; // Commented out as it's unused
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRefImpl};
@@ -31,13 +31,13 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
 /// Schema for the refresh progress table:
-/// - vnode (i32): VirtualNode identifier
-/// - stage (i32): Current refresh stage (Normal=0, Refreshing=1, Merging=2, Cleanup=3)
-/// - started_epoch (i64): Epoch when the refresh started
-/// - current_epoch (i64): Current processing epoch
-/// - processed_rows (i64): Number of rows processed so far in this vnode
-/// - is_completed (bool): Whether this vnode has completed processing
-/// - last_updated_at (i64): Timestamp of last update
+/// - `vnode` (i32): `VirtualNode` identifier
+/// - `stage` (i32): Current refresh stage (Normal=0, Refreshing=1, Merging=2, Cleanup=3)
+/// - `started_epoch` (i64): Epoch when the refresh started
+/// - `current_epoch` (i64): Current processing epoch
+/// - `processed_rows` (i64): Number of rows processed so far in this vnode
+/// - `is_completed` (bool): Whether this vnode has completed processing
+/// - `last_updated_at` (i64): Timestamp of last update
 pub struct RefreshProgressTable<S: StateStore> {
     /// The underlying state table for persistence
     state_table: StateTable<S>,
@@ -45,7 +45,7 @@ pub struct RefreshProgressTable<S: StateStore> {
     cache: HashMap<VirtualNode, RefreshProgressEntry>,
 }
 
-/// Progress information for a single VirtualNode
+/// Progress information for a single `VirtualNode`
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefreshProgressEntry {
     pub vnode: VirtualNode,
@@ -57,7 +57,7 @@ pub struct RefreshProgressEntry {
     pub last_updated_at: u64,
 }
 
-/// Refresh stages matching the RefreshStage enum
+/// Refresh stages matching the `RefreshStage` enum
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum RefreshStage {
@@ -80,7 +80,7 @@ impl From<i32> for RefreshStage {
 }
 
 impl<S: StateStore> RefreshProgressTable<S> {
-    /// Create a new RefreshProgressTable
+    /// Create a new `RefreshProgressTable`
     pub fn new(state_table: StateTable<S>) -> Self {
         Self {
             state_table,
@@ -107,7 +107,7 @@ impl<S: StateStore> RefreshProgressTable<S> {
         Ok(())
     }
 
-    /// Set progress for a specific VirtualNode
+    /// Set progress for a specific `VirtualNode`
     pub fn set_progress(
         &mut self,
         vnode: VirtualNode,
@@ -142,17 +142,17 @@ impl<S: StateStore> RefreshProgressTable<S> {
         Ok(())
     }
 
-    /// Get progress for a specific VirtualNode
+    /// Get progress for a specific `VirtualNode`
     pub fn get_progress(&self, vnode: VirtualNode) -> Option<&RefreshProgressEntry> {
         self.cache.get(&vnode)
     }
 
-    /// Get progress for all VirtualNodes
+    /// Get progress for all `VirtualNodes`
     pub fn get_all_progress(&self) -> &HashMap<VirtualNode, RefreshProgressEntry> {
         &self.cache
     }
 
-    /// Get all VirtualNodes that have completed processing
+    /// Get all `VirtualNodes` that have completed processing
     pub fn get_completed_vnodes(&self) -> HashSet<VirtualNode> {
         self.cache
             .iter()
@@ -161,7 +161,7 @@ impl<S: StateStore> RefreshProgressTable<S> {
             .collect()
     }
 
-    /// Get all VirtualNodes in a specific stage
+    /// Get all `VirtualNodes` in a specific stage
     pub fn get_vnodes_in_stage(&self, stage: RefreshStage) -> Vec<VirtualNode> {
         self.cache
             .iter()
@@ -170,7 +170,7 @@ impl<S: StateStore> RefreshProgressTable<S> {
             .collect()
     }
 
-    /// Clear progress for a specific VirtualNode
+    /// Clear progress for a specific `VirtualNode`
     pub fn clear_progress(&mut self, vnode: VirtualNode) -> StreamExecutorResult<()> {
         if let Some(entry) = self.cache.remove(&vnode) {
             let row = self.entry_to_row(&entry);
@@ -188,7 +188,7 @@ impl<S: StateStore> RefreshProgressTable<S> {
         Ok(())
     }
 
-    /// Get the total number of processed rows across all VirtualNodes
+    /// Get the total number of processed rows across all `VirtualNodes`
     pub fn get_total_processed_rows(&self) -> u64 {
         self.cache.values().map(|entry| entry.processed_rows).sum()
     }
@@ -217,7 +217,7 @@ impl<S: StateStore> RefreshProgressTable<S> {
         Ok(())
     }
 
-    /// Convert RefreshProgressEntry to OwnedRow for storage
+    /// Convert `RefreshProgressEntry` to `OwnedRow` for storage
     fn entry_to_row(&self, entry: &RefreshProgressEntry) -> OwnedRow {
         OwnedRow::new(vec![
             Some(ScalarImpl::Int32(entry.vnode.to_index() as i32)),
@@ -230,7 +230,7 @@ impl<S: StateStore> RefreshProgressTable<S> {
         ])
     }
 
-    /// Parse OwnedRow from storage to RefreshProgressEntry
+    /// Parse `OwnedRow` from storage to `RefreshProgressEntry`
     fn parse_row_to_entry(&self, row: &impl Row) -> Option<RefreshProgressEntry> {
         let datums = row.iter().collect::<Vec<_>>();
         if datums.len() != 7 {

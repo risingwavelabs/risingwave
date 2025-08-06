@@ -586,7 +586,7 @@ impl TableCatalog {
             engine: Some(self.engine.to_protobuf().into()),
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
-            refresh_state: risingwave_pb::catalog::RefreshState::Idle as i32,
+            refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
         }
     }
 
