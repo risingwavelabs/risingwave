@@ -195,8 +195,9 @@ impl Distribution {
         }
     }
 
-    /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
-    /// valid.
+    /// Get distribution column indices.
+    ///
+    /// Panics if the distribution is not `HashShard`, `UpstreamHashShard` or `Single`.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
             Distribution::Single => &[],
