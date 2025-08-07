@@ -70,6 +70,17 @@ pub async fn handle_create_user(
                 );
             }
 
+            let require_admin = stmt
+                .with_options
+                .0
+                .iter()
+                .any(|option| matches!(option, UserOption::Admin));
+            if require_admin && !session_user.is_admin {
+                return Err(
+                    PermissionDenied("must be admin to create admin users".to_owned()).into(),
+                );
+            }
+
             if !session_user.can_create_user {
                 return Err(PermissionDenied("permission denied to create user".to_owned()).into());
             }
@@ -96,6 +107,8 @@ pub async fn handle_create_user(
                 UserOption::NoCreateUser => user_info.can_create_user = false,
                 UserOption::Login => user_info.can_login = true,
                 UserOption::NoLogin => user_info.can_login = false,
+                UserOption::Admin => user_info.is_admin = true,
+                UserOption::NoAdmin => user_info.is_admin = false,
                 UserOption::EncryptedPassword(password) => {
                     if !password.0.is_empty() {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);

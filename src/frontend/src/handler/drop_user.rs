@@ -34,9 +34,9 @@ pub async fn handle_drop_user(
     let user_info = user_info_reader
         .read_guard()
         .get_user_by_name(&user_name)
-        .map(|u| (u.id, u.is_super));
+        .map(|u| (u.id, u.is_super, u.is_admin));
     match user_info {
-        Some((user_id, is_super)) => {
+        Some((user_id, is_super, is_admin)) => {
             if session.user_id() == user_id {
                 return Err(ErrorCode::PermissionDenied(
                     "current user cannot be dropped".to_owned(),
@@ -58,6 +58,12 @@ pub async fn handle_drop_user(
                     if is_super {
                         return Err(ErrorCode::PermissionDenied(
                             "must be superuser to drop superusers".to_owned(),
+                        )
+                        .into());
+                    }
+                    if is_admin && !current_user.is_admin {
+                        return Err(ErrorCode::PermissionDenied(
+                            "must be admin to drop admin users".to_owned(),
                         )
                         .into());
                     }
