@@ -1092,11 +1092,10 @@ impl CatalogControllerInner {
     pub(crate) fn notify_cancelled(&mut self, database_id: Option<DatabaseId>, id: ObjectId) {
         if let Some(database_id) = database_id {
             if let Some(creating_tables) = self.creating_table_finish_notifier.get_mut(&database_id)
+                && let Some(tx_list) = creating_tables.remove(&id)
             {
-                if let Some(tx_list) = creating_tables.remove(&id) {
-                    for tx in tx_list {
-                        let _ = tx.send(Err("Cancelled".to_owned()));
-                    }
+                for tx in tx_list {
+                    let _ = tx.send(Err("Cancelled".to_owned()));
                 }
             }
         } else {
