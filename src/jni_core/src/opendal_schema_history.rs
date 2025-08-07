@@ -26,6 +26,23 @@ use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_
 
 static OBJECT_STORE_INSTANCE: OnceLock<Arc<ObjectStoreImpl>> = OnceLock::new();
 
+/// Security safeguard: Check if file has .dat extension
+/// This prevents accidental overwriting of Hummock data or other critical files.
+fn validate_dat_file_extension(path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("File path cannot be empty".to_owned());
+    }
+
+    if !path.ends_with(".dat") {
+        return Err(format!(
+            "Security violation: Only .dat files are allowed for schema history operations, got: {}",
+            path
+        ));
+    }
+
+    Ok(())
+}
+
 // schema history is internal state, all data is stored under the DATA_DIRECTORY directory.
 fn prepend_data_directory(path: &str) -> String {
     let data_dir = DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or("");
@@ -73,6 +90,16 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
     execute_and_catch(env, move |env| {
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
+
+        // Security check: validate file extension before any operation
+        if let Err(error_msg) = validate_dat_file_extension(&object_name) {
+            tracing::error!(
+                "putObject security validation failed, skipping operation: {}",
+                error_msg
+            );
+            return Ok(()); // Skip this operation
+        }
+
         let object_name = prepend_data_directory(&object_name);
 
         let data_guard = to_guarded_slice(&data, env)?;
@@ -96,6 +123,16 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
+
+        // Security check: validate file extension before any operation
+        if let Err(error_msg) = validate_dat_file_extension(&object_name) {
+            tracing::error!(
+                "getObject security validation failed, returning empty result: {}",
+                error_msg
+            );
+            return Ok(env.byte_array_from_slice(&[])?); // Return empty byte array
+        }
+
         let object_name = prepend_data_directory(&object_name);
         let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
             let object_store = get_object_store().await;
@@ -130,6 +167,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
     **execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let dir = env.get_string(&dir)?;
         let dir: Cow<'_, str> = (&dir).into();
+
+        // Note: listObject operates on directories, individual file security is checked in putObject/getObject
+
         let dir = prepend_data_directory(&dir);
 
         let files: Vec<String> = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
@@ -142,7 +182,25 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
             use futures::StreamExt;
             while let Some(obj) = stream.next().await {
                 match obj {
-                    Ok(obj) => file_names.push(obj.key),
+                    Ok(obj) => {
+                        // Additional security: only return files that pass validation
+                        // Remove the data directory prefix for validation
+                        let relative_path = obj
+                            .key
+                            .strip_prefix(DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or(""))
+                            .unwrap_or(&obj.key);
+                        let relative_path = if let Some(stripped) = relative_path.strip_prefix('/') {
+                            stripped
+                        } else {
+                            relative_path
+                        };
+
+                        if validate_dat_file_extension(relative_path).is_ok() {
+                            file_names.push(obj.key);
+                        } else {
+                            tracing::error!("Filtering out non-.dat file from list: {}", obj.key);
+                        }
+                    }
                     Err(_) => continue,
                 }
             }
@@ -167,6 +225,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let dir = env.get_string(&dir)?;
         let dir: Cow<'_, str> = (&dir).into();
+
+        // Note: deleteObjects operates on directories, individual file security is checked in putObject/getObject
+
         let dir = prepend_data_directory(&dir);
 
         JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
@@ -179,10 +240,27 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
             use futures::StreamExt;
             while let Some(obj) = stream.next().await {
                 if let Ok(obj) = obj {
-                    keys.push(obj.key);
+                    // Additional security: only delete files that pass validation
+                    // Remove the data directory prefix for validation
+                    let relative_path = obj
+                        .key
+                        .strip_prefix(DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or(""))
+                        .unwrap_or(&obj.key);
+                    let relative_path = if let Some(stripped) = relative_path.strip_prefix('/') {
+                        stripped
+                    } else {
+                        relative_path
+                    };
+
+                    if validate_dat_file_extension(relative_path).is_ok() {
+                        keys.push(obj.key);
+                    } else {
+                        tracing::error!("Skipping deletion of non-.dat file: {}", obj.key);
+                    }
                 }
             }
             for key in keys {
+                tracing::debug!("Deleting schema history file: {}", key);
                 let _ = object_store.delete(&key).await;
             }
         });
