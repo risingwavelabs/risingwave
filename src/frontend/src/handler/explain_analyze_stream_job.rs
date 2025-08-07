@@ -770,9 +770,6 @@ mod graph {
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
                 if node.identity != NodeBodyDiscriminants::BatchPlan
-                // FIXME(kwannoel): Add back after https://github.com/risingwavelabs/risingwave/issues/22775 is resolved.
-                && node.identity != NodeBodyDiscriminants::Merge
-                && node.identity != NodeBodyDiscriminants::Project
                 {
                     assert!(executor_ids.insert(executor_id));
                 }
