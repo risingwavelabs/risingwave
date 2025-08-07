@@ -1041,6 +1041,7 @@ impl LogicalPlanRoot {
             let columns = t.columns_without_rw_timestamp();
             stream_plan.target_columns_to_plan_mapping(&columns, user_specified_columns)
         });
+
         StreamSink::create(
             stream_plan,
             sink_name,
