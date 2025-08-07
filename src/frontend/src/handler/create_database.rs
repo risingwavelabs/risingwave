@@ -87,9 +87,7 @@ pub async fn handle_create_database(
         .flatten();
 
     if resource_group.is_some() {
-        risingwave_common::license::Feature::ResourceGroup
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
+        risingwave_common::license::Feature::ResourceGroup.check_available()?;
     }
 
     let resource_group = resource_group.as_deref().unwrap_or(DEFAULT_RESOURCE_GROUP);
