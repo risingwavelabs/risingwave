@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::StreamJobStatus;
 use risingwave_pb::ddl_service::{ReplaceJobPlan, replace_job_plan};
 use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::ObjectName;
@@ -63,7 +64,7 @@ pub async fn handle_drop_sink(
 
     let sink_id = sink.id;
 
-    if sink.target_table.is_none() {
+    if sink.stream_job_status == StreamJobStatus::Creating && sink.target_table.is_none() {
         let canceled_jobs = session
             .env()
             .meta_client()
