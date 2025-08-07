@@ -21,6 +21,12 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 use crate::error::Result;
 
+fn check_database_failure_isolation_license() -> Result<()> {
+    risingwave_common::license::Feature::DatabaseFailureIsolation
+        .check_available()
+        .map_err(|e| anyhow::anyhow!(e).into())
+}
+
 pub async fn handle_alter_database_param(
     handler_args: HandlerArgs,
     database_name: ObjectName,
@@ -43,9 +49,9 @@ pub async fn handle_alter_database_param(
 
     match param {
         AlterDatabaseParam::BarrierIntervalMs(Some(interval)) => {
-            risingwave_common::license::Feature::DatabaseFailureIsolation
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
+            if !cfg!(test) {
+                check_database_failure_isolation_license()?;
+            }
             if interval >= NOTICE_BARRIER_INTERVAL_MS {
                 builder = builder.notice(
                     format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.",
@@ -53,9 +59,9 @@ pub async fn handle_alter_database_param(
             }
         }
         AlterDatabaseParam::CheckpointFrequency(Some(frequency)) => {
-            risingwave_common::license::Feature::DatabaseFailureIsolation
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
+            if !cfg!(test) {
+                check_database_failure_isolation_license()?;
+            }
             if frequency >= NOTICE_CHECKPOINT_FREQUENCY {
                 builder = builder.notice(
                     format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.",
