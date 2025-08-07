@@ -755,7 +755,7 @@ pub(super) mod handlers {
                 srv.prometheus_selector
             );
             let channel_backpressure_query = format!(
-                "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, upstream_fragment_id)",
+                "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id)",
                 srv.prometheus_selector
             );
 
@@ -833,14 +833,14 @@ pub(super) mod handlers {
             {
                 for sample in channel_backpressure_data {
                     if let Some(fragment_id_str) = sample.metric().get("fragment_id")
-                        && let Some(upstream_fragment_id_str) =
-                            sample.metric().get("upstream_fragment_id")
-                        && let (Ok(fragment_id), Ok(upstream_fragment_id)) = (
+                        && let Some(downstream_fragment_id_str) =
+                            sample.metric().get("downstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(downstream_fragment_id)) = (
                             fragment_id_str.parse::<u32>(),
-                            upstream_fragment_id_str.parse::<u32>(),
+                            downstream_fragment_id_str.parse::<u32>(),
                         )
                     {
-                        let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                        let key = format!("{}_{}", fragment_id, downstream_fragment_id);
                         channel_data
                             .entry(key)
                             .or_insert_with(|| ChannelDeltaStats {
