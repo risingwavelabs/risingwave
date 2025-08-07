@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use core::num::NonZero;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use phf::{Set, phf_set};
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
@@ -254,6 +255,61 @@ impl Sink for RedshiftSink {
         Ok(coordinator)
     }
 }
+
+struct AugmentedChunk {
+    current_epoch: u64,
+    current_row_count: usize,
+    is_append_only: bool,
+}
+
+impl AugmentedChunk {
+    fn new(current_epoch: u64, is_append_only: bool) -> Self {
+        Self {
+            current_epoch,
+            current_row_count: 0,
+            is_append_only,
+        }
+    }
+
+    fn reset_epoch(&mut self, current_epoch: u64) {
+        if self.is_append_only || current_epoch == self.current_epoch {
+            return;
+        }
+        self.current_epoch = current_epoch;
+        self.current_row_count = 0;
+    }
+
+    fn augmented_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
+        if self.is_append_only {
+            return Ok(chunk);
+        }
+        let (data_chunk, ops) = chunk.into_parts();
+        let chunk_row_count = data_chunk.capacity();
+        let (columns, visibility) = data_chunk.into_parts();
+
+        let op_column = ops.iter().map(|op| op.to_i16() as i32).collect::<Vec<_>>();
+        let row_column_strings: Vec<String> = (0..chunk_row_count)
+            .map(|i| format!("{}_{}", self.current_epoch, self.current_row_count + i))
+            .collect();
+
+        let row_column_refs: Vec<&str> = row_column_strings.iter().map(|s| s.as_str()).collect();
+        self.current_row_count += chunk_row_count;
+
+        let mut arrays: Vec<Arc<ArrayImpl>> = columns;
+        arrays.push(Arc::new(ArrayImpl::Utf8(Utf8Array::from_iter(
+            row_column_refs,
+        ))));
+        arrays.push(Arc::new(ArrayImpl::Int32(
+            PrimitiveArray::<i32>::from_iter(op_column),
+        )));
+
+        let chunk = DataChunk::new(arrays, visibility);
+        let ops = vec![Op::Insert; chunk_row_count];
+        let chunk = StreamChunk::from_parts(ops, chunk);
+        Ok(chunk)
+    }
+}
+
 pub struct RedShiftSinkWriter {
     augmented_row: AugmentedChunk,
     jdbc_sink_writer: CoordinatedRemoteSinkWriter,
