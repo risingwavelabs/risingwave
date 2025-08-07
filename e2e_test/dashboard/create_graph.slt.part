@@ -6,6 +6,7 @@ create table t(v1 int, v2 int) with (
     fields.v1.start = 1,
     fields.v1.end = 1000000,
     fields.v2.kind = 'random',
+    fields.v2.seed = '1',
     fields.v2.min = 1,
     fields.v2.max = 100,
     datagen.rows.per.second = 100
@@ -22,6 +23,7 @@ create table t2(v1 int, v2 int) with (
     fields.v1.start = 1,
     fields.v1.end = 1000000,
     fields.v2.kind = 'random',
+    fields.v2.seed = '2',
     fields.v2.min = 1,
     fields.v2.max = 100,
     datagen.rows.per.second = 100
@@ -38,6 +40,7 @@ create table t3(v1 int, v2 int) with (
     fields.v1.start = 1,
     fields.v1.end = 1000000,
     fields.v2.kind = 'random',
+    fields.v2.seed = '3',
     fields.v2.min = 1,
     fields.v2.max = 100,
     datagen.rows.per.second = 100
@@ -54,6 +57,7 @@ create table t4(v1 int, v2 int) with (
     fields.v1.start = 1,
     fields.v1.end = 1000000,
     fields.v2.kind = 'random',
+    fields.v2.seed = '4',
     fields.v2.min = 1,
     fields.v2.max = 100,
     datagen.rows.per.second = 100
@@ -70,6 +74,7 @@ create table t5(v1 int, v2 int) with (
     fields.v1.start = 1,
     fields.v1.end = 1000000,
     fields.v2.kind = 'random',
+    fields.v2.seed = '5',
     fields.v2.min = 1,
     fields.v2.max = 100,
     datagen.rows.per.second = 100
