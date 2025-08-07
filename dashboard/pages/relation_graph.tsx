@@ -133,6 +133,15 @@ export default function StreamingGraph() {
           toast(e, "error")
         }
       )
+      api.get("/metrics/streaming_stats_prometheus").then(
+        (res) => {
+          console.log(res)
+        },
+        (e) => {
+          console.error(e)
+          toast(e, "error")
+        }
+      )
     }
     refresh() // run once immediately
     const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
