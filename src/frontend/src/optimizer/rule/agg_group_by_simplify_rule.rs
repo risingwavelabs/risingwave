@@ -14,10 +14,10 @@
 
 use risingwave_expr::aggregate::PbAggKind;
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::InputRef;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
+use crate::optimizer::plan_node::*;
 use crate::utils::{Condition, IndexSet};
 
 /// Use functional dependencies to simplify aggregation's group by
@@ -26,7 +26,7 @@ use crate::utils::{Condition, IndexSet};
 /// After
 /// group by b, `first_value`(a), `first_value`(c),
 pub struct AggGroupBySimplifyRule {}
-impl Rule for AggGroupBySimplifyRule {
+impl Rule<Logical> for AggGroupBySimplifyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (agg_calls, group_key, grouping_sets, agg_input, _two_phase) = agg.clone().decompose();

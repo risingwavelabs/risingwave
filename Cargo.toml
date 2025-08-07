@@ -167,13 +167,14 @@ hashbrown = { version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a788a196287f4047f08b48b6e5588fb559a11f3c", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f4d3827e906b5e1e885d396c02591480dcfc92d5", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a788a196287f4047f08b48b6e5588fb559a11f3c" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a788a196287f4047f08b48b6e5588fb559a11f3c" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f4d3827e906b5e1e885d396c02591480dcfc92d5" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f4d3827e906b5e1e885d396c02591480dcfc92d5" }
+
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = "0.1.4"
@@ -273,11 +274,11 @@ sqlx = { version = "0.8.2", default-features = false, features = [
 ] }
 thiserror = { git = "https://github.com/BugenZhao/thiserror.git", tag = "bz-provide-3" }
 thiserror-ext = { version = "0.3", features = ["backtrace"] }
-tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
+tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",
     "stats",
-], rev = "64a2d9" }
+], rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = [
     "net",
     "fs",
@@ -392,7 +393,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "793d612e8f660fcb29c06b689177c588a9c2dd81" }
+faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.

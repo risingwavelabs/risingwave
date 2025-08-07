@@ -21,14 +21,13 @@ use std::collections::BTreeMap;
 
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalScan, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 
 pub struct TopNOnIndexRule {}
 
-impl Rule for TopNOnIndexRule {
+impl Rule<Logical> for TopNOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_top_n: &LogicalTopN = plan.as_logical_top_n()?;
         let logical_scan: LogicalScan = logical_top_n.input().as_logical_scan()?.to_owned();

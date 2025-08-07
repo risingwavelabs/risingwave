@@ -843,10 +843,14 @@ impl DdlService for DdlServiceImpl {
         request: Request<DropConnectionRequest>,
     ) -> Result<Response<DropConnectionResponse>, Status> {
         let req = request.into_inner();
+        let drop_mode = DropMode::from_request_setting(req.cascade);
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(req.connection_id as _))
+            .run_command(DdlCommand::DropConnection(
+                req.connection_id as _,
+                drop_mode,
+            ))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
@@ -906,6 +910,25 @@ impl DdlService for DdlServiceImpl {
     async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
         self.ddl_controller.wait().await?;
         Ok(Response::new(WaitResponse {}))
+    }
+
+    async fn alter_cdc_table_backfill_parallelism(
+        &self,
+        request: Request<AlterCdcTableBackfillParallelismRequest>,
+    ) -> Result<Response<AlterCdcTableBackfillParallelismResponse>, Status> {
+        let req = request.into_inner();
+        let job_id = req.get_table_id();
+        let parallelism = *req.get_parallelism()?;
+        self.ddl_controller
+            .reschedule_cdc_table_backfill(
+                job_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
+                    resource_group: JobResourceGroupTarget::Keep,
+                },
+            )
+            .await?;
+        Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
     }
 
     async fn alter_parallelism(

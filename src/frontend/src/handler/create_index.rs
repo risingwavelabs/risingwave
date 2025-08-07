@@ -36,9 +36,11 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
-use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::plan_node::{
+    Explain, LogicalProject, LogicalScan, StreamMaterialize, StreamPlanRef as PlanRef,
+};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
@@ -49,7 +51,7 @@ pub(crate) fn resolve_index_schema(
     table_name: ObjectName,
 ) -> Result<(String, Arc<TableCatalog>, String)> {
     let db_name = &session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -73,8 +75,6 @@ pub(crate) fn gen_create_index_plan(
     include: Vec<Ident>,
     distributed_by: Vec<ast::Expr>,
 ) -> Result<(PlanRef, TableCatalog, PbIndex)> {
-    let table_name = table.name.clone();
-
     if table.is_index() {
         return Err(
             ErrorCode::InvalidInputSyntax(format!("\"{}\" is an index", table.name)).into(),
@@ -90,14 +90,14 @@ pub(crate) fn gen_create_index_plan(
     }
 
     let mut binder = Binder::new_for_stream(session);
-    binder.bind_table(Some(&schema_name), &table_name)?;
+    binder.bind_table(Some(&schema_name), &table.name)?;
 
     let mut index_columns_ordered_expr = vec![];
     let mut include_columns_expr = vec![];
     let mut distributed_columns_expr = vec![];
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
-        let expr_impl = binder.bind_expr(column.expr)?;
+        let expr_impl = binder.bind_expr(&column.expr)?;
         // Do constant folding and timezone transportation on expressions so that batch queries can match it in the same form.
         let mut const_eval = ConstEvalRewriter { error: None };
         let expr_impl = const_eval.rewrite_expr(expr_impl);
@@ -138,13 +138,13 @@ pub(crate) fn gen_create_index_plan(
     } else {
         for column in include {
             let expr_impl =
-                binder.bind_expr(risingwave_sqlparser::ast::Expr::Identifier(column))?;
+                binder.bind_expr(&risingwave_sqlparser::ast::Expr::Identifier(column))?;
             include_columns_expr.push(expr_impl);
         }
     };
 
     for column in distributed_by {
-        let expr_impl = binder.bind_expr(column)?;
+        let expr_impl = binder.bind_expr(&column)?;
         distributed_columns_expr.push(expr_impl);
     }
 
@@ -198,7 +198,6 @@ pub(crate) fn gen_create_index_plan(
 
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
-        table_name,
         index_database_id,
         index_schema_id,
         table.clone(),
@@ -213,7 +212,6 @@ pub(crate) fn gen_create_index_plan(
         } else {
             distributed_columns_expr.len()
         },
-        table.cardinality,
     )?;
 
     let mut index_table = materialize.table().clone();
@@ -319,7 +317,6 @@ fn build_index_item(
 /// Note: distributed by columns must be a prefix of index columns, so we just use
 /// `distributed_by_columns_len` to represent distributed by columns
 fn assemble_materialize(
-    table_name: String,
     database_id: DatabaseId,
     schema_id: SchemaId,
     table_catalog: Arc<TableCatalog>,
@@ -328,7 +325,6 @@ fn assemble_materialize(
     index_columns: &[(ExprImpl, OrderType)],
     include_columns: &[ExprImpl],
     distributed_by_columns_len: usize,
-    cardinality: Cardinality,
 ) -> Result<StreamMaterialize> {
     // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
@@ -337,15 +333,7 @@ fn assemble_materialize(
     let definition = context.normalized_sql().to_owned();
     let retention_seconds = table_catalog.retention_seconds.and_then(NonZeroU32::new);
 
-    let logical_scan = LogicalScan::create(
-        table_name,
-        table_catalog.clone(),
-        // Index table has no indexes.
-        vec![],
-        context,
-        None,
-        cardinality,
-    );
+    let logical_scan = LogicalScan::create(table_catalog.clone(), context, None);
 
     let exprs = index_columns
         .iter()

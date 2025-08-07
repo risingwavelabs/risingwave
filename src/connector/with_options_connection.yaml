@@ -116,6 +116,16 @@ IcebergConnection:
     comments: This is only used by iceberg engine to enable the hosted catalog.
     required: false
     default: Default::default
+  - name: catalog.header
+    field_type: String
+    comments: |-
+      The http header to be used in the catalog requests.
+      Example:
+      `catalog.header = "key1=value1;key2=value2;key3=value3"`
+      explain the format of the header:
+      - Each header is a key-value pair, separated by an '='.
+      - Multiple headers can be specified, separated by a ';'.
+    required: false
 KafkaConnection:
   fields:
   - name: properties.bootstrap.server

@@ -19,7 +19,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorAlignmentId, IsSingleton, VnodeCount};
+use risingwave_common::hash::{ActorAlignmentId, IsSingleton, VnodeCount, VnodeCountCompat};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_meta_model::WorkerId;
@@ -106,12 +106,10 @@ impl FragmentActorBuilder {
 
                 Ok(StreamNode {
                     node_body: Some(NodeBody::Merge(Box::new({
-                        #[expect(deprecated)]
                         MergeNode {
-                            upstream_actor_id: vec![],
                             upstream_fragment_id,
                             upstream_dispatcher_type: exchange.get_strategy()?.r#type,
-                            fields: stream_node.get_fields().clone(),
+                            ..Default::default()
                         }
                     }))),
                     identity: "MergeExecutor".to_owned(),
@@ -163,12 +161,10 @@ impl FragmentActorBuilder {
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
                         node_body: Some(NodeBody::Merge(Box::new({
-                            #[expect(deprecated)]
                             MergeNode {
-                                upstream_actor_id: vec![],
                                 upstream_fragment_id,
                                 upstream_dispatcher_type,
-                                fields: merge_node.fields.clone(),
+                                ..Default::default()
                             }
                         }))),
                         ..merge_node.clone()
@@ -219,12 +215,10 @@ impl FragmentActorBuilder {
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
                         node_body: Some(NodeBody::Merge(Box::new({
-                            #[expect(deprecated)]
                             MergeNode {
-                                upstream_actor_id: vec![],
                                 upstream_fragment_id,
                                 upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                                fields: merge_node.fields.clone(),
+                                ..Default::default()
                             }
                         }))),
                         ..merge_node.clone()
@@ -593,13 +587,11 @@ pub struct ActorGraphBuildResult {
     /// The graph of sealed fragments, including all actors.
     pub graph: BTreeMap<FragmentId, Fragment>,
     /// The downstream fragments of the fragments from the new graph to be created.
+    /// Including the fragment relation to external downstream fragment.
     pub downstream_fragment_relations: FragmentDownstreamRelation,
 
     /// The scheduled locations of the actors to be built.
     pub building_locations: Locations,
-
-    /// The actual locations of the external actors.
-    pub existing_locations: Locations,
 
     /// The new dispatchers to be added to the upstream mview actors. Used for MV on MV.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
@@ -659,8 +651,12 @@ impl ActorGraphBuilder {
         // Fill the vnode count for each internal table, based on schedule result.
         let mut fragment_graph = fragment_graph;
         for (id, fragment) in fragment_graph.building_fragments_mut() {
+            let mut error = None;
             let fragment_vnode_count = distributions[id].vnode_count();
             visit_tables(fragment, |table, _| {
+                if error.is_some() {
+                    return;
+                }
                 // There are special cases where a hash-distributed fragment contains singleton
                 // internal tables, e.g., the state table of `Source` executors.
                 let vnode_count = if table.is_singleton() {
@@ -674,8 +670,26 @@ impl ActorGraphBuilder {
                 } else {
                     fragment_vnode_count
                 };
-                table.maybe_vnode_count = VnodeCount::set(vnode_count).to_protobuf();
-            })
+                match table.vnode_count_inner().value_opt() {
+                    // Vnode count of this table is not set to placeholder, meaning that we are replacing
+                    // a streaming job, and the existing state table requires a specific vnode count.
+                    // Check if it's the same with what we derived from the schedule result.
+                    //
+                    // Typically, inconsistency should not happen as we force to align the vnode count
+                    // when planning the new streaming job in the frontend.
+                    Some(required_vnode_count) if required_vnode_count != vnode_count => {
+                        error = Some(format!(
+                            "failed to align vnode count for table {}({}): required {}, but got {}",
+                            table.id, table.name, required_vnode_count, vnode_count
+                        ));
+                    }
+                    // Normal cases.
+                    _ => table.maybe_vnode_count = VnodeCount::set(vnode_count).to_protobuf(),
+                }
+            });
+            if let Some(error) = error {
+                bail!(error);
+            }
         }
 
         Ok(Self {
@@ -827,7 +841,6 @@ impl ActorGraphBuilder {
 
         // Convert the actor location map to the `Locations` struct.
         let building_locations = self.build_locations(building_locations);
-        let existing_locations = self.build_locations(external_locations);
 
         // Extract the new fragment relation from the external changes.
         let upstream_fragment_downstreams = upstream_fragment_changes
@@ -899,7 +912,6 @@ impl ActorGraphBuilder {
             graph,
             downstream_fragment_relations,
             building_locations,
-            existing_locations,
             upstream_fragment_downstreams,
             replace_upstream,
             new_no_shuffle,

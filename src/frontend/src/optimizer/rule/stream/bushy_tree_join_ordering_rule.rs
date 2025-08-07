@@ -15,8 +15,7 @@
 use thiserror_ext::AsReport;
 
 use super::super::super::plan_node::*;
-use super::super::Rule;
-use crate::optimizer::rule::BoxedRule;
+use crate::optimizer::rule::prelude::{PlanRef, *};
 
 /// Reorders a multi join into a bushy tree shape join tree with a minimal height.
 pub struct BushyTreeJoinOrderingRule {}
@@ -29,7 +28,7 @@ const BUSHY_TREE_JOIN_UPPER_LIMIT: usize = 10;
 /// inputs.
 const BUSHY_TREE_JOIN_LOWER_LIMIT: usize = 4;
 
-impl Rule for BushyTreeJoinOrderingRule {
+impl Rule<Logical> for BushyTreeJoinOrderingRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_multi_join()?;
         if join.inputs().len() >= BUSHY_TREE_JOIN_LOWER_LIMIT

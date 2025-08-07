@@ -316,7 +316,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         }
         _ => {
             return Err(SinkError::DeltaLake(anyhow!(
-                "deltalake cannot support type {:?}",
+                "Type {:?} is not supported for DeltaLake sink.",
                 rw_data_type.to_owned()
             )));
         }

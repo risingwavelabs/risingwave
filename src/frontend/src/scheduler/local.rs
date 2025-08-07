@@ -49,7 +49,7 @@ use tracing::debug;
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
 use crate::catalog::{FragmentId, TableId};
 use crate::error::RwError;
-use crate::optimizer::plan_node::PlanNodeType;
+use crate::optimizer::plan_node::BatchPlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::{SchedulerError, SchedulerResult};
@@ -283,7 +283,7 @@ impl LocalQueryExecution {
             next_executor_id.fetch_add(1, Ordering::Relaxed)
         );
         match execution_plan_node.plan_node_type {
-            PlanNodeType::BatchExchange => {
+            BatchPlanNodeType::BatchExchange => {
                 let exchange_source_stage_id = execution_plan_node
                     .source_stage_id
                     .expect("We expect stage id for Exchange Operator");
@@ -491,7 +491,7 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchSeqScan => {
+            BatchPlanNodeType::BatchSeqScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::RowSeqScan(scan_node) => {
@@ -513,7 +513,7 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchLogSeqScan => {
+            BatchPlanNodeType::BatchLogSeqScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::LogRowSeqScan(scan_node) => {
@@ -533,7 +533,7 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchFileScan => {
+            BatchPlanNodeType::BatchFileScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::FileScan(file_scan_node) => {
@@ -553,7 +553,7 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
+            BatchPlanNodeType::BatchSource | BatchPlanNodeType::BatchKafkaScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::Source(source_node) => {
@@ -576,7 +576,7 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchIcebergScan => {
+            BatchPlanNodeType::BatchIcebergScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::IcebergScan(iceberg_scan_node) => {
@@ -599,7 +599,7 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchLookupJoin => {
+            BatchPlanNodeType::BatchLookupJoin => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::LocalLookupJoin(node) => {

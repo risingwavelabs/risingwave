@@ -37,7 +37,8 @@ use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
-    DATABASE_NAME_KEY, ExternalTableConfig, ExternalTableImpl, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+    CdcTableType, DATABASE_NAME_KEY, ExternalTableConfig, ExternalTableImpl, SCHEMA_NAME_KEY,
+    TABLE_NAME_KEY,
 };
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
@@ -75,10 +76,12 @@ use crate::handler::create_source::{
     bind_source_watermark, handle_addition_columns,
 };
 use crate::handler::util::SourceSchemaCompatExt;
-use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
-use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
+use crate::optimizer::plan_node::generic::{SourceNodeKind, build_cdc_scan_options_with_options};
+use crate::optimizer::plan_node::{
+    LogicalCdcScan, LogicalPlanRef, LogicalSource, StreamPlanRef as PlanRef,
+};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
@@ -87,7 +90,11 @@ use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
-use risingwave_connector::sink::iceberg::parse_partition_by_exprs;
+use risingwave_connector::sink::iceberg::{
+    COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, WRITE_MODE,
+    parse_partition_by_exprs,
+};
 
 use crate::handler::drop_table::handle_drop_table;
 
@@ -226,12 +233,12 @@ pub fn bind_sql_column_constraints(
     session: &SessionImpl,
     table_name: String,
     column_catalogs: &mut [ColumnCatalog],
-    columns: Vec<ColumnDef>,
+    columns: &[ColumnDef],
     pk_column_ids: &[ColumnId],
 ) -> Result<()> {
     let generated_column_names = {
         let mut names = vec![];
-        for column in &columns {
+        for column in columns {
             for option_def in &column.options {
                 if let ColumnOption::GeneratedColumns(_) = option_def.option {
                     names.push(column.name.real_value());
@@ -255,8 +262,8 @@ pub fn bind_sql_column_constraints(
             continue;
         };
 
-        for option_def in column.options {
-            match option_def.option {
+        for option_def in &column.options {
+            match &option_def.option {
                 ColumnOption::GeneratedColumns(expr) => {
                     binder.set_clause(Some(Clause::GeneratedColumn));
 
@@ -286,7 +293,7 @@ pub fn bind_sql_column_constraints(
                 ColumnOption::DefaultValue(expr) => {
                     let expr_impl = binder
                         .bind_expr(expr)?
-                        .cast_assign(column_catalogs[idx].data_type().clone())?;
+                        .cast_assign(column_catalogs[idx].data_type())?;
 
                     // Rewrite expressions to evaluate a snapshot value, used for missing values in the case of
                     // schema change.
@@ -330,7 +337,7 @@ pub fn bind_sql_column_constraints(
                         );
                     }
 
-                    let desc = DefaultColumnDesc::decode(&*persisted)
+                    let desc = DefaultColumnDesc::decode(&**persisted)
                         .expect("failed to decode persisted `DefaultColumnDesc`");
 
                     column_catalogs[idx].column_desc.generated_or_default_column =
@@ -482,7 +489,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let db_name: &str = &session.database();
-    let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+    let (schema_name, _) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
 
     // TODO: omit this step if `sql_column_strategy` is `Follow`.
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
@@ -589,13 +596,13 @@ pub(crate) fn gen_create_table_plan_without_source(
         context.session_ctx(),
         table_name.real_value(),
         &mut columns,
-        column_defs,
+        &column_defs,
         &pk_column_ids,
     )?;
     let session = context.session_ctx().clone();
 
     let db_name = &session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
 
     let info = CreateTableInfo {
         columns,
@@ -738,7 +745,7 @@ fn gen_table_plan_inner(
     let session = context.session_ctx().clone();
     let retention_seconds = context.with_options().retention_seconds();
 
-    let source_node: PlanRef = LogicalSource::new(
+    let source_node: LogicalPlanRef = LogicalSource::new(
         source_catalog.clone().map(Rc::new),
         columns.clone(),
         row_id_index,
@@ -828,7 +835,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         context.session_ctx(),
         table_name.real_value(),
         &mut columns,
-        column_defs,
+        &column_defs,
         &pk_column_ids,
     )?;
 
@@ -858,7 +865,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .map(|c| c.column_desc.clone())
         .collect_vec();
     let non_generated_column_num = non_generated_column_descs.len();
-
+    let cdc_table_type = CdcTableType::from_properties(&options);
     let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id.into(), // id of cdc source streaming job
@@ -871,8 +878,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
-
-    let options = CdcScanOptions::from_with_options(context.with_options())?;
+    let options = build_cdc_scan_options_with_options(context.with_options(), cdc_table_type)?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name.clone(),
@@ -881,7 +887,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         options,
     );
 
-    let scan_node: PlanRef = logical_scan.into();
+    let scan_node: LogicalPlanRef = logical_scan.into();
     let required_cols = FixedBitSet::with_capacity(non_generated_column_num);
     let plan_root = PlanRoot::new_with_logical_plan(
         scan_node,
@@ -1028,7 +1034,7 @@ pub(super) async fn handle_create_table_plan(
     explain_options: ExplainOptions,
     format_encode: Option<FormatEncodeOptions>,
     cdc_table_info: Option<CdcTableInfo>,
-    table_name: ObjectName,
+    table_name: &ObjectName,
     column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
     constraints: Vec<TableConstraint>,
@@ -1122,13 +1128,13 @@ pub(super) async fn handle_create_table_plan(
             let user_name = &session.user_name();
             let search_path = session.config().search_path();
             let (schema_name, resolved_table_name) =
-                Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+                Binder::resolve_schema_qualified_name(db_name, table_name)?;
             let (database_id, schema_id) =
                 session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
             // cdc table cannot be append-only
             let (format_encode, source_name) =
-                Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+                Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;
 
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
@@ -1191,7 +1197,7 @@ pub(super) async fn handle_create_table_plan(
                 on_conflict,
                 with_version_column,
                 include_column_options,
-                table_name,
+                table_name.clone(),
                 resolved_table_name,
                 database_id,
                 schema_id,
@@ -1423,7 +1429,7 @@ pub async fn handle_create_table(
             ExplainOptions::default(),
             format_encode,
             cdc_table_info,
-            table_name.clone(),
+            &table_name,
             column_defs.clone(),
             wildcard_idx,
             constraints.clone(),
@@ -1692,8 +1698,12 @@ pub async fn create_iceberg_engine_table(
 
     let mut sink_with = with_common.clone();
 
-    sink_with.insert("primary_key".to_owned(), pks.join(","));
-    sink_with.insert("type".to_owned(), "upsert".to_owned());
+    if table.append_only {
+        sink_with.insert("type".to_owned(), "append-only".to_owned());
+    } else {
+        sink_with.insert("primary_key".to_owned(), pks.join(","));
+        sink_with.insert("type".to_owned(), "upsert".to_owned());
+    }
     // sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
     //
     // Note: in theory, we don't need to backfill from the table to the sink,
@@ -1747,10 +1757,6 @@ pub async fn create_iceberg_engine_table(
     sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
-
-    const ENABLE_COMPACTION: &str = "enable_compaction";
-    const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
-    const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
 
     if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
         match enable_compaction.to_lowercase().as_str() {
@@ -1840,6 +1846,54 @@ pub async fn create_iceberg_engine_table(
                 .check_available()
                 .is_ok()
                 .to_string(),
+        );
+    }
+
+    if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
+        match write_mode.to_lowercase().as_str() {
+            ICEBERG_WRITE_MODE_MERGE_ON_READ => {
+                sink_with.insert(
+                    WRITE_MODE.to_owned(),
+                    ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
+                );
+            }
+
+            ICEBERG_WRITE_MODE_COPY_ON_WRITE => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                if table.append_only {
+                    return Err(ErrorCode::NotSupported(
+                        "COPY ON WRITE is not supported for append-only iceberg table".to_owned(),
+                        "Please use MERGE ON READ instead".to_owned(),
+                    )
+                    .into());
+                }
+
+                sink_with.insert(
+                    WRITE_MODE.to_owned(),
+                    ICEBERG_WRITE_MODE_COPY_ON_WRITE.to_owned(),
+                );
+            }
+
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "write_mode must be one of: {}, {}",
+                    ICEBERG_WRITE_MODE_MERGE_ON_READ, ICEBERG_WRITE_MODE_COPY_ON_WRITE
+                ))
+                .into());
+            }
+        }
+
+        // remove write_mode from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("write_mode"));
+    } else {
+        sink_with.insert(
+            WRITE_MODE.to_owned(),
+            ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
         );
     }
 
@@ -2059,7 +2113,7 @@ pub async fn generate_stream_graph_for_replace_table(
         engine,
     };
 
-    let ((plan, mut source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
+    let ((plan, mut source, mut table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
         (Some(format_encode), None) => (
             gen_create_table_plan_with_source(
                 handler_args,
@@ -2147,10 +2201,7 @@ pub async fn generate_stream_graph_for_replace_table(
     let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
     // Fill the original table ID.
-    let mut table = TableCatalog {
-        id: original_catalog.id(),
-        ..table
-    };
+    table.id = original_catalog.id();
     if !is_drop_connector && let Some(source_id) = original_catalog.associated_source_id() {
         table.associated_source_id = Some(source_id);
 
@@ -2169,12 +2220,12 @@ fn get_source_and_resolved_table_name(
 ) -> Result<(Arc<SourceCatalog>, String, DatabaseId, SchemaId)> {
     let db_name = &session.database();
     let (schema_name, resolved_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, table_name)?;
+        Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     let (format_encode, source_name) =
-        Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;
 
     let source = {
         let catalog_reader = session.env().catalog_reader().read_guard();
@@ -2216,7 +2267,7 @@ fn bind_webhook_info(
     let (pb_secret_ref, secret_name) = if let Some(secret_ref) = secret_ref {
         let db_name = &session.database();
         let (schema_name, secret_name) =
-            Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
+            Binder::resolve_schema_qualified_name(db_name, &secret_ref.secret_name)?;
         let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
         (
             Some(PbSecretRef {
@@ -2238,7 +2289,7 @@ fn bind_webhook_info(
         secret_name,
     };
     let mut binder = Binder::new_for_ddl_with_secure_compare(session, secure_compare_context);
-    let expr = binder.bind_expr(signature_expr.clone())?;
+    let expr = binder.bind_expr(&signature_expr)?;
 
     // validate expr, ensuring it is SECURE_COMPARE()
     if expr.as_function_call().is_none()

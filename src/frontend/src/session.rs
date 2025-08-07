@@ -944,7 +944,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
             let (schema_name, relation_name) =
-                Binder::resolve_schema_qualified_name(db_name, name)?;
+                Binder::resolve_schema_qualified_name(db_name, &name)?;
             let search_path = self.config().search_path();
             let user_name = &self.user_name();
             let schema_name = match schema_name {
@@ -991,7 +991,7 @@ impl SessionImpl {
         let db_name = &self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, secret_name) = {
-            let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+            let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
             let search_path = self.config().search_path();
             let user_name = &self.user_name();
             let schema_name = match schema_name {
@@ -1012,7 +1012,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, connection_name) = {
             let (schema_name, connection_name) =
-                Binder::resolve_schema_qualified_name(db_name, name)?;
+                Binder::resolve_schema_qualified_name(db_name, &name)?;
             let search_path = self.config().search_path();
             let user_name = &self.user_name();
             let schema_name = match schema_name {
@@ -1036,7 +1036,7 @@ impl SessionImpl {
         if_not_exists: bool,
     ) -> Result<Either<(), RwPgResponse>> {
         let db_name = &self.database();
-        let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+        let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
         let (database_id, schema_id) = self.get_database_and_schema_id_for_create(schema_name)?;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -1203,7 +1203,7 @@ impl SessionImpl {
 
         self.check_privileges(&[ObjectCheckItem::new(
             secret.owner(),
-            AclMode::Create,
+            AclMode::Usage,
             secret.name.clone(),
             Object::SecretId(secret.id.secret_id()),
         )])?;

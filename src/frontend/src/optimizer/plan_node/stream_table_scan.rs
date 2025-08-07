@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode, generic};
+use super::{ExprRewritable, PlanBase, PlanNodeId, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
@@ -91,7 +91,7 @@ impl StreamTableScan {
     }
 
     pub fn table_name(&self) -> &str {
-        &self.core.table_name
+        self.core.table_name()
     }
 
     pub fn core(&self) -> &generic::TableScan {
@@ -100,14 +100,12 @@ impl StreamTableScan {
 
     pub fn to_index_scan(
         &self,
-        index_name: &str,
         index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
         stream_scan_type: StreamScanType,
     ) -> StreamTableScan {
         let logical_index_scan = self.core.to_index_scan(
-            index_name,
             index_table_catalog,
             primary_to_secondary_mapping,
             function_mapping,
@@ -251,13 +249,13 @@ impl StreamTableScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamTableScan }
+impl_plan_tree_node_for_leaf! { Stream, StreamTableScan }
 
 impl Distill for StreamTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
-        vec.push(("table", Pretty::from(self.core.table_name.clone())));
+        vec.push(("table", Pretty::from(self.core.table_name().to_owned())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
 
         if verbose {
@@ -426,7 +424,7 @@ impl StreamTableScan {
     }
 }
 
-impl ExprRewritable for StreamTableScan {
+impl ExprRewritable<Stream> for StreamTableScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

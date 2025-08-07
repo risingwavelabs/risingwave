@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, PlanTreeNodeUnary};
-use crate::optimizer::rule::{BoxedRule, Rule};
+use crate::optimizer::rule::prelude::{PlanRef, *};
 use crate::utils::Condition;
 
 /// Split `LogicalFilter` with many AND conjunctions with now into multiple `LogicalFilter`, prepared for `SplitNowOrRule`
@@ -40,7 +39,7 @@ use crate::utils::Condition;
 ///      Input
 /// ```
 pub struct SplitNowAndRule {}
-impl Rule for SplitNowAndRule {
+impl Rule<Logical> for SplitNowAndRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let input = filter.input();

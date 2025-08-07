@@ -58,7 +58,7 @@ use tracing::{Instrument, debug, error, warn};
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::{FragmentId, TableId};
-use crate::optimizer::plan_node::PlanNodeType;
+use crate::optimizer::plan_node::BatchPlanNodeType;
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
 use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::distributed::stage::StageState::Pending;
@@ -1005,7 +1005,7 @@ impl StageRunner {
         };
 
         match execution_plan_node.plan_node_type {
-            PlanNodeType::BatchExchange => {
+            BatchPlanNodeType::BatchExchange => {
                 // Find the stage this exchange node should fetch from and get all exchange sources.
                 let child_stage = self
                     .children
@@ -1041,7 +1041,7 @@ impl StageRunner {
                     _ => unreachable!(),
                 }
             }
-            PlanNodeType::BatchSeqScan => {
+            BatchPlanNodeType::BatchSeqScan => {
                 let node_body = execution_plan_node.node.clone();
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
@@ -1058,7 +1058,7 @@ impl StageRunner {
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
                 }
             }
-            PlanNodeType::BatchLogSeqScan => {
+            BatchPlanNodeType::BatchLogSeqScan => {
                 let node_body = execution_plan_node.node.clone();
                 let NodeBody::LogRowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
@@ -1074,7 +1074,7 @@ impl StageRunner {
                     node_body: Some(NodeBody::LogRowSeqScan(scan_node)),
                 }
             }
-            PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
+            BatchPlanNodeType::BatchSource | BatchPlanNodeType::BatchKafkaScan => {
                 let node_body = execution_plan_node.node.clone();
                 let NodeBody::Source(mut source_node) = node_body else {
                     unreachable!();
@@ -1094,7 +1094,7 @@ impl StageRunner {
                     node_body: Some(NodeBody::Source(source_node)),
                 }
             }
-            PlanNodeType::BatchIcebergScan => {
+            BatchPlanNodeType::BatchIcebergScan => {
                 let node_body = execution_plan_node.node.clone();
                 let NodeBody::IcebergScan(mut iceberg_scan_node) = node_body else {
                     unreachable!();
