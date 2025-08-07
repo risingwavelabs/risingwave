@@ -118,7 +118,7 @@ pub struct SnowflakeConfig {
     pub with_s3: bool,
 
     #[serde(flatten)]
-    pub s3_inner: S3Common,
+    pub s3_inner: Option<S3Common>,
 
     #[serde(rename = "stage")]
     pub stage: Option<String>,
@@ -545,7 +545,17 @@ async fn build_opendal_writer(
     executor_id: u64,
     operator: &Operator,
 ) -> Result<opendal::Writer> {
-    let mut base_path = config.s3_inner.path.clone().unwrap_or("".to_owned());
+    let mut base_path = config
+        .s3_inner
+        .as_ref()
+        .ok_or_else(|| {
+            SinkError::Config(anyhow!(
+                "S3 configuration is required for Snowflake S3 sink"
+            ))
+        })?
+        .path
+        .clone()
+        .unwrap_or("".to_owned());
     if !base_path.ends_with('/') {
         base_path.push('/');
     }
@@ -572,7 +582,12 @@ impl SnowflakeSinkS3Writer {
         is_append_only: bool,
         executor_id: u64,
     ) -> Result<Self> {
-        let s3_operator = FileSink::<S3Sink>::new_s3_sink(&config.s3_inner)?;
+        let s3_operator =
+            FileSink::<S3Sink>::new_s3_sink(config.s3_inner.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "S3 configuration is required for Snowflake S3 sink"
+                ))
+            })?)?;
         Ok(Self {
             config,
             s3_operator,
