@@ -130,9 +130,9 @@ impl ColIndexMapping {
                         None => RequiredDist::Any,
                     }
                 }
-                Distribution::Single => RequiredDist::PhysicalDist(Distribution::Single),
-                Distribution::Broadcast => RequiredDist::PhysicalDist(Distribution::Broadcast),
-                Distribution::SomeShard => RequiredDist::PhysicalDist(Distribution::SomeShard),
+                Distribution::Single | Distribution::Broadcast | Distribution::SomeShard => {
+                    RequiredDist::PhysicalDist(dist.clone())
+                }
             },
             RequiredDist::Any => RequiredDist::Any,
             RequiredDist::AnyShard => RequiredDist::AnyShard,
