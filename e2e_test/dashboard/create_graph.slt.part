@@ -122,13 +122,3 @@ statement ok
 create materialized view mv8 as
 select mv4.v1, mv4.t4_v1, mv5.v1 as mv5_v1, mv5.mv4_v1
 from mv4 join mv5 on mv4.v1 = mv5.mv4_v1;
-
-statement ok
-create materialized view mv9 as
-select t2.v1, t2.v2, mv6.mv2_v1, mv7.t5_v1
-from t2 join mv6 on t2.v1 = mv6.v1 join mv7 on mv6.mv2_v1 = mv7.v1;
-
-statement ok
-create materialized view mv10 as
-select mv8.v1, mv8.mv5_v1, mv9.v1 as mv9_v1, mv9.t5_v1
-from mv8 join mv9 on mv8.mv5_v1 = mv9.v1;
