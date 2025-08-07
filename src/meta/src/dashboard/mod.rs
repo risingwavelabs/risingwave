@@ -755,7 +755,8 @@ pub(super) mod handlers {
                 srv.prometheus_selector
             );
             let channel_backpressure_query = format!(
-                "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id)",
+                "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id) \
+                 / ignoring (downstream_fragment_id) group_left sum(stream_actor_count) by (fragment_id)",
                 srv.prometheus_selector
             );
 
