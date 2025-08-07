@@ -769,8 +769,7 @@ mod graph {
             for actor_id in &node.actor_ids {
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
-                if node.identity != NodeBodyDiscriminants::BatchPlan
-                {
+                if node.identity != NodeBodyDiscriminants::BatchPlan {
                     assert!(executor_ids.insert(executor_id));
                 }
                 assert!(
