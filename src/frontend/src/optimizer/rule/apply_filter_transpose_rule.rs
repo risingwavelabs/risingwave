@@ -15,9 +15,9 @@
 use itertools::{Either, Itertools};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ApplyOffsetRewriter, BoxedRule, Rule};
+use super::ApplyOffsetRewriter;
+use super::prelude::{PlanRef, *};
 use crate::expr::ExprRewriter;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::utils::Condition;
 
@@ -43,7 +43,7 @@ use crate::utils::Condition;
 ///  Domain        Input
 /// ```
 pub struct ApplyFilterTransposeRule {}
-impl Rule for ApplyFilterTransposeRule {
+impl Rule<Logical> for ApplyFilterTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =

@@ -14,14 +14,13 @@
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalExcept, LogicalJoin, PlanTreeNode};
 use crate::optimizer::rule::IntersectToSemiJoinRule;
 
 pub struct ExceptToAntiJoinRule {}
-impl Rule for ExceptToAntiJoinRule {
+impl Rule<Logical> for ExceptToAntiJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_except: &LogicalExcept = plan.as_logical_except()?;
         let all = logical_except.all();

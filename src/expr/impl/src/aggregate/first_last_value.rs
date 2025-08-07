@@ -73,12 +73,21 @@ impl From<&FirstValueState> for Datum {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("last_value(*) -> auto", state = "ref")] // TODO(rc): `last_value(any) -> any`
+#[aggregate(
+    "last_value(*) -> auto",
+    state = "ref",
+    type_infer = "|args| Ok(args[0].clone())"
+)] // TODO(rc): `last_value(any) -> any`
 fn last_value<T>(_: Option<T>, input: Option<T>) -> Option<T> {
     input
 }
 
-#[aggregate("internal_last_seen_value(*) -> auto", state = "ref", internal)]
+#[aggregate(
+    "internal_last_seen_value(*) -> auto",
+    state = "ref",
+    internal,
+    type_infer = "|args| Ok(args[0].clone())"
+)]
 fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
     if retract { state } else { input }
 }

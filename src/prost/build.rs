@@ -244,6 +244,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.GroupMerge", "#[derive(Eq)]")
         .type_attribute("hummock.GroupDelta", "#[derive(Eq)]")
         .type_attribute("hummock.NewL0SubLevel", "#[derive(Eq)]")
+        .type_attribute("hummock.TruncateTables", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler.RunningCompactTask", "#[derive(Eq)]")
         .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")
         .type_attribute("hummock.TableOption", "#[derive(Eq)]")

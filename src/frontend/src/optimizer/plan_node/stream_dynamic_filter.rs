@@ -24,9 +24,10 @@ use super::utils::{
 };
 use super::{ExprRewritable, generic};
 use crate::expr::Expr;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
+use crate::optimizer::plan_node::{
+    PlanBase, PlanTreeNodeBinary, StreamNode, StreamPlanRef as PlanRef,
+};
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -139,7 +140,7 @@ impl Distill for StreamDynamicFilter {
     }
 }
 
-impl PlanTreeNodeBinary for StreamDynamicFilter {
+impl PlanTreeNodeBinary<Stream> for StreamDynamicFilter {
     fn left(&self) -> PlanRef {
         self.core.left().clone()
     }
@@ -153,7 +154,7 @@ impl PlanTreeNodeBinary for StreamDynamicFilter {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamDynamicFilter }
+impl_plan_tree_node_for_binary! { Stream, StreamDynamicFilter }
 
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -182,6 +183,6 @@ impl StreamNode for StreamDynamicFilter {
     }
 }
 
-impl ExprRewritable for StreamDynamicFilter {}
+impl ExprRewritable<Stream> for StreamDynamicFilter {}
 
 impl ExprVisitable for StreamDynamicFilter {}

@@ -18,7 +18,6 @@ use risingwave_sqlparser::ast::Ident;
 use crate::binder::{Binder, Clause};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
-use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -38,30 +37,11 @@ impl Binder {
             }
         };
 
-        // Special check for sql udf
-        // Note: The check in `bind_column` is to inline the identifiers,
-        // which, in the context of sql udf, will NOT be perceived as normal
-        // columns, but the actual named input parameters.
-        // Thus, we need to figure out if the current "column name" corresponds
-        // to the name of the defined sql udf parameters stored in `udf_context`.
-        // If so, we will treat this bind as an special bind, the actual expression
-        // stored in `udf_context` will then be bound instead of binding the non-existing column.
-        if self.udf_context.global_count() != 0 {
-            if let Some(expr) = self.udf_context.get_expr(&column_name) {
-                return Ok(expr.clone());
-            } else {
-                // The reason that we directly return error here,
-                // is because during a valid sql udf binding,
-                // there will not exist any column identifiers
-                // And invalid cases should already be caught
-                // during semantic check phase
-                // Note: the error message here also help with hint display
-                // when invalid definition occurs at sql udf creation time
-                return Err(ErrorCode::BindError(format!(
-                    "{SQL_UDF_PATTERN} failed to find named parameter {column_name}"
-                ))
-                .into());
-            }
+        // If we find `sql_udf_arguments` in the current context, it means we're binding an inline SQL UDF
+        // (without a layer of subquery). This only happens when the function body is a trivial `SELECT`
+        // statement without any `FROM` clause etc. In this case, the column must be a UDF parameter.
+        if self.is_binding_inline_sql_udf() {
+            return self.bind_sql_udf_parameter(&column_name);
         }
 
         match self
@@ -129,7 +109,7 @@ impl Binder {
         }
 
         for (i, (context, lateral_contexts)) in
-            self.upper_subquery_contexts.iter().rev().enumerate()
+            self.visible_upper_subquery_contexts_rev().enumerate()
         {
             if matches!(context.clause, Some(Clause::Insert)) {
                 continue;
@@ -176,6 +156,7 @@ impl Binder {
                 }
             }
         }
+
         // `CTID` is a system column in postgres.
         // https://www.postgresql.org/docs/current/ddl-system-columns.html
         //
@@ -189,6 +170,14 @@ impl Binder {
         {
             return Ok(Literal::new(Some("".into()), DataType::Varchar).into());
         }
+
+        // Failed to resolve the column in current context. Now check if it's a sql udf parameter.
+        if let ErrorCode::ItemNotFound(_) = err
+            && self.is_binding_subquery_sql_udf()
+        {
+            return self.bind_sql_udf_parameter(&column_name);
+        }
+
         Err(err.into())
     }
 }

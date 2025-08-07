@@ -19,7 +19,10 @@ use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
 
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, generic};
+use super::{
+    BatchPlanRef as PlanRef, ExprRewritable, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
+    generic,
+};
 use crate::error::Result;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -52,7 +55,7 @@ impl Distill for BatchInsert {
     }
 }
 
-impl PlanTreeNodeUnary for BatchInsert {
+impl PlanTreeNodeUnary<Batch> for BatchInsert {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -64,7 +67,7 @@ impl PlanTreeNodeUnary for BatchInsert {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchInsert }
+impl_plan_tree_node_for_unary! { Batch, BatchInsert }
 
 impl ToDistributedBatch for BatchInsert {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -73,7 +76,7 @@ impl ToDistributedBatch for BatchInsert {
             let new_input = RequiredDist::PhysicalDist(Distribution::HashShard(
                 (0..self.input().schema().len()).collect(),
             ))
-            .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
             let new_insert: PlanRef = self.clone_with_input(new_input).into();
             if self.core.returning {
                 Ok(new_insert)
@@ -82,7 +85,7 @@ impl ToDistributedBatch for BatchInsert {
             }
         } else {
             let new_input = RequiredDist::single()
-                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+                .batch_enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
             Ok(self.clone_with_input(new_input).into())
         }
     }
@@ -122,11 +125,11 @@ impl ToBatchPb for BatchInsert {
 impl ToLocalBatch for BatchInsert {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = RequiredDist::single()
-            .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
 
-impl ExprRewritable for BatchInsert {}
+impl ExprRewritable<Batch> for BatchInsert {}
 
 impl ExprVisitable for BatchInsert {}

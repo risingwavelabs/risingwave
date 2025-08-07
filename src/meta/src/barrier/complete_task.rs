@@ -54,6 +54,7 @@ pub(super) enum CompletingTask {
     Err(MetaError),
 }
 
+/// Only for checkpoint barrier. For normal barrier, there won't be a task.
 #[derive(Default)]
 pub(super) struct CompleteBarrierTask {
     pub(super) commit_info: CommitEpochInfo,
@@ -68,6 +69,8 @@ pub(super) struct CompleteBarrierTask {
             Vec<(TableId, u64)>,
         ),
     >,
+    /// Source IDs that have finished loading data and need `LoadFinish` commands
+    pub(super) load_finished_source_ids: Vec<u32>,
 }
 
 impl CompleteBarrierTask {
@@ -101,6 +104,15 @@ impl CompleteBarrierTask {
                 .barrier_wait_commit_latency
                 .start_timer();
             let version_stats = context.commit_epoch(self.commit_info).await?;
+
+            // Handle load finished source IDs for refreshable batch sources
+            // Spawn this asynchronously to avoid deadlock during barrier collection
+            if !self.load_finished_source_ids.is_empty() {
+                context
+                    .handle_load_finished_source_ids(self.load_finished_source_ids.clone())
+                    .await?;
+            }
+
             for command_ctx in self
                 .epoch_infos
                 .values()

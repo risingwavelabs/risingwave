@@ -26,7 +26,7 @@ use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, DEFAULT_SUPER_USER_ID, Field, MAX_SYS_CATALOG_NUM,
-    SYS_CATALOG_START_ID, SysCatalogReader, TableDesc, TableId,
+    SYS_CATALOG_START_ID, SysCatalogReader, TableId,
 };
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::SessionConfig;
@@ -45,7 +45,7 @@ use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::user_service::UserInfoReader;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Hash)]
 pub struct SystemTableCatalog {
     pub id: TableId,
 
@@ -78,16 +78,6 @@ impl SystemTableCatalog {
     /// Get a reference to the system catalog's columns.
     pub fn columns(&self) -> &[ColumnCatalog] {
         &self.columns
-    }
-
-    /// Get a [`TableDesc`] of the system table.
-    pub fn table_desc(&self) -> TableDesc {
-        TableDesc {
-            table_id: self.id,
-            columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
-            stream_key: self.pk.clone(),
-            ..Default::default()
-        }
     }
 
     /// Get a reference to the system catalog's name.

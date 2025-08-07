@@ -33,6 +33,7 @@ use risingwave_frontend::handler::{
     drop_table, explain, variable,
 };
 use risingwave_frontend::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
+use risingwave_frontend::optimizer::plan_node::ConventionMarker;
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{LocalFrontend, create_proto_file, get_explain_output};
 use risingwave_frontend::{
@@ -877,6 +878,7 @@ impl TestCase {
                     None,
                     None,
                     false,
+                    None,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
@@ -894,7 +896,7 @@ impl TestCase {
     }
 }
 
-fn explain_plan(plan: &PlanRef) -> String {
+fn explain_plan(plan: &PlanRef<impl ConventionMarker>) -> String {
     plan.explain_to_string()
 }
 

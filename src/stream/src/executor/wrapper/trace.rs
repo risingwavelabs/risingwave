@@ -88,6 +88,7 @@ pub async fn trace(
                     prev_epoch = barrier.epoch.prev,
                     curr_epoch = barrier.epoch.curr,
                     kind = ?barrier.kind,
+                    mutation = ?barrier.mutation,
                 );
                 span.record("message", "barrier");
             }

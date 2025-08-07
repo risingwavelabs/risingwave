@@ -22,7 +22,7 @@ use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
 use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::stream;
+use crate::optimizer::plan_node::StreamPlanRef;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
@@ -47,6 +47,20 @@ pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
 }
 
 impl<PlanRef: GenericPlanRef> Join<PlanRef> {
+    pub(crate) fn clone_with_inputs<OtherPlanRef>(
+        &self,
+        left: OtherPlanRef,
+        right: OtherPlanRef,
+    ) -> Join<OtherPlanRef> {
+        Join {
+            left,
+            right,
+            on: self.on.clone(),
+            join_type: self.join_type,
+            output_indices: self.output_indices.clone(),
+        }
+    }
+
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.on = self.on.clone().rewrite_expr(r);
     }
@@ -81,10 +95,10 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     }
 }
 
-impl<I: stream::StreamPlanRef> Join<I> {
+impl Join<StreamPlanRef> {
     /// Return stream hash join internal table catalog and degree table catalog.
     pub fn infer_internal_and_degree_table_catalog(
-        input: I,
+        input: StreamPlanRef,
         join_key_indices: Vec<usize>,
         dk_indices_in_jk: Vec<usize>,
     ) -> (TableCatalog, TableCatalog, Vec<usize>) {
@@ -322,7 +336,9 @@ impl<PlanRef> Join<PlanRef> {
             self.output_indices,
         )
     }
+}
 
+impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn full_out_col_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
             JoinType::Inner
@@ -336,9 +352,7 @@ impl<PlanRef> Join<PlanRef> {
             JoinType::Unspecified => unreachable!(),
         }
     }
-}
 
-impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn with_full_output(
         left: PlanRef,
         right: PlanRef,

@@ -35,9 +35,9 @@ impl Binder {
     /// `with_ordinality` is only supported for the `TableFunction` case now.
     pub(super) fn bind_table_function(
         &mut self,
-        name: ObjectName,
-        alias: Option<TableAlias>,
-        args: Vec<FunctionArg>,
+        name: &ObjectName,
+        alias: Option<&TableAlias>,
+        args: &[FunctionArg],
         with_ordinality: bool,
     ) -> Result<Relation> {
         let func_name = &name.0[0].real_value();
@@ -82,10 +82,10 @@ impl Binder {
         self.push_context();
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);
-        let func = self.bind_function(Function {
+        let func = self.bind_function(&Function {
             scalar_as_agg: false,
-            name,
-            arg_list: FunctionArgList::args_only(args),
+            name: name.clone(),
+            arg_list: FunctionArgList::args_only(args.to_vec()),
             over: None,
             filter: None,
             within_group: None,

@@ -17,12 +17,12 @@ use std::ops::{Mul, Sub};
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{DefaultBehavior, DefaultValue, PlanVisitor};
+use super::{DefaultBehavior, DefaultValue, LogicalPlanVisitor, PlanVisitor};
 use crate::optimizer::plan_node::generic::TopNLimit;
 use crate::optimizer::plan_node::{
-    self, PlanNode, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary,
+    self, LogicalPlanRef as PlanRef, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary,
 };
-use crate::optimizer::plan_visitor::PlanRef;
+use crate::optimizer::plan_visitor::LogicalPlanNode;
 use crate::optimizer::property::Cardinality;
 
 /// A visitor that computes the cardinality of a plan node.
@@ -31,7 +31,7 @@ pub struct CardinalityVisitor;
 impl CardinalityVisitor {
     /// Used for `Filter` and `Scan` with predicate.
     fn visit_predicate(
-        input: &dyn PlanNode,
+        input: &dyn LogicalPlanNode,
         input_card: Cardinality,
         eq_set: HashSet<usize>,
     ) -> Cardinality {
@@ -53,7 +53,7 @@ impl CardinalityVisitor {
     }
 }
 
-impl PlanVisitor for CardinalityVisitor {
+impl LogicalPlanVisitor for CardinalityVisitor {
     type Result = Cardinality;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
