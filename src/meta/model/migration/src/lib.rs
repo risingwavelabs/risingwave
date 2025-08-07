@@ -46,6 +46,7 @@ mod m20250603_084830_default_privilege;
 mod m20250702_062029_cdc_table_snapshot_splits;
 mod m20250710_065220_sink_auto_refresh_schema;
 mod m20250722_155040_table_refreshable;
+mod m20250130_000000_add_user_admin_field;
 mod utils;
 
 pub struct Migrator;
@@ -130,6 +131,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250702_062029_cdc_table_snapshot_splits::Migration),
             Box::new(m20250710_065220_sink_auto_refresh_schema::Migration),
             Box::new(m20250722_155040_table_refreshable::Migration),
+            Box::new(m20250130_000000_add_user_admin_field::Migration),
         ]
     }
 }

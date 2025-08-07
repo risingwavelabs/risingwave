@@ -226,4 +226,35 @@ mod tests {
                 .is_err()
         );
     }
+
+    #[tokio::test]
+    async fn test_create_admin_user() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let user_info_reader = session.env().user_info_reader();
+
+        // Create admin user
+        frontend.run_sql("CREATE USER admin_user WITH ADMIN NOADMIN").await.unwrap();
+        
+        let admin_user = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user")
+            .cloned()
+            .unwrap();
+        
+        // Should not be admin because NOADMIN overrides ADMIN
+        assert!(!admin_user.is_admin);
+        
+        // Create another admin user
+        frontend.run_sql("CREATE USER admin_user2 WITH ADMIN").await.unwrap();
+        
+        let admin_user2 = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user2")
+            .cloned()
+            .unwrap();
+        
+        // Should be admin
+        assert!(admin_user2.is_admin);
+    }
 }
