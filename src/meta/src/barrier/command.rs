@@ -26,7 +26,6 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignment, CdcTableSnapshotSplitAssignmentWithGeneration,
-    build_actor_cdc_table_snapshot_splits_with_generation,
     build_pb_actor_cdc_table_snapshot_splits,
     build_pb_actor_cdc_table_snapshot_splits_with_generation,
 };

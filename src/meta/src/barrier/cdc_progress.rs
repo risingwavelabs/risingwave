@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use num_traits::ToPrimitive;
 use parking_lot::Mutex;
@@ -22,7 +21,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_meta_model::cdc_table_snapshot_split;
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
 use risingwave_pb::stream_service::barrier_complete_response::PbCdcTableBackfillProgress;
-use sea_orm::{ColumnTrait, EntityTrait, QuerySelect};
+use sea_orm::prelude::Expr;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 
 use crate::MetaResult;
 use crate::controller::SqlMetaStore;
@@ -30,13 +30,16 @@ use crate::controller::SqlMetaStore;
 pub type CdcTableBackfillTrackerRef = Arc<CdcTableBackfillTracker>;
 
 pub struct CdcTableBackfillTracker {
+    meta_store: SqlMetaStore,
     inner: Mutex<CdcTableBackfillTrackerInner>,
 }
 
 impl CdcTableBackfillTracker {
     pub async fn new(meta_store: SqlMetaStore) -> MetaResult<Self> {
+        let inner = CdcTableBackfillTrackerInner::new(meta_store.clone()).await?;
         let inst = Self {
-            inner: Mutex::new(CdcTableBackfillTrackerInner::new(meta_store).await?),
+            meta_store,
+            inner: Mutex::new(inner),
         };
         Ok(inst)
     }
@@ -45,15 +48,28 @@ impl CdcTableBackfillTracker {
         &self,
         resps: impl IntoIterator<Item = &PbBarrierCompleteResponse>,
     ) -> Vec<TableId> {
-        for resp in resps.into_iter() {
-            let progress = &resp.cdc_table_backfill_progress;
-            // TODO(zw): !!!
+        let mut inner = self.inner.lock();
+        let mut completed_jobs = vec![];
+        for resp in resps {
+            for progress in &resp.cdc_table_backfill_progress {
+                completed_jobs.extend(inner.try_complete_split(progress));
+            }
         }
-        vec![]
+        completed_jobs.into_iter().map(Into::into).collect()
     }
 
     pub async fn finish_backfill(&self, job_id: TableId) -> MetaResult<()> {
-        // TODO(zw): !!!
+        cdc_table_snapshot_split::Entity::update_many()
+            .col_expr(
+                cdc_table_snapshot_split::Column::IsBackfillFinished,
+                Expr::value(true),
+            )
+            .filter(
+                cdc_table_snapshot_split::Column::TableId
+                    .eq(job_id.table_id as risingwave_meta_model::TableId),
+            )
+            .exec(&self.meta_store.conn)
+            .await?;
         Ok(())
     }
 
@@ -103,16 +119,47 @@ impl CdcTableBackfillTrackerInner {
 
     fn add_split_count(&mut self, table_id: u32, split_count: u64) {
         self.table_split_total_counts.insert(table_id, split_count);
-        self.table_split_completed_counts.insert(table_id, 0);
     }
 
-    fn try_complete_split(&mut self, table_id: u32, progress: PbCdcTableBackfillProgress) {
-        todo!("!!!")
+    fn try_complete_split(&mut self, progress: &PbCdcTableBackfillProgress) -> Vec<u32> {
+        // TODO(zw): use correct table id
+        let table_id = 0;
+        let Some(completed_count) = self.table_split_completed_counts.get_mut(&table_id) else {
+            tracing::warn!(
+                table_id,
+                "CDC table progress state (split_completed_counts) not found."
+            );
+            return vec![];
+        };
+        let Some(expected_count) = self.table_split_total_counts.get(&table_id) else {
+            tracing::warn!(
+                table_id,
+                "CDC table progress state (split_total_counts) not found."
+            );
+            return vec![];
+        };
+        let Some(generation) = self.table_split_assignment_generations.get(&table_id) else {
+            tracing::warn!(
+                table_id,
+                "CDC table progress state (split_assignment_generations) not found."
+            );
+            return vec![];
+        };
+        let mut completed_jobs = vec![];
+        if *generation == progress.generation && progress.done {
+            *completed_count +=
+                (1 + progress.split_id_end_inclusive - progress.split_id_start_inclusive) as u64;
+            if *completed_count == *expected_count {
+                completed_jobs.push(table_id);
+            }
+        }
+        completed_jobs
     }
 
     fn update_split_assignment_generation(&mut self, table_id: u32, generation: u64) {
         self.table_split_assignment_generations
             .insert(table_id, generation);
+        self.table_split_completed_counts.insert(table_id, 0);
     }
 }
 
