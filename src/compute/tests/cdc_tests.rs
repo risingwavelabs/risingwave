@@ -534,7 +534,6 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
             0,
         ),
         ParallelizedCdcBackfillExecutor::new(
-            0,
             ActorContext::for_test(actor_id),
             external_table,
             cdc_source,
