@@ -46,6 +46,8 @@ use crate::task::cdc_progress::CdcProgressReporter;
 const METADATA_STATE_LEN: usize = 5;
 
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
+    table_id: u32,
+
     actor_ctx: ActorContextRef,
 
     /// The external table to be backfilled
@@ -73,6 +75,7 @@ pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
 impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        table_id: u32,
         actor_ctx: ActorContextRef,
         external_table: ExternalStorageTable,
         upstream: Executor,
@@ -85,6 +88,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         progress: CdcProgressReporter,
     ) -> Self {
         Self {
+            table_id,
             actor_ctx,
             external_table,
             upstream,
@@ -99,6 +103,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        tracing::debug!(cdc_table_id = self.table_id, "!!!");
         assert!(!self.options.disable_backfill);
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();

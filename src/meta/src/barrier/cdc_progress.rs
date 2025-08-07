@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
 use risingwave_meta_model::cdc_table_snapshot_split;
@@ -117,7 +118,7 @@ impl CdcTableBackfillTrackerInner {
 
 /// Tracks the split counts of existing tables.
 async fn load_split_counts(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, u64>> {
-    let split_counts: Vec<(u32, u64)> = cdc_table_snapshot_split::Entity::find()
+    let split_counts: Vec<(i32, i64)> = cdc_table_snapshot_split::Entity::find()
         .select_only()
         .column(cdc_table_snapshot_split::Column::TableId)
         .column_as(cdc_table_snapshot_split::Column::TableId.count(), "count")
@@ -125,5 +126,8 @@ async fn load_split_counts(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32,
         .into_tuple()
         .all(&meta_store.conn)
         .await?;
-    Ok(split_counts.into_iter().collect())
+    Ok(split_counts
+        .into_iter()
+        .map(|(k, v)| (k.to_u32().unwrap(), v.to_u64().unwrap()))
+        .collect())
 }
