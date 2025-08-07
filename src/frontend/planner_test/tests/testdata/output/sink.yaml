@@ -299,7 +299,12 @@
     └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t1._row_id) }
       └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
 - id: separate_aggregation_and_sink
-  sql: "set streaming_separate_sink to true;\ncreate table t (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);\ncreate table sink_table (v1 date, v2 bigint);\nexplain create sink s into sink_table as select v1, count(*) from t group by v1 \nwith (type = 'append-only', force_append_only = 'true');\n"
+  sql: |
+    set streaming_separate_sink to true;
+    create table t (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
+    create table sink_table (v1 date, v2 bigint);
+    explain create sink s into sink_table as select v1, count(*) from t group by v1
+    with (type = 'append-only', force_append_only = 'true');
   explain_output: |
     StreamProject { exprs: [t.v1, count, null:Serial] }
     └─StreamSink { type: append-only, columns: [v1, count] }

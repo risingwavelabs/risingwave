@@ -356,7 +356,7 @@ impl StreamSink {
         };
         let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
         let input = if input.ctx().session_ctx().config().streaming_separate_sink()
-            && input.as_stream_exchange().is_some()
+            && input.as_stream_exchange().is_none()
         {
             StreamExchange::new_no_shuffle(input).into()
         } else {
