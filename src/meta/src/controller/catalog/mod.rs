@@ -1095,7 +1095,7 @@ impl CatalogControllerInner {
             {
                 if let Some(tx_list) = creating_tables.remove(&id) {
                     for tx in tx_list {
-                        let _ = tx.send(Err("Cancelled".to_string()));
+                        let _ = tx.send(Err("Cancelled".to_owned()));
                     }
                 }
             }
@@ -1103,7 +1103,7 @@ impl CatalogControllerInner {
             for txs in self.creating_table_finish_notifier.values_mut() {
                 if let Some(tx_list) = txs.remove(&id) {
                     for tx in tx_list {
-                        let _ = tx.send(Err("Cancelled".to_string()));
+                        let _ = tx.send(Err("Cancelled".to_owned()));
                     }
                 }
             }
