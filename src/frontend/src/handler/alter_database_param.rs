@@ -21,10 +21,6 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 use crate::error::Result;
 
-fn check_database_failure_isolation_license() -> Result<()> {
-    risingwave_common::license::Feature::DatabaseFailureIsolation.check_available()
-}
-
 pub async fn handle_alter_database_param(
     handler_args: HandlerArgs,
     database_name: ObjectName,
@@ -48,7 +44,7 @@ pub async fn handle_alter_database_param(
     match param {
         AlterDatabaseParam::BarrierIntervalMs(Some(interval)) => {
             if !cfg!(test) {
-                check_database_failure_isolation_license()?;
+                risingwave_common::license::Feature::ResourceGroup.check_available()?;
             }
             if interval >= NOTICE_BARRIER_INTERVAL_MS {
                 builder = builder.notice(
@@ -58,7 +54,7 @@ pub async fn handle_alter_database_param(
         }
         AlterDatabaseParam::CheckpointFrequency(Some(frequency)) => {
             if !cfg!(test) {
-                check_database_failure_isolation_license()?;
+                risingwave_common::license::Feature::ResourceGroup.check_available()?;
             }
             if frequency >= NOTICE_CHECKPOINT_FREQUENCY {
                 builder = builder.notice(
