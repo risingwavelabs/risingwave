@@ -25,6 +25,17 @@ use crate::handler::explain_analyze_stream_job::graph::{
 };
 use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgResponseBuilderExt};
 
+#[macro_export]
+macro_rules! debug_panic_or_warn {
+    ($($arg:tt)*) => {
+        if cfg!(debug_assertions) || cfg!(madsim) {
+            panic!($($arg)*);
+        } else {
+            tracing::warn!($($arg)*);
+        }
+    };
+}
+
 #[derive(Fields)]
 struct ExplainAnalyzeStreamJobOutput {
     identity: String,
@@ -43,13 +54,19 @@ pub async fn handle_explain_analyze_stream_job(
 
     let meta_client = handler_args.session.env().meta_client();
     let fragments = net::get_fragments(meta_client, job_id).await?;
-    let dispatcher_fragment_ids = fragments.iter().map(|f| f.id).collect::<Vec<_>>();
     let fragment_parallelisms = fragments
         .iter()
         .map(|f| (f.id, f.actors.len()))
         .collect::<HashMap<_, _>>();
-    let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
+    let (root_node, dispatcher_fragment_ids, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
+    tracing::debug!(
+        ?fragment_parallelisms,
+        ?root_node,
+        ?dispatcher_fragment_ids,
+        ?adjacency_list,
+        "explain analyze metadata"
+    );
 
     let worker_nodes = net::list_stream_worker_nodes(handler_args.session.env()).await?;
 
@@ -188,47 +205,58 @@ mod net {
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
         executor_ids: &HashSet<ExecutorId>,
-        dispatcher_fragment_ids: &[u32],
+        dispatcher_fragment_ids: &HashSet<u32>,
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
-        let mut aggregated_stats = ExecutorStats::new();
+        let dispatcher_fragment_ids = dispatcher_fragment_ids.iter().copied().collect::<Vec<_>>();
+        let mut initial_aggregated_stats = ExecutorStats::new();
         for node in worker_nodes {
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.start_record(
+            initial_aggregated_stats.record(
                 executor_ids,
-                dispatcher_fragment_ids,
+                &dispatcher_fragment_ids,
                 &stats.into_inner(),
             );
         }
+        tracing::debug!(?initial_aggregated_stats, "initial aggregated stats");
 
         sleep(profiling_duration).await;
 
+        let mut final_aggregated_stats = ExecutorStats::new();
         for node in worker_nodes {
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.finish_record(
+            final_aggregated_stats.record(
                 executor_ids,
-                dispatcher_fragment_ids,
+                &dispatcher_fragment_ids,
                 &stats.into_inner(),
             );
         }
+        tracing::debug!(?final_aggregated_stats, "final aggregated stats");
 
-        Ok(aggregated_stats)
+        let delta_aggregated_stats = ExecutorStats::get_delta(
+            &initial_aggregated_stats,
+            &final_aggregated_stats,
+            executor_ids,
+            &dispatcher_fragment_ids,
+        );
+
+        Ok(delta_aggregated_stats)
     }
 }
 
@@ -239,6 +267,7 @@ mod net {
 mod metrics {
     use std::collections::{HashMap, HashSet};
 
+    use risingwave_common::operator::unique_executor_id_into_parts;
     use risingwave_pb::monitor_service::GetProfileStatsResponse;
 
     use crate::catalog::FragmentId;
@@ -280,8 +309,8 @@ mod metrics {
             self.executor_stats.get(executor_id)
         }
 
-        /// Establish metrics baseline for profiling
-        pub(super) fn start_record<'a>(
+        /// Record metrics for profiling
+        pub(super) fn record<'a>(
             &mut self,
             executor_ids: &'a HashSet<ExecutorId>,
             dispatch_fragment_ids: &'a [FragmentId],
@@ -307,7 +336,15 @@ mod metrics {
                 };
                 // An executor should be scheduled on a single worker node,
                 // it should not be inserted multiple times.
-                assert!(self.executor_stats.insert(*executor_id, stats).is_none());
+                if cfg!(madsim) {
+                    // If madsim is enabled, worker nodes will share the same process.
+                    // The metrics is stored as a global object, so querying each worker node
+                    // will return the same set of executor metrics.
+                    // So we should not assert here.
+                    self.executor_stats.insert(*executor_id, stats);
+                } else {
+                    assert!(self.executor_stats.insert(*executor_id, stats).is_none());
+                }
             }
 
             for fragment_id in dispatch_fragment_ids {
@@ -333,70 +370,117 @@ mod metrics {
             }
         }
 
-        /// Compute the deltas for reporting
-        pub(super) fn finish_record<'a>(
-            &mut self,
-            executor_ids: &'a HashSet<ExecutorId>,
-            dispatch_fragment_ids: &'a [FragmentId],
-            metrics: &'a GetProfileStatsResponse,
-        ) {
+        pub(super) fn get_delta(
+            initial: &Self,
+            end: &Self,
+            executor_ids: &HashSet<ExecutorId>,
+            dispatch_fragment_ids: &[FragmentId],
+        ) -> Self {
+            let mut delta_aggregated_stats = Self::new();
             for executor_id in executor_ids {
-                let Some(stats) = self.executor_stats.get_mut(executor_id) else {
+                let (actor_id, operator_id) = unique_executor_id_into_parts(*executor_id);
+                let Some(initial_stats) = initial.executor_stats.get(executor_id) else {
+                    debug_panic_or_warn!(
+                        "missing initial stats for executor {} (actor {} operator {})",
+                        executor_id,
+                        actor_id,
+                        operator_id
+                    );
                     continue;
                 };
-                let Some(total_output_throughput) =
-                    metrics.stream_node_output_row_count.get(executor_id)
-                else {
+                let Some(end_stats) = end.executor_stats.get(executor_id) else {
+                    debug_panic_or_warn!(
+                        "missing final stats for executor {} (actor {} operator {})",
+                        executor_id,
+                        actor_id,
+                        operator_id
+                    );
                     continue;
                 };
-                let Some(total_output_pending_ns) = metrics
-                    .stream_node_output_blocking_duration_ns
-                    .get(executor_id)
-                else {
+
+                let initial_throughput = initial_stats.total_output_throughput;
+                let end_throughput = end_stats.total_output_throughput;
+                let Some(delta_throughput) = end_throughput.checked_sub(initial_throughput) else {
+                    debug_panic_or_warn!(
+                        "delta throughput is negative for actor {} operator {} (initial: {}, end: {})",
+                        actor_id,
+                        operator_id,
+                        initial_throughput,
+                        end_throughput
+                    );
                     continue;
                 };
-                let Some(throughput_delta) =
-                    total_output_throughput.checked_sub(stats.total_output_throughput)
-                else {
+
+                let initial_pending_ns = initial_stats.total_output_pending_ns;
+                let end_pending_ns = end_stats.total_output_pending_ns;
+                let Some(delta_pending_ns) = end_pending_ns.checked_sub(initial_pending_ns) else {
+                    debug_panic_or_warn!(
+                        "delta pending ns is negative for actor {} operator {} (initial: {}, end: {})",
+                        actor_id,
+                        operator_id,
+                        initial_pending_ns,
+                        end_pending_ns
+                    );
                     continue;
                 };
-                let Some(output_ns_delta) =
-                    total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
-                else {
-                    continue;
+
+                let delta_stats = ExecutorMetrics {
+                    executor_id: *executor_id,
+                    epoch: 0,
+                    total_output_throughput: delta_throughput,
+                    total_output_pending_ns: delta_pending_ns,
                 };
-                stats.total_output_throughput = throughput_delta;
-                stats.total_output_pending_ns = output_ns_delta;
+                delta_aggregated_stats
+                    .executor_stats
+                    .insert(*executor_id, delta_stats);
             }
 
             for fragment_id in dispatch_fragment_ids {
-                let Some(stats) = self.dispatch_stats.get_mut(fragment_id) else {
+                let Some(initial_stats) = initial.dispatch_stats.get(fragment_id) else {
+                    debug_panic_or_warn!("missing initial stats for fragment {}", fragment_id);
                     continue;
                 };
-                let Some(total_output_throughput) =
-                    metrics.dispatch_fragment_output_row_count.get(fragment_id)
-                else {
+                let Some(end_stats) = end.dispatch_stats.get(fragment_id) else {
+                    debug_panic_or_warn!("missing final stats for fragment {}", fragment_id);
                     continue;
                 };
-                let Some(total_output_pending_ns) = metrics
-                    .dispatch_fragment_output_blocking_duration_ns
-                    .get(fragment_id)
-                else {
+
+                let initial_throughput = initial_stats.total_output_throughput;
+                let end_throughput = end_stats.total_output_throughput;
+                let Some(delta_throughput) = end_throughput.checked_sub(initial_throughput) else {
+                    debug_panic_or_warn!(
+                        "delta throughput is negative for fragment {} (initial: {}, end: {})",
+                        fragment_id,
+                        initial_throughput,
+                        end_throughput
+                    );
                     continue;
                 };
-                let Some(throughput_delta) =
-                    total_output_throughput.checked_sub(stats.total_output_throughput)
-                else {
+
+                let initial_pending_ns = initial_stats.total_output_pending_ns;
+                let end_pending_ns = end_stats.total_output_pending_ns;
+                let Some(delta_pending_ns) = end_pending_ns.checked_sub(initial_pending_ns) else {
+                    debug_panic_or_warn!(
+                        "delta pending ns is negative for fragment {} (initial: {}, end: {})",
+                        fragment_id,
+                        initial_pending_ns,
+                        end_pending_ns
+                    );
                     continue;
                 };
-                let Some(output_ns_delta) =
-                    total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
-                else {
-                    continue;
+
+                let delta_stats = DispatchMetrics {
+                    fragment_id: *fragment_id,
+                    epoch: 0,
+                    total_output_throughput: delta_throughput,
+                    total_output_pending_ns: delta_pending_ns,
                 };
-                stats.total_output_throughput = throughput_delta;
-                stats.total_output_pending_ns = output_ns_delta;
+                delta_aggregated_stats
+                    .dispatch_stats
+                    .insert(*fragment_id, delta_stats);
             }
+
+            delta_aggregated_stats
         }
     }
 
@@ -452,12 +536,15 @@ mod metrics {
             for (fragment_id, dispatch_metrics) in &executor_stats.dispatch_stats {
                 let operator_id = operator_id_for_dispatch(*fragment_id);
                 let total_output_throughput = dispatch_metrics.total_output_throughput;
-                let fragment_parallelism = fragment_parallelisms
-                    .get(fragment_id)
-                    .copied()
-                    .expect("should have fragment parallelism");
+                let Some(fragment_parallelism) = fragment_parallelisms.get(fragment_id) else {
+                    debug_panic_or_warn!(
+                        "missing fragment parallelism for fragment {}",
+                        fragment_id
+                    );
+                    continue;
+                };
                 let total_output_pending_ns =
-                    dispatch_metrics.total_output_pending_ns / fragment_parallelism as u64;
+                    dispatch_metrics.total_output_pending_ns / *fragment_parallelism as u64;
 
                 operator_stats.insert(
                     operator_id,
@@ -485,16 +572,19 @@ mod metrics {
 /// rendering, extracting, etc.
 mod graph {
     use std::collections::{HashMap, HashSet};
+    use std::fmt::Debug;
     use std::time::Duration;
 
     use itertools::Itertools;
     use risingwave_common::operator::{
         unique_executor_id_from_unique_operator_id, unique_operator_id,
+        unique_operator_id_into_parts,
     };
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::stream_plan::stream_node::{NodeBody, NodeBodyDiscriminants};
     use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
 
+    use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::ExplainAnalyzeStreamJobOutput;
     use crate::handler::explain_analyze_stream_job::metrics::OperatorStats;
     use crate::handler::explain_analyze_stream_job::utils::operator_id_for_dispatch;
@@ -502,13 +592,27 @@ mod graph {
     pub(super) type ExecutorId = u64;
 
     /// This is an internal struct used ONLY for explain analyze stream job.
-    #[derive(Debug)]
     pub(super) struct StreamNode {
         operator_id: OperatorId,
         fragment_id: u32,
         identity: NodeBodyDiscriminants,
         actor_ids: HashSet<u32>,
         dependencies: Vec<u64>,
+    }
+
+    impl Debug for StreamNode {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let (actor_id, operator_id) = unique_operator_id_into_parts(self.operator_id);
+            let operator_id_str = format!(
+                "{}: (actor_id: {}, operator_id: {})",
+                self.operator_id, actor_id, operator_id
+            );
+            write!(
+                f,
+                "StreamNode {{ operator_id: {}, fragment_id: {}, identity: {:?}, actor_ids: {:?}, dependencies: {:?} }}",
+                operator_id_str, self.fragment_id, self.identity, self.actor_ids, self.dependencies
+            )
+        }
     }
 
     impl StreamNode {
@@ -526,9 +630,14 @@ mod graph {
     /// Extracts the root node of the plan, as well as the adjacency list
     pub(super) fn extract_stream_node_infos(
         fragments: Vec<FragmentInfo>,
-    ) -> (OperatorId, HashMap<OperatorId, StreamNode>) {
-        // Finds root nodes of the graph
+    ) -> (
+        OperatorId,
+        HashSet<FragmentId>,
+        HashMap<OperatorId, StreamNode>,
+    ) {
+        let job_fragment_ids = fragments.iter().map(|f| f.id).collect::<HashSet<_>>();
 
+        // Finds root nodes of the graph
         fn find_root_nodes(stream_nodes: &HashMap<u64, StreamNode>) -> HashSet<u64> {
             let mut all_nodes = stream_nodes.keys().copied().collect::<HashSet<_>>();
             for node in stream_nodes.values() {
@@ -635,7 +744,18 @@ mod graph {
             }
         }
 
-        (root_node.unwrap(), operator_id_to_stream_node)
+        let mut dispatcher_fragment_ids = HashSet::new();
+        for dispatcher_fragment_id in fragment_id_to_merge_operator_id.keys() {
+            if job_fragment_ids.contains(dispatcher_fragment_id) {
+                dispatcher_fragment_ids.insert(*dispatcher_fragment_id);
+            }
+        }
+
+        (
+            root_node.unwrap(),
+            dispatcher_fragment_ids,
+            operator_id_to_stream_node,
+        )
     }
 
     pub(super) fn extract_executor_infos(
@@ -649,7 +769,9 @@ mod graph {
             for actor_id in &node.actor_ids {
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
-                assert!(executor_ids.insert(executor_id));
+                if node.identity != NodeBodyDiscriminants::BatchPlan {
+                    assert!(executor_ids.insert(executor_id));
+                }
                 assert!(
                     operator_to_executor
                         .entry(operator_id)
