@@ -1246,7 +1246,7 @@ impl BatchPlanFragmenter {
             return Ok(None);
         }
         if let Some(scan_node) = node.as_batch_sys_seq_scan() {
-            let name = scan_node.core().table_name.to_owned();
+            let name = scan_node.core().table.name.clone();
             Ok(Some(TableScanInfo::system_table(name)))
         } else if let Some(scan_node) = node.as_batch_log_seq_scan() {
             build_table_scan_info(
