@@ -752,6 +752,28 @@ impl CatalogController {
         }
 
         insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;
+        let objects = if let Some(plan) = &replace_plan {
+            insert_fragment_relations(&txn, &plan.upstream_fragment_downstreams).await?;
+
+            let incoming_sink_id = job_id;
+            let (objects, _) = Self::finish_replace_streaming_job_inner(
+                plan.tmp_id as _,
+                plan.replace_upstream.clone(),
+                SinkIntoTableContext {
+                    creating_sink_id: Some(incoming_sink_id),
+                    dropping_sink_id: None,
+                    updated_sink_catalogs: vec![],
+                },
+                &txn,
+                plan.streaming_job.clone(),
+                None,
+                None,
+            )
+            .await?;
+            objects
+        } else {
+            vec![]
+        };
 
         // Mark job as CREATING.
         streaming_job::ActiveModel {
@@ -763,6 +785,13 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
+        if !objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+            )
+            .await;
+        }
 
         Ok(())
     }
@@ -1195,10 +1224,11 @@ impl CatalogController {
                 }
 
                 if let Some(sink_id) = dropping_sink_id {
-                    let drained = incoming_sinks
+                    let _drained = incoming_sinks
                         .extract_if(.., |id| *id == sink_id)
                         .collect_vec();
-                    debug_assert_eq!(drained, vec![sink_id]);
+                    // TODO(august): re-enable this assertion after refactoring sink into table
+                    // debug_assert_eq!(drained, vec![sink_id]);
                 }
 
                 table.incoming_sinks = Set(incoming_sinks.into());

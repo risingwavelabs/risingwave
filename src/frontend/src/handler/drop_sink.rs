@@ -74,7 +74,7 @@ pub async fn handle_drop_sink(
         tracing::info!(?canceled_jobs, "cancelled creating jobs");
     } else {
         // No matter whether the sink is being created or not, we need to replace the target table graph.
-        // TODO: using cancel interface to cancel the creating job after refactoring sink into table.
+        // TODO(august): using cancel interface to cancel the creating job after refactoring sink into table.
         let mut affected_table_change = None;
         if let Some(target_table_id) = &sink.target_table {
             let table_catalog = {
@@ -86,16 +86,10 @@ pub async fn handle_drop_sink(
             let (mut graph, mut table, source, target_job_type) =
                 reparse_table_for_sink(&session, &table_catalog).await?;
 
-            assert!(!table_catalog.incoming_sinks.is_empty());
-
-            table
-                .incoming_sinks
-                .clone_from(&table_catalog.incoming_sinks);
-
             let mut incoming_sink_ids: HashSet<_> =
                 table_catalog.incoming_sinks.iter().copied().collect();
-
-            assert!(incoming_sink_ids.remove(&sink_id.sink_id));
+            incoming_sink_ids.remove(&sink_id.sink_id);
+            table.incoming_sinks = incoming_sink_ids.iter().cloned().collect();
 
             let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
             for sink in fetch_incoming_sinks(&session, &incoming_sink_ids)? {
