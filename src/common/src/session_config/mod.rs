@@ -225,6 +225,10 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     streaming_separate_consecutive_join: bool,
 
+    /// Separate `StreamSink` by no-shuffle `StreamExchange`
+    #[parameter(default = false)]
+    streaming_separate_sink: bool,
+
     /// Determine which encoding will be used to encode join rows in operator cache.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = JoinEncodingType::default())]
