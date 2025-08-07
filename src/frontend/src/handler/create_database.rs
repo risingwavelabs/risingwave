@@ -93,9 +93,7 @@ pub async fn handle_create_database(
     let resource_group = resource_group.as_deref().unwrap_or(DEFAULT_RESOURCE_GROUP);
 
     if barrier_interval_ms.is_some() || checkpoint_frequency.is_some() {
-        risingwave_common::license::Feature::DatabaseFailureIsolation
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
+        risingwave_common::license::Feature::DatabaseFailureIsolation.check_available()?;
     }
     if let Some(interval) = barrier_interval_ms
         && interval >= NOTICE_BARRIER_INTERVAL_MS

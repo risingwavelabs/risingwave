@@ -22,9 +22,7 @@ use crate::Binder;
 use crate::error::Result;
 
 fn check_database_failure_isolation_license() -> Result<()> {
-    risingwave_common::license::Feature::DatabaseFailureIsolation
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e).into())
+    risingwave_common::license::Feature::DatabaseFailureIsolation.check_available()
 }
 
 pub async fn handle_alter_database_param(
