@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
+
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
@@ -21,7 +23,7 @@ use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::stream;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::utils::{Condition, ConditionDisplay};
 use crate::{OptimizerContextRef, TableCatalog};
 
@@ -157,15 +159,12 @@ pub fn infer_left_internal_table_catalog(
 }
 
 pub fn infer_right_internal_table_catalog(
-    input: impl stream::StreamPlanNodeMetadata,
+    right: impl stream::StreamPlanNodeMetadata,
 ) -> TableCatalog {
-    let schema = input.schema();
+    let schema = right.schema();
 
-    // We require that the right table has distribution `Single`
-    assert_eq!(
-        input.distribution().dist_column_indices().to_vec(),
-        Vec::<usize>::new()
-    );
+    // Right side should be broadcast. We will use a singleton table to store the value.
+    assert_matches!(right.distribution(), Distribution::Broadcast);
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::default();
 

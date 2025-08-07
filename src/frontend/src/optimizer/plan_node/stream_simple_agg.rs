@@ -118,13 +118,6 @@ impl StreamNode for StreamSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            distribution_key: self
-                .base
-                .distribution()
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect(),
             is_append_only: self.input().append_only(),
             agg_call_states: agg_states
                 .into_iter()
