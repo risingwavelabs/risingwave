@@ -100,7 +100,7 @@ message GetStreamingStatsResponse {
   map<uint32, RelationStats> relation_stats = 3;
 }
 
-message GetStreamingDeltaStatsResponse {
+message GetStreamingPrometheusStatsResponse {
   // Key: "<upstream_fragment_id>_<downstream_fragment_id>"
   map<string, ChannelDeltaStats> channel_stats = 1;
   map<uint32, FragmentStats> fragment_stats = 2;
