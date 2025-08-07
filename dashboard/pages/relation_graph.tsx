@@ -116,35 +116,49 @@ export default function StreamingGraph() {
     }
 
     function refresh() {
-      api.get("/metrics/streaming_stats").then(
-        (res) => {
-          let response = GetStreamingStatsResponse.fromJSON(res)
-          let snapshot = new ChannelStatsSnapshot(
-            new Map(Object.entries(response.channelStats)),
-            Date.now()
-          )
-          if (!initialSnapshot) {
-            initialSnapshot = snapshot
-          } else {
-            setChannelStats(snapshot.getRate(initialSnapshot))
+      let embedded = false
+      if (embedded) {
+        api.get("/metrics/streaming_stats").then(
+          (res) => {
+            let response = GetStreamingStatsResponse.fromJSON(res)
+            let snapshot = new ChannelStatsSnapshot(
+              new Map(Object.entries(response.channelStats)),
+              Date.now()
+            )
+            if (!initialSnapshot) {
+              initialSnapshot = snapshot
+            } else {
+              setChannelStats(snapshot.getRate(initialSnapshot))
+            }
+            setRelationStats(response.relationStats)
+          },
+          (e) => {
+            console.error(e)
+            toast(e, "error")
           }
-          setRelationStats(response.relationStats)
-        },
-        (e) => {
-          console.error(e)
-          toast(e, "error")
-        }
-      )
-      api.get("/metrics/streaming_stats_prometheus").then(
-        (res) => {
-          let response = GetStreamingPrometheusStatsResponse.fromJSON(res)
-          console.log(response)
-        },
-        (e) => {
-          console.error(e)
-          toast(e, "error")
-        }
-      )
+        )
+      } else {
+        api.get("/metrics/streaming_stats_prometheus").then(
+          (res) => {
+            let response = GetStreamingPrometheusStatsResponse.fromJSON(res)
+            const result = new Map<string, ChannelDeltaStats>()
+            for (const [key, value] of Object.entries(response.channelStats)) {
+              result.set(key, {
+                actorCount: value.actorCount,
+                backpressureRate: value.backpressureRate,
+                recvThroughput: value.recvThroughput,
+                sendThroughput: value.sendThroughput,
+              })
+              setChannelStats(result)
+            }
+            setRelationStats(response.relationStats)
+          },
+          (e) => {
+            console.error(e)
+            toast(e, "error")
+          }
+        )
+      }
     }
     refresh() // run once immediately
     const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
