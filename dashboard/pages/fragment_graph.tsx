@@ -53,6 +53,7 @@ import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import {
   ChannelStats,
+  ChannelDeltaStats,
   FragmentStats,
   GetStreamingStatsResponse,
 } from "../proto/gen/monitor_service"
@@ -76,15 +77,7 @@ export interface PlanNodeDatum {
 }
 
 // Derived stats from ChannelStats, majorly by dividing the stats by duration.
-export interface ChannelStatsDerived {
-  actorCount: number
-  /** Rate of blocking duration of all actors */
-  backPressure: number
-  /** Rate of received row count of all actors */
-  recvThroughput: number
-  /** Rate of sent row count of all actors */
-  sendThroughput: number
-}
+// Using ChannelDeltaStats from proto instead of custom interface
 
 function buildPlanNodeDependency(
   fragment: TableFragments_Fragment
@@ -209,15 +202,15 @@ export class ChannelStatsSnapshot {
     this.time = time
   }
 
-  getRate(initial: ChannelStatsSnapshot): Map<string, ChannelStatsDerived> {
-    const result = new Map<string, ChannelStatsDerived>()
+  getRate(initial: ChannelStatsSnapshot): Map<string, ChannelDeltaStats> {
+    const result = new Map<string, ChannelDeltaStats>()
     for (const [key, s] of this.metrics) {
       const init = initial.metrics.get(key)
       if (init) {
         const delta = this.time - initial.time // in microseconds
         result.set(key, {
           actorCount: s.actorCount,
-          backPressure:
+          backpressureRate:
             (s.outputBlockingDuration - init.outputBlockingDuration) /
             init.actorCount /
             delta /
@@ -342,7 +335,7 @@ export default function Streaming() {
 
   // Keep the initial snapshot to calculate the rate of back pressure
   const [channelStats, setChannelStats] =
-    useState<Map<string, ChannelStatsDerived>>()
+    useState<Map<string, ChannelDeltaStats>>()
 
   const [fragmentStats, setFragmentStats] = useState<{
     [key: number]: FragmentStats

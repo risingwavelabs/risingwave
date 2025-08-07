@@ -34,10 +34,12 @@ import {
 } from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
 import {
+  GetStreamingPrometheusStatsResponse,
   GetStreamingStatsResponse,
   RelationStats,
+  ChannelDeltaStats,
 } from "../proto/gen/monitor_service"
-import { ChannelStatsDerived, ChannelStatsSnapshot } from "./fragment_graph"
+import { ChannelStatsSnapshot } from "./fragment_graph"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -98,7 +100,7 @@ export default function StreamingGraph() {
 
   // Periodically fetch fragment-level back-pressure from Meta node
   const [channelStats, setChannelStats] =
-    useState<Map<string, ChannelStatsDerived>>()
+    useState<Map<string, ChannelDeltaStats>>()
   const [relationStats, setRelationStats] = useState<{
     [key: number]: RelationStats
   }>()
@@ -135,7 +137,8 @@ export default function StreamingGraph() {
       )
       api.get("/metrics/streaming_stats_prometheus").then(
         (res) => {
-          console.log(res)
+          let response = GetStreamingPrometheusStatsResponse.fromJSON(res)
+          console.log(response)
         },
         (e) => {
           console.error(e)
@@ -151,15 +154,15 @@ export default function StreamingGraph() {
   }, [toast, resetEmbeddedBackPressures])
 
   // Convert fragment-level backpressure rate map to relation-level backpressure rate
-  const relationChannelStats: Map<string, ChannelStatsDerived> | undefined =
+  const relationChannelStats: Map<string, ChannelDeltaStats> | undefined =
     useMemo(() => {
       if (!fragmentToRelationMap) {
-        return new Map<string, ChannelStatsDerived>()
+        return new Map<string, ChannelDeltaStats>()
       }
       let inMap = fragmentToRelationMap.inMap
       let outMap = fragmentToRelationMap.outMap
       if (channelStats) {
-        let map = new Map<string, ChannelStatsDerived>()
+        let map = new Map<string, ChannelDeltaStats>()
         for (const [key, stats] of channelStats) {
           const [outputFragment, inputFragment] = key.split("_").map(Number)
           if (outMap[outputFragment] && inMap[inputFragment]) {
