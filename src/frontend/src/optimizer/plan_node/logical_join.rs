@@ -1362,7 +1362,7 @@ impl LogicalJoin {
             return Ok(None);
         }
 
-        let left = self.left().to_stream(ctx)?;
+        let left = self.left().to_stream(ctx)?.enforce_concrete_distribution();
         let right = self.right().to_stream_with_dist_required(
             &RequiredDist::PhysicalDist(Distribution::Broadcast),
             ctx,
