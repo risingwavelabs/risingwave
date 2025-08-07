@@ -17,7 +17,6 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use phf::{Set, phf_set};
-use crate::sink::snowflake::AugmentedChunk;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::types::DataType;
@@ -37,7 +36,7 @@ use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::remote::CoordinatedRemoteSinkWriter;
-use crate::sink::snowflake::{SNOWFLAKE_SINK_OP, SNOWFLAKE_SINK_ROW_ID};
+use crate::sink::snowflake::{AugmentedChunk, SNOWFLAKE_SINK_OP, SNOWFLAKE_SINK_ROW_ID};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam,
