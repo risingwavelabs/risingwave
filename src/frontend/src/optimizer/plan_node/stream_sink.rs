@@ -41,7 +41,7 @@ use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
 use super::{
-    ExprRewritable, PlanBase, StreamNode, StreamPlanRef as PlanRef, StreamProject,
+    ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanRef as PlanRef, StreamProject,
     StreamSyncLogStore, generic,
 };
 use crate::TableCatalog;
@@ -355,6 +355,14 @@ impl StreamSink {
             }
         };
         let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
+        let input = if input.ctx().session_ctx().config().streaming_separate_sink()
+            && input.as_stream_exchange().is_none()
+        {
+            StreamExchange::new_no_shuffle(input).into()
+        } else {
+            input
+        };
+
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let create_type = if input.ctx().session_ctx().config().background_ddl()
             && plan_can_use_background_ddl(&input)
