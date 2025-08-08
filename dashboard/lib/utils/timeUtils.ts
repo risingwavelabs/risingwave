@@ -48,7 +48,7 @@ export function parseDuration(durationStr: string): number {
  */
 export function parseTimestampToUnixEpoch(
   timestamp: string,
-  timezone: string
+  timezone: string = Intl.DateTimeFormat().resolvedOptions().timeZone
 ): number {
   try {
     // Create a date object from the timestamp string
@@ -63,6 +63,42 @@ export function parseTimestampToUnixEpoch(
   } catch (error) {
     throw new Error("Invalid timestamp format")
   }
+}
+
+/**
+ * Get current time in system timezone as ISO string
+ */
+export function getCurrentTimeInSystemTimezone(): string {
+  const now = new Date()
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+  // Format the date in the system timezone
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: timeZone,
+    hour12: false,
+  })
+
+  const formatted = formatter.formatToParts(now)
+  const datePart =
+    formatted.find((part) => part.type === "year")?.value +
+    "-" +
+    formatted.find((part) => part.type === "month")?.value +
+    "-" +
+    formatted.find((part) => part.type === "day")?.value
+  const timePart =
+    formatted.find((part) => part.type === "hour")?.value +
+    ":" +
+    formatted.find((part) => part.type === "minute")?.value +
+    ":" +
+    formatted.find((part) => part.type === "second")?.value
+
+  return `${datePart}T${timePart}`
 }
 
 /**
