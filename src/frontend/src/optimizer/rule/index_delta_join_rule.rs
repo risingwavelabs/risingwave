@@ -108,7 +108,7 @@ impl Rule<Stream> for IndexDeltaJoinRule {
             {
                 // Check join key is prefix of primary table order key
                 let primary_table_order_key_prefix = primary_table
-                    .table_desc
+                    .table_catalog
                     .pk
                     .iter()
                     .map(|x| x.column_index)

@@ -48,17 +48,6 @@ pub struct CdcTableDesc {
 }
 
 impl CdcTableDesc {
-    pub fn order_column_indices(&self) -> Vec<usize> {
-        self.pk.iter().map(|col| (col.column_index)).collect()
-    }
-
-    pub fn order_column_ids(&self) -> Vec<ColumnId> {
-        self.pk
-            .iter()
-            .map(|col| self.columns[col.column_index].column_id)
-            .collect()
-    }
-
     pub fn to_protobuf(&self) -> ExternalTableDesc {
         ExternalTableDesc {
             table_id: self.table_id.into(),
@@ -74,10 +63,6 @@ impl CdcTableDesc {
 
     /// Helper function to create a mapping from `column id` to `column index`
     pub fn get_id_to_op_idx_mapping(&self) -> HashMap<ColumnId, usize> {
-        let mut id_to_idx = HashMap::new();
-        self.columns.iter().enumerate().for_each(|(idx, c)| {
-            id_to_idx.insert(c.column_id, idx);
-        });
-        id_to_idx
+        ColumnDesc::get_id_to_op_idx_mapping(self.columns.as_slice(), None)
     }
 }

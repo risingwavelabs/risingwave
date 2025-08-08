@@ -159,13 +159,13 @@ impl TryToStreamPb for StreamDeltaJoin {
         } else {
             unreachable!();
         };
-        let left_table_desc = &*left_table.table_desc;
+        let left_table_catalog = &*left_table.table_catalog;
         let right_table = if let Some(stream_table_scan) = right.as_stream_table_scan() {
             stream_table_scan.core()
         } else {
             unreachable!();
         };
-        let right_table_desc = &*right_table.table_desc;
+        let right_table_catalog = &*right_table.table_catalog;
 
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
@@ -186,18 +186,18 @@ impl TryToStreamPb for StreamDeltaJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            left_table_id: left_table_desc.table_id.table_id(),
-            right_table_id: right_table_desc.table_id.table_id(),
+            left_table_id: left_table_catalog.id.table_id(),
+            right_table_id: right_table_catalog.id.table_id(),
             left_info: Some(ArrangementInfo {
                 // TODO: remove it
-                arrange_key_orders: left_table_desc.arrange_key_orders_protobuf(),
+                arrange_key_orders: left_table_catalog.arrange_key_orders_protobuf(),
                 // TODO: remove it
                 column_descs: left_table
                     .column_descs()
                     .iter()
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
-                table_desc: Some(left_table_desc.try_to_protobuf()?),
+                table_desc: Some(left_table_catalog.table_desc().try_to_protobuf()?),
                 output_col_idx: left_table
                     .output_col_idx
                     .iter()
@@ -206,14 +206,14 @@ impl TryToStreamPb for StreamDeltaJoin {
             }),
             right_info: Some(ArrangementInfo {
                 // TODO: remove it
-                arrange_key_orders: right_table_desc.arrange_key_orders_protobuf(),
+                arrange_key_orders: right_table_catalog.arrange_key_orders_protobuf(),
                 // TODO: remove it
                 column_descs: right_table
                     .column_descs()
                     .iter()
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
-                table_desc: Some(right_table_desc.try_to_protobuf()?),
+                table_desc: Some(right_table_catalog.table_desc().try_to_protobuf()?),
                 output_col_idx: right_table
                     .output_col_idx
                     .iter()

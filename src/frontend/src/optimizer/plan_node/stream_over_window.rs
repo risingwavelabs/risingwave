@@ -118,6 +118,7 @@ impl StreamNode for StreamOverWindow {
             .core
             .order_key()
             .iter()
+            .copied()
             .map(ColumnOrder::to_protobuf)
             .collect();
         let state_table = self

@@ -257,7 +257,7 @@ impl TryToStreamPb for StreamTemporalJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
-            table_desc: Some(scan.core().table_desc.try_to_protobuf()?),
+            table_desc: Some(scan.core().table_catalog.table_desc().try_to_protobuf()?),
             table_output_indices: scan.core().output_col_idx.iter().map(|&i| i as _).collect(),
             memo_table: if self.append_only {
                 None
