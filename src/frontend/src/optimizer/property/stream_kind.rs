@@ -50,17 +50,26 @@ impl StreamKind {
 /// Reject upsert stream as input.
 macro_rules! reject_upsert_input {
     ($input:expr) => {
-        if let StreamKind::Upsert = $input.stream_kind() {
-            return Err(::anyhow::anyhow!(
+        reject_upsert_input!(
+            $input,
+            std::any::type_name::<Self>().split("::").last().unwrap()
+        )
+    };
+
+    ($input:expr, $curr:expr) => {{
+        use crate::optimizer::property::StreamKind;
+        let kind = $input.stream_kind();
+        if let StreamKind::Upsert = kind {
+            risingwave_common::bail!(
                 "{} yields upsert stream, which is not supported as input of {}",
                 std::any::type_name_of_val(&$input)
                     .split("::")
                     .last()
                     .unwrap(),
-                std::any::type_name::<Self>().split("::").last().unwrap(),
-            )
-            .into());
+                $curr,
+            );
         }
-    };
+        kind
+    }};
 }
 pub(crate) use reject_upsert_input;
