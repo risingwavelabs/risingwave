@@ -60,6 +60,7 @@ mod row_merge;
 mod approx_percentile;
 
 mod sync_log_store;
+mod vector_index;
 
 // import for submodules
 use itertools::Itertools;
@@ -112,6 +113,7 @@ use crate::error::StreamResult;
 use crate::executor::{Execute, Executor, ExecutorInfo};
 use crate::from_proto::changelog::ChangeLogExecutorBuilder;
 use crate::from_proto::values::ValuesExecutorBuilder;
+use crate::from_proto::vector_index::VectorIndexWriteExecutorBuilder;
 use crate::task::ExecutorParams;
 
 trait ExecutorBuilder {
@@ -195,5 +197,6 @@ pub async fn create_executor(
         NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
         NodeBody::SyncLogStore => SyncLogStoreExecutorBuilder,
         NodeBody::MaterializedExprs => MaterializedExprsExecutorBuilder,
+        NodeBody::VectorIndexWrite => VectorIndexWriteExecutorBuilder,
     }
 }

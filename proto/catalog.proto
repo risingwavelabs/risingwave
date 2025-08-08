@@ -357,6 +357,17 @@ message Function {
   message AggregateFunction {}
 }
 
+message FlatIndexConfig {}
+
+message VectorIndexInfo {
+  uint32 dimension = 1;
+  common.DistanceType distance_type = 2;
+  oneof config {
+    // reserve 64 general configs
+    FlatIndexConfig flat = 65;
+  }
+}
+
 // Includes full information about a table.
 //
 // Here `Table` is an internal concept, corresponding to _a table in storage_, all of which can be `SELECT`ed.
@@ -501,6 +512,9 @@ message Table {
   // Whether the table supports manual refresh operation:
   // reload data from external source and emit messages based on the diff with current data.
   bool refreshable = 45;
+
+  // only exist when table_type is VECTOR_INDEX.
+  optional VectorIndexInfo vector_index_info = 46;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
