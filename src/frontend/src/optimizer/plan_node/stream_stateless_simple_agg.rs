@@ -55,7 +55,9 @@ impl StreamStatelessSimpleAgg {
         let base = PlanBase::new_stream_with_core(
             &core,
             input_dist.clone(),
-            input.append_only(),
+            // Stateless simple agg outputs one `Insert` row per epoch to the global phase.
+            // TODO(kind): reject upsert input
+            StreamKind::AppendOnly,
             input.emit_on_window_close(),
             watermark_columns,
             MonotonicityMap::new(),

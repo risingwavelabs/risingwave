@@ -28,7 +28,7 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeBinary, StreamNode, StreamPlanRef as PlanRef,
 };
-use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -47,16 +47,17 @@ impl StreamDynamicFilter {
                 ExprType::LessThan | ExprType::LessThanOrEqual
             );
 
-        let out_append_only = if condition_always_relax {
-            core.left().append_only()
+        let out_kind = if condition_always_relax && core.left().append_only() {
+            StreamKind::AppendOnly
         } else {
-            false
+            // TODO(kind): check if the impl can handle upsert stream.
+            StreamKind::Retract
         };
 
         let base = PlanBase::new_stream_with_core(
             &core,
             core.left().distribution().clone(),
-            out_append_only,
+            out_kind,
             false, // TODO(rc): decide EOWC property
             Self::derive_watermark_columns(&core),
             MonotonicityMap::new(), // TODO: derive monotonicity

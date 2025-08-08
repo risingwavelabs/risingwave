@@ -24,6 +24,7 @@ use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, generic};
 use crate::TableCatalog;
 use crate::optimizer::plan_node::StreamPlanRef as PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::StreamKind;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -41,7 +42,7 @@ impl StreamDedup {
         let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
-            true,
+            StreamKind::AppendOnly,
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),

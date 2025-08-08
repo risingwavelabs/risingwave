@@ -1562,7 +1562,7 @@
       │                 └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6] }
-          └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] }
+          └─StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr5)] }
                 └─StreamHashAgg { group_key: [$expr5], aggs: [count] }
@@ -1622,7 +1622,7 @@
 
     Fragment 6
     StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6] }
-    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] } { tables: [ SimpleAggState: 11 ] }
+    └── StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] } { tables: [ SimpleAggState: 11 ] }
         └── StreamExchange Single from 7
 
     Fragment 7

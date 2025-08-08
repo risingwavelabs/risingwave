@@ -34,3 +34,5 @@ mod monotonicity;
 pub use monotonicity::*;
 mod watermark_columns;
 pub use watermark_columns::*;
+mod stream_kind;
+pub use stream_kind::*;

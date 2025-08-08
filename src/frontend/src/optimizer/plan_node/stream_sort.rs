@@ -75,7 +75,7 @@ impl StreamEowcSort {
             stream_key,
             fd_set,
             dist,
-            true,
+            StreamKind::AppendOnly,
             true,
             watermark_columns,
             columns_monotonicity,
