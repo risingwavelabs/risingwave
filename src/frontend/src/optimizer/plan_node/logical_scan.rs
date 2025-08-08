@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::rc::Rc;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -31,7 +30,9 @@ use super::{
     ToStream, generic,
 };
 use crate::TableCatalog;
-use crate::catalog::{ColumnId, IndexCatalog};
+use crate::binder::BoundBaseTable;
+use crate::catalog::ColumnId;
+use crate::catalog::index_catalog::{IndexType, TableIndex};
 use crate::error::Result;
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::ApplyResult;
@@ -91,29 +92,48 @@ impl GenericPlanRef for LogicalScan {
 impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
-        table_name: String, // explain-only
         table_catalog: Arc<TableCatalog>,
-        indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         as_of: Option<AsOf>,
-        table_cardinality: Cardinality,
     ) -> Self {
         let output_col_idx: Vec<usize> = (0..table_catalog.columns().len()).collect();
         generic::TableScan::new(
-            table_name,
             output_col_idx,
             table_catalog,
-            indexes,
+            vec![],
             ctx,
             Condition::true_cond(),
             as_of,
-            table_cardinality,
+        )
+        .into()
+    }
+
+    pub fn from_base_table(
+        base_table: &BoundBaseTable,
+        ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
+    ) -> Self {
+        let table_catalog = base_table.table_catalog.clone();
+        let output_col_idx: Vec<usize> = (0..table_catalog.columns().len()).collect();
+        let mut table_indexes = vec![];
+        for index in &base_table.table_indexes {
+            match &index.index_type {
+                IndexType::Table(index) => table_indexes.push(index.clone()),
+            }
+        }
+        generic::TableScan::new(
+            output_col_idx,
+            table_catalog,
+            table_indexes,
+            ctx,
+            Condition::true_cond(),
+            as_of,
         )
         .into()
     }
 
     pub fn table_name(&self) -> &str {
-        &self.core.table_name
+        &self.core.table_catalog.name
     }
 
     pub fn as_of(&self) -> Option<AsOf> {
@@ -122,7 +142,7 @@ impl LogicalScan {
 
     /// The cardinality of the table **without** applying the predicate.
     pub fn table_cardinality(&self) -> Cardinality {
-        self.core.table_cardinality
+        self.core.table_catalog.cardinality
     }
 
     // FIXME(kwannoel): Fetch from `table_catalog` + lazily instantiate?
@@ -145,9 +165,9 @@ impl LogicalScan {
         self.core.output_column_ids()
     }
 
-    /// Get all indexes on this table
-    pub fn indexes(&self) -> &[Rc<IndexCatalog>] {
-        &self.core.indexes
+    /// Get all table indexes on this table
+    pub fn table_indexes(&self) -> &[Arc<TableIndex>] {
+        &self.core.table_indexes
     }
 
     /// Get the logical scan's filter predicate
@@ -170,7 +190,7 @@ impl LogicalScan {
     }
 
     /// Return indexes can satisfy the required order.
-    pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Rc<IndexCatalog>> {
+    pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Arc<TableIndex>> {
         self.indexes_satisfy_order_with_prefix(required_order, &HashSet::new())
             .into_iter()
             .map(|(index, _)| index)
@@ -185,7 +205,7 @@ impl LogicalScan {
         &self,
         required_order: &Order,
         prefix: &HashSet<ColumnOrder>,
-    ) -> Vec<(&Rc<IndexCatalog>, Order)> {
+    ) -> Vec<(&Arc<TableIndex>, Order)> {
         let output_col_map = self
             .output_col_idx()
             .iter()
@@ -195,7 +215,7 @@ impl LogicalScan {
             .collect::<BTreeMap<_, _>>();
         let unmatched_idx = output_col_map.len();
         let mut index_catalog_and_orders = vec![];
-        for index in self.indexes() {
+        for index in self.table_indexes() {
             let s2p_mapping = index.secondary_to_primary_mapping();
             let index_orders: Vec<ColumnOrder> = index
                 .index_table
@@ -241,7 +261,7 @@ impl LogicalScan {
     }
 
     /// If the index can cover the scan, transform it to the index scan.
-    pub fn to_index_scan_if_index_covered(&self, index: &Rc<IndexCatalog>) -> Option<LogicalScan> {
+    pub fn to_index_scan_if_index_covered(&self, index: &Arc<TableIndex>) -> Option<LogicalScan> {
         let p2s_mapping = index.primary_to_secondary_mapping();
         if self
             .required_col_idx()
@@ -249,7 +269,6 @@ impl LogicalScan {
             .all(|x| p2s_mapping.contains_key(x))
         {
             let index_scan = self.core.to_index_scan(
-                &index.name,
                 index.index_table.clone(),
                 p2s_mapping,
                 index.function_mapping(),
@@ -298,14 +317,12 @@ impl LogicalScan {
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
         let scan_without_predicate = generic::TableScan::new(
-            self.table_name().to_owned(),
             self.required_col_idx().to_vec(),
             self.core.table_catalog.clone(),
-            self.indexes().to_vec(),
+            self.table_indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
             self.as_of(),
-            self.table_cardinality(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
             Some(self.output_idx_to_input_ref())
@@ -317,28 +334,24 @@ impl LogicalScan {
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::TableScan::new_inner(
-            self.table_name().to_owned(),
             self.output_col_idx().to_vec(),
             self.table_catalog(),
-            self.indexes().to_vec(),
+            self.table_indexes().to_vec(),
             self.base.ctx().clone(),
             predicate,
             self.as_of(),
-            self.table_cardinality(),
         )
         .into()
     }
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::TableScan::new_inner(
-            self.table_name().to_owned(),
             output_col_idx,
             self.core.table_catalog.clone(),
-            self.indexes().to_vec(),
+            self.table_indexes().to_vec(),
             self.base.ctx().clone(),
             self.predicate().clone(),
             self.as_of(),
-            self.table_cardinality(),
         )
         .into()
     }
@@ -555,7 +568,7 @@ impl ToBatch for LogicalScan {
     ) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new = self.clone_with_predicate(self.predicate().clone());
 
-        if !new.indexes().is_empty() {
+        if !new.table_indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
             if let ApplyResult::Ok(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {

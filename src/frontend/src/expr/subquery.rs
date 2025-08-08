@@ -154,8 +154,8 @@ impl Expr for Subquery {
         }
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Subquery {:?} has not been unnested", self)
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
+        Err(format!("Subquery {:?} has not been unnested", self))
     }
 }
 

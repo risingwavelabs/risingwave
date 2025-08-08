@@ -143,7 +143,7 @@ impl Distill for BatchLookupJoin {
 
         let scan: &BatchSeqScan = self.core.right.as_batch_seq_scan().unwrap();
 
-        vec.push(("lookup table", Pretty::display(&scan.core().table_name)));
+        vec.push(("lookup table", Pretty::display(&scan.core().table_name())));
 
         childless_record("BatchLookupJoin", vec)
     }

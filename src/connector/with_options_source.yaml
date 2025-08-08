@@ -32,6 +32,24 @@ AzblobProperties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+BatchPosixFsProperties:
+  fields:
+  - name: batch_posix_fs.root
+    field_type: String
+    comments: The root directory of the files to search. The files will be searched recursively.
+    required: true
+  - name: match_pattern
+    field_type: String
+    comments: The glob pattern to match files under root directory.
+    required: false
+    default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 DatagenProperties:
   fields:
   - name: datagen.split.num

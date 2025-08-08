@@ -209,6 +209,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::JsonbBuildArrayVariadic
             | Type::JsonbBuildObject
             | Type::JsonbPopulateRecord
+            | Type::JsonbToArray
             | Type::JsonbToRecord
             | Type::JsonbBuildObjectVariadic
             | Type::JsonbPathExists

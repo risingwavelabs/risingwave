@@ -123,6 +123,13 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
         unreachable!()
     }
+
+    async fn handle_load_finished_source_ids(
+        &self,
+        _load_finished_source_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        unimplemented!()
+    }
 }
 
 #[tokio::test]

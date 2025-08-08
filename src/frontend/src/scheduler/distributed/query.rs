@@ -604,18 +604,11 @@ pub(crate) mod tests {
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
         };
-        let batch_plan_node = LogicalScan::create(
-            "".to_owned(),
-            table_catalog.into(),
-            vec![],
-            ctx,
-            None,
-            Cardinality::unknown(),
-        )
-        .to_batch()
-        .unwrap()
-        .to_distributed()
-        .unwrap();
+        let batch_plan_node = LogicalScan::create(table_catalog.into(), ctx, None)
+            .to_batch()
+            .unwrap()
+            .to_distributed()
+            .unwrap();
         let batch_filter = BatchFilter::new(generic::Filter::new(
             Condition {
                 conjunctions: vec![],

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::ops::Deref;
 
 use itertools::Itertools;
 use risingwave_common::types::Datum;
@@ -262,6 +263,14 @@ impl From<&ColumnDesc> for PbColumnDesc {
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
+}
+
+impl Deref for ColumnCatalog {
+    type Target = ColumnDesc;
+
+    fn deref(&self) -> &Self::Target {
+        &self.column_desc
+    }
 }
 
 impl ColumnCatalog {

@@ -58,6 +58,44 @@ impl Query {
             _ => None,
         }
     }
+
+    /// `SELECT <expr>` without other clauses.
+    pub fn as_single_select_item(&self) -> Option<&Expr> {
+        match &self {
+            Query {
+                with: None,
+                body: SetExpr::Select(select),
+                order_by,
+                limit: None,
+                offset: None,
+                fetch: None,
+            } if order_by.is_empty() => match select.as_ref() {
+                Select {
+                    distinct: Distinct::All,
+                    projection,
+                    from,
+                    lateral_views,
+                    selection: None,
+                    group_by,
+                    having: None,
+                    window,
+                } if projection.len() == 1
+                    && from.is_empty()
+                    && lateral_views.is_empty()
+                    && group_by.is_empty()
+                    && window.is_empty() =>
+                {
+                    match &projection[0] {
+                        SelectItem::UnnamedExpr(expr) => Some(expr),
+                        SelectItem::ExprWithAlias { expr, .. } => Some(expr),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Query {

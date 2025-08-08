@@ -142,7 +142,7 @@ impl Distill for BatchSeqScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
-        vec.push(("table", Pretty::from(self.core.table_name.clone())));
+        vec.push(("table", Pretty::from(self.core.table_name().to_owned())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
 
         if !self.scan_ranges.is_empty() {

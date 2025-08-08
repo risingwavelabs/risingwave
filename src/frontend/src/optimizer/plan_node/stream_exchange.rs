@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
+
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -38,6 +40,12 @@ pub struct StreamExchange {
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
+        assert_matches!(
+            dist,
+            Distribution::HashShard(_) | Distribution::Single | Distribution::Broadcast,
+            "exchange can not be used to enforce such distribution"
+        );
+
         let columns_monotonicity = if input.distribution().satisfies(&RequiredDist::single()) {
             // If the input is a singleton, the monotonicity will be preserved during shuffle
             // since we use ordered channel/buffer when exchanging data.

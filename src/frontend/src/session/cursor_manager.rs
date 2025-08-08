@@ -49,7 +49,7 @@ use crate::handler::util::{
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
 use crate::optimizer::PlanRoot;
 use crate::optimizer::plan_node::{BatchFilter, BatchLogSeqScan, BatchSeqScan, generic};
-use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot};
 use crate::utils::Condition;
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
@@ -950,7 +950,6 @@ impl SubscriptionCursor {
             (batch_log_seq_scan.into(), out_fields, out_names)
         } else {
             let core = generic::TableScan::new(
-                table_catalog.name.clone(),
                 output_col_idx,
                 table_catalog.clone(),
                 vec![],
@@ -959,7 +958,6 @@ impl SubscriptionCursor {
                     conjunctions: vec![],
                 },
                 None,
-                Cardinality::default(),
             );
             let scans = match scan {
                 Some(scan) => vec![scan],
