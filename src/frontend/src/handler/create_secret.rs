@@ -31,9 +31,7 @@ pub async fn handle_create_secret(
     handler_args: HandlerArgs,
     stmt: CreateSecretStatement,
 ) -> Result<RwPgResponse> {
-    Feature::SecretManagement
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
+    Feature::SecretManagement.check_available()?;
 
     let session = handler_args.session.clone();
     let db_name = &session.database();

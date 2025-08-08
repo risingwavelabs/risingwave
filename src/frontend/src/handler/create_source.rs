@@ -746,9 +746,7 @@ pub fn bind_connector_props(
                 ))
             })?
         {
-            Feature::CdcAutoSchemaChange
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
+            Feature::CdcAutoSchemaChange.check_available()?;
         }
 
         // set connector to backfill mode
