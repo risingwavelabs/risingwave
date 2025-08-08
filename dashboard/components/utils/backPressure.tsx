@@ -16,10 +16,10 @@ export function backPressureColor(value: number) {
   ].map((c) => tinycolor(c))
 
   value = Math.max(value, 0)
-  value = Math.min(value, 100)
+  value = Math.min(value, 1)
 
   const step = colorRange.length - 1
-  const pos = (value / 100) * step
+  const pos = value * step
   const floor = Math.floor(pos)
   const ceil = Math.ceil(pos)
 
@@ -37,9 +37,9 @@ export function backPressureColor(value: number) {
  */
 export function backPressureWidth(value: number, scale: number) {
   value = Math.max(value, 0)
-  value = Math.min(value, 100)
+  value = Math.min(value, 1)
 
-  return scale * (value / 100) + 2
+  return scale * value + 2
 }
 
 export function epochToUnixMillis(epoch: number) {
