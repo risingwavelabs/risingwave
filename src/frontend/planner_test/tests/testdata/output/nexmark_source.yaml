@@ -1914,7 +1914,7 @@
       │             └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(auction))) as $expr1] }
-          └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(auction)), count] }
+          └─StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count(auction)), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [sum0(count), count(auction)] }
                 └─StreamHashAgg [append_only] { group_key: [auction], aggs: [count] }
@@ -1950,7 +1950,7 @@
 
     Fragment 4
     StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(auction))) as $expr1] }
-    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(auction)), count] } { tables: [ SimpleAggState: 9 ] }
+    └── StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count(auction)), count] } { tables: [ SimpleAggState: 9 ] }
         └── StreamExchange Single from 5
 
     Fragment 5
