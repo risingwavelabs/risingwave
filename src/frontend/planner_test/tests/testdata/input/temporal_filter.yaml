@@ -135,3 +135,16 @@
     select * from t where a > extract(hour from now());
   expected_outputs:
     - stream_error
+- name: Temporal filter after singleton (top-n)
+  sql: |
+    create table t (a int, ta timestamp with time zone);
+    with cte as (select * from t order by a limit 10) select * from cte where ta >= now() - interval '2 hour';
+  expected_outputs:
+  - stream_plan
+- name: Temporal filter after some-shard (full outer join), an exchange is required
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 full outer join t2 on ta = tb where ta is null or ta >= now() - interval '2 hour';
+  expected_outputs:
+    - stream_plan

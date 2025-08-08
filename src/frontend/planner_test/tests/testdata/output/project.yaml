@@ -34,3 +34,33 @@
     └─StreamProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, (*VALUES*_0.column_0 + 1:Int32) as $expr2, $expr1, Upper(*VALUES*_0.column_1) as $expr3, _row_id] }
       └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, *VALUES*_0.column_1) as $expr1] }
         └─StreamValues { rows: [[1:Int32, 'hello':Varchar, 0:Int64], [2:Int32, 'world':Varchar, 1:Int64]] }
+- name: materialize impure expressions after singleton (top-n)
+  sql: |
+    create table t (v int);
+    with cte as (select v from t order by v limit 10) select pg_sleep(v) from cte;
+  stream_plan: |-
+    StreamMaterialize { columns: [pg_sleep, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [$expr1, t._row_id] }
+      └─StreamMaterializedExprs { exprs: [PgSleep(t.v::Float64) as $expr1] }
+        └─StreamProject { exprs: [t.v, t._row_id] }
+          └─StreamTopN { order: [t.v ASC], limit: 10, offset: 0 }
+            └─StreamExchange { dist: Single }
+              └─StreamGroupTopN { order: [t.v ASC], limit: 10, offset: 0, group_key: [_vnode] }
+                └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as _vnode] }
+                  └─StreamTableScan { table: t, columns: [t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: materialized impure expressions after some-shard (full outer join)
+  sql: |
+    create table t1 (v int);
+    create table t2 (v int);
+    with cte as (select t1.v v from t1 full outer join t2 on t1.v = t2.v) select pg_sleep(v) from cte;
+  stream_plan: |-
+    StreamMaterialize { columns: [pg_sleep, t1._row_id(hidden), t2._row_id(hidden), t1.v(hidden), t2.v(hidden)], stream_key: [t1._row_id, t2._row_id, t1.v, t2.v], pk_columns: [t1._row_id, t2._row_id, t1.v, t2.v], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [$expr1, t1._row_id, t2._row_id, t1.v, t2.v] }
+      └─StreamMaterializedExprs { exprs: [PgSleep(t1.v::Float64) as $expr1] }
+        └─StreamExchange { dist: HashShard(t1.v, t1._row_id, t2._row_id, t2.v) }
+          └─StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
+            └─StreamHashJoin { type: FullOuter, predicate: t1.v = t2.v, output: [t1.v, t1._row_id, t2._row_id, t2.v] }
+              ├─StreamExchange { dist: HashShard(t1.v) }
+              │ └─StreamTableScan { table: t1, columns: [t1.v, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+              └─StreamExchange { dist: HashShard(t2.v) }
+                └─StreamTableScan { table: t2, columns: [t2.v, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
