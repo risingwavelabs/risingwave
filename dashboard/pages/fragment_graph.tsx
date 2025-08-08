@@ -341,14 +341,16 @@ export default function Streaming() {
   }>()
 
   useEffect(() => {
+    let initialSnapshot: ChannelStatsSnapshot | undefined
+
     const refresh = createStreamingStatsRefresh(
       {
         setChannelStats,
         setFragmentStats,
         toast,
       },
+      initialSnapshot,
       "fragment",
-      true // Use initial snapshot for fragment graph
     )
 
     refresh() // run once immediately

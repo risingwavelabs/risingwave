@@ -43,11 +43,9 @@ export interface StreamingStatsCallbacks {
 
 export function createStreamingStatsRefresh(
   callbacks: StreamingStatsCallbacks,
+  initialSnapshot: ChannelStatsSnapshot | undefined,
   statsType: StatsType,
-  useInitialSnapshot: boolean = false
 ) {
-  let initialSnapshot: ChannelStatsSnapshot | undefined
-
   return function refresh() {
     // Try Prometheus first, fall back to embedded if it fails
     api.get("/metrics/streaming_stats_prometheus").then(
@@ -93,14 +91,10 @@ export function createStreamingStatsRefresh(
               Date.now()
             )
 
-            if (useInitialSnapshot) {
-              if (!initialSnapshot) {
-                initialSnapshot = snapshot
-              } else {
-                callbacks.setChannelStats(snapshot.getRate(initialSnapshot))
-              }
+            if (!initialSnapshot) {
+              initialSnapshot = snapshot
             } else {
-              callbacks.setChannelStats(snapshot.getRate(snapshot))
+              callbacks.setChannelStats(snapshot.getRate(initialSnapshot))
             }
 
             // Dispatch to the appropriate stats setter based on statsType
