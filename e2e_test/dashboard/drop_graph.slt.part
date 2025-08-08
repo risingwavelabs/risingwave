@@ -1,26 +1,5 @@
 # Drop materialized views in reverse dependency order (dependent MVs first, then base MVs)
 statement ok
-drop materialized view mv15;
-
-statement ok
-drop materialized view mv14;
-
-statement ok
-drop materialized view mv13;
-
-statement ok
-drop materialized view mv12;
-
-statement ok
-drop materialized view mv11;
-
-statement ok
-drop materialized view mv10;
-
-statement ok
-drop materialized view mv9;
-
-statement ok
 drop materialized view mv8;
 
 statement ok
