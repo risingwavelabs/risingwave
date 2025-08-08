@@ -23,7 +23,6 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import RelationGraph, { boxHeight, boxWidth } from "../components/RelationGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
-import api from "../lib/api/api"
 import useFetch from "../lib/api/fetch"
 import {
   Relation,
@@ -32,12 +31,9 @@ import {
   getRelations,
   relationIsStreamingJob,
 } from "../lib/api/streaming"
-import { RelationPoint } from "../lib/layout"
-import {
-  RelationStats,
-  ChannelDeltaStats,
-} from "../proto/gen/monitor_service"
 import { createStreamingStatsRefresh } from "../lib/api/streamingStats"
+import { RelationPoint } from "../lib/layout"
+import { ChannelDeltaStats, RelationStats } from "../proto/gen/monitor_service"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000

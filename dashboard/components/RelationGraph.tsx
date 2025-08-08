@@ -32,8 +32,7 @@ import {
   RelationPoint,
   RelationPointPosition,
 } from "../lib/layout"
-import { ChannelDeltaStats } from "../proto/gen/monitor_service"
-import { RelationStats } from "../proto/gen/monitor_service"
+import { ChannelDeltaStats, RelationStats } from "../proto/gen/monitor_service"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
 import {
   backPressureColor,
@@ -213,7 +212,9 @@ export default function RelationGraph({
           const tooltipText = `<b>Relation ${d.source} → ${
             d.target
           }</b><br>Backpressure: ${
-            stats != null ? `${(stats.backpressureRate * 100).toFixed(2)}%` : "N/A"
+            stats != null
+              ? `${(stats.backpressureRate * 100).toFixed(2)}%`
+              : "N/A"
           }<br>Recv Throughput: ${
             stats != null ? `${stats.recvThroughput.toFixed(2)} rows/s` : "N/A"
           }<br>Send Throughput: ${
