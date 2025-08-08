@@ -27,6 +27,7 @@ import {
 } from "@chakra-ui/react"
 import { useState } from "react"
 import {
+  getCurrentTimeInSystemTimezone,
   parseDuration,
   parseTimestampToUnixEpoch,
 } from "../lib/utils/timeUtils"
@@ -54,7 +55,7 @@ export default function TimeControls({
     // Parse timestamp if provided
     if (timestampInput.trim()) {
       try {
-        timestamp = parseTimestampToUnixEpoch(timestampInput, "UTC")
+        timestamp = parseTimestampToUnixEpoch(timestampInput)
         setDisplayTimestamp(new Date(timestamp * 1000).toISOString())
         setTimestampError("")
       } catch (error) {
@@ -99,11 +100,11 @@ export default function TimeControls({
       </Text>
       <VStack spacing={3} align="stretch">
         <FormControl isInvalid={!!timestampError}>
-          <FormLabel fontSize="sm">Timestamp (ISO format)</FormLabel>
+          <FormLabel fontSize="sm">Timestamp (system timezone)</FormLabel>
           <HStack spacing={2}>
             <Input
               size="sm"
-              placeholder="2024-01-15T10:30:00Z"
+              placeholder="2024-01-15T10:30:00 (system timezone)"
               value={timestampInput}
               onChange={(e) => setTimestampInput(e.target.value)}
             />
@@ -111,7 +112,7 @@ export default function TimeControls({
               size="sm"
               variant="outline"
               onClick={() => {
-                const now = new Date().toISOString()
+                const now = getCurrentTimeInSystemTimezone()
                 setTimestampInput(now)
                 setTimestampError("")
               }}
