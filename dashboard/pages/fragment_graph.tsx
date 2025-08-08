@@ -42,21 +42,20 @@ import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
-import api from "../lib/api/api"
 import useFetch from "../lib/api/fetch"
 import {
   getFragmentsByJobId,
   getRelationIdInfos,
   getStreamingJobs,
 } from "../lib/api/streaming"
+import { createStreamingStatsRefresh } from "../lib/api/streamingStats"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import {
-  ChannelStats,
   ChannelDeltaStats,
+  ChannelStats,
   FragmentStats,
 } from "../proto/gen/monitor_service"
-import { createStreamingStatsRefresh } from "../lib/api/streamingStats"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {

@@ -15,23 +15,30 @@
  *
  */
 
-import api from "./api"
+import { ChannelStatsSnapshot } from "../../pages/fragment_graph"
 import {
+  ChannelDeltaStats,
+  FragmentStats,
   GetStreamingPrometheusStatsResponse,
   GetStreamingStatsResponse,
-  ChannelDeltaStats,
   RelationStats,
-  FragmentStats,
 } from "../../proto/gen/monitor_service"
-import { ChannelStatsSnapshot } from "../../pages/fragment_graph"
+import api from "./api"
 
 export type StatsType = "relation" | "fragment"
 
 export interface StreamingStatsCallbacks {
   setChannelStats: (stats: Map<string, ChannelDeltaStats> | undefined) => void
-  setRelationStats?: (stats: { [key: number]: RelationStats } | undefined) => void
-  setFragmentStats?: (stats: { [key: number]: FragmentStats } | undefined) => void
-  toast: (error: any, status?: "info" | "warning" | "success" | "error" | "loading") => void
+  setRelationStats?: (
+    stats: { [key: number]: RelationStats } | undefined
+  ) => void
+  setFragmentStats?: (
+    stats: { [key: number]: FragmentStats } | undefined
+  ) => void
+  toast: (
+    error: any,
+    status?: "info" | "warning" | "success" | "error" | "loading"
+  ) => void
 }
 
 export function createStreamingStatsRefresh(
@@ -51,7 +58,7 @@ export function createStreamingStatsRefresh(
             new Map(Object.entries(response.channelStats)),
             Date.now()
           )
-          
+
           if (useInitialSnapshot) {
             if (!initialSnapshot) {
               initialSnapshot = snapshot
@@ -61,11 +68,19 @@ export function createStreamingStatsRefresh(
           } else {
             callbacks.setChannelStats(snapshot.getRate(snapshot))
           }
-          
+
           // Dispatch to the appropriate stats setter based on statsType
-          if (statsType === "relation" && callbacks.setRelationStats && response.relationStats) {
+          if (
+            statsType === "relation" &&
+            callbacks.setRelationStats &&
+            response.relationStats
+          ) {
             callbacks.setRelationStats(response.relationStats)
-          } else if (statsType === "fragment" && callbacks.setFragmentStats && response.fragmentStats) {
+          } else if (
+            statsType === "fragment" &&
+            callbacks.setFragmentStats &&
+            response.fragmentStats
+          ) {
             callbacks.setFragmentStats(response.fragmentStats)
           }
         },
@@ -88,11 +103,19 @@ export function createStreamingStatsRefresh(
             })
           }
           callbacks.setChannelStats(result)
-          
+
           // Dispatch to the appropriate stats setter based on statsType
-          if (statsType === "relation" && callbacks.setRelationStats && response.relationStats) {
+          if (
+            statsType === "relation" &&
+            callbacks.setRelationStats &&
+            response.relationStats
+          ) {
             callbacks.setRelationStats(response.relationStats)
-          } else if (statsType === "fragment" && callbacks.setFragmentStats && response.fragmentStats) {
+          } else if (
+            statsType === "fragment" &&
+            callbacks.setFragmentStats &&
+            response.fragmentStats
+          ) {
             callbacks.setFragmentStats(response.fragmentStats)
           }
         },
@@ -103,4 +126,4 @@ export function createStreamingStatsRefresh(
       )
     }
   }
-} 
+}
