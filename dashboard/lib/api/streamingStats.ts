@@ -49,81 +49,84 @@ export function createStreamingStatsRefresh(
   let initialSnapshot: ChannelStatsSnapshot | undefined
 
   return function refresh() {
-    let embedded = false
-    if (embedded) {
-      api.get("/metrics/streaming_stats").then(
-        (res) => {
-          let response = GetStreamingStatsResponse.fromJSON(res)
-          let snapshot = new ChannelStatsSnapshot(
-            new Map(Object.entries(response.channelStats)),
-            Date.now()
-          )
+    // Try Prometheus first, fall back to embedded if it fails
+    api.get("/metrics/streaming_stats_prometheus").then(
+      (res) => {
+        let response = GetStreamingPrometheusStatsResponse.fromJSON(res)
+        const result = new Map<string, ChannelDeltaStats>()
+        for (const [key, value] of Object.entries(response.channelStats)) {
+          result.set(key, {
+            actorCount: value.actorCount,
+            backpressureRate: value.backpressureRate,
+            recvThroughput: value.recvThroughput,
+            sendThroughput: value.sendThroughput,
+          })
+        }
+        callbacks.setChannelStats(result)
 
-          if (useInitialSnapshot) {
-            if (!initialSnapshot) {
-              initialSnapshot = snapshot
+        // Dispatch to the appropriate stats setter based on statsType
+        if (
+          statsType === "relation" &&
+          callbacks.setRelationStats &&
+          response.relationStats
+        ) {
+          callbacks.setRelationStats(response.relationStats)
+        } else if (
+          statsType === "fragment" &&
+          callbacks.setFragmentStats &&
+          response.fragmentStats
+        ) {
+          callbacks.setFragmentStats(response.fragmentStats)
+        }
+      },
+      (e) => {
+        console.error(
+          "Prometheus stats failed, falling back to embedded dashboard:",
+          e
+        )
+        // Fall back to embedded dashboard
+        api.get("/metrics/streaming_stats").then(
+          (res) => {
+            let response = GetStreamingStatsResponse.fromJSON(res)
+            let snapshot = new ChannelStatsSnapshot(
+              new Map(Object.entries(response.channelStats)),
+              Date.now()
+            )
+
+            if (useInitialSnapshot) {
+              if (!initialSnapshot) {
+                initialSnapshot = snapshot
+              } else {
+                callbacks.setChannelStats(snapshot.getRate(initialSnapshot))
+              }
             } else {
-              callbacks.setChannelStats(snapshot.getRate(initialSnapshot))
+              callbacks.setChannelStats(snapshot.getRate(snapshot))
             }
-          } else {
-            callbacks.setChannelStats(snapshot.getRate(snapshot))
-          }
 
-          // Dispatch to the appropriate stats setter based on statsType
-          if (
-            statsType === "relation" &&
-            callbacks.setRelationStats &&
-            response.relationStats
-          ) {
-            callbacks.setRelationStats(response.relationStats)
-          } else if (
-            statsType === "fragment" &&
-            callbacks.setFragmentStats &&
-            response.fragmentStats
-          ) {
-            callbacks.setFragmentStats(response.fragmentStats)
+            // Dispatch to the appropriate stats setter based on statsType
+            if (
+              statsType === "relation" &&
+              callbacks.setRelationStats &&
+              response.relationStats
+            ) {
+              callbacks.setRelationStats(response.relationStats)
+            } else if (
+              statsType === "fragment" &&
+              callbacks.setFragmentStats &&
+              response.fragmentStats
+            ) {
+              callbacks.setFragmentStats(response.fragmentStats)
+            }
+          },
+          (embeddedError) => {
+            console.error(
+              "Both Prometheus and embedded dashboard failed:",
+              embeddedError
+            )
+            callbacks.toast(embeddedError, "error")
           }
-        },
-        (e) => {
-          console.error(e)
-          callbacks.toast(e, "error")
-        }
-      )
-    } else {
-      api.get("/metrics/streaming_stats_prometheus").then(
-        (res) => {
-          let response = GetStreamingPrometheusStatsResponse.fromJSON(res)
-          const result = new Map<string, ChannelDeltaStats>()
-          for (const [key, value] of Object.entries(response.channelStats)) {
-            result.set(key, {
-              actorCount: value.actorCount,
-              backpressureRate: value.backpressureRate,
-              recvThroughput: value.recvThroughput,
-              sendThroughput: value.sendThroughput,
-            })
-          }
-          callbacks.setChannelStats(result)
-
-          // Dispatch to the appropriate stats setter based on statsType
-          if (
-            statsType === "relation" &&
-            callbacks.setRelationStats &&
-            response.relationStats
-          ) {
-            callbacks.setRelationStats(response.relationStats)
-          } else if (
-            statsType === "fragment" &&
-            callbacks.setFragmentStats &&
-            response.fragmentStats
-          ) {
-            callbacks.setFragmentStats(response.fragmentStats)
-          }
-        },
-        (e) => {
-          console.error(e)
-          callbacks.toast(e, "error")
-        }
-      )
-    }
+        )
+      }
+    )
   }
 }
