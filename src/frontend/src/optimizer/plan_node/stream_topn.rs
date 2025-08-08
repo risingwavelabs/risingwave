@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
+
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
 use super::stream::prelude::*;
 use super::utils::{Distill, plan_node_name};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode, generic};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, MonotonicityMap, Order, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -35,15 +39,12 @@ impl StreamTopN {
         assert!(core.group_key.is_empty());
         assert!(core.limit_attr.limit() > 0);
         let input = &core.input;
-        let dist = match input.distribution() {
-            Distribution::Single => Distribution::Single,
-            _ => panic!(),
-        };
+        assert_matches!(input.distribution(), Distribution::Single);
         let watermark_columns = WatermarkColumns::new();
 
         let base = PlanBase::new_stream_with_core(
             &core,
-            dist,
+            Distribution::Single,
             false,
             false,
             watermark_columns,
@@ -74,7 +75,7 @@ impl Distill for StreamTopN {
     }
 }
 
-impl PlanTreeNodeUnary for StreamTopN {
+impl PlanTreeNodeUnary<Stream> for StreamTopN {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -86,7 +87,7 @@ impl PlanTreeNodeUnary for StreamTopN {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamTopN }
+impl_plan_tree_node_for_unary! { Stream, StreamTopN }
 
 impl StreamNode for StreamTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -118,6 +119,6 @@ impl StreamNode for StreamTopN {
     }
 }
 
-impl ExprRewritable for StreamTopN {}
+impl ExprRewritable<Stream> for StreamTopN {}
 
 impl ExprVisitable for StreamTopN {}

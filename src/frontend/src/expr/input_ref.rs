@@ -138,13 +138,14 @@ impl Expr for InputRef {
         self.data_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
-        ExprNode {
+
+        Ok(ExprNode {
             function_type: ExprType::Unspecified.into(),
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(RexNode::InputRef(self.index() as _)),
-        }
+        })
     }
 }

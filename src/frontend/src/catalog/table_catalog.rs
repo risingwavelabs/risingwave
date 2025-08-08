@@ -18,8 +18,8 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Engine, Field, Schema, StreamJobStatus, TableDesc,
-    TableId, TableVersionId,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, Schema,
+    StreamJobStatus, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
@@ -28,6 +28,7 @@ use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
 };
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
+use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast;
@@ -683,6 +684,26 @@ impl TableCatalog {
 
     pub fn is_iceberg_engine_table(&self) -> bool {
         self.engine == Engine::Iceberg
+    }
+
+    pub fn order_column_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.pk.iter().map(|col| col.column_index)
+    }
+
+    pub fn get_id_to_op_idx_mapping(&self) -> HashMap<ColumnId, usize> {
+        ColumnDesc::get_id_to_op_idx_mapping(&self.columns, None)
+    }
+
+    pub fn order_column_ids(&self) -> Vec<ColumnId> {
+        self.pk
+            .iter()
+            .map(|col| self.columns[col.column_index].column_desc.column_id)
+            .collect()
+    }
+
+    pub fn arrange_key_orders_protobuf(&self) -> Vec<PbColumnOrder> {
+        // Set materialize key as arrange key + pk
+        self.pk.iter().map(|x| x.to_protobuf()).collect()
     }
 }
 

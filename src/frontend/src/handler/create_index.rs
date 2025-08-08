@@ -14,14 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{IndexId, TableDesc, TableId};
+use risingwave_common::catalog::{IndexId, TableId};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbStreamJobStatus};
 use risingwave_sqlparser::ast;
@@ -36,9 +35,11 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
-use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::plan_node::{
+    Explain, LogicalProject, LogicalScan, StreamMaterialize, StreamPlanRef as PlanRef,
+};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
@@ -73,8 +74,6 @@ pub(crate) fn gen_create_index_plan(
     include: Vec<Ident>,
     distributed_by: Vec<ast::Expr>,
 ) -> Result<(PlanRef, TableCatalog, PbIndex)> {
-    let table_name = table.name.clone();
-
     if table.is_index() {
         return Err(
             ErrorCode::InvalidInputSyntax(format!("\"{}\" is an index", table.name)).into(),
@@ -90,7 +89,7 @@ pub(crate) fn gen_create_index_plan(
     }
 
     let mut binder = Binder::new_for_stream(session);
-    binder.bind_table(Some(&schema_name), &table_name)?;
+    binder.bind_table(Some(&schema_name), &table.name)?;
 
     let mut index_columns_ordered_expr = vec![];
     let mut include_columns_expr = vec![];
@@ -148,8 +147,6 @@ pub(crate) fn gen_create_index_plan(
         distributed_columns_expr.push(expr_impl);
     }
 
-    let table_desc = Rc::new(table.table_desc());
-
     // Remove duplicate column of index columns
     let mut set = HashSet::new();
     index_columns_ordered_expr = index_columns_ordered_expr
@@ -198,7 +195,6 @@ pub(crate) fn gen_create_index_plan(
 
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
-        table_name,
         index_database_id,
         index_schema_id,
         table.clone(),
@@ -213,7 +209,6 @@ pub(crate) fn gen_create_index_plan(
         } else {
             distributed_columns_expr.len()
         },
-        table.cardinality,
     )?;
 
     let mut index_table = materialize.table().clone();
@@ -235,7 +230,7 @@ pub(crate) fn gen_create_index_plan(
     let index_item = build_index_item(
         &index_table,
         table.name(),
-        table_desc,
+        &table,
         index_columns_ordered_expr,
     );
 
@@ -271,10 +266,10 @@ pub(crate) fn gen_create_index_plan(
 fn build_index_item(
     index_table: &TableCatalog,
     primary_table_name: &str,
-    primary_table_desc: Rc<TableDesc>,
+    primary_table: &TableCatalog,
     index_columns: Vec<(ExprImpl, OrderType)>,
 ) -> Vec<risingwave_pb::expr::ExprNode> {
-    let primary_table_desc_map = primary_table_desc
+    let primary_table_desc_map = primary_table
         .columns
         .iter()
         .enumerate()
@@ -303,7 +298,7 @@ fn build_index_item(
                     let column_index = *primary_table_desc_map.get(&name).unwrap();
                     InputRef {
                         index: column_index,
-                        data_type: primary_table_desc
+                        data_type: primary_table
                             .columns
                             .get(column_index)
                             .unwrap()
@@ -319,7 +314,6 @@ fn build_index_item(
 /// Note: distributed by columns must be a prefix of index columns, so we just use
 /// `distributed_by_columns_len` to represent distributed by columns
 fn assemble_materialize(
-    table_name: String,
     database_id: DatabaseId,
     schema_id: SchemaId,
     table_catalog: Arc<TableCatalog>,
@@ -328,7 +322,6 @@ fn assemble_materialize(
     index_columns: &[(ExprImpl, OrderType)],
     include_columns: &[ExprImpl],
     distributed_by_columns_len: usize,
-    cardinality: Cardinality,
 ) -> Result<StreamMaterialize> {
     // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
@@ -337,15 +330,7 @@ fn assemble_materialize(
     let definition = context.normalized_sql().to_owned();
     let retention_seconds = table_catalog.retention_seconds.and_then(NonZeroU32::new);
 
-    let logical_scan = LogicalScan::create(
-        table_name,
-        table_catalog.clone(),
-        // Index table has no indexes.
-        vec![],
-        context,
-        None,
-        cardinality,
-    );
+    let logical_scan = LogicalScan::create(table_catalog.clone(), context, None);
 
     let exprs = index_columns
         .iter()

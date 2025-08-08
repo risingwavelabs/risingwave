@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode, generic};
+use super::{ExprRewritable, PlanBase, PlanNodeId, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
@@ -67,7 +67,7 @@ impl StreamTableScan {
                         Distribution::Single
                     } else {
                         // See also `BatchSeqScan::clone_with_dist`.
-                        Distribution::UpstreamHashShard(distribution_key, core.table_desc.table_id)
+                        Distribution::UpstreamHashShard(distribution_key, core.table_catalog.id)
                     }
                 }
                 None => Distribution::SomeShard,
@@ -91,7 +91,7 @@ impl StreamTableScan {
     }
 
     pub fn table_name(&self) -> &str {
-        &self.core.table_name
+        self.core.table_name()
     }
 
     pub fn core(&self) -> &generic::TableScan {
@@ -100,14 +100,12 @@ impl StreamTableScan {
 
     pub fn to_index_scan(
         &self,
-        index_name: &str,
         index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
         stream_scan_type: StreamScanType,
     ) -> StreamTableScan {
         let logical_index_scan = self.core.to_index_scan(
-            index_name,
             index_table_catalog,
             primary_to_secondary_mapping,
             function_mapping,
@@ -195,7 +193,7 @@ impl StreamTableScan {
                 // pk columns
                 for col_order in self.core.primary_key() {
                     let col = &upstream_schema[col_order.column_index];
-                    catalog_builder.add_column(&Field::from(col));
+                    catalog_builder.add_column(&Field::from(&**col));
                 }
 
                 // `backfill_finished` column
@@ -230,7 +228,7 @@ impl StreamTableScan {
                 // pk columns
                 for col_order in self.core.primary_key() {
                     let col = &upstream_schema[col_order.column_index];
-                    catalog_builder.add_column(&Field::from(col));
+                    catalog_builder.add_column(&Field::from(&col.column_desc));
                 }
             }
             StreamScanType::Unspecified => {
@@ -251,13 +249,13 @@ impl StreamTableScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamTableScan }
+impl_plan_tree_node_for_leaf! { Stream, StreamTableScan }
 
 impl Distill for StreamTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
-        vec.push(("table", Pretty::from(self.core.table_name.clone())));
+        vec.push(("table", Pretty::from(self.core.table_name().to_owned())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
 
         if verbose {
@@ -336,7 +334,7 @@ impl StreamTableScan {
                     .iter()
                     .find(|c| c.column_id.get_id() == id)
                     .unwrap();
-                Field::from(col).to_prost()
+                Field::from(&col.column_desc).to_prost()
             })
             .collect_vec();
 
@@ -344,7 +342,7 @@ impl StreamTableScan {
 
         // TODO: snapshot read of upstream mview
         let batch_plan_node = BatchPlanNode {
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            table_desc: Some(self.core.table_catalog.table_desc().try_to_protobuf()?),
             column_ids: upstream_column_ids.clone(),
         };
 
@@ -401,13 +399,13 @@ impl StreamTableScan {
         };
 
         let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
-            table_id: self.core.table_desc.table_id.table_id,
+            table_id: self.core.table_catalog.id.table_id,
             stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
             output_indices,
             upstream_column_ids,
             // The table desc used by backfill executor
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            table_desc: Some(self.core.table_catalog.table_desc().try_to_protobuf()?),
             state_table: Some(catalog),
             arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
@@ -426,7 +424,7 @@ impl StreamTableScan {
     }
 }
 
-impl ExprRewritable for StreamTableScan {
+impl ExprRewritable<Stream> for StreamTableScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

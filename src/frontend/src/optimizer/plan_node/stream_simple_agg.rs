@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, plan_node_name};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
@@ -91,7 +91,7 @@ impl Distill for StreamSimpleAgg {
     }
 }
 
-impl PlanTreeNodeUnary for StreamSimpleAgg {
+impl PlanTreeNodeUnary<Stream> for StreamSimpleAgg {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -104,7 +104,7 @@ impl PlanTreeNodeUnary for StreamSimpleAgg {
         Self::new(logical, self.row_count_idx, self.must_output_per_barrier)
     }
 }
-impl_plan_tree_node_for_unary! { StreamSimpleAgg }
+impl_plan_tree_node_for_unary! { Stream, StreamSimpleAgg }
 
 impl StreamNode for StreamSimpleAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -117,13 +117,6 @@ impl StreamNode for StreamSimpleAgg {
                 .agg_calls()
                 .iter()
                 .map(PlanAggCall::to_protobuf)
-                .collect(),
-            distribution_key: self
-                .base
-                .distribution()
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
                 .collect(),
             is_append_only: self.input().append_only(),
             agg_call_states: agg_states
@@ -154,7 +147,7 @@ impl StreamNode for StreamSimpleAgg {
     }
 }
 
-impl ExprRewritable for StreamSimpleAgg {
+impl ExprRewritable<Stream> for StreamSimpleAgg {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

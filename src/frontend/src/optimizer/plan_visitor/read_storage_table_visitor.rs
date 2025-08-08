@@ -44,14 +44,14 @@ impl BatchPlanVisitor for ReadStorageTableVisitor {
     }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        self.tables.insert(plan.core().table_desc.table_id);
+        self.tables.insert(plan.core().table_catalog.id);
     }
 
     fn visit_batch_log_seq_scan(&mut self, plan: &BatchLogSeqScan) -> Self::Result {
-        self.tables.insert(plan.core().table_desc.table_id);
+        self.tables.insert(plan.core().table.id);
     }
 
     fn visit_batch_lookup_join(&mut self, plan: &BatchLookupJoin) -> Self::Result {
-        self.tables.insert(plan.right_table_desc().table_id);
+        self.tables.insert(plan.right_table().id);
     }
 }

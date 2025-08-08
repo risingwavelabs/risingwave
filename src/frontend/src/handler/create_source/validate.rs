@@ -121,9 +121,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
 
 fn validate_license(connector: &str) -> Result<()> {
     if connector == SQL_SERVER_CDC_CONNECTOR {
-        Feature::SqlServerCdcSource
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
+        Feature::SqlServerCdcSource.check_available()?;
     }
     Ok(())
 }

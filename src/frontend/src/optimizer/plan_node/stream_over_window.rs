@@ -20,7 +20,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{GenericPlanNode, PlanWindowFunction};
 use super::stream::prelude::*;
 use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode, generic};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
@@ -83,7 +85,7 @@ impl StreamOverWindow {
 
 impl_distill_by_unit!(StreamOverWindow, core, "StreamOverWindow");
 
-impl PlanTreeNodeUnary for StreamOverWindow {
+impl PlanTreeNodeUnary<Stream> for StreamOverWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -94,7 +96,7 @@ impl PlanTreeNodeUnary for StreamOverWindow {
         Self::new(core)
     }
 }
-impl_plan_tree_node_for_unary! { StreamOverWindow }
+impl_plan_tree_node_for_unary! { Stream, StreamOverWindow }
 
 impl StreamNode for StreamOverWindow {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -116,6 +118,7 @@ impl StreamNode for StreamOverWindow {
             .core
             .order_key()
             .iter()
+            .copied()
             .map(ColumnOrder::to_protobuf)
             .collect();
         let state_table = self
@@ -139,6 +142,6 @@ impl StreamNode for StreamOverWindow {
     }
 }
 
-impl ExprRewritable for StreamOverWindow {}
+impl ExprRewritable<Stream> for StreamOverWindow {}
 
 impl ExprVisitable for StreamOverWindow {}

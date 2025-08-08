@@ -32,6 +32,8 @@ message AddMutation {
   repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
   // nodes which should be paused initially.
   repeated uint32 backfill_nodes_to_pause = 6;
+  // CDC table snapshot splits
+  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
 }
 
 message StopMutation {
@@ -79,6 +81,8 @@ message UpdateMutation {
   // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
   // Consistent with the semantics in AddMutation.
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
+  // CDC table snapshot splits
+  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
 }
 
 message SourceChangeSplitMutation {
@@ -406,9 +410,11 @@ enum AggNodeVersion {
 }
 
 message SimpleAggNode {
+  // Previously we have this field for stateless simple agg, but it's actually not used.
+  reserved 2;
+  reserved "distribution_key";
+
   repeated expr.AggCall agg_calls = 1;
-  // Only used for stateless simple agg.
-  repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
   catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
@@ -699,6 +705,14 @@ message StreamCdcScanOptions {
   uint32 snapshot_barrier_interval = 2;
 
   uint32 snapshot_batch_size = 3;
+
+  uint32 backfill_parallelism = 4;
+
+  uint64 backfill_num_rows_per_split = 5;
+
+  bool backfill_as_even_splits = 6;
+
+  uint32 backfill_split_pk_column_index = 7;
 }
 
 message StreamCdcScanNode {

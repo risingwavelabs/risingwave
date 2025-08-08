@@ -15,8 +15,8 @@
 use std::fmt::Write;
 
 use risingwave_common::row::Row;
-use risingwave_common::types::JsonbRef;
-use risingwave_expr::function;
+use risingwave_common::types::{DataType, JsonbRef, ListValue, ScalarRefImpl};
+use risingwave_expr::{ExprError, Result, function};
 
 /// Extracts JSON object field with the given key.
 ///
@@ -216,4 +216,46 @@ pub fn jsonb_extract_path_text(
     }
     jsonb.force_str(writer).unwrap();
     Some(())
+}
+
+/// Converts the a JSONB array to a SQL array of JSONB elements.
+///
+/// This is equivalent to `jsonb_array_elements` followed by `array_agg` or `array` in most cases.
+///
+/// ```slt
+/// query T
+/// select
+///     input,
+///     (select array_agg(v) from jsonb_array_elements(input) as v) as array_agg,
+///     array(select jsonb_array_elements(input)),
+///     jsonb_to_array(input)
+/// from (values
+///     (null::jsonb),
+///     ('[]'::jsonb)
+/// ) as t(input);
+/// ----
+/// NULL NULL {} NULL
+/// []   NULL {} {}
+///
+/// query T
+/// select jsonb_to_array('[1,"foo",null,true,[false,"bar"],{"a":2}]');
+/// ----
+/// {1,"\"foo\"","null",true,"[false, \"bar\"]","{\"a\": 2}"}
+///
+/// query error parsing
+/// select jsonb_to_array('');
+///
+/// query error cannot extract elements from a jsonb object
+/// select jsonb_to_array('{"a": 1}');
+/// ```
+#[function("jsonb_to_array(jsonb) -> jsonb[]")]
+fn jsonb_to_array(v: JsonbRef<'_>) -> Result<ListValue> {
+    let iter = v
+        .array_elements()
+        .map_err(|e| ExprError::InvalidParam {
+            name: "jsonb",
+            reason: e.into(),
+        })?
+        .map(|elem| Some(ScalarRefImpl::Jsonb(elem)));
+    Ok(ListValue::from_datum_iter(&DataType::Jsonb, iter))
 }

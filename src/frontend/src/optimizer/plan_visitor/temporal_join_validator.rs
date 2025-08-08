@@ -29,7 +29,7 @@ pub struct TemporalJoinValidator {
 }
 
 impl TemporalJoinValidator {
-    pub fn exist_dangling_temporal_scan<C: ConventionMarker>(plan: PlanRef) -> bool
+    pub fn exist_dangling_temporal_scan<C: ConventionMarker>(plan: PlanRef<C>) -> bool
     where
         Self: PlanVisitor<C, Result = bool>,
     {

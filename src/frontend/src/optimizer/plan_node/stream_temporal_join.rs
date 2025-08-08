@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, generic};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamPlanRef as PlanRef, generic};
 use crate::TableCatalog;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -205,7 +205,7 @@ impl Distill for StreamTemporalJoin {
     }
 }
 
-impl PlanTreeNodeBinary for StreamTemporalJoin {
+impl PlanTreeNodeBinary<Stream> for StreamTemporalJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -222,7 +222,7 @@ impl PlanTreeNodeBinary for StreamTemporalJoin {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamTemporalJoin }
+impl_plan_tree_node_for_binary! { Stream, StreamTemporalJoin }
 
 impl TryToStreamPb for StreamTemporalJoin {
     fn try_to_stream_prost_body(
@@ -257,7 +257,7 @@ impl TryToStreamPb for StreamTemporalJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
-            table_desc: Some(scan.core().table_desc.try_to_protobuf()?),
+            table_desc: Some(scan.core().table_catalog.table_desc().try_to_protobuf()?),
             table_output_indices: scan.core().output_col_idx.iter().map(|&i| i as _).collect(),
             memo_table: if self.append_only {
                 None
@@ -271,7 +271,7 @@ impl TryToStreamPb for StreamTemporalJoin {
     }
 }
 
-impl ExprRewritable for StreamTemporalJoin {
+impl ExprRewritable<Stream> for StreamTemporalJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

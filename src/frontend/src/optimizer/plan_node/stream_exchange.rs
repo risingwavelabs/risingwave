@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
+
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -20,7 +22,7 @@ use risingwave_pb::stream_plan::{
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, plan_node_name};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{
     Distribution, DistributionDisplay, MonotonicityMap, RequiredDist,
@@ -38,6 +40,12 @@ pub struct StreamExchange {
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
+        assert_matches!(
+            dist,
+            Distribution::HashShard(_) | Distribution::Single | Distribution::Broadcast,
+            "exchange can not be used to enforce such distribution"
+        );
+
         let columns_monotonicity = if input.distribution().satisfies(&RequiredDist::single()) {
             // If the input is a singleton, the monotonicity will be preserved during shuffle
             // since we use ordered channel/buffer when exchanging data.
@@ -105,7 +113,7 @@ impl Distill for StreamExchange {
     }
 }
 
-impl PlanTreeNodeUnary for StreamExchange {
+impl PlanTreeNodeUnary<Stream> for StreamExchange {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -118,7 +126,7 @@ impl PlanTreeNodeUnary for StreamExchange {
         }
     }
 }
-impl_plan_tree_node_for_unary! {StreamExchange}
+impl_plan_tree_node_for_unary! { Stream, StreamExchange}
 
 impl StreamNode for StreamExchange {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -152,6 +160,6 @@ impl StreamNode for StreamExchange {
     }
 }
 
-impl ExprRewritable for StreamExchange {}
+impl ExprRewritable<Stream> for StreamExchange {}
 
 impl ExprVisitable for StreamExchange {}

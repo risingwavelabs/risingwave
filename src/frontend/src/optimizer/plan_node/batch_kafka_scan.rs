@@ -23,7 +23,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record, column_names_pretty};
 use super::{
-    ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, ToBatchPb, ToDistributedBatch, ToLocalBatch,
+    generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
@@ -91,7 +92,7 @@ impl BatchKafkaScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { BatchKafkaScan }
+impl_plan_tree_node_for_leaf! { Batch, BatchKafkaScan }
 
 impl Distill for BatchKafkaScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -137,6 +138,6 @@ impl ToBatchPb for BatchKafkaScan {
     }
 }
 
-impl ExprRewritable for BatchKafkaScan {}
+impl ExprRewritable<Batch> for BatchKafkaScan {}
 
 impl ExprVisitable for BatchKafkaScan {}

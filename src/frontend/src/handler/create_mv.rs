@@ -32,8 +32,8 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Explain, Stream};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
+use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
@@ -294,9 +294,7 @@ pub(crate) async fn gen_create_mv_graph(
     let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
     if resource_group.is_some() {
-        risingwave_common::license::Feature::ResourceGroup
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
+        risingwave_common::license::Feature::ResourceGroup.check_available()?;
     }
 
     let is_serverless_backfill = with_options
@@ -378,16 +376,15 @@ It only indicates the physical clustering of the data, which may improve the per
 
     // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
     // during binding instead of visiting the optimized plan.
-    let dependencies =
-        RelationCollectorVisitor::collect_with::<Stream>(dependent_relations, plan.clone())
-            .into_iter()
-            .map(|id| id.table_id() as ObjectId)
-            .chain(
-                dependent_udfs
-                    .into_iter()
-                    .map(|id| id.function_id() as ObjectId),
-            )
-            .collect();
+    let dependencies = RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
+        .into_iter()
+        .map(|id| id.table_id() as ObjectId)
+        .chain(
+            dependent_udfs
+                .into_iter()
+                .map(|id| id.function_id() as ObjectId),
+        )
+        .collect();
 
     let graph = build_graph_with_strategy(
         plan,

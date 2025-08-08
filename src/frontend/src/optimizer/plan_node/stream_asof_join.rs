@@ -25,8 +25,8 @@ use super::utils::{
     Distill, TableCatalogBuilder, childless_record, plan_node_name, watermark_pretty,
 };
 use super::{
-    ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamJoinCommon,
-    StreamNode, generic,
+    ExprRewritable, LogicalJoin, PlanBase, PlanTreeNodeBinary, StreamJoinCommon, StreamNode,
+    StreamPlanRef as PlanRef, generic,
 };
 use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
@@ -125,7 +125,7 @@ impl StreamAsOfJoin {
     }
 
     /// Return stream asof join internal table catalog.
-    pub fn infer_internal_table_catalog<I: StreamPlanRef>(
+    pub fn infer_internal_table_catalog<I: StreamPlanNodeMetadata>(
         input: I,
         join_key_indices: Vec<usize>,
         dk_indices_in_jk: Vec<usize>,
@@ -214,7 +214,7 @@ impl Distill for StreamAsOfJoin {
     }
 }
 
-impl PlanTreeNodeBinary for StreamAsOfJoin {
+impl PlanTreeNodeBinary<Stream> for StreamAsOfJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -231,7 +231,7 @@ impl PlanTreeNodeBinary for StreamAsOfJoin {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamAsOfJoin }
+impl_plan_tree_node_for_binary! { Stream, StreamAsOfJoin }
 
 impl StreamNode for StreamAsOfJoin {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -292,7 +292,7 @@ impl StreamNode for StreamAsOfJoin {
     }
 }
 
-impl ExprRewritable for StreamAsOfJoin {
+impl ExprRewritable<Stream> for StreamAsOfJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

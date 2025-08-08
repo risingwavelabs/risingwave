@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::plan_node::{PlanRef, Stream, StreamSyncLogStore};
+use crate::optimizer::plan_node::{Stream, StreamPlanRef as PlanRef, StreamSyncLogStore};
 use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct AddLogstoreRule {}
