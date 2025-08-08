@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
+
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::functional::SameOrElseExt;
+use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
@@ -49,6 +52,11 @@ impl StreamDeltaJoin {
         if eq_join_predicate.has_non_eq() {
             todo!("non-eq condition not supported for delta join");
         }
+        assert_matches!(
+            core.join_type,
+            JoinType::Inner,
+            "delta join only supports inner join for now"
+        );
 
         // FIXME: delta join could have arbitrary distribution.
         let dist = Distribution::SomeShard;
