@@ -202,7 +202,7 @@ pub async fn compactor_serve(
         WorkerType::Compactor,
         &advertise_addr,
         Default::default(),
-        &config.meta,
+        Arc::new(config.meta.clone()),
     )
     .await;
 
