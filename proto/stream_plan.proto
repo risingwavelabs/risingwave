@@ -379,6 +379,9 @@ message MaterializeNode {
   // For refreshable tables, staging table for collecting new data during refresh.
   // This table has the same schema as the main table but with a different table_id.
   optional catalog.Table staging_table = 5;
+  // Progress tracking table for refreshable materialized views.
+  // Used to store checkpoint information for resumable refresh operations.
+  optional catalog.Table refresh_progress_table = 6;
 }
 
 message AggCallState {

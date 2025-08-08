@@ -593,6 +593,7 @@ impl StreamNode for StreamMaterialize {
                 .iter()
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
+            refresh_progress_table: None, /* TODO: Generate progress table catalog for refreshable tables */
         }))
     }
 }

@@ -88,6 +88,10 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
         }
     }
 
+    pub fn only_left(message_stream: ExecutorMessageStream) -> Self {
+        Self::new(message_stream, futures::stream::empty().boxed())
+    }
+
     /// Replace the data stream with a new one for given `stream`. Used for split change.
     pub fn replace_data_stream(
         &mut self,

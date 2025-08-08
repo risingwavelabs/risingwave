@@ -503,6 +503,9 @@ message Table {
   // reload data from external source and emit messages based on the diff with current data.
   bool refreshable = 45;
 
+  // Current refresh state of the table for refreshable tables
+  optional RefreshState refresh_state = 46;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
@@ -515,6 +518,53 @@ enum HandleConflictBehavior {
   HANDLE_CONFLICT_BEHAVIOR_IGNORE = 2;
   HANDLE_CONFLICT_BEHAVIOR_NO_CHECK = 3;
   HANDLE_CONFLICT_BEHAVIOR_DO_UPDATE_IF_NOT_NULL = 4;
+}
+
+// State of refresh operation for refreshable tables
+enum RefreshState {
+  REFRESH_STATE_UNSPECIFIED = 0;
+  REFRESH_STATE_IDLE = 1;
+  REFRESH_STATE_REFRESHING = 2;
+  REFRESH_STATE_FINISHING = 3;
+}
+
+// Progress information for resumable refresh operations
+message RefreshProgress {
+  // Epoch when the refresh operation started
+  uint64 started_epoch = 1;
+
+  // Current refresh stage
+  string current_stage = 2;
+
+  // Per-vnode progress information
+  repeated VnodeProgress vnode_progress = 3;
+
+  // Total number of vnodes to process
+  uint32 total_vnodes = 4;
+
+  // Number of vnodes completed
+  uint32 completed_vnodes = 5;
+}
+
+// Progress information for a specific vnode
+message VnodeProgress {
+  // The vnode number
+  uint32 vnode = 1;
+
+  // Current processing stage for this vnode
+  string stage = 2;
+
+  // Serialized position of main table iterator
+  optional bytes main_iter_position = 3;
+
+  // Serialized position of staging table iterator
+  optional bytes staging_iter_position = 4;
+
+  // Number of rows processed for this vnode
+  uint64 processed_rows = 5;
+
+  // Last checkpoint epoch for this vnode
+  uint64 last_checkpoint_epoch = 6;
 }
 
 message View {
