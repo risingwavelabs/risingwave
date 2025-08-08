@@ -100,12 +100,25 @@ export default function TimeControls({
       <VStack spacing={3} align="stretch">
         <FormControl isInvalid={!!timestampError}>
           <FormLabel fontSize="sm">Timestamp (ISO format)</FormLabel>
-          <Input
-            size="sm"
-            placeholder="2024-01-15T10:30:00Z"
-            value={timestampInput}
-            onChange={(e) => setTimestampInput(e.target.value)}
-          />
+          <HStack spacing={2}>
+            <Input
+              size="sm"
+              placeholder="2024-01-15T10:30:00Z"
+              value={timestampInput}
+              onChange={(e) => setTimestampInput(e.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const now = new Date().toISOString()
+                setTimestampInput(now)
+                setTimestampError("")
+              }}
+            >
+              Now
+            </Button>
+          </HStack>
           {timestampError && (
             <Text fontSize="xs" color="red.500">
               {timestampError}
