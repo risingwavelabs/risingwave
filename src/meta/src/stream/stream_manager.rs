@@ -517,12 +517,10 @@ impl GlobalStreamManager {
             self.env.meta_store_ref(),
         )
         .await?;
-        // TODO(zw): !!!
-        let table_ids = vec![];
         let cdc_split_generation = self
             .env
             .cdc_table_backfill_tracker
-            .next_generation(table_ids.into_iter());
+            .next_generation(iter::once(stream_job_fragments.stream_job_id.table_id));
         for (table_id, splits) in cdc_table_snapshot_split_assignment.iter() {
             self.env
                 .cdc_table_backfill_tracker
