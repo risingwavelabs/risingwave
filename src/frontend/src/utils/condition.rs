@@ -20,12 +20,13 @@ use std::sync::LazyLock;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::{ScanRange, is_full_range};
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_rows};
+use risingwave_common::util::sort_util::{OrderType, cmp_rows};
 
+use crate::TableCatalog;
 use crate::error::Result;
 use crate::expr::{
     ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall,
@@ -298,8 +299,7 @@ impl Condition {
     /// Currently, only support equal type range scans.
     /// Keep in mind that range scans can not overlap, otherwise duplicate rows will occur.
     fn disjunctions_to_scan_ranges(
-        pk: &[ColumnOrder],
-        columns: &[ColumnCatalog],
+        table: &TableCatalog,
         max_split_range_gap: u64,
         disjunctions: Vec<ExprImpl>,
     ) -> Result<Option<(Vec<ScanRange>, bool)>> {
@@ -309,7 +309,7 @@ impl Condition {
                 Condition {
                     conjunctions: to_conjunctions(x),
                 }
-                .split_to_scan_ranges(pk, columns, max_split_range_gap)
+                .split_to_scan_ranges(table, max_split_range_gap)
             })
             .collect();
 
@@ -367,7 +367,8 @@ impl Condition {
                 scan_ranges.extend(scan_ranges_chunk);
             }
 
-            let order_types = pk
+            let order_types = table
+                .pk
                 .iter()
                 .cloned()
                 .map(|x| {
@@ -507,7 +508,7 @@ impl Condition {
 
     fn split_row_cmp_to_scan_ranges(
         &self,
-        pk: &[ColumnOrder],
+        table: &TableCatalog,
     ) -> Result<Option<(Vec<ScanRange>, Self)>> {
         let (mut row_conjunctions, row_conjunctions_without_struct): (Vec<_>, Vec<_>) =
             self.conjunctions.clone().into_iter().partition(|expr| {
@@ -564,7 +565,7 @@ impl Condition {
                 let mut order_type = None;
                 let mut all_added = true;
                 let mut iter = row_left_inputs.iter().zip_eq_fast(right_iter);
-                for column_order in pk {
+                for column_order in &table.pk {
                     if let Some((left_expr, right_expr)) = iter.next() {
                         if left_expr.as_input_ref().unwrap().index != column_order.column_index {
                             all_added = false;
@@ -641,8 +642,7 @@ impl Condition {
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
     pub fn split_to_scan_ranges(
         self,
-        pk: &[ColumnOrder],
-        columns: &[ColumnCatalog],
+        table: &TableCatalog,
         max_split_range_gap: u64,
     ) -> Result<(Vec<ScanRange>, Self)> {
         fn false_cond() -> (Vec<ScanRange>, Condition) {
@@ -654,7 +654,7 @@ impl Condition {
             && let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions()
         {
             if let Some((scan_ranges, maintaining_condition)) =
-                Self::disjunctions_to_scan_ranges(pk, columns, max_split_range_gap, disjunctions)?
+                Self::disjunctions_to_scan_ranges(table, max_split_range_gap, disjunctions)?
             {
                 if maintaining_condition {
                     return Ok((scan_ranges, self));
@@ -665,16 +665,16 @@ impl Condition {
                 return Ok((vec![], self));
             }
         }
-        if let Some((scan_ranges, other_condition)) = self.split_row_cmp_to_scan_ranges(pk)? {
+        if let Some((scan_ranges, other_condition)) = self.split_row_cmp_to_scan_ranges(table)? {
             return Ok((scan_ranges, other_condition));
         }
 
-        let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, pk, columns);
+        let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, table);
         let mut other_conds = groups.pop().unwrap();
 
         // Analyze each group and use result to update scan range.
         let mut scan_range = ScanRange::full_table_scan();
-        for i in 0..pk.len() {
+        for i in 0..table.pk.len() {
             let group = std::mem::take(&mut groups[i]);
             if group.is_empty() {
                 groups.push(other_conds);
@@ -762,7 +762,7 @@ impl Condition {
         Ok((
             if scan_range.is_full_table_scan() {
                 vec![]
-            } else if columns[pk[0].column_index].data_type.is_int() {
+            } else if table.columns[table.pk[0].column_index].data_type.is_int() {
                 match scan_range.split_small_range(max_split_range_gap) {
                     Some(scan_ranges) => scan_ranges,
                     None => vec![scan_range],
@@ -781,16 +781,18 @@ impl Condition {
     /// The last group contains all the other exprs.
     fn classify_conjunctions_by_pk(
         conjunctions: Vec<ExprImpl>,
-        pk: &[ColumnOrder],
-        columns: &[ColumnCatalog],
+        table: &TableCatalog,
     ) -> Vec<Vec<ExprImpl>> {
-        let pk_cols_num = pk.len();
-        let cols_num = columns.len();
+        let pk_cols_num = table.pk.len();
+        let cols_num = table.columns.len();
 
         let mut col_idx_to_pk_idx = vec![None; cols_num];
-        pk.iter().enumerate().for_each(|(idx, col)| {
-            col_idx_to_pk_idx[col.column_index] = Some(idx);
-        });
+        table
+            .order_column_indices()
+            .enumerate()
+            .for_each(|(idx, pk_idx)| {
+                col_idx_to_pk_idx[pk_idx] = Some(idx);
+            });
 
         let mut groups = vec![vec![]; pk_cols_num + 1];
         for (key, group) in &conjunctions.into_iter().chunk_by(|expr| {

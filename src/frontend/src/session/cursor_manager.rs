@@ -921,11 +921,7 @@ impl SubscriptionCursor {
                             .into(),
                     ],
                 }
-                .split_to_scan_ranges(
-                    &table_catalog.pk,
-                    &table_catalog.columns,
-                    max_split_range_gap,
-                )?;
+                .split_to_scan_ranges(&table_catalog, max_split_range_gap)?;
                 if scan.len() > 1 {
                     return Err(ErrorCode::InternalError(
                         "Seek pk row should only generate one scan range".to_owned(),

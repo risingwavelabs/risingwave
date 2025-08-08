@@ -508,8 +508,7 @@ impl LogicalScan {
                 .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![], None).into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
-                &self.table().pk,
-                &self.table().columns,
+                self.table(),
                 self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
             )?;
             let mut scan = self.clone();
