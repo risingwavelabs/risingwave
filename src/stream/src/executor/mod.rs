@@ -54,7 +54,6 @@ use risingwave_pb::stream_plan::{
     SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
-use tokio::time::Instant;
 
 use crate::error::StreamResult;
 use crate::executor::exchange::input::BoxedInput;
@@ -1381,7 +1380,7 @@ pub struct DynamicReceivers<InputId, M> {
     /// watermark column index -> `BufferedWatermarks`
     buffered_watermarks: BTreeMap<usize, BufferedWatermarks<InputId>>,
     /// Currently only used for union.
-    barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
+    // barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
     /// Only for merge. If None, then we don't take `Instant::now()` and `observe` during `poll_next`
     merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
 }
@@ -1401,7 +1400,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
             return Poll::Ready(None);
         }
 
-        let mut start = None;
+        // let mut start = None;
         loop {
             match futures::ready!(self.active.poll_next_unpin(cx)) {
                 // Directly forward the error.
@@ -1425,22 +1424,19 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
                             }
                         }
                         MessageInner::Barrier(barrier) => {
-                            // Block this upstream by pushing it to `blocked`.
-                            if self.blocked.is_empty() {
-                                start = Some(Instant::now());
-                            }
-                            self.blocked.push(remaining);
-                            if let Some(current_barrier) = self.barrier.as_ref() {
-                                if current_barrier.epoch != barrier.epoch {
-                                    return Poll::Ready(Some(Err(
-                                        StreamExecutorError::align_barrier(
-                                            current_barrier.clone().map_mutation(|_| None),
-                                            barrier.map_mutation(|_| None),
-                                        ),
-                                    )));
-                                }
-                            } else {
+                            self.active.push(remaining.into_future());
+                            if self.barrier.is_none() {
                                 self.barrier = Some(barrier);
+                                return Poll::Ready(Some(Ok(MessageInner::Barrier(
+                                    self.barrier.as_ref().unwrap().clone(),
+                                ))));
+                            } else {
+                                if barrier.epoch.curr > self.barrier.as_ref().unwrap().epoch.curr {
+                                    self.barrier = Some(barrier);
+                                    return Poll::Ready(Some(Ok(MessageInner::Barrier(
+                                        self.barrier.as_ref().unwrap().clone(),
+                                    ))));
+                                }
                             }
                         }
                     }
@@ -1460,38 +1456,17 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
                 }
                 // There's no active upstreams. Process the barrier and resume the blocked ones.
                 None => {
-                    if let Some(start) = start {
-                        if let Some(barrier_align_duration) = &self.barrier_align_duration {
-                            barrier_align_duration.inc_by(start.elapsed().as_nanos() as u64);
-                        }
-                        if let Some(merge_barrier_align_duration) =
-                            &self.merge_barrier_align_duration
-                        {
-                            // Observe did a few atomic operation inside, we want to avoid the overhead.
-                            merge_barrier_align_duration.observe(start.elapsed().as_secs_f64())
-                        }
-                    }
-
-                    break;
+                    unreachable!("unexpected end of stream unexpectedly");
                 }
             }
         }
-
-        assert!(self.active.is_terminated());
-        let barrier = self.barrier.take().unwrap();
-
-        let upstreams = std::mem::take(&mut self.blocked);
-        self.extend_active(upstreams);
-        assert!(!self.active.is_terminated());
-
-        Poll::Ready(Some(Ok(MessageInner::Barrier(barrier))))
     }
 }
 
 impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId, M> {
     pub fn new(
         upstreams: Vec<BoxedMessageInput<InputId, M>>,
-        barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
+        _barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
         merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
     ) -> Self {
         assert!(!upstreams.is_empty());
@@ -1501,7 +1476,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
             active: Default::default(),
             buffered_watermarks: Default::default(),
             merge_barrier_align_duration,
-            barrier_align_duration,
+            // barrier_align_duration,
         };
         this.extend_active(upstreams);
         this
