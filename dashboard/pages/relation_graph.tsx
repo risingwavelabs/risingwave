@@ -72,14 +72,6 @@ export default function StreamingGraph() {
   const { response: relationDeps } = useFetch(getRelationDependencies)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
   const { response: fragmentToRelationMap } = useFetch(getFragmentToRelationMap)
-  const [resetEmbeddedBackPressures, setResetEmbeddedBackPressures] =
-    useState<boolean>(false)
-
-  const toggleResetEmbeddedBackPressures = () => {
-    setResetEmbeddedBackPressures(
-      (resetEmbeddedBackPressures) => !resetEmbeddedBackPressures
-    )
-  }
 
   const toast = useErrorToast()
 
@@ -103,11 +95,6 @@ export default function StreamingGraph() {
   useEffect(() => {
     let initialSnapshot: ChannelStatsSnapshot | undefined
 
-    if (resetEmbeddedBackPressures) {
-      setChannelStats(undefined)
-      toggleResetEmbeddedBackPressures()
-    }
-
     const refresh = createStreamingStatsRefresh(
       {
         setChannelStats,
@@ -123,7 +110,7 @@ export default function StreamingGraph() {
     return () => {
       clearInterval(interval)
     }
-  }, [toast, resetEmbeddedBackPressures])
+  }, [toast])
 
   // Convert fragment-level backpressure rate map to relation-level backpressure rate
   const relationChannelStats: Map<string, ChannelDeltaStats> | undefined =
@@ -162,10 +149,6 @@ export default function StreamingGraph() {
         >
           <Box flex={1} overflowY="scroll">
             <VStack width={SIDEBAR_WIDTH} align="start" spacing={1}>
-              <Button onClick={(_) => toggleResetEmbeddedBackPressures()}>
-                Reset Back Pressures
-              </Button>
-
               <Text fontWeight="semibold" mb={3}>
                 Relations
               </Text>
