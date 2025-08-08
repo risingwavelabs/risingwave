@@ -312,7 +312,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::PgTableIsVisible
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
-            | Type::HasDatabasePrivilege => self.impure = true,
+            | Type::HasDatabasePrivilege
+            | Type::Random => self.impure = true,
         }
     }
 }
