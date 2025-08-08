@@ -41,14 +41,32 @@ export interface StreamingStatsCallbacks {
   ) => void
 }
 
+export interface TimeParams {
+  at?: number // Unix timestamp in seconds
+  timeOffset?: number // Time offset in seconds
+}
+
 export function createStreamingStatsRefresh(
   callbacks: StreamingStatsCallbacks,
   initialSnapshot: ChannelStatsSnapshot | undefined,
   statsType: StatsType,
+  timeParams?: TimeParams
 ) {
   return function refresh() {
+    // Build query parameters for time-based requests
+    const queryParams = new URLSearchParams()
+    if (timeParams?.at) {
+      queryParams.append("at", timeParams.at.toString())
+    }
+    if (timeParams?.timeOffset) {
+      queryParams.append("time_offset", timeParams.timeOffset.toString())
+    }
+
+    const queryString = queryParams.toString()
+    const urlSuffix = queryString ? `?${queryString}` : ""
+
     // Try Prometheus first, fall back to embedded if it fails
-    api.get("/metrics/streaming_stats_prometheus").then(
+    api.get(`/metrics/streaming_stats_prometheus${urlSuffix}`).then(
       (res) => {
         let response = GetStreamingPrometheusStatsResponse.fromJSON(res)
         const result = new Map<string, ChannelDeltaStats>()
@@ -83,7 +101,7 @@ export function createStreamingStatsRefresh(
           e
         )
         // Fall back to embedded dashboard
-        api.get("/metrics/streaming_stats").then(
+        api.get(`/metrics/streaming_stats${urlSuffix}`).then(
           (res) => {
             let response = GetStreamingStatsResponse.fromJSON(res)
             let snapshot = new ChannelStatsSnapshot(

@@ -40,6 +40,7 @@ import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
+import TimeControls from "../components/TimeControls"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
@@ -48,7 +49,10 @@ import {
   getRelationIdInfos,
   getStreamingJobs,
 } from "../lib/api/streaming"
-import { createStreamingStatsRefresh } from "../lib/api/streamingStats"
+import {
+  TimeParams,
+  createStreamingStatsRefresh,
+} from "../lib/api/streamingStats"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import {
@@ -337,6 +341,9 @@ export default function Streaming() {
     [key: number]: FragmentStats
   }>()
 
+  // Time parameters state
+  const [timeParams, setTimeParams] = useState<TimeParams>()
+
   useEffect(() => {
     let initialSnapshot: ChannelStatsSnapshot | undefined
 
@@ -348,6 +355,7 @@ export default function Streaming() {
       },
       initialSnapshot,
       "fragment",
+      timeParams
     )
 
     refresh() // run once immediately
@@ -355,7 +363,14 @@ export default function Streaming() {
     return () => {
       clearInterval(interval)
     }
-  }, [toast])
+  }, [toast, timeParams])
+
+  const handleTimeParamsChange = (timestamp?: number, offset?: number) => {
+    setTimeParams({
+      at: timestamp,
+      timeOffset: offset,
+    })
+  }
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -368,6 +383,7 @@ export default function Streaming() {
           width={SIDEBAR_WIDTH}
           height="full"
         >
+          <TimeControls onApply={handleTimeParamsChange} />
           <FormControl>
             <FormLabel>Streaming Jobs</FormLabel>
             <Input
