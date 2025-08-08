@@ -39,6 +39,7 @@ pub mod prelude {
     pub use super::super::Stream;
     pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
     pub use super::StreamPlanNodeMetadata;
+    pub use crate::error::Result;
     pub use crate::optimizer::property::StreamKind;
     pub(crate) use crate::optimizer::property::reject_upsert_input;
 }

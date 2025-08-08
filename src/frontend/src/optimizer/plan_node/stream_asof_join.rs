@@ -63,12 +63,12 @@ impl StreamAsOfJoin {
         core: generic::Join<PlanRef>,
         eq_join_predicate: EqJoinPredicate,
         inequality_desc: AsOfJoinDesc,
-    ) -> Self {
+    ) -> Result<Self> {
         let ctx = core.ctx();
 
         assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
 
-        let stream_kind = core.stream_kind();
+        let stream_kind = core.stream_kind()?;
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),
@@ -89,14 +89,14 @@ impl StreamAsOfJoin {
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
             eq_join_predicate,
             is_append_only: stream_kind.is_append_only(),
             inequality_desc,
             join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
-        }
+        })
     }
 
     /// Get join type
@@ -223,7 +223,8 @@ impl PlanTreeNodeBinary<Stream> for StreamAsOfJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone(), self.inequality_desc)
+
+        Self::new(core, self.eq_join_predicate.clone(), self.inequality_desc).unwrap()
     }
 }
 
@@ -302,7 +303,8 @@ impl ExprRewritable<Stream> for StreamAsOfJoin {
             core.left.schema().len(),
         )
         .unwrap();
-        Self::new(core, eq_join_predicate, desc).into()
+
+        Self::new(core, eq_join_predicate, desc).unwrap().into()
     }
 }
 
