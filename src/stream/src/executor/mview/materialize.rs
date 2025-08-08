@@ -26,7 +26,8 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
-use risingwave_common::row::{CompactedRow, RowDeserializer};
+use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
@@ -71,6 +72,9 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// No data will be written to hummock table. This Materialize is just a dummy node.
     /// Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
     is_dummy_table: bool,
+
+    /// Whether this table is a CDC table.
+    is_cdc_table: bool,
 }
 
 fn get_op_consistency_level(
@@ -151,6 +155,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
 
+        let is_cdc_table = table_catalog.cdc_table_id.is_some();
+
         Self {
             input,
             schema,
@@ -169,12 +175,18 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             may_have_downstream,
             depended_subscription_ids,
             metrics: mv_metrics,
+            is_cdc_table,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mv_table_id = TableId::new(self.state_table.table_id());
+        println!(
+            "=== MaterializeExecutor执行开始 table_id={} is_cdc_table={} ===",
+            mv_table_id.table_id(),
+            self.is_cdc_table
+        );
 
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
@@ -199,6 +211,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     Message::Chunk(chunk)
                 }
                 Message::Chunk(chunk) => {
+                    println!(
+                        "=== MaterializeExecutor处理Chunk cardinality={} is_cdc_table={} conflict_behavior={:?} ===",
+                        chunk.cardinality(),
+                        self.is_cdc_table,
+                        self.conflict_behavior
+                    );
                     self.metrics
                         .materialize_input_row_count
                         .inc_by(chunk.cardinality() as u64);
@@ -209,6 +227,17 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     let do_not_handle_conflict = !self.state_table.is_consistent_op()
                         && self.version_column_index.is_none()
                         && self.conflict_behavior == ConflictBehavior::Overwrite;
+
+                    // For CDC tables, disable optimization to ensure TOAST column fix is applied
+                    let do_not_handle_conflict = if self.is_cdc_table {
+                        false
+                    } else {
+                        do_not_handle_conflict
+                    };
+                    println!(
+                        "=== do_not_handle_conflict={} (CDC表强制冲突检查) ===",
+                        do_not_handle_conflict
+                    );
                     match self.conflict_behavior {
                         checked_conflict_behaviors!() if !do_not_handle_conflict => {
                             if chunk.cardinality() == 0 {
@@ -256,6 +285,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     &self.state_table,
                                     self.conflict_behavior,
                                     &self.metrics,
+                                    self.is_cdc_table,
                                 )
                                 .await?;
 
@@ -418,11 +448,36 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             conflict_behavior,
             version_column_index: None,
             is_dummy_table: false,
+            is_cdc_table: false,
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
             metrics,
         }
     }
+}
+
+/// Debezium's default unavailable value placeholder for TOAST columns
+const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
+
+/// Fix TOAST columns by replacing unavailable values with old row values
+fn fix_toast_columns_for_cdc(old_row: &OwnedRow, new_row: &OwnedRow) -> OwnedRow {
+    println!("处理 toast");
+    let mut fixed_row_data = new_row.as_inner().to_vec();
+
+    for (i, new_datum) in new_row.iter().enumerate() {
+        if let Some(new_scalar_ref) = new_datum {
+            if let risingwave_common::types::ScalarRefImpl::Utf8(val) = new_scalar_ref {
+                if val == DEBEZIUM_UNAVAILABLE_VALUE {
+                    // Replace with old row value if available
+                    if let Some(old_datum_ref) = old_row.datum_at(i) {
+                        fixed_row_data[i] = Some(old_datum_ref.into_scalar_impl());
+                    }
+                }
+            }
+        }
+    }
+
+    OwnedRow::new(fixed_row_data)
 }
 
 /// Construct output `StreamChunk` from given buffer.
@@ -594,7 +649,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         table: &StateTableInner<S, SD>,
         conflict_behavior: ConflictBehavior,
         metrics: &MaterializeMetrics,
+        is_cdc_table: bool,
     ) -> StreamExecutorResult<ChangeBuffer> {
+        println!("这里1");
         assert_matches!(conflict_behavior, checked_conflict_behaviors!());
 
         let key_set: HashSet<Box<[u8]>> = row_ops
@@ -616,6 +673,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         let row_serde = self.row_serde.clone();
         let version_column_index = self.version_column_index;
         for (op, key, row) in row_ops {
+            println!("这里op: {:?}", op);
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let Some(old_row) = self.get_expected(&key) else {
@@ -643,8 +701,29 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 true
                             };
                             if need_overwrite {
-                                change_buffer.update(key.clone(), old_row.row.clone(), row.clone());
-                                self.lru_cache.put(key.clone(), Some(CompactedRow { row }));
+                                println!("这里is_cdc_table: {}", is_cdc_table);
+                                let final_row = if is_cdc_table {
+                                    // Apply TOAST column fix for CDC tables
+                                    let old_row_deserialized =
+                                        row_serde.deserializer.deserialize(old_row.row.clone())?;
+                                    let new_row_deserialized =
+                                        row_serde.deserializer.deserialize(row.clone())?;
+                                    let fixed_row = fix_toast_columns_for_cdc(
+                                        &old_row_deserialized,
+                                        &new_row_deserialized,
+                                    );
+                                    Bytes::from(row_serde.serializer.serialize(fixed_row))
+                                } else {
+                                    row.clone()
+                                };
+
+                                change_buffer.update(
+                                    key.clone(),
+                                    old_row.row.clone(),
+                                    final_row.clone(),
+                                );
+                                self.lru_cache
+                                    .put(key.clone(), Some(CompactedRow { row: final_row }));
                             };
                         }
                         ConflictBehavior::IgnoreConflict => {
@@ -672,9 +751,22 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                     old_row_deserialized.into_inner().into_vec();
                                 replace_if_not_null(
                                     &mut row_deserialized_vec,
-                                    new_row_deserialized,
+                                    new_row_deserialized.clone(),
                                 );
-                                let updated_row = OwnedRow::new(row_deserialized_vec);
+                                let mut updated_row = OwnedRow::new(row_deserialized_vec);
+                                println!("is_cdc_table: {}", is_cdc_table);
+                                // Apply TOAST column fix for CDC tables
+                                if is_cdc_table {
+                                    // Note: we need to use old_row_deserialized again, but it was moved above
+                                    // So we re-deserialize the old row
+                                    let old_row_deserialized_again =
+                                        row_serde.deserializer.deserialize(old_row.row.clone())?;
+                                    updated_row = fix_toast_columns_for_cdc(
+                                        &old_row_deserialized_again,
+                                        &updated_row,
+                                    );
+                                }
+
                                 let updated_row_bytes =
                                     Bytes::from(row_serde.serializer.serialize(updated_row));
 
