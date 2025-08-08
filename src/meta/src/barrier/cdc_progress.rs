@@ -90,7 +90,6 @@ impl CdcTableBackfillTracker {
 }
 
 struct CdcTableBackfillTrackerInner {
-    meta_store: SqlMetaStore,
     table_split_total_counts: HashMap<u32, u64>,
     table_split_completed_counts: HashMap<u32, u64>,
     table_split_assignment_generations: HashMap<u32, u64>,
@@ -108,7 +107,6 @@ impl CdcTableBackfillTrackerInner {
             .collect();
         let table_split_completed_counts = HashMap::default();
         let inst = Self {
-            meta_store,
             table_split_total_counts,
             table_split_completed_counts,
             table_split_assignment_generations,
