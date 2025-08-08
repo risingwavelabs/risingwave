@@ -150,7 +150,7 @@ impl LogicalTopN {
             self.topn_order().clone(),
             vec![vnode_col_idx],
         );
-        let local_top_n = StreamGroupTopN::new(local_top_n, Some(vnode_col_idx));
+        let local_top_n = StreamGroupTopN::new(local_top_n, Some(vnode_col_idx))?;
 
         let exchange =
             RequiredDist::single().streaming_enforce_if_not_satisfies(local_top_n.into())?;
@@ -327,7 +327,7 @@ impl ToStream for LogicalTopN {
             let input = RequiredDist::hash_shard(self.group_key())
                 .streaming_enforce_if_not_satisfies(input)?;
             let core = self.core.clone_with_input(input);
-            StreamGroupTopN::new(core, None).into()
+            StreamGroupTopN::new(core, None)?.into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?
         })

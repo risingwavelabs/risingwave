@@ -47,11 +47,10 @@ impl StreamDynamicFilter {
                 ExprType::LessThan | ExprType::LessThanOrEqual
             );
 
-        let out_kind = if condition_always_relax && core.left().append_only() {
-            StreamKind::AppendOnly
-        } else {
-            // TODO(kind): check if the impl can handle upsert stream.
-            StreamKind::Retract
+        let out_kind = match core.left().stream_kind() {
+            StreamKind::AppendOnly if condition_always_relax => StreamKind::AppendOnly,
+            StreamKind::AppendOnly | StreamKind::Retract => StreamKind::Retract,
+            StreamKind::Upsert => todo!(), /* TODO(kind): check if the impl can handle upsert stream. */
         };
 
         let base = PlanBase::new_stream_with_core(

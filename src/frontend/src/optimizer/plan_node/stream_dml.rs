@@ -38,11 +38,11 @@ impl StreamDml {
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            if append_only {
+            input.stream_kind().merge(if append_only {
                 StreamKind::AppendOnly
             } else {
                 StreamKind::Retract
-            }, // TODO(kind): merge input stream kind
+            }),
             false,                   // TODO(rc): decide EOWC property
             WatermarkColumns::new(), // no watermark if dml is allowed
             MonotonicityMap::new(),  // TODO: derive monotonicity

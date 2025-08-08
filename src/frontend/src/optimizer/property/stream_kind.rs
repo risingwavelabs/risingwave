@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /// The kind of the changelog stream output by a stream operator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StreamKind {
     /// The stream contains only `Insert` operations.
     AppendOnly,
@@ -24,14 +24,15 @@ pub enum StreamKind {
     /// containing the complete old value will be emitted first, before the new value is emitted
     /// as an `Insert` or `UpdateInsert` record.
     Retract,
-    // /// The stream contains `Insert` and `Delete` operations.
-    // /// When a row is going to be updated, only the new value is emitted as an `Insert` record.
-    // /// When a row is going to be deleted, an incomplete `Delete` record may be emitted, where
-    // /// only the primary key columns are guaranteed to be set.
-    // ///
-    // /// Stateful operators typically can not process such streams correctly. It will be converted
-    // /// to `Retract` before being sent to stateful operators in this case.
-    // Upsert,
+
+    /// The stream contains `Insert` and `Delete` operations.
+    /// When a row is going to be updated, only the new value is emitted as an `Insert` record.
+    /// When a row is going to be deleted, an incomplete `Delete` record may be emitted, where
+    /// only the primary key columns are guaranteed to be set.
+    ///
+    /// Stateful operators typically can not process such streams correctly. It will be converted
+    /// to `Retract` before being sent to stateful operators in this case.
+    Upsert,
 }
 
 impl StreamKind {
@@ -39,4 +40,27 @@ impl StreamKind {
     pub fn is_append_only(self) -> bool {
         matches!(self, Self::AppendOnly)
     }
+
+    /// Returns the stream kind representing the merge (union) of the two.
+    pub fn merge(self, other: Self) -> Self {
+        self.max(other)
+    }
 }
+
+/// Reject upsert stream as input.
+macro_rules! reject_upsert_input {
+    ($input:expr) => {
+        if let StreamKind::Upsert = $input.stream_kind() {
+            return Err(::anyhow::anyhow!(
+                "{} yields upsert stream, which is not supported as input of {}",
+                std::any::type_name_of_val(&$input)
+                    .split("::")
+                    .last()
+                    .unwrap(),
+                std::any::type_name::<Self>().split("::").last().unwrap(),
+            )
+            .into());
+        }
+    };
+}
+pub(crate) use reject_upsert_input;

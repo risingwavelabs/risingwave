@@ -99,7 +99,6 @@ impl StreamHashAgg {
                 // in EOWC mode, we produce append only output
                 StreamKind::AppendOnly
             } else {
-                // TODO(kind): reject upsert input
                 StreamKind::Retract
             },
             emit_on_window_close,
