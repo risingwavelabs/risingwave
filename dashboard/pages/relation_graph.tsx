@@ -34,6 +34,7 @@ import {
 import { createStreamingStatsRefresh } from "../lib/api/streamingStats"
 import { RelationPoint } from "../lib/layout"
 import { ChannelDeltaStats, RelationStats } from "../proto/gen/monitor_service"
+import { ChannelStatsSnapshot } from "./fragment_graph"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -100,6 +101,8 @@ export default function StreamingGraph() {
   }>()
 
   useEffect(() => {
+    let initialSnapshot: ChannelStatsSnapshot | undefined
+
     if (resetEmbeddedBackPressures) {
       setChannelStats(undefined)
       toggleResetEmbeddedBackPressures()
@@ -111,8 +114,8 @@ export default function StreamingGraph() {
         setRelationStats,
         toast,
       },
+      initialSnapshot,
       "relation",
-      false // Don't use initial snapshot for relation graph
     )
 
     refresh() // run once immediately
