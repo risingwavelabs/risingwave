@@ -138,6 +138,16 @@ impl Binder {
             )
         }
 
+        fn random() -> Handle {
+            guard_by_len(
+                0,
+                raw(move |binder, _inputs| {
+                    binder.ensure_random_function_allowed()?;
+                    Ok(FunctionCall::new(ExprType::Random, _inputs)?.into())
+                }),
+            )
+        }
+
         // XXX: can we unify this with FUNC_SIG_MAP?
         // For raw_call here, it seems unnecessary to declare it again here.
         // For some functions, we have validation logic here. Is it still useful now?
@@ -734,6 +744,7 @@ impl Binder {
                 ("proctime", proctime()),
                 ("pg_sleep", raw_call(ExprType::PgSleep)),
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
+                ("random", random()),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
 
@@ -846,6 +857,16 @@ impl Binder {
                 "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_owned(),
             )
                 .into());
+        }
+        Ok(())
+    }
+
+    fn ensure_random_function_allowed(&self) -> Result<()> {
+        if self.is_for_stream() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "random() function is not supported in streaming queries".to_owned(),
+            )
+            .into());
         }
         Ok(())
     }

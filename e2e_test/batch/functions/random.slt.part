@@ -1,0 +1,7 @@
+statement ok
+select random();
+
+query I  
+SELECT COUNT(*) FROM (SELECT random() FROM generate_series(1, 10));  
+----  
+10  
