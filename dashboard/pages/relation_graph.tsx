@@ -34,12 +34,10 @@ import {
 } from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
 import {
-  GetStreamingPrometheusStatsResponse,
-  GetStreamingStatsResponse,
   RelationStats,
   ChannelDeltaStats,
 } from "../proto/gen/monitor_service"
-import { ChannelStatsSnapshot } from "./fragment_graph"
+import { createStreamingStatsRefresh } from "../lib/api/streamingStats"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -106,60 +104,21 @@ export default function StreamingGraph() {
   }>()
 
   useEffect(() => {
-    // The initial snapshot is used to calculate the rate of back pressure
-    // It's not used to render the page directly, so we don't need to set it in the state
-    let initialSnapshot: ChannelStatsSnapshot | undefined
-
     if (resetEmbeddedBackPressures) {
       setChannelStats(undefined)
       toggleResetEmbeddedBackPressures()
     }
 
-    function refresh() {
-      let embedded = false
-      if (embedded) {
-        api.get("/metrics/streaming_stats").then(
-          (res) => {
-            let response = GetStreamingStatsResponse.fromJSON(res)
-            let snapshot = new ChannelStatsSnapshot(
-              new Map(Object.entries(response.channelStats)),
-              Date.now()
-            )
-            if (!initialSnapshot) {
-              initialSnapshot = snapshot
-            } else {
-              setChannelStats(snapshot.getRate(initialSnapshot))
-            }
-            setRelationStats(response.relationStats)
-          },
-          (e) => {
-            console.error(e)
-            toast(e, "error")
-          }
-        )
-      } else {
-        api.get("/metrics/streaming_stats_prometheus").then(
-          (res) => {
-            let response = GetStreamingPrometheusStatsResponse.fromJSON(res)
-            const result = new Map<string, ChannelDeltaStats>()
-            for (const [key, value] of Object.entries(response.channelStats)) {
-              result.set(key, {
-                actorCount: value.actorCount,
-                backpressureRate: value.backpressureRate,
-                recvThroughput: value.recvThroughput,
-                sendThroughput: value.sendThroughput,
-              })
-              setChannelStats(result)
-            }
-            setRelationStats(response.relationStats)
-          },
-          (e) => {
-            console.error(e)
-            toast(e, "error")
-          }
-        )
-      }
-    }
+    const refresh = createStreamingStatsRefresh(
+      {
+        setChannelStats,
+        setRelationStats,
+        toast,
+      },
+      "relation",
+      false // Don't use initial snapshot for relation graph
+    )
+
     refresh() // run once immediately
     const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
     return () => {

@@ -55,9 +55,8 @@ import {
   ChannelStats,
   ChannelDeltaStats,
   FragmentStats,
-  GetStreamingStatsResponse,
-  GetStreamingPrometheusStatsResponse,
 } from "../proto/gen/monitor_service"
+import { createStreamingStatsRefresh } from "../lib/api/streamingStats"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {
@@ -343,56 +342,16 @@ export default function Streaming() {
   }>()
 
   useEffect(() => {
-    // The initial snapshot is used to calculate the rate of back pressure
-    // It's not used to render the page directly, so we don't need to set it in the state
-    let initialSnapshot: ChannelStatsSnapshot | undefined
+    const refresh = createStreamingStatsRefresh(
+      {
+        setChannelStats,
+        setFragmentStats,
+        toast,
+      },
+      "fragment",
+      true // Use initial snapshot for fragment graph
+    )
 
-
-    function refresh() {
-      let embedded = false
-      if (embedded) {
-        api.get("/metrics/streaming_stats").then(
-          (res) => {
-            let response = GetStreamingStatsResponse.fromJSON(res)
-            let snapshot = new ChannelStatsSnapshot(
-              new Map(Object.entries(response.channelStats)),
-              Date.now()
-            )
-            if (!initialSnapshot) {
-              initialSnapshot = snapshot
-            } else {
-              setChannelStats(snapshot.getRate(initialSnapshot))
-            }
-            setFragmentStats(response.fragmentStats)
-          },
-          (e) => {
-            console.error(e)
-            toast(e, "error")
-          }
-        )
-      } else {
-        api.get("/metrics/streaming_stats_prometheus").then(
-          (res) => {
-            let response = GetStreamingPrometheusStatsResponse.fromJSON(res)
-            const result = new Map<string, ChannelDeltaStats>()
-            for (const [key, value] of Object.entries(response.channelStats)) {
-              result.set(key, {
-                actorCount: value.actorCount,
-                backpressureRate: value.backpressureRate,
-                recvThroughput: value.recvThroughput,
-                sendThroughput: value.sendThroughput,
-              })
-              setChannelStats(result)
-            }
-            setFragmentStats(response.fragmentStats)
-          },
-          (e) => {
-            console.error(e)
-            toast(e, "error")
-          }
-        )
-      }
-    }
     refresh() // run once immediately
     const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
     return () => {
