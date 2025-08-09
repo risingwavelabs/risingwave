@@ -368,6 +368,20 @@ impl RequiredDist {
     }
 }
 
+impl StreamPlanRef {
+    /// Eliminate `SomeShard` distribution by using the stream key as the distribution key to
+    /// enforce the current plan to have a known distribution key.
+    pub fn enforce_concrete_distribution(self) -> Self {
+        match self.distribution() {
+            Distribution::SomeShard => {
+                RequiredDist::shard_by_key(self.schema().len(), self.expect_stream_key())
+                    .stream_enforce(self)
+            }
+            _ => self,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Distribution, RequiredDist};
