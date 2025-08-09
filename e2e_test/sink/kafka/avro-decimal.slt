@@ -38,7 +38,8 @@ create sink sink_decimal_scale_0 from t_sink_decimal_scale_0 with (
   ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'test_rw_sink_decimal_encode_scale_0'
 ) format plain encode avro (
-  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  force_append_only = 'true',
 );
 
 statement ok
@@ -46,7 +47,7 @@ create table ingest_decimal_scale_0 with (
   ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
   topic = 'test_rw_sink_decimal_encode_scale_0'
 ) format plain encode avro (
-  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
 );
 
 # '0.1234567890' will be 0 due to insuffcient scale

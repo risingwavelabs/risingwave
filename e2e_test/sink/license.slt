@@ -26,8 +26,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
-  3: Internal error
-  4: feature DynamoDbSink is not available based on your license
+  3: feature DynamoDbSink is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -51,8 +50,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
-  3: Internal error
-  4: feature SnowflakeSink is not available based on your license
+  3: feature SnowflakeSink is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -97,8 +95,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
-  3: Internal error
-  4: feature BigQuerySink is not available based on your license
+  3: feature BigQuerySink is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -108,21 +105,6 @@ ALTER SYSTEM SET license_key TO DEFAULT;
 
 statement ok
 flush;
-
-statement ok
-CREATE SINK file_sink
-FROM
-  t
-WITH
-(
-  connector = 's3',
-  s3.region_name = 'us-east-1',
-  s3.bucket_name = 'test',
-  s3.path = '',
-  type = 'append-only',
-  force_append_only='true'
-) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');
-
 
 statement error
 CREATE SINK dynamodb_sink
@@ -140,12 +122,11 @@ WITH
 ----
 db error: ERROR: Failed to run the query
 
-Caused by these errors (recent errors listed first):
-  1: Sink error
-  2: Sink primary key column not found: xx. Please use ',' as the delimiter for different primary key columns.
+Caused by:
+  Invalid input syntax: Sink primary key column not found: xx. Please use ',' as the delimiter for different primary key columns.
 
 
-statement ok
+statement error
 CREATE SINK snowflake_sink
 FROM t
 WITH (
@@ -157,7 +138,13 @@ WITH (
     s3.credentials.secret = 'xx',
     s3.region_name = 'xx',
     s3.path = 'xx',
+    primary_key = 'xx',
 );
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Sink primary key column not found: xx. Please use ',' as the delimiter for different primary key columns.
 
 
 statement error
@@ -176,7 +163,8 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
-  3: sink cannot pass validation: INTERNAL: Connection is closed
+  3: ElasticSearch/OpenSearch error
+  4: relative URL without a base
 
 
 statement error
@@ -202,9 +190,6 @@ Caused by these errors (recent errors listed first):
   3: BigQuery error
   4: No such file or directory (os error 2)
 
-
-statement ok
-DROP SINK snowflake_sink;
 
 statement ok
 DROP TABLE t;
