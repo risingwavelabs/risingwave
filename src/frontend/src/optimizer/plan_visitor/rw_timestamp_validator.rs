@@ -15,8 +15,7 @@
 use risingwave_common::catalog::{RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME};
 
 use super::{DefaultBehavior, Merge, StreamPlanVisitor};
-use crate::PlanRef;
-use crate::optimizer::plan_node::StreamTableScan;
+use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]

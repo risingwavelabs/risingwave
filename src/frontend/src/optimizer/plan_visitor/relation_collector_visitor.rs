@@ -42,12 +42,11 @@ impl RelationCollectorVisitor {
     /// on indices can only be discovered after plan is built.
     pub fn collect_with<C: ConventionMarker>(
         relations: HashSet<TableId>,
-        plan: PlanRef,
+        plan: PlanRef<C>,
     ) -> HashSet<TableId>
     where
         Self: PlanVisitor<C>,
     {
-        plan.expect_convention::<C>();
         let mut visitor = Self::new_with(relations);
         visitor.visit(plan);
         visitor.relations
@@ -64,7 +63,7 @@ impl LogicalPlanVisitor for RelationCollectorVisitor {
     }
 
     fn visit_logical_scan(&mut self, plan: &LogicalScan) {
-        self.relations.insert(plan.table_desc().table_id);
+        self.relations.insert(plan.table().id);
     }
 }
 
@@ -79,7 +78,7 @@ impl StreamPlanVisitor for RelationCollectorVisitor {
 
     fn visit_stream_table_scan(&mut self, plan: &StreamTableScan) {
         let logical = plan.core();
-        self.relations.insert(logical.table_desc.table_id);
+        self.relations.insert(logical.table_catalog.id);
     }
 
     fn visit_stream_source(&mut self, plan: &StreamSource) {
@@ -99,7 +98,7 @@ impl BatchPlanVisitor for RelationCollectorVisitor {
     }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        self.relations.insert(plan.core().table_desc.table_id);
+        self.relations.insert(plan.core().table_catalog.id);
     }
 
     fn visit_batch_source(&mut self, plan: &BatchSource) {

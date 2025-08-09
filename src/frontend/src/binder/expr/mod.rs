@@ -27,8 +27,10 @@ use risingwave_sqlparser::ast::{
 use crate::binder::Binder;
 use crate::binder::expr::function::is_sys_function_without_args;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
-use crate::handler::create_sql_function::SQL_UDF_PATTERN;
+use crate::expr::{
+    Expr as _, ExprImpl, ExprRewriter as _, ExprType, FunctionCall, InputRef,
+    InputRefDepthRewriter, Parameter, SubqueryKind,
+};
 
 mod binary_op;
 mod column;
@@ -437,21 +439,59 @@ impl Binder {
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
     }
 
+    fn is_binding_inline_sql_udf(&self) -> bool {
+        self.context.sql_udf_arguments.is_some()
+    }
+
+    /// Returns whether we're binding SQL UDF by checking if any of the upper subquery context has
+    /// `sql_udf_arguments` set.
+    fn is_binding_subquery_sql_udf(&self) -> bool {
+        self.upper_subquery_contexts
+            .iter()
+            .any(|(context, _)| context.sql_udf_arguments.is_some())
+    }
+
+    /// Bind a parameter for SQL UDF.
+    fn bind_sql_udf_parameter(&mut self, name: &str) -> Result<ExprImpl> {
+        for (depth, context) in std::iter::once(&self.context)
+            .chain((self.upper_subquery_contexts.iter().rev()).map(|(context, _)| context))
+            .enumerate()
+        {
+            // Only lookup the first non-empty udf context. If the parameter is not found in the
+            // current context, we will continue to the upper context.
+            if let Some(args) = &context.sql_udf_arguments {
+                if let Some(expr) = args.get(name) {
+                    // The arguments recorded in the context is relative to the that context.
+                    // We need to shift the depth to the current context.
+                    let mut rewriter = InputRefDepthRewriter::new(depth);
+                    return Ok(rewriter.rewrite_expr(expr.clone()));
+                } else {
+                    // A UDF cannot access parameters from outer UDFs. Do not continue but directly
+                    // return an error.
+                    break;
+                }
+            }
+        }
+
+        Err(ErrorCode::BindError(format!(
+            "failed to find {} parameter {name}",
+            if name.starts_with('$') {
+                "unnamed"
+            } else {
+                "named"
+            }
+        ))
+        .into())
+    }
+
     fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
         // Special check for sql udf
         // Note: This is specific to sql udf with unnamed parameters, since the
         // parameters will be parsed and treated as `Parameter`.
         // For detailed explanation, consider checking `bind_column`.
-        if self.udf_context.global_count() != 0 {
-            if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
-                return Ok(expr.clone());
-            }
-            // Same as `bind_column`, the error message here
-            // help with hint display when invalid definition occurs
-            return Err(ErrorCode::BindError(format!(
-                "{SQL_UDF_PATTERN} failed to find unnamed parameter ${index}"
-            ))
-            .into());
+        if self.is_binding_inline_sql_udf() || self.is_binding_subquery_sql_udf() {
+            let column_name = format!("${index}");
+            return self.bind_sql_udf_parameter(&column_name);
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())
@@ -1078,7 +1118,17 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         }
         AstDataType::Bytea => DataType::Bytea,
         AstDataType::Jsonb => DataType::Jsonb,
-        AstDataType::Vector(size) => DataType::Vector(*size as _),
+        AstDataType::Vector(size) => match (1..=DataType::VEC_MAX_SIZE).contains(&(*size as _)) {
+            true => DataType::Vector(*size as _),
+            false => {
+                return Err(ErrorCode::BindError(format!(
+                    "vector size {} is out of range [1, {}]",
+                    size,
+                    DataType::VEC_MAX_SIZE
+                ))
+                .into());
+            }
+        },
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid

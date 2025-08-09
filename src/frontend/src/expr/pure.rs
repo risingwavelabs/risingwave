@@ -209,6 +209,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::JsonbBuildArrayVariadic
             | Type::JsonbBuildObject
             | Type::JsonbPopulateRecord
+            | Type::JsonbToArray
             | Type::JsonbToRecord
             | Type::JsonbBuildObjectVariadic
             | Type::JsonbPathExists
@@ -274,6 +275,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::CosineDistance
             | Type::L1Distance
             | Type::InnerProduct
+            | Type::VecConcat
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
@@ -287,7 +289,7 @@ impl ExprVisitor for ImpureAnalyzer {
             }
             // expression output is not deterministic
             Type::Vnode // obtain vnode count from the context
-            | Type::TestPaidTier
+            | Type::TestFeature
             | Type::License
             | Type::Proctime
             | Type::PgSleep

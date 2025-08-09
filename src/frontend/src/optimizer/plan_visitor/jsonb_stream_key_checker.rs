@@ -24,7 +24,7 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 pub struct StreamKeyChecker;
 
 impl StreamKeyChecker {
-    fn visit_inputs(&mut self, plan: &impl PlanNode) -> Option<String> {
+    fn visit_inputs(&mut self, plan: &impl LogicalPlanNode) -> Option<String> {
         let results = plan.inputs().into_iter().map(|input| self.visit(input));
         Self::default_behavior().apply(results)
     }

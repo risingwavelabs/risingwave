@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -38,7 +38,11 @@ impl StreamDml {
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            append_only,
+            if append_only {
+                StreamKind::AppendOnly
+            } else {
+                StreamKind::Retract
+            }, // TODO(kind): merge input stream kind
             false,                   // TODO(rc): decide EOWC property
             WatermarkColumns::new(), // no watermark if dml is allowed
             MonotonicityMap::new(),  // TODO: derive monotonicity
@@ -71,7 +75,7 @@ impl Distill for StreamDml {
     }
 }
 
-impl PlanTreeNodeUnary for StreamDml {
+impl PlanTreeNodeUnary<Stream> for StreamDml {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -81,7 +85,7 @@ impl PlanTreeNodeUnary for StreamDml {
     }
 }
 
-impl_plan_tree_node_for_unary! {StreamDml}
+impl_plan_tree_node_for_unary! { Stream, StreamDml}
 
 impl StreamNode for StreamDml {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -96,6 +100,6 @@ impl StreamNode for StreamDml {
     }
 }
 
-impl ExprRewritable for StreamDml {}
+impl ExprRewritable<Stream> for StreamDml {}
 
 impl ExprVisitable for StreamDml {}

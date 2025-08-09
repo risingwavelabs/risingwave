@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
+use crate::optimizer::plan_node::*;
 pub struct ProjectJoinMergeRule {}
 
 impl ProjectJoinMergeRule {
@@ -22,7 +22,7 @@ impl ProjectJoinMergeRule {
     }
 }
 
-impl Rule for ProjectJoinMergeRule {
+impl Rule<Logical> for ProjectJoinMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
         let input = project.input();

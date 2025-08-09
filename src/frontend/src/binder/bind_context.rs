@@ -25,6 +25,7 @@ use risingwave_sqlparser::ast::{TableAlias, WindowSpec};
 
 use crate::binder::Relation;
 use crate::error::{ErrorCode, Result};
+use crate::expr::ExprImpl;
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
@@ -162,6 +163,9 @@ pub struct BindContext {
     pub disable_security_invoker: bool,
     /// Named window definitions from the `WINDOW` clause
     pub named_windows: HashMap<String, WindowSpec>,
+    /// Bound arguments for the current SQL UDF, if any.
+    // TODO: use enum for named or positional arguments
+    pub sql_udf_arguments: Option<HashMap<String, ExprImpl>>,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.

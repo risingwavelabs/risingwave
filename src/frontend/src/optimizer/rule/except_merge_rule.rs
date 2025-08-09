@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalExcept, PlanTreeNode};
 
 /// Different from `UnionMergeRule` and `IntersectMergeRule`, `ExceptMergeRule` can only merge its
 /// left most one input.
 pub struct ExceptMergeRule {}
-impl Rule for ExceptMergeRule {
+impl Rule<Logical> for ExceptMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_except: &LogicalExcept = plan.as_logical_except()?;
         let top_all = top_except.all();
