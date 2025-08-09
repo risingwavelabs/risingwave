@@ -18,6 +18,7 @@ use std::ops::DerefMut;
 use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use risingwave_common::catalog::Field;
 use risingwave_pb::connector_service::SinkMetadata;
 
 use super::SinkCommittedEpochSubscriber;
@@ -107,7 +108,12 @@ impl SinkCommitCoordinator for BoxCoordinator {
         self.deref_mut().init(subscriber).await
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> crate::sink::Result<()> {
-        self.deref_mut().commit(epoch, metadata).await
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> crate::sink::Result<()> {
+        self.deref_mut().commit(epoch, metadata, add_columns).await
     }
 }

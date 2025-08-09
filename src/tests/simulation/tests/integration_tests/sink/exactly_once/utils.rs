@@ -31,6 +31,7 @@ use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::{Rng, rng as thread_rng};
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::Field;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl, Serial};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -440,6 +441,7 @@ impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
     ) -> risingwave_connector::sink::Result<()> {
         // wait epoch
         assert!(self.committed_epoch_subscriber.is_some());
