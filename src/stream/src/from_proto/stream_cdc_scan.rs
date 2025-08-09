@@ -53,7 +53,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         assert_eq!(output_schema.data_types(), params.info.schema.data_types());
 
         let properties = table_desc.connect_properties.clone();
-
         let table_pk_order_types = table_desc
             .pk
             .iter()
@@ -122,6 +121,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 state_table,
                 node.rate_limit,
                 scan_options,
+                properties,
             );
             Ok((params.info, exec).into())
         } else {
@@ -141,6 +141,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 state_table,
                 node.rate_limit,
                 scan_options,
+                properties,
             );
             Ok((params.info, exec).into())
         }
