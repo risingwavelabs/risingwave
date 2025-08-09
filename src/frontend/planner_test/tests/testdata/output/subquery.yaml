@@ -192,15 +192,11 @@
       └─LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: true, output: all }
-    ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-    └─LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
-      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-    ├─BatchValues { rows: [[]] }
-    └─BatchProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
-      └─BatchValues { rows: [[]] }
+    BatchProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     SELECT n.nspname as "Schema",
     c.relname as "Name",
@@ -218,22 +214,21 @@
     LogicalProject { exprs: [rw_schemas.name, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, PgGetUserbyid(pg_class.relowner) as $expr2] }
     └─LogicalFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) AND PgTableIsVisible(pg_class.oid) }
       └─LogicalJoin { type: LeftOuter, on: (rw_schemas.id = pg_class.relnamespace), output: all }
-        ├─LogicalSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relpersistence, pg_class.relkind, pg_class.relpages, pg_class.relam, pg_class.reltablespace, pg_class.reloptions, pg_class.relispartition, pg_class.relpartbound] }
+        ├─LogicalSysScan { table: pg_class, output_columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relpersistence, pg_class.relkind, pg_class.relpages, pg_class.relam, pg_class.reltablespace, pg_class.reloptions, pg_class.relispartition, pg_class.relpartbound] }
         └─LogicalShare { id: 2 }
           └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-            └─LogicalSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+            └─LogicalSysScan { table: rw_schemas, output_columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
   batch_plan: |-
     BatchExchange { order: [rw_schemas.name ASC, pg_class.relname ASC], dist: Single }
     └─BatchProject { exprs: [rw_schemas.name, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, PgGetUserbyid(pg_class.relowner) as $expr2] }
       └─BatchSort { order: [rw_schemas.name ASC, pg_class.relname ASC] }
         └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.relname, pg_class.relowner, pg_class.relkind, rw_schemas.name] }
           ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
-          │ └─BatchProject { exprs: [pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind] }
-          │   └─BatchFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND PgTableIsVisible(pg_class.oid) }
-          │     └─BatchScan { table: pg_class, columns: [pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind, pg_class.oid], distribution: Single }
+          │ └─BatchFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND PgTableIsVisible(pg_class.oid) }
+          │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind], distribution: Single }
           └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
             └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
-              └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+              └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
 - sql: |
     create table auction (date_time date);
     select * from hop( auction, auction.date_time, INTERVAL '1', INTERVAL '3600' ) AS hop_1
@@ -805,9 +800,7 @@
   batch_plan: |-
     BatchProject { exprs: [GenerateSeries(1:Int32, $0)] }
     └─BatchProjectSet { select_list: [GenerateSeries(1:Int32, $0)] }
-      └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-        ├─BatchValues { rows: [[]] }
-        └─BatchValues { rows: [[1:Int32]] }
+      └─BatchValues { rows: [[1:Int32]] }
 - name: array subquery
   sql: |
     select Array(select 1 union select 2);

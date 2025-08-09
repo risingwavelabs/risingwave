@@ -17,16 +17,14 @@ use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::Type;
 
-use super::BoxedRule;
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, align_types};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
-use crate::optimizer::rule::Rule;
 use crate::utils::{ColIndexMapping, Condition};
 
 pub struct PushCalculationOfJoinRule {}
 
-impl Rule for PushCalculationOfJoinRule {
+impl Rule<Logical> for PushCalculationOfJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join: &LogicalJoin = plan.as_logical_join()?;
         let (mut left, mut right, mut on, join_type, mut output_indices) = join.clone().decompose();

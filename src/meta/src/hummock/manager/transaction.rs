@@ -123,6 +123,7 @@ impl<'a> HummockVersionTransaction<'a> {
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
         vector_index_delta: HashMap<TableId, VectorIndexDelta>,
+        group_id_to_truncate_tables: HashMap<CompactionGroupId, Vec<TableId>>,
     ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
         new_version_delta.new_table_watermarks = new_table_watermarks;
@@ -159,6 +160,18 @@ impl<'a> HummockVersionTransaction<'a> {
             for sub_level in sub_levels {
                 group_deltas.push(GroupDelta::NewL0SubLevel(sub_level));
             }
+        }
+
+        for (compaction_group_id, table_ids) in group_id_to_truncate_tables {
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(compaction_group_id)
+                .or_default()
+                .group_deltas;
+
+            group_deltas.push(GroupDelta::TruncateTables(
+                table_ids.into_iter().map(|id| id.into()).collect(),
+            ));
         }
 
         // update state table info

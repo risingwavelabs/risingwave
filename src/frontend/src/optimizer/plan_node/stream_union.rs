@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, watermark_pretty};
-use super::{ExprRewritable, PlanRef, generic};
+use super::{ExprRewritable, StreamPlanRef as PlanRef, generic};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
@@ -44,6 +44,11 @@ impl StreamUnion {
     }
 
     pub fn new_with_dist(core: generic::Union<PlanRef>, dist: Distribution) -> Self {
+        assert!(
+            core.all,
+            "After UnionToDistinctRule, union should become union all"
+        );
+
         let inputs = &core.inputs;
         let ctx = core.ctx();
 
@@ -67,7 +72,12 @@ impl StreamUnion {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            inputs.iter().all(|x| x.append_only()),
+            if inputs.iter().all(|x| x.append_only()) {
+                StreamKind::AppendOnly
+            } else {
+                // TODO(kind): handle `StreamKind::Upsert`
+                StreamKind::Retract
+            },
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
             MonotonicityMap::new(),
@@ -87,12 +97,12 @@ impl Distill for StreamUnion {
     }
 }
 
-impl PlanTreeNode for StreamUnion {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Stream> for StreamUnion {
+    fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         smallvec::SmallVec::from_vec(self.core.inputs.clone())
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         let mut new = self.core.clone();
         new.inputs = inputs.to_vec();
         let dist = self.distribution().clone();
@@ -106,6 +116,6 @@ impl StreamNode for StreamUnion {
     }
 }
 
-impl ExprRewritable for StreamUnion {}
+impl ExprRewritable<Stream> for StreamUnion {}
 
 impl ExprVisitable for StreamUnion {}

@@ -18,11 +18,11 @@ use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::LocalApproxPercentileNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use crate::PlanRef;
+use super::StreamPlanRef as PlanRef;
 use crate::expr::{ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::{Distill, childless_record, watermark_pretty};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
@@ -57,7 +57,7 @@ impl StreamLocalApproxPercentile {
             input.stream_key().map(|k| k.to_vec()),
             functional_dependency,
             input.distribution().clone(),
-            input.append_only(),
+            input.stream_kind(), // TODO(kind): reject upsert input
             input.emit_on_window_close(),
             watermark_columns,
             input.columns_monotonicity().clone(),
@@ -91,7 +91,7 @@ impl Distill for StreamLocalApproxPercentile {
     }
 }
 
-impl PlanTreeNodeUnary for StreamLocalApproxPercentile {
+impl PlanTreeNodeUnary<Stream> for StreamLocalApproxPercentile {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -107,7 +107,7 @@ impl PlanTreeNodeUnary for StreamLocalApproxPercentile {
     }
 }
 
-impl_plan_tree_node_for_unary! {StreamLocalApproxPercentile}
+impl_plan_tree_node_for_unary! { Stream, StreamLocalApproxPercentile}
 
 impl StreamNode for StreamLocalApproxPercentile {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -123,7 +123,7 @@ impl StreamNode for StreamLocalApproxPercentile {
     }
 }
 
-impl ExprRewritable for StreamLocalApproxPercentile {
+impl ExprRewritable<Stream> for StreamLocalApproxPercentile {
     fn has_rewritable_expr(&self) -> bool {
         false
     }

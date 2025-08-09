@@ -14,9 +14,8 @@
 
 use risingwave_common::catalog::{RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME};
 
-use super::{DefaultBehavior, Merge};
-use crate::PlanRef;
-use crate::optimizer::plan_node::StreamTableScan;
+use super::{DefaultBehavior, Merge, StreamPlanVisitor};
+use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
@@ -28,7 +27,7 @@ impl RwTimestampValidator {
     }
 }
 
-impl PlanVisitor for RwTimestampValidator {
+impl StreamPlanVisitor for RwTimestampValidator {
     type Result = bool;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

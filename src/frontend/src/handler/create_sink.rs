@@ -66,9 +66,10 @@ use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
 use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
 use crate::optimizer::plan_node::{
-    IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject, generic,
+    IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamPlanRef as PlanRef,
+    StreamProject, generic,
 };
-use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
+use crate::optimizer::{OptimizerContext, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
@@ -171,9 +172,7 @@ pub async fn gen_sink_plan(
         .unwrap_or(false);
 
     if is_auto_schema_change {
-        Feature::SinkAutoSchemaChange
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
+        Feature::SinkAutoSchemaChange.check_available()?;
     }
 
     // Used for debezium's table name

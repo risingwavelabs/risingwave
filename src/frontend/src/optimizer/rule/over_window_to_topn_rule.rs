@@ -16,8 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
 use risingwave_expr::window_function::WindowFuncKind;
 
-use super::{BoxedRule, Rule};
-use crate::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, Literal, collect_input_refs,
 };
@@ -56,7 +55,7 @@ impl OverWindowToTopNRule {
     }
 }
 
-impl Rule for OverWindowToTopNRule {
+impl Rule<Logical> for OverWindowToTopNRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let ctx = plan.ctx();
         let (project, plan) = {

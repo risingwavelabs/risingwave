@@ -18,10 +18,10 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::*;
 pub struct GroupingSetsToExpandRule {}
 
 impl GroupingSetsToExpandRule {
@@ -68,7 +68,7 @@ impl GroupingSetsToExpandRule {
     }
 }
 
-impl Rule for GroupingSetsToExpandRule {
+impl Rule<Logical> for GroupingSetsToExpandRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         if agg.grouping_sets().is_empty() {

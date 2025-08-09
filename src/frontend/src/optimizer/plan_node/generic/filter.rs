@@ -43,6 +43,13 @@ impl<PlanRef: GenericPlanRef> Filter<PlanRef> {
     pub fn new(predicate: Condition, input: PlanRef) -> Self {
         Filter { predicate, input }
     }
+
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> Filter<OtherPlanRef> {
+        Filter {
+            predicate: self.predicate.clone(),
+            input,
+        }
+    }
 }
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
     fn schema(&self) -> Schema {

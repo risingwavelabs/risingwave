@@ -302,6 +302,12 @@ impl BarrierScheduler {
         ret
     }
 
+    /// Schedule a command without waiting for it to be executed.
+    pub fn run_command_no_wait(&self, database_id: DatabaseId, command: Command) -> MetaResult<()> {
+        tracing::trace!("run_command_no_wait: {:?}", command);
+        self.push(database_id, vec![(command, Notifier::default())])
+    }
+
     /// Flush means waiting for the next barrier to collect.
     pub async fn flush(&self, database_id: DatabaseId) -> MetaResult<HummockVersionId> {
         let start = Instant::now();
@@ -851,6 +857,13 @@ mod tests {
             &self,
             _database_id: DatabaseId,
         ) -> MetaResult<Option<crate::barrier::DatabaseRuntimeInfoSnapshot>> {
+            unimplemented!()
+        }
+
+        async fn handle_load_finished_source_ids(
+            &self,
+            _load_finished_source_ids: Vec<u32>,
+        ) -> MetaResult<()> {
             unimplemented!()
         }
     }

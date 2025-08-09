@@ -224,6 +224,13 @@ pub struct StorageConfig {
     /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
     #[serde(default = "default::storage::iceberg_compaction_size_estimation_smoothing_factor")]
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
+    // For Small File Compaction
+    /// The threshold for small file compaction in MB.
+    #[serde(default = "default::storage::iceberg_compaction_small_file_threshold_mb")]
+    pub iceberg_compaction_small_file_threshold_mb: u32,
+    /// The maximum total size of tasks in small file compaction in MB.
+    #[serde(default = "default::storage::iceberg_compaction_max_task_total_size_mb")]
+    pub iceberg_compaction_max_task_total_size_mb: u32,
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
@@ -1033,6 +1040,14 @@ pub mod default {
 
         pub fn iceberg_compaction_size_estimation_smoothing_factor() -> f64 {
             0.3
+        }
+
+        pub fn iceberg_compaction_small_file_threshold_mb() -> u32 {
+            32
+        }
+
+        pub fn iceberg_compaction_max_task_total_size_mb() -> u32 {
+            50 * 1024 // 50GB
         }
     }
 
