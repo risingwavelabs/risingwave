@@ -276,6 +276,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::L1Distance
             | Type::InnerProduct
             | Type::VecConcat
+            | Type::L2Norm
+            | Type::L2Normalize
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
