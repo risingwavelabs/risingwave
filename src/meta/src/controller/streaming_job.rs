@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
@@ -31,7 +32,9 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::source::{ConnectorProperties, SplitImpl};
+use risingwave_connector::source::{
+    ConnectorProperties, SplitImpl, pb_connection_type_to_connection_type,
+};
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
@@ -2207,14 +2210,36 @@ impl CatalogController {
         Ok(new_config.into_iter().collect())
     }
 
-    pub async fn update_connection_props_by_connection_id(
+    /// Update connection properties and all dependent sources/sinks in a single transaction
+    pub async fn update_connection_and_dependent_objects_props(
         &self,
         connection_id: ConnectionId,
         alter_props: BTreeMap<String, String>,
         alter_secret_refs: BTreeMap<String, PbSecretRef>,
-    ) -> MetaResult<WithOptionsSecResolved> {
+    ) -> MetaResult<(
+        WithOptionsSecResolved,                   // Connection's new properties
+        Vec<(SourceId, HashMap<String, String>)>, // Source ID and their complete properties
+        Vec<(SinkId, HashMap<String, String>)>,   // Sink ID and their complete properties
+    )> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
+
+        // Find all dependent sources and sinks first
+        let dependent_sources: Vec<SourceId> = Source::find()
+            .select_only()
+            .column(source::Column::SourceId)
+            .filter(source::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let dependent_sinks: Vec<SinkId> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
         let (connection_catalog, _obj) = Connection::find_by_id(connection_id)
             .find_also_related(Object)
@@ -2232,63 +2257,41 @@ impl CatalogController {
             .collect();
 
         // Map the connection type enum to the string name expected by the validation function
-        let connection_type_str = match connection_catalog.params.to_protobuf().connection_type() {
-            risingwave_pb::catalog::connection_params::PbConnectionType::Kafka => "kafka",
-            risingwave_pb::catalog::connection_params::PbConnectionType::Iceberg => "iceberg",
-            risingwave_pb::catalog::connection_params::PbConnectionType::SchemaRegistry => {
-                "schema_registry"
-            }
-            risingwave_pb::catalog::connection_params::PbConnectionType::Elasticsearch => {
-                "elasticsearch"
-            }
-            risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => {
-                return Err(MetaError::invalid_parameter("Unspecified connection type"));
-            }
-        };
+        let connection_type_str = pb_connection_type_to_connection_type(
+            &connection_catalog.params.to_protobuf().connection_type(),
+        )
+        .ok_or_else(|| MetaError::invalid_parameter("Unspecified connection type"))?;
 
         risingwave_connector::allow_alter_on_fly_fields::check_connection_allow_alter_on_fly_fields(
             connection_type_str, &prop_keys,
         )?;
 
         let connection_pb = connection_catalog.params.to_protobuf();
-        let mut options_with_secret = WithOptionsSecResolved::new(
+        let mut connection_options_with_secret = WithOptionsSecResolved::new(
             connection_pb.properties.into_iter().collect(),
             connection_pb.secret_refs.into_iter().collect(),
         );
 
-        // Clone for validation before consuming in handle_update
-        let alter_props_clone = alter_props.clone();
-        let alter_secret_refs_clone = alter_secret_refs.clone();
+        let (to_add_secret_dep, to_remove_secret_dep) = connection_options_with_secret
+            .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
 
-        let (to_add_secret_dep, to_remove_secret_dep) =
-            options_with_secret.handle_update(alter_props, alter_secret_refs)?;
-
-        tracing::info!(
-            "applying new properties to connection: connection_id={}, options_with_secret={:?}",
+        tracing::debug!(
+            "applying new properties to connection and dependents: connection_id={}, sources={:?}, sinks={:?}",
             connection_id,
-            options_with_secret
+            dependent_sources,
+            dependent_sinks
         );
 
-        // Validate that dependent sources/sinks don't have conflicting properties
-        self.validate_connection_property_conflicts(
-            connection_id,
-            &connection_catalog,
-            &alter_props_clone,
-            &alter_secret_refs_clone,
-            &txn,
-        )
-        .await?;
-
+        // Validate connection
         {
-            // emsamble connection and validate it
             let conn_params_pb = risingwave_pb::catalog::ConnectionParams {
                 connection_type: connection_pb.connection_type,
-                properties: options_with_secret
+                properties: connection_options_with_secret
                     .as_plaintext()
                     .clone()
                     .into_iter()
                     .collect(),
-                secret_refs: options_with_secret
+                secret_refs: connection_options_with_secret
                     .as_secret()
                     .clone()
                     .into_iter()
@@ -2304,7 +2307,7 @@ impl CatalogController {
             validate_connection(&connection).await?;
         }
 
-        // Update secret dependencies
+        // Update connection secret dependencies
         if !to_add_secret_dep.is_empty() {
             ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
                 object_dependency::ActiveModel {
@@ -2330,12 +2333,12 @@ impl CatalogController {
         // Update the connection with new properties
         let updated_connection_params = risingwave_pb::catalog::ConnectionParams {
             connection_type: connection_pb.connection_type,
-            properties: options_with_secret
+            properties: connection_options_with_secret
                 .as_plaintext()
                 .clone()
                 .into_iter()
                 .collect(),
-            secret_refs: options_with_secret
+            secret_refs: connection_options_with_secret
                 .as_secret()
                 .clone()
                 .into_iter()
@@ -2348,7 +2351,195 @@ impl CatalogController {
         };
         active_connection_model.update(&txn).await?;
 
-        // Get the updated connection to notify frontend
+        // Batch update dependent sources and collect their complete properties
+        let mut updated_sources_with_props: Vec<(SourceId, HashMap<String, String>)> = Vec::new();
+
+        if !dependent_sources.is_empty() {
+            // Batch fetch all dependent sources
+            let sources_with_objs = Source::find()
+                .find_also_related(Object)
+                .filter(source::Column::SourceId.is_in(dependent_sources.iter().cloned()))
+                .all(&txn)
+                .await?;
+
+            // Prepare batch updates
+            let mut source_updates = Vec::new();
+            let mut fragment_updates = Vec::new();
+
+            for (source, _obj) in sources_with_objs {
+                let source_id = source.source_id;
+
+                let mut source_options_with_secret = WithOptionsSecResolved::new(
+                    source.with_properties.0.clone(),
+                    source
+                        .secret_ref
+                        .map(|secret_ref| secret_ref.to_protobuf())
+                        .unwrap_or_default(),
+                );
+                let (_source_to_add_secret_dep, _source_to_remove_secret_dep) =
+                    source_options_with_secret
+                        .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
+
+                // Validate the updated source properties
+                let _ = ConnectorProperties::extract(source_options_with_secret.clone(), true)?;
+
+                // Prepare source update
+                let active_source = source::ActiveModel {
+                    source_id: Set(source_id),
+                    with_properties: Set(Property(
+                        source_options_with_secret.as_plaintext().clone(),
+                    )),
+                    secret_ref: Set((!source_options_with_secret.as_secret().is_empty()).then(
+                        || {
+                            risingwave_meta_model::SecretRef::from(
+                                source_options_with_secret.as_secret().clone(),
+                            )
+                        },
+                    )),
+                    ..Default::default()
+                };
+                source_updates.push(active_source);
+
+                // Prepare fragment update
+                let fragment_job_id = source.optional_associated_table_id.unwrap_or(source_id);
+                fragment_updates.push((
+                    fragment_job_id,
+                    source_options_with_secret.as_plaintext().clone(),
+                    source_options_with_secret.as_secret().clone(),
+                ));
+
+                // Collect the complete properties for runtime broadcast
+                let complete_source_props = LocalSecretManager::global()
+                    .fill_secrets(
+                        source_options_with_secret.as_plaintext().clone(),
+                        source_options_with_secret.as_secret().clone(),
+                    )
+                    .map_err(MetaError::from)?
+                    .into_iter()
+                    .collect::<HashMap<String, String>>();
+                updated_sources_with_props.push((source_id, complete_source_props));
+            }
+
+            for source_update in source_updates {
+                source_update.update(&txn).await?;
+            }
+
+            // Batch execute fragment updates
+            for (fragment_job_id, with_properties, secret_refs) in fragment_updates {
+                update_connector_props_fragments(
+                    &txn,
+                    fragment_job_id,
+                    FragmentTypeFlag::Source,
+                    |node, found| {
+                        if let PbNodeBody::Source(node) = node
+                            && let Some(source_inner) = &mut node.source_inner
+                        {
+                            source_inner.with_properties = with_properties.clone();
+                            source_inner.secret_refs = secret_refs.clone();
+                            *found = true;
+                        }
+                    },
+                )
+                .await?;
+            }
+        }
+
+        // Batch update dependent sinks and collect their complete properties
+        let mut updated_sinks_with_props: Vec<(SinkId, HashMap<String, String>)> = Vec::new();
+
+        if !dependent_sinks.is_empty() {
+            // Batch fetch all dependent sinks
+            let sinks_with_objs = Sink::find()
+                .find_also_related(Object)
+                .filter(sink::Column::SinkId.is_in(dependent_sinks.iter().cloned()))
+                .all(&txn)
+                .await?;
+
+            // Prepare batch updates
+            let mut sink_updates = Vec::new();
+            let mut sink_fragment_updates = Vec::new();
+
+            for (sink, _obj) in sinks_with_objs {
+                let sink_id = sink.sink_id;
+
+                // Validate that sink props can be altered
+                match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
+                    Some(connector) => {
+                        let connector_type = connector.to_lowercase();
+                        check_sink_allow_alter_on_fly_fields(&connector_type, &prop_keys)
+                            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+                        match_sink_name_str!(
+                            connector_type.as_str(),
+                            SinkType,
+                            {
+                                let mut new_sink_props = sink.properties.0.clone();
+                                new_sink_props.extend(alter_props.clone());
+                                SinkType::validate_alter_config(&new_sink_props)
+                            },
+                            |sink: &str| Err(SinkError::Config(anyhow!(
+                                "unsupported sink type {}",
+                                sink
+                            )))
+                        )?
+                    }
+                    None => {
+                        return Err(SinkError::Config(anyhow!(
+                            "connector not specified when alter sink"
+                        ))
+                        .into());
+                    }
+                };
+
+                let mut new_sink_props = sink.properties.0.clone();
+                new_sink_props.extend(alter_props.clone());
+
+                // Prepare sink update
+                let active_sink = sink::ActiveModel {
+                    sink_id: Set(sink_id),
+                    properties: Set(risingwave_meta_model::Property(new_sink_props.clone())),
+                    ..Default::default()
+                };
+                sink_updates.push(active_sink);
+
+                // Prepare fragment updates for this sink
+                sink_fragment_updates.push((sink_id, new_sink_props.clone()));
+
+                // Collect the complete properties for runtime broadcast
+                let complete_sink_props: HashMap<String, String> =
+                    new_sink_props.into_iter().collect();
+                updated_sinks_with_props.push((sink_id, complete_sink_props));
+            }
+
+            // Batch execute sink updates
+            for sink_update in sink_updates {
+                sink_update.update(&txn).await?;
+            }
+
+            // Batch execute sink fragment updates using the reusable function
+            for (sink_id, new_sink_props) in sink_fragment_updates {
+                update_connector_props_fragments(
+                    &txn,
+                    sink_id,
+                    FragmentTypeFlag::Sink,
+                    |node, found| {
+                        if let PbNodeBody::Sink(node) = node
+                            && let Some(sink_desc) = &mut node.sink_desc
+                            && sink_desc.id == sink_id as u32
+                        {
+                            sink_desc.properties = new_sink_props.clone();
+                            *found = true;
+                        }
+                    },
+                )
+                .await?;
+            }
+        }
+
+        // Collect all updated objects for frontend notification
+        let mut updated_objects = Vec::new();
+
+        // Add connection
         let (connection, obj) = Connection::find_by_id(connection_id)
             .find_also_related(Object)
             .one(&txn)
@@ -2356,149 +2547,61 @@ impl CatalogController {
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
             })?;
+        updated_objects.push(PbObject {
+            object_info: Some(PbObjectInfo::Connection(
+                ObjectModel(connection, obj.unwrap()).into(),
+            )),
+        });
 
+        // Add sources
+        for source_id in &dependent_sources {
+            let (source, obj) = Source::find_by_id(*source_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(ObjectType::Source.as_str(), *source_id)
+                })?;
+            updated_objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Source(
+                    ObjectModel(source, obj.unwrap()).into(),
+                )),
+            });
+        }
+
+        // Add sinks
+        for sink_id in &dependent_sinks {
+            let (sink, obj) = Sink::find_by_id(*sink_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), *sink_id)
+                })?;
+            updated_objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+            });
+        }
+
+        // Commit the transaction
         txn.commit().await?;
 
-        self.notify_frontend(
-            NotificationOperation::Update,
-            NotificationInfo::ObjectGroup(PbObjectGroup {
-                objects: vec![PbObject {
-                    object_info: Some(PbObjectInfo::Connection(
-                        ObjectModel(connection, obj.unwrap()).into(),
-                    )),
-                }],
-            }),
-        )
-        .await;
-
-        Ok(options_with_secret)
-    }
-
-    /// Find all sources that depend on a given connection
-    pub async fn find_sources_by_connection_id(
-        &self,
-        connection_id: ConnectionId,
-    ) -> MetaResult<Vec<SourceId>> {
-        let inner = self.inner.read().await;
-        let source_ids: Vec<SourceId> = Source::find()
-            .select_only()
-            .column(source::Column::SourceId)
-            .filter(source::Column::ConnectionId.eq(connection_id))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-        Ok(source_ids)
-    }
-
-    /// Find all sinks that depend on a given connection
-    pub async fn find_sinks_by_connection_id(
-        &self,
-        connection_id: ConnectionId,
-    ) -> MetaResult<Vec<SinkId>> {
-        let inner = self.inner.read().await;
-        let sink_ids: Vec<SinkId> = Sink::find()
-            .select_only()
-            .column(sink::Column::SinkId)
-            .filter(sink::Column::ConnectionId.eq(connection_id))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-        Ok(sink_ids)
-    }
-
-    /// Validate that dependent sources/sinks don't have conflicting property keys
-    async fn validate_connection_property_conflicts(
-        &self,
-        connection_id: ConnectionId,
-        connection_catalog: &connection::Model,
-        alter_props: &BTreeMap<String, String>,
-        alter_secret_refs: &BTreeMap<String, PbSecretRef>,
-        txn: &DatabaseTransaction,
-    ) -> MetaResult<Vec<()>> {
-        // we have checked create source/sink creation on no collision in connection properties
-        // so we assume:
-        // if a property is set in connection, it will not be set by dependent objects
-        let connection_defined_keys = connection_catalog
-            .params
-            .to_protobuf()
-            .properties
-            .keys()
-            .chain(connection_catalog.params.to_protobuf().secret_refs.keys())
-            .cloned()
-            .collect::<HashSet<_>>();
-
-        let property_keys: HashSet<String> = alter_props
-            .keys()
-            .chain(alter_secret_refs.keys())
-            .cloned()
-            .collect();
-
-        let mut merged_props = vec![];
-
-        // Check sources for conflicts
-        let conflicting_sources: Vec<(SourceId, String)> = Source::find()
-            .filter(source::Column::ConnectionId.eq(connection_id))
-            .all(txn)
-            .await?
-            .into_iter()
-            .filter_map(|source| {
-                for prop_key in &property_keys {
-                    if !connection_defined_keys.contains(prop_key)
-                        && source.with_properties.0.contains_key(prop_key)
-                        && let Some(secret_ref) = &source.secret_ref
-                        && secret_ref.to_protobuf().contains_key(prop_key)
-                    {
-                        return Some((source.source_id, prop_key.clone()));
-                    }
-                }
-
-                None
-            })
-            .collect();
-
-        if !conflicting_sources.is_empty() {
-            let conflicts: Vec<String> = conflicting_sources
-                .into_iter()
-                .map(|(source_id, prop)| format!("source {} has property '{}'", source_id, prop))
-                .collect();
-            return Err(MetaError::invalid_parameter(format!(
-                "Cannot alter connection properties that are also set in dependent objects: {}",
-                conflicts.join(", ")
-            )));
+        // Notify frontend about all updated objects
+        if !updated_objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: updated_objects,
+                }),
+            )
+            .await;
         }
 
-        // Check sinks for conflicts
-        let conflicting_sinks: Vec<(SinkId, String)> = Sink::find()
-            .filter(sink::Column::ConnectionId.eq(connection_id))
-            .all(txn)
-            .await?
-            .into_iter()
-            .filter_map(|sink| {
-                for prop_key in &property_keys {
-                    if !connection_defined_keys.contains(prop_key)
-                        && sink.properties.0.contains_key(prop_key)
-                        && let Some(secret_ref) = &sink.secret_ref
-                        && secret_ref.to_protobuf().contains_key(prop_key)
-                    {
-                        return Some((sink.sink_id, prop_key.clone()));
-                    }
-                }
-                None
-            })
-            .collect();
-
-        if !conflicting_sinks.is_empty() {
-            let conflicts: Vec<String> = conflicting_sinks
-                .into_iter()
-                .map(|(sink_id, prop)| format!("sink {} has property '{}'", sink_id, prop))
-                .collect();
-            return Err(MetaError::invalid_parameter(format!(
-                "Cannot alter connection properties that are also set in dependent objects: {}",
-                conflicts.join(", ")
-            )));
-        }
-
-        Ok(merged_props)
+        Ok((
+            connection_options_with_secret,
+            updated_sources_with_props,
+            updated_sinks_with_props,
+        ))
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(

@@ -587,43 +587,35 @@ impl StreamManagerService for StreamServiceImpl {
                     .collect()
             }
             AlterConnectorPropsObject::Connection => {
-                // Find all sources and sinks that depend on this connection
-                let dependent_sources = self
+                // Use the unified atomic update method to update connection and all dependent objects in a single transaction
+                let (
+                    connection_options_with_secret,
+                    updated_sources_with_props,
+                    updated_sinks_with_props,
+                ) = self
                     .metadata_manager
                     .catalog_controller
-                    .find_sources_by_connection_id(request.object_id as ConnectionId)
-                    .await?;
-
-                let dependent_sinks = self
-                    .metadata_manager
-                    .catalog_controller
-                    .find_sinks_by_connection_id(request.object_id as ConnectionId)
-                    .await?;
-
-                let options_with_secret = self
-                    .metadata_manager
-                    .catalog_controller
-                    .update_connection_props_by_connection_id(
+                    .update_connection_and_dependent_objects_props(
                         request.object_id as ConnectionId,
                         request.changed_props.clone().into_iter().collect(),
                         request.changed_secret_refs.clone().into_iter().collect(),
                     )
                     .await?;
 
-                let (options, secret_refs) = options_with_secret.into_parts();
+                let (options, secret_refs) = connection_options_with_secret.into_parts();
                 let new_props_plaintext = secret_manager
                     .fill_secrets(options, secret_refs)
                     .map_err(MetaError::from)?
                     .into_iter()
                     .collect::<HashMap<String, String>>();
 
-                // Prepare mutation for all dependent sources and sinks
+                // Prepare runtime mutation for all dependent sources and sinks with their complete properties
                 let mut dependent_mutation = HashMap::default();
-                for source_id in dependent_sources {
-                    dependent_mutation.insert(source_id as u32, new_props_plaintext.clone());
+                for (source_id, complete_source_props) in updated_sources_with_props {
+                    dependent_mutation.insert(source_id as u32, complete_source_props);
                 }
-                for sink_id in dependent_sinks {
-                    dependent_mutation.insert(sink_id as u32, new_props_plaintext.clone());
+                for (sink_id, complete_sink_props) in updated_sinks_with_props {
+                    dependent_mutation.insert(sink_id as u32, complete_sink_props);
                 }
 
                 // Broadcast changes to dependent sources and sinks if any exist
