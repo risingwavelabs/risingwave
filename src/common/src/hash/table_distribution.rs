@@ -229,17 +229,12 @@ impl TableDistribution {
                     .map(|idx| pk_indices[*idx])
                     .collect_vec();
 
-                VirtualNode::compute_chunk(chunk, &dist_key_indices, vnodes.len())
-                    .into_iter()
-                    .zip_eq_fast(chunk.visibility().iter())
-                    .map(|(vnode, vis)| {
-                        // Ignore the invisible rows.
-                        if vis {
-                            check_vnode_is_set(vnode, vnodes);
-                        }
-                        vnode
-                    })
-                    .collect()
+                let v_node_chunks =
+                    VirtualNode::compute_chunk(chunk, &dist_key_indices, vnodes.len());
+                for idx in chunk.visibility().iter_ones() {
+                    check_vnode_is_set(v_node_chunks[idx], vnodes);
+                }
+                v_node_chunks
             }
             ComputeVnode::VnodeColumnIndex {
                 vnodes,
