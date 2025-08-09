@@ -20,7 +20,7 @@ use super::{
     DataType, Date, Decimal, F32, F64, Interval, ScalarRefImpl, Serial, Time, Timestamp,
     Timestamptz,
 };
-use crate::array::{ListRef, StructRef};
+use crate::array::{ListRef, StructRef, VECTOR_ITEM_TYPE};
 use crate::error::NotImplemented;
 
 /// Error type for [`ToBinary`] trait.
@@ -160,7 +160,11 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            ScalarRefImpl::Vector(v) => {
+                assert_eq!(&DataType::Vector(v.into_inner().len()), ty);
+                v.into_inner()
+                    .to_binary_with_type(&DataType::List(VECTOR_ITEM_TYPE.into()))
+            }
             ScalarRefImpl::List(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Struct(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Map(_) => {
