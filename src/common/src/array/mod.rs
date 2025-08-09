@@ -48,7 +48,7 @@ pub use chrono_array::{
     DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray,
     TimestampArrayBuilder, TimestamptzArray, TimestamptzArrayBuilder,
 };
-pub use data_chunk::{DataChunk, DataChunkTestExt};
+pub use data_chunk::{ColumnChunk, DataChunk, DataChunkTestExt, RowChunk};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
