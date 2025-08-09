@@ -113,6 +113,7 @@ impl ToBatchPb for BatchOverWindow {
             .core
             .order_key()
             .iter()
+            .copied()
             .map(ColumnOrder::to_protobuf)
             .collect();
 

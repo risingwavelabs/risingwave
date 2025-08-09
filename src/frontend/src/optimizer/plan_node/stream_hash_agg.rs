@@ -95,7 +95,13 @@ impl StreamHashAgg {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            emit_on_window_close, // in EOWC mode, we produce append only output
+            if emit_on_window_close {
+                // in EOWC mode, we produce append only output
+                StreamKind::AppendOnly
+            } else {
+                // TODO(kind): reject upsert input
+                StreamKind::Retract
+            },
             emit_on_window_close,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity

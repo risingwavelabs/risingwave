@@ -44,6 +44,11 @@ impl StreamUnion {
     }
 
     pub fn new_with_dist(core: generic::Union<PlanRef>, dist: Distribution) -> Self {
+        assert!(
+            core.all,
+            "After UnionToDistinctRule, union should become union all"
+        );
+
         let inputs = &core.inputs;
         let ctx = core.ctx();
 
@@ -67,7 +72,12 @@ impl StreamUnion {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            inputs.iter().all(|x| x.append_only()),
+            if inputs.iter().all(|x| x.append_only()) {
+                StreamKind::AppendOnly
+            } else {
+                // TODO(kind): handle `StreamKind::Upsert`
+                StreamKind::Retract
+            },
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
             MonotonicityMap::new(),

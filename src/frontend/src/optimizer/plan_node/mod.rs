@@ -56,6 +56,7 @@ use super::property::{
 };
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
+use crate::optimizer::property::StreamKind;
 use crate::session::current::notice_to_user;
 use crate::utils::{PrettySerde, build_graph_from_pretty};
 
@@ -662,8 +663,8 @@ impl PhysicalPlanRef for StreamPlanRef {
 /// Allow access to all fields defined in [`StreamPlanNodeMetadata`] for the type-erased plan node.
 // TODO: may also implement on `dyn PlanNode` directly.
 impl StreamPlanNodeMetadata for StreamPlanRef {
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only()
+    fn stream_kind(&self) -> StreamKind {
+        self.plan_base().stream_kind()
     }
 
     fn emit_on_window_close(&self) -> bool {

@@ -132,7 +132,7 @@
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
       └─StreamProject { exprs: [sum0(count)] }
-        └─StreamSimpleAgg { aggs: [sum0(count), count] }
+        └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [count] }
               └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -155,7 +155,7 @@
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
       └─StreamProject { exprs: [sum0(count)] }
-        └─StreamSimpleAgg { aggs: [sum0(count), count] }
+        └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [count] }
               └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
