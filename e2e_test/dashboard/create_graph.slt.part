@@ -1,0 +1,124 @@
+onlyif dashboard
+statement ok
+create table t(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.seed = '1',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
+
+statement ok
+create table if not exists t(v1 int, v2 int);
+
+onlyif dashboard
+statement ok
+create table t2(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.seed = '2',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
+
+statement ok
+create table if not exists t2(v1 int, v2 int);
+
+onlyif dashboard
+statement ok
+create table t3(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.seed = '3',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
+
+statement ok
+create table if not exists t3(v1 int, v2 int);
+
+onlyif dashboard
+statement ok
+create table t4(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.seed = '4',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
+
+statement ok
+create table if not exists t4(v1 int, v2 int);
+
+onlyif dashboard
+statement ok
+create table t5(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.seed = '5',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
+
+statement ok
+create table if not exists t5(v1 int, v2 int);
+
+statement ok
+create materialized view mv1 as
+select t.v1, t.v2, t2.v1 as t2_v1, t2.v2 as t2_v2
+from t join t2 on t.v1 = t2.v1;
+
+statement ok
+create materialized view mv2 as
+select t3.v1, t3.v2, t4.v1 as t4_v1, t4.v2 as t4_v2
+from t3 join t4 on t3.v2 = t4.v2;
+
+statement ok
+create materialized view mv3 as
+select mv1.v1, mv1.t2_v1, t5.v1 as t5_v1, t5.v2 as t5_v2
+from mv1 join t5 on mv1.v1 = t5.v1;
+
+statement ok
+create materialized view mv4 as
+select mv2.v1, mv2.t4_v1, mv3.t5_v1, mv3.t5_v2
+from mv2 join mv3 on mv2.v1 = mv3.v1;
+
+statement ok
+create materialized view mv5 as
+select t.v1, t.v2, mv4.v1 as mv4_v1, mv4.t4_v1
+from t join mv4 on t.v2 = mv4.v1;
+
+statement ok
+create materialized view mv6 as
+select mv1.v1, mv1.t2_v1, mv2.v1 as mv2_v1, mv2.t4_v1
+from mv1 join mv2 on mv1.t2_v1 = mv2.t4_v1;
+
+statement ok
+create materialized view mv7 as
+select t3.v1, t3.v2, mv3.t5_v1, mv3.t5_v2, t5.v1 as t5_orig_v1
+from t3 join mv3 on t3.v1 = mv3.v1 join t5 on mv3.t5_v1 = t5.v1;
+
+statement ok
+create materialized view mv8 as
+select mv4.v1, mv4.t4_v1, mv5.v1 as mv5_v1, mv5.mv4_v1
+from mv4 join mv5 on mv4.v1 = mv5.mv4_v1;

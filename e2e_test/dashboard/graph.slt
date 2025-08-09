@@ -1,0 +1,5 @@
+# Include the creation script
+include create_graph.slt.part
+
+# Include the cleanup script
+include drop_graph.slt.part
