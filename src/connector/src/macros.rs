@@ -248,7 +248,7 @@ macro_rules! impl_connection {
         pub fn pb_connection_type_to_connection_type(pb_connection_type: &risingwave_pb::catalog::connection_params::PbConnectionType) -> Option<&'static str> {
             match pb_connection_type {
                 $(
-                    risingwave_pb::catalog::connection_params::PbConnectionType::$variant_name => Some(stringify!($connection_type_name)),
+                    risingwave_pb::catalog::connection_params::PbConnectionType::$variant_name => Some($connection_type_name),
                 )*
                 _ => None,
             }
