@@ -234,5 +234,9 @@ harness = false
 name = "json_vs_plain_parser"
 harness = false
 
+[[bench]]
+name = "json_batch_processing"
+harness = false
+
 [lints]
 workspace = true
