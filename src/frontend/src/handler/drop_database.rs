@@ -17,6 +17,7 @@ use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::OwnedByUserCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
@@ -54,6 +55,26 @@ pub async fn handle_drop_database(
             }
         }
     };
+
+    // Check if database was created by an admin user, if so, require admin privilege to drop
+    let user_reader = session.env().user_info_reader().read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&session.user_name())
+        .ok_or_else(|| {
+            ErrorCode::PermissionDenied("Session user is invalid".to_owned())
+        })?;
+
+    // If the database owner was an admin, only admin users can delete it
+    if let Some(database_owner_name) = user_reader.get_user_name_by_id(&database.owner()) {
+        if let Some(database_owner) = user_reader.get_user_by_name(&database_owner_name) {
+            if database_owner.is_admin && !current_user.is_admin && !current_user.is_super {
+                return Err(ErrorCode::PermissionDenied(
+                    "Only admin users can drop databases created by admin users".to_owned()
+                ).into());
+            }
+        }
+    }
+    drop(user_reader);
 
     session.check_privilege_for_drop_alter_db_schema(&database)?;
 
@@ -105,5 +126,66 @@ mod tests {
             .ok()
             .cloned();
         assert!(database.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_admin_database_protection() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+
+        // Create an admin user 
+        frontend.run_sql("CREATE USER admin_user WITH ADMIN").await.unwrap();
+        let admin_user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("admin_user")
+                .unwrap()
+                .id
+        };
+
+        // Admin user creates a database
+        frontend
+            .run_user_sql(
+                "CREATE DATABASE admin_db",
+                "dev".to_owned(),
+                "admin_user".to_owned(),
+                admin_user_id,
+            )
+            .await
+            .unwrap();
+
+        // Create a regular user
+        frontend.run_sql("CREATE USER regular_user WITH NOSUPERUSER NOADMIN").await.unwrap();
+        let regular_user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("regular_user")
+                .unwrap()
+                .id
+        };
+
+        // Regular user should not be able to drop admin-created database
+        let res = frontend
+            .run_user_sql(
+                "DROP DATABASE admin_db",
+                "dev".to_owned(),
+                "regular_user".to_owned(),
+                regular_user_id,
+            )
+            .await;
+        assert!(res.is_err());
+
+        // Admin user should be able to drop their own database
+        frontend
+            .run_user_sql(
+                "DROP DATABASE admin_db",
+                "dev".to_owned(),
+                "admin_user".to_owned(),
+                admin_user_id,
+            )
+            .await
+            .unwrap();
     }
 }

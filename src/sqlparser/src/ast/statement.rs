@@ -1057,6 +1057,8 @@ pub enum UserOption {
     NoCreateUser,
     Login,
     NoLogin,
+    Admin,
+    NoAdmin,
     EncryptedPassword(AstString),
     Password(Option<AstString>),
     OAuth(Vec<SqlOption>),
@@ -1073,6 +1075,8 @@ impl fmt::Display for UserOption {
             UserOption::NoCreateUser => write!(f, "NOCREATEUSER"),
             UserOption::Login => write!(f, "LOGIN"),
             UserOption::NoLogin => write!(f, "NOLOGIN"),
+            UserOption::Admin => write!(f, "ADMIN"),
+            UserOption::NoAdmin => write!(f, "NOADMIN"),
             UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
             UserOption::Password(None) => write!(f, "PASSWORD NULL"),
             UserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
@@ -1093,6 +1097,7 @@ struct UserOptionsBuilder {
     create_db: Option<UserOption>,
     create_user: Option<UserOption>,
     login: Option<UserOption>,
+    admin: Option<UserOption>,
     password: Option<UserOption>,
 }
 
@@ -1109,6 +1114,9 @@ impl UserOptionsBuilder {
             options.push(option);
         }
         if let Some(option) = self.login {
+            options.push(option);
+        }
+        if let Some(option) = self.admin {
             options.push(option);
         }
         if let Some(option) = self.password {
@@ -1147,6 +1155,8 @@ impl ParseTo for UserOptions {
                     Keyword::NOCREATEUSER => (&mut builder.create_user, UserOption::NoCreateUser),
                     Keyword::LOGIN => (&mut builder.login, UserOption::Login),
                     Keyword::NOLOGIN => (&mut builder.login, UserOption::NoLogin),
+                    Keyword::ADMIN => (&mut builder.admin, UserOption::Admin),
+                    Keyword::NOADMIN => (&mut builder.admin, UserOption::NoAdmin),
                     Keyword::PASSWORD => {
                         if parser.parse_keyword(Keyword::NULL) {
                             (&mut builder.password, UserOption::Password(None))
@@ -1172,7 +1182,7 @@ impl ParseTo for UserOptions {
                         parser.expected_at(
                             checkpoint,
                             "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | ADMIN | NOADMIN | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                         )?;
                         unreachable!()
                     }
@@ -1181,7 +1191,7 @@ impl ParseTo for UserOptions {
             } else {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
+                        | CREATEUSER | NOCREATEUSER | ADMIN | NOADMIN | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                 )?
             }
         }

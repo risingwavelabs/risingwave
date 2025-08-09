@@ -932,6 +932,7 @@ impl UserInfoWriter for MockUserInfoWriter {
             UpdateField::CreateUser => user_info.can_create_user = update_user.can_create_user,
             UpdateField::AuthInfo => user_info.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => user_info.name.clone_from(&update_user.name),
+            UpdateField::Admin => user_info.is_admin = update_user.is_admin,
             UpdateField::Unspecified => unreachable!(),
         });
         lock.update_user(update_user);

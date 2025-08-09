@@ -62,6 +62,20 @@ fn alter_prost_user_info(
             )
             .into());
         }
+
+        let require_admin = user_info.is_admin
+            || options
+                .0
+                .iter()
+                .any(|option| matches!(option, UserOption::Admin | UserOption::NoAdmin));
+        if require_admin && !session_user.is_admin {
+            return Err(PermissionDenied(
+                "must be admin to alter admin users or change admin attribute"
+                    .to_owned(),
+            )
+            .into());
+        }
+
         if !session_user.can_create_user && !change_self_password_only {
             return Err(PermissionDenied("permission denied to alter user".to_owned()).into());
         }
@@ -102,6 +116,14 @@ fn alter_prost_user_info(
             UserOption::NoLogin => {
                 user_info.can_login = false;
                 update_fields.push(UpdateField::Login);
+            }
+            UserOption::Admin => {
+                user_info.is_admin = true;
+                update_fields.push(UpdateField::Admin);
+            }
+            UserOption::NoAdmin => {
+                user_info.is_admin = false;
+                update_fields.push(UpdateField::Admin);
             }
             UserOption::EncryptedPassword(p) => {
                 if !p.0.is_empty() {

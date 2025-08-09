@@ -70,6 +70,17 @@ pub async fn handle_create_user(
                 );
             }
 
+            let require_admin = stmt
+                .with_options
+                .0
+                .iter()
+                .any(|option| matches!(option, UserOption::Admin));
+            if require_admin && !session_user.is_admin {
+                return Err(
+                    PermissionDenied("must be admin to create admin users".to_owned()).into(),
+                );
+            }
+
             if !session_user.can_create_user {
                 return Err(PermissionDenied("permission denied to create user".to_owned()).into());
             }
@@ -96,6 +107,8 @@ pub async fn handle_create_user(
                 UserOption::NoCreateUser => user_info.can_create_user = false,
                 UserOption::Login => user_info.can_login = true,
                 UserOption::NoLogin => user_info.can_login = false,
+                UserOption::Admin => user_info.is_admin = true,
+                UserOption::NoAdmin => user_info.is_admin = false,
                 UserOption::EncryptedPassword(password) => {
                     if !password.0.is_empty() {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);
@@ -212,5 +225,36 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn test_create_admin_user() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let user_info_reader = session.env().user_info_reader();
+
+        // Create admin user
+        frontend.run_sql("CREATE USER admin_user WITH ADMIN NOADMIN").await.unwrap();
+        
+        let admin_user = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user")
+            .cloned()
+            .unwrap();
+        
+        // Should not be admin because NOADMIN overrides ADMIN
+        assert!(!admin_user.is_admin);
+        
+        // Create another admin user
+        frontend.run_sql("CREATE USER admin_user2 WITH ADMIN").await.unwrap();
+        
+        let admin_user2 = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user2")
+            .cloned()
+            .unwrap();
+        
+        // Should be admin
+        assert!(admin_user2.is_admin);
     }
 }
