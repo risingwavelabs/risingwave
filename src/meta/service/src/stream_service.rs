@@ -26,7 +26,9 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{
+    ConnectionId, FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism,
+};
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
@@ -585,18 +587,68 @@ impl StreamManagerService for StreamServiceImpl {
                     .collect()
             }
             AlterConnectorPropsObject::Connection => {
-                todo!()
+                // Use the unified atomic update method to update connection and all dependent objects in a single transaction
+                let (
+                    connection_options_with_secret,
+                    updated_sources_with_props,
+                    updated_sinks_with_props,
+                ) = self
+                    .metadata_manager
+                    .catalog_controller
+                    .update_connection_and_dependent_objects_props(
+                        request.object_id as ConnectionId,
+                        request.changed_props.clone().into_iter().collect(),
+                        request.changed_secret_refs.clone().into_iter().collect(),
+                    )
+                    .await?;
+
+                let (options, secret_refs) = connection_options_with_secret.into_parts();
+                let new_props_plaintext = secret_manager
+                    .fill_secrets(options, secret_refs)
+                    .map_err(MetaError::from)?
+                    .into_iter()
+                    .collect::<HashMap<String, String>>();
+
+                // Prepare runtime mutation for all dependent sources and sinks with their complete properties
+                let mut dependent_mutation = HashMap::default();
+                for (source_id, complete_source_props) in updated_sources_with_props {
+                    dependent_mutation.insert(source_id as u32, complete_source_props);
+                }
+                for (sink_id, complete_sink_props) in updated_sinks_with_props {
+                    dependent_mutation.insert(sink_id as u32, complete_sink_props);
+                }
+
+                // Broadcast changes to dependent sources and sinks if any exist
+                if !dependent_mutation.is_empty() {
+                    tracing::info!(
+                        "broadcasting connection {} property changes to {} dependent sources/sinks",
+                        request.object_id,
+                        dependent_mutation.len()
+                    );
+                    let _dependent_version = self
+                        .barrier_scheduler
+                        .run_command(
+                            database_id,
+                            Command::ConnectorPropsChange(dependent_mutation),
+                        )
+                        .await?;
+                }
+
+                new_props_plaintext
             }
             AlterConnectorPropsObject::Unspecified => unreachable!(),
         };
 
-        let mut mutation = HashMap::default();
-        mutation.insert(request.object_id, new_props_plaintext);
+        // For sources and sinks, broadcast the change to the object itself
+        if request.object_type() != AlterConnectorPropsObject::Connection {
+            let mut mutation = HashMap::default();
+            mutation.insert(request.object_id, new_props_plaintext);
 
-        let _i = self
-            .barrier_scheduler
-            .run_command(database_id, Command::ConnectorPropsChange(mutation))
-            .await?;
+            let _i = self
+                .barrier_scheduler
+                .run_command(database_id, Command::ConnectorPropsChange(mutation))
+                .await?;
+        }
 
         Ok(Response::new(AlterConnectorPropsResponse {}))
     }

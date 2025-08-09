@@ -269,6 +269,7 @@ pub enum AlterFunctionOperation {
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
+    AlterConnectorProps { alter_props: Vec<SqlOption> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -615,6 +616,13 @@ impl fmt::Display for AlterConnectionOperation {
             }
             AlterConnectionOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {new_owner_name}")
+            }
+            AlterConnectionOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
             }
         }
     }
