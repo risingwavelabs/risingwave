@@ -93,12 +93,12 @@ create source mysql_cdc_source with (
 query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 \x01020304
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 text tinytext mediumtext longtext 2021-01-01 12:34:56 \x01020304
 
 query
 select * from mysql_query('mysql_cdc_source', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 \x01020304
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 text tinytext mediumtext longtext 2021-01-01 12:34:56 \x01020304
 
 
 system ok
@@ -214,6 +214,90 @@ system ok
 mysql -e "
 USE tvf;
 DROP DATABASE tvf;
+"
+
+# Test numeric256 types
+# Note: MySQL DECIMAL can store very large numbers that we can cast to uint256
+system ok
+mysql -e "DROP DATABASE IF EXISTS uint256_test; CREATE DATABASE uint256_test;"
+
+system ok
+mysql -e "
+USE uint256_test;
+CREATE TABLE test_numeric256 (
+    id bigint primary key,
+    int256_val varchar(255),
+    uint256_val varchar(255),
+    description text
+);"
+
+system ok
+mysql -e "
+USE uint256_test;
+INSERT INTO test_numeric256 VALUES
+    (1, '0', '0', 'zeros'),
+    (2, '123456789012345678901234567890', '123456789012345678901234567890', 'normal'),
+    (3, '-123456789012345678901234567890', NULL, 'negative int256'),
+    (4, '57896044618658097711785492504343953926634992332820282019728792003956564819967', '86844066927987146567678238756515930889952488499230423029593188005934847229949', 'large values');
+"
+
+query ITTT
+select id, int256_val::rw_int256, uint256_val::rw_uint256, description
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select * from test_numeric256 order by id;');
+----
+1 0 0 zeros
+2 123456789012345678901234567890 123456789012345678901234567890 normal
+3 -123456789012345678901234567890 NULL negative int256
+4 57896044618658097711785492504343953926634992332820282019728792003956564819967 86844066927987146567678238756515930889952488499230423029593188005934847229949 large values
+
+# Test uint256 arithmetic operations through MySQL source
+query I
+select uint256_val::rw_uint256 + 1::rw_uint256
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256 where id = 1;');
+----
+1
+
+# Test uint256 comparison operations
+query I
+select COUNT(*) from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256;')
+where uint256_val::rw_uint256 > 0::rw_uint256;
+----
+2
+
+# Test uint256 aggregation with MySQL source data
+query I
+select SUM(uint256_val::rw_uint256)
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256 where uint256_val is not null;');
+----
+86844066927987146567678238756515930889952488499353879818605533684836081797839
+
+# Test uint256 MAX/MIN aggregation
+query II
+select MAX(uint256_val::rw_uint256), MIN(uint256_val::rw_uint256)
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256 where uint256_val is not null;');
+----
+86844066927987146567678238756515930889952488499230423029593188005934847229949 0
+
+# Test uint256 casting edge cases
+statement error
+select '-1'::rw_uint256
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select 1;');
+
+# Test uint256 ordering with large values
+query T
+select uint256_val::rw_uint256
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256 where uint256_val is not null order by cast(uint256_val as unsigned);');
+----
+0
+123456789012345678901234567890
+86844066927987146567678238756515930889952488499230423029593188005934847229949
+
+# Cleanup MySQL test database
+system ok
+mysql -e "
+USE uint256_test;
+DROP TABLE test_numeric256;
+DROP DATABASE uint256_test;
 "
 
 statement ok

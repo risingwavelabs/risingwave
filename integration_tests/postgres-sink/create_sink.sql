@@ -36,3 +36,14 @@ FROM
     primary_key = 'id',
     force_append_only = 'true',
 );
+
+CREATE SINK numeric256_types_postgres_sink
+FROM numeric256_types WITH (
+    connector = 'jdbc',
+    jdbc.url = 'jdbc:postgresql://postgres:5432/mydb',
+    user='myuser',
+    password='123456',
+    table.name = 'numeric256_types',
+    type='upsert',
+    primary_key = 'id'
+);
