@@ -251,7 +251,6 @@ impl SourceManagerCore {
         }
 
         for (source_id, new_props) in recreate_source_id_map_new_props {
-            tracing::info!("recreate source {source_id} in source manager");
             if let Some(handle) = self.managed_sources.get_mut(&(source_id as _)) {
                 // the update here should not involve fragments change and split change
                 // Or we need to drop and recreate the source worker instead of updating inplace
@@ -259,6 +258,9 @@ impl SourceManagerCore {
                     WithOptionsSecResolved::without_secrets(new_props.into_iter().collect());
                 let props = ConnectorProperties::extract(props_wrapper, false).unwrap(); // already checked when sending barrier
                 handle.update_props(props);
+                tracing::info!("recreate source {source_id} in source manager");
+            } else {
+                tracing::info!("job id {source_id} is not registered in source manager");
             }
         }
     }
@@ -444,8 +446,25 @@ impl SourceManager {
     /// e.g., split change (`post_collect` barrier) or scaling (`post_apply_reschedule`).
     #[await_tree::instrument("apply_source_change({source_change})")]
     pub async fn apply_source_change(&self, source_change: SourceChange) {
-        let mut core = self.core.lock().await;
-        core.apply_source_change(source_change);
+        let need_force_tick = matches!(source_change, SourceChange::UpdateSourceProps { .. });
+        let updated_source_ids = if let SourceChange::UpdateSourceProps {
+            ref source_id_map_new_props,
+        } = source_change
+        {
+            source_id_map_new_props.keys().cloned().collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        {
+            let mut core = self.core.lock().await;
+            core.apply_source_change(source_change);
+        }
+
+        // Force tick for updated source workers
+        if need_force_tick {
+            self.force_tick_updated_sources(updated_source_ids).await;
+        }
     }
 
     /// create and register connector worker for source.
@@ -538,6 +557,28 @@ impl SourceManager {
     pub async fn pause_tick(&self) -> MutexGuard<'_, ()> {
         tracing::debug!("pausing tick lock in source manager");
         self.paused.lock().await
+    }
+
+    /// Force tick for specific updated source workers after properties update.
+    async fn force_tick_updated_sources(&self, updated_source_ids: Vec<u32>) {
+        let core = self.core.lock().await;
+        for source_id in updated_source_ids {
+            if let Some(handle) = core.managed_sources.get(&(source_id as SourceId)) {
+                tracing::info!("forcing tick for updated source {}", source_id);
+                if let Err(e) = handle.force_tick().await {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "failed to force tick for source {} after properties update",
+                        source_id
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    "source {} not found when trying to force tick after update",
+                    source_id
+                );
+            }
+        }
     }
 }
 
