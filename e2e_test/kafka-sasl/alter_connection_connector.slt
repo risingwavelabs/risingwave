@@ -1,27 +1,27 @@
 control substitution on
 
 system ok
-rpk topic create test_alter_conn_1 -X brokers=localhost:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+rpk topic create test_alter_conn_1 -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
 
 system ok
-cat << EOF | rpk topic produce test_alter_conn_1 -X brokers=localhost:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+cat << EOF | rpk topic produce test_alter_conn_1 -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
 {"x": 1}
 {"x": 2}
 {"x": 3}
 EOF
 
 system ok
-rpk topic create test_alter_conn_1 -p 2 -X brokers=localhost:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+rpk topic create test_alter_conn_1 -p 2 -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
 
 system ok
-cat << EOF | rpk topic produce test_alter_conn_1 -p 0 -X brokers=localhost:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+cat << EOF | rpk topic produce test_alter_conn_1 -p 0 -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
 {"x": 4}
 {"x": 5}
 {"x": 6}
 EOF
 
 statement ok
-create secret s_broker with ( backend = 'meta' ) as 'localhost:19092';
+create secret s_broker with ( backend = 'meta' ) as 'message_queue_sasl_1:19092';
 
 statement ok
 create connection kafka_conn with (
@@ -36,7 +36,7 @@ create connection kafka_conn with (
 statement ok
 create connection kafka_bk with (
     type = 'kafka',
-    properties.bootstrap.server = 'localhost:19093',
+    properties.bootstrap.server = 'message_queue_sasl_2:19093',
     properties.security.protocol = 'SASL_PLAINTEXT',
     properties.sasl.mechanism = 'PLAIN',
     properties.sasl.username = 'dev1',
@@ -61,21 +61,21 @@ select * from t_conn order by x;
 
 
 statement ok
-alter secret s_broker with ( backend = 'meta' ) as 'localhost:19093';
+alter secret s_broker with ( backend = 'meta' ) as 'message_queue_sasl_2:19093';
 
 statement ok
 alter connection kafka_conn connector with (properties.sasl.username = 'dev1');
 
 # add data to a new partition, to test enumerator work as expected
 system ok
-cat << EOF | rpk topic produce test_alter_conn_1 -p 0 -X brokers=localhost:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+cat << EOF | rpk topic produce test_alter_conn_1 -p 0 -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
 {"x": 7}
 {"x": 8}
 {"x": 9}
 EOF
 
 system ok
-cat << EOF | rpk topic produce test_alter_conn_1 -p 1 -X brokers=localhost:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+cat << EOF | rpk topic produce test_alter_conn_1 -p 1 -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
 {"x": 10}
 {"x": 11}
 {"x": 12}
@@ -83,7 +83,7 @@ EOF
 
 # add data to original topic, it should not be ingested
 system ok
-cat << EOF | rpk topic produce test_alter_conn_1 -X brokers=localhost:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+cat << EOF | rpk topic produce test_alter_conn_1 -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
 {"x": 13}
 {"x": 14}
 {"x": 15}
