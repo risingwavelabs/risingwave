@@ -77,7 +77,11 @@ impl StreamTableScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            core.append_only(),
+            if core.append_only() {
+                StreamKind::AppendOnly
+            } else {
+                StreamKind::Retract
+            },
             false,
             core.watermark_columns(),
             MonotonicityMap::new(),

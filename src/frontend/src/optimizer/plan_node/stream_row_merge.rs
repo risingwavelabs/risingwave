@@ -87,7 +87,7 @@ impl StreamRowMerge {
             lhs_input.stream_key().map(|k| k.to_vec()),
             functional_dependency,
             lhs_input.distribution().clone(),
-            lhs_input.append_only(),
+            lhs_input.stream_kind(), // TODO(kind): reject upsert input
             lhs_input.emit_on_window_close(),
             watermark_columns,
             lhs_input.columns_monotonicity().clone(),

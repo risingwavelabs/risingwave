@@ -1937,7 +1937,7 @@
       │       └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], stream_scan_type: ArrangementBackfill, stream_key: [bid._row_id], pk: [_row_id], dist: UpstreamHashShard(bid._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(bid.auction))) as $expr1] }
-          └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(bid.auction)), count] }
+          └─StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count(bid.auction)), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [sum0(count), count(bid.auction)] }
                 └─StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [count] }
@@ -1971,7 +1971,7 @@
 
     Fragment 3
     StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(bid.auction))) as $expr1] }
-    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(bid.auction)), count] } { tables: [ SimpleAggState: 9 ] }
+    └── StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count(bid.auction)), count] } { tables: [ SimpleAggState: 9 ] }
         └── StreamExchange Single from 4
 
     Fragment 4
