@@ -152,14 +152,14 @@ impl PostgresExternalTable {
         // attstorage values: 'p' = plain, 'e' = external, 'm' = main, 'x' = extended
         // We want columns that are not 'p' (plain) as they can potentially use TOAST
         let query = "
-            SELECT attname 
-            FROM pg_attribute a 
-            JOIN pg_class c ON a.attrelid = c.oid 
-            JOIN pg_namespace n ON c.relnamespace = n.oid 
-            WHERE n.nspname = $1 
-            AND c.relname = $2 
-            AND a.attnum > 0 
-            AND NOT a.attisdropped 
+            SELECT attname
+            FROM pg_attribute a
+            JOIN pg_class c ON a.attrelid = c.oid
+            JOIN pg_namespace n ON c.relnamespace = n.oid
+            WHERE n.nspname = $1
+            AND c.relname = $2
+            AND a.attnum > 0
+            AND NOT a.attisdropped
             AND a.attstorage != 'p'
             ORDER BY a.attnum
         ";

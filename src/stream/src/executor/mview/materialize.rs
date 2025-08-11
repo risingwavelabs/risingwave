@@ -227,13 +227,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         && self.version_column_index.is_none()
                         && self.conflict_behavior == ConflictBehavior::Overwrite;
 
-                    // // For CDC tables with TOAST-able columns, disable optimization to ensure TOAST column fix is applied
-                    // let do_not_handle_conflict = if self.toastable_column_indices.is_some() {
-                    //     false
-                    // } else {
-                    //     do_not_handle_conflict
-                    // };
-
                     match self.conflict_behavior {
                         checked_conflict_behaviors!() if !do_not_handle_conflict => {
                             if chunk.cardinality() == 0 {
