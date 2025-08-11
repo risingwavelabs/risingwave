@@ -182,12 +182,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mv_table_id = TableId::new(self.state_table.table_id());
-        println!(
-            "=== MaterializeExecutor执行开始 table_id={} is_cdc_table={} ===",
-            mv_table_id.table_id(),
-            self.is_cdc_table
-        );
-
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
@@ -211,12 +205,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     Message::Chunk(chunk)
                 }
                 Message::Chunk(chunk) => {
-                    println!(
-                        "=== MaterializeExecutor处理Chunk cardinality={} is_cdc_table={} conflict_behavior={:?} ===",
-                        chunk.cardinality(),
-                        self.is_cdc_table,
-                        self.conflict_behavior
-                    );
                     self.metrics
                         .materialize_input_row_count
                         .inc_by(chunk.cardinality() as u64);
@@ -234,10 +222,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     } else {
                         do_not_handle_conflict
                     };
-                    println!(
-                        "=== do_not_handle_conflict={} (CDC表强制冲突检查) ===",
-                        do_not_handle_conflict
-                    );
+
                     match self.conflict_behavior {
                         checked_conflict_behaviors!() if !do_not_handle_conflict => {
                             if chunk.cardinality() == 0 {
@@ -460,8 +445,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
 const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
 
 /// Fix TOAST columns by replacing unavailable values with old row values
-fn fix_toast_columns_for_cdc(old_row: &OwnedRow, new_row: &OwnedRow) -> OwnedRow {
-    println!("处理 toast");
+fn handle_toast_columns_for_cdc(old_row: &OwnedRow, new_row: &OwnedRow) -> OwnedRow {
     let mut fixed_row_data = new_row.as_inner().to_vec();
 
     for (i, new_datum) in new_row.iter().enumerate() {
@@ -651,7 +635,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         metrics: &MaterializeMetrics,
         is_cdc_table: bool,
     ) -> StreamExecutorResult<ChangeBuffer> {
-        println!("这里1");
         assert_matches!(conflict_behavior, checked_conflict_behaviors!());
 
         let key_set: HashSet<Box<[u8]>> = row_ops
@@ -673,7 +656,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         let row_serde = self.row_serde.clone();
         let version_column_index = self.version_column_index;
         for (op, key, row) in row_ops {
-            println!("这里op: {:?}", op);
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let Some(old_row) = self.get_expected(&key) else {
@@ -701,14 +683,13 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 true
                             };
                             if need_overwrite {
-                                println!("这里is_cdc_table: {}", is_cdc_table);
                                 let final_row = if is_cdc_table {
                                     // Apply TOAST column fix for CDC tables
                                     let old_row_deserialized =
                                         row_serde.deserializer.deserialize(old_row.row.clone())?;
                                     let new_row_deserialized =
                                         row_serde.deserializer.deserialize(row.clone())?;
-                                    let fixed_row = fix_toast_columns_for_cdc(
+                                    let fixed_row = handle_toast_columns_for_cdc(
                                         &old_row_deserialized,
                                         &new_row_deserialized,
                                     );
@@ -754,14 +735,14 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                     new_row_deserialized.clone(),
                                 );
                                 let mut updated_row = OwnedRow::new(row_deserialized_vec);
-                                println!("is_cdc_table: {}", is_cdc_table);
+
                                 // Apply TOAST column fix for CDC tables
                                 if is_cdc_table {
                                     // Note: we need to use old_row_deserialized again, but it was moved above
                                     // So we re-deserialize the old row
                                     let old_row_deserialized_again =
                                         row_serde.deserializer.deserialize(old_row.row.clone())?;
-                                    updated_row = fix_toast_columns_for_cdc(
+                                    updated_row = handle_toast_columns_for_cdc(
                                         &old_row_deserialized_again,
                                         &updated_row,
                                     );
