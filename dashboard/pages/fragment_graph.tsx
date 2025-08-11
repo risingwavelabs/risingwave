@@ -75,9 +75,6 @@ export interface PlanNodeDatum {
   actorIds?: string[]
 }
 
-// Derived stats from ChannelStats, majorly by dividing the stats by duration.
-// Using ChannelDeltaStats from proto instead of custom interface
-
 function buildPlanNodeDependency(
   fragment: TableFragments_Fragment
 ): d3.HierarchyNode<PlanNodeDatum> {
