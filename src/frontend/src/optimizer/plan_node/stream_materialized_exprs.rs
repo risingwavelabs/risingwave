@@ -108,7 +108,8 @@ impl StreamMaterializedExprs {
             input.stream_key().map(|v| v.to_vec()),
             fd_set,
             input.distribution().clone(),
-            input.append_only(),
+            // TODO(kind): theoretically, even if input is upsert, the output can be retract
+            input.stream_kind(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),

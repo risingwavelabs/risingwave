@@ -29,7 +29,7 @@ use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::{Schema, TableDesc};
+use risingwave_common::catalog::Schema;
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::scan_range::ScanRange;
@@ -54,9 +54,9 @@ use serde::ser::SerializeStruct;
 use uuid::Uuid;
 
 use super::SchedulerError;
+use crate::TableCatalog;
 use crate::catalog::TableId;
 use crate::catalog::catalog_service::CatalogReader;
-use crate::error::RwError;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
@@ -1227,17 +1227,11 @@ impl BatchPlanFragmenter {
     /// If there are multiple scan nodes in this stage, they must have the same distribution, but
     /// maybe different vnodes partition. We just use the same partition for all the scan nodes.
     fn collect_stage_table_scan(&self, node: PlanRef) -> SchedulerResult<Option<TableScanInfo>> {
-        let build_table_scan_info = |name, table_desc: &TableDesc, scan_range| {
-            let table_catalog = self
-                .catalog_reader
-                .read_guard()
-                .get_any_table_by_id(&table_desc.table_id)
-                .cloned()
-                .map_err(RwError::from)?;
+        let build_table_scan_info = |name, table_catalog: &TableCatalog, scan_range| {
             let vnode_mapping = self
                 .worker_node_manager
                 .fragment_mapping(table_catalog.fragment_id)?;
-            let partitions = derive_partitions(scan_range, table_desc, &vnode_mapping)?;
+            let partitions = derive_partitions(scan_range, table_catalog, &vnode_mapping)?;
             let info = TableScanInfo::new(name, partitions);
             Ok(Some(info))
         };
@@ -1251,13 +1245,13 @@ impl BatchPlanFragmenter {
         } else if let Some(scan_node) = node.as_batch_log_seq_scan() {
             build_table_scan_info(
                 scan_node.core().table_name.to_owned(),
-                &scan_node.core().table_desc,
+                &scan_node.core().table,
                 &[],
             )
         } else if let Some(scan_node) = node.as_batch_seq_scan() {
             build_table_scan_info(
                 scan_node.core().table_name().to_owned(),
-                &scan_node.core().table_desc,
+                &scan_node.core().table_catalog,
                 scan_node.scan_ranges(),
             )
         } else {
@@ -1295,13 +1289,7 @@ impl BatchPlanFragmenter {
             return Ok(None);
         }
         if let Some(lookup_join) = node.as_batch_lookup_join() {
-            let table_desc = lookup_join.right_table_desc();
-            let table_catalog = self
-                .catalog_reader
-                .read_guard()
-                .get_any_table_by_id(&table_desc.table_id)
-                .cloned()
-                .map_err(RwError::from)?;
+            let table_catalog = lookup_join.right_table();
             let vnode_mapping = self
                 .worker_node_manager
                 .fragment_mapping(table_catalog.fragment_id)?;
@@ -1320,18 +1308,19 @@ impl BatchPlanFragmenter {
 /// It can be derived if the value of the distribution key is already known.
 fn derive_partitions(
     scan_ranges: &[ScanRange],
-    table_desc: &TableDesc,
+    table_catalog: &TableCatalog,
     vnode_mapping: &WorkerSlotMapping,
 ) -> SchedulerResult<HashMap<WorkerSlotId, TablePartitionInfo>> {
-    let vnode_mapping = if table_desc.vnode_count != vnode_mapping.len() {
+    let vnode_mapping = if table_catalog.vnode_count.value() != vnode_mapping.len() {
         // The vnode count mismatch occurs only in special cases where a hash-distributed fragment
         // contains singleton internal tables. e.g., the state table of `Source` executors.
         // In this case, we reduce the vnode mapping to a single vnode as only `SINGLETON_VNODE` is used.
-        assert!(
-            table_desc.vnode_count == 1,
+        assert_eq!(
+            table_catalog.vnode_count.value(),
+            1,
             "fragment vnode count {} does not match table vnode count {}",
             vnode_mapping.len(),
-            table_desc.vnode_count,
+            table_catalog.vnode_count.value(),
         );
         &WorkerSlotMapping::new_single(vnode_mapping.iter().next().unwrap())
     } else {
@@ -1359,7 +1348,7 @@ fn derive_partitions(
 
     let table_distribution = TableDistribution::new_from_storage_table_desc(
         Some(Bitmap::ones(vnode_count).into()),
-        &table_desc.try_to_protobuf()?,
+        &table_catalog.table_desc().try_to_protobuf()?,
     );
 
     for scan_range in scan_ranges {

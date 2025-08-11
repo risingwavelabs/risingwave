@@ -120,7 +120,7 @@ impl StreamProject {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             out_watermark_columns,
             out_monotonicity_map,

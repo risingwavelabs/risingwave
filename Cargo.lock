@@ -926,9 +926,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.28.3"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4df839a6643e1e3248733b01f229dc4f462d7256f808bbaf04cac40739b345c2"
+checksum = "31acf814d6b499e33ec894bb0fd7ddaf2665b44fbdd42b858d736449271fde0c"
 dependencies = [
  "async-openai-macros",
  "backoff",
@@ -6841,7 +6841,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=49e9814409752db218dbed1aa552c2efe80ee2a3#49e9814409752db218dbed1aa552c2efe80ee2a3"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6893,7 +6893,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=49e9814409752db218dbed1aa552c2efe80ee2a3#49e9814409752db218dbed1aa552c2efe80ee2a3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6910,7 +6910,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-memory"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=49e9814409752db218dbed1aa552c2efe80ee2a3#49e9814409752db218dbed1aa552c2efe80ee2a3"
 dependencies = [
  "async-trait",
  "futures",
@@ -6923,7 +6923,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=49e9814409752db218dbed1aa552c2efe80ee2a3#49e9814409752db218dbed1aa552c2efe80ee2a3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6943,7 +6943,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=1f6a0dfa58fce8bd704fc4eda8c395c089d67524#1f6a0dfa58fce8bd704fc4eda8c395c089d67524"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=f87b384f1224783892ca17b74569df99263e7d17#f87b384f1224783892ca17b74569df99263e7d17"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6974,7 +6974,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=49e9814409752db218dbed1aa552c2efe80ee2a3#49e9814409752db218dbed1aa552c2efe80ee2a3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8879,7 +8879,7 @@ dependencies = [
  "md-5",
  "parking_lot 0.12.1",
  "percent-encoding",
- "quick-xml 0.37.1",
+ "quick-xml 0.37.5",
  "rand 0.9.0",
  "reqwest 0.12.15",
  "ring",
@@ -10605,9 +10605,19 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.37.1"
+version = "0.37.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f22f29bdff3987b4d8632ef95fd6424ec7e4e0a57e2f4fc63e489e75357f6a03"
+checksum = "331e97a1af0bf59823e6eadffe373d7b27f485be8748f71471c662c1f269b7fb"
+dependencies = [
+ "memchr",
+ "serde",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.38.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9845d9dccf565065824e69f9f235fafba1587031eda353c1f1561cd6a6be78f4"
 dependencies = [
  "memchr",
  "serde",
@@ -12220,7 +12230,7 @@ dependencies = [
  "pretty_assertions",
  "prometheus",
  "prost 0.13.4",
- "quick-xml 0.37.1",
+ "quick-xml 0.38.1",
  "rand 0.9.0",
  "risingwave_batch",
  "risingwave_batch_executors",

@@ -60,7 +60,7 @@ impl StreamSimpleAgg {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            false,
+            StreamKind::Retract, // TODO(kind): reject upsert input
             false,
             watermark_columns,
             MonotonicityMap::new(),
