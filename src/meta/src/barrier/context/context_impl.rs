@@ -157,6 +157,38 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
         Ok(())
     }
+
+    async fn handle_refresh_finished_table_ids(
+        &self,
+        refresh_finished_table_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        use risingwave_meta_model::table::RefreshState;
+
+        tracing::info!(
+            "Handling refresh finished table IDs: {:?}",
+            refresh_finished_table_ids
+        );
+
+        for table_id in refresh_finished_table_ids {
+            let res: MetaResult<()> = try {
+                tracing::info!(%table_id, "Processing refresh finished for materialized view");
+
+                // Update the table's refresh state back to Idle (refresh complete)
+                self.metadata_manager
+                    .catalog_controller
+                    .set_table_refresh_state(table_id as i32, RefreshState::Idle)
+                    .await
+                    .context("Failed to set table refresh state to Idle")?;
+
+                tracing::info!(%table_id, "Table refresh completed, state updated to Idle");
+            };
+            if let Err(e) = res {
+                tracing::error!(error = %e.as_report(), %table_id, "Failed to handle refresh finished table");
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl GlobalBarrierWorkerContextImpl {

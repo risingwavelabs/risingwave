@@ -49,6 +49,11 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         table_id: u32,
     },
+    ReportRefreshFinished {
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+    },
     RegisterBarrierSender {
         actor_id: ActorId,
         barrier_sender: mpsc::UnboundedSender<Barrier>,
@@ -171,6 +176,14 @@ impl LocalBarrierManager {
 
     pub fn report_truncate_table(&self, epoch: EpochPair, actor_id: ActorId, table_id: u32) {
         self.send_event(LocalBarrierEvent::ReportTruncateTable {
+            epoch,
+            actor_id,
+            table_id,
+        });
+    }
+
+    pub fn report_refresh_finished(&self, epoch: EpochPair, actor_id: ActorId, table_id: u32) {
+        self.send_event(LocalBarrierEvent::ReportRefreshFinished {
             epoch,
             actor_id,
             table_id,

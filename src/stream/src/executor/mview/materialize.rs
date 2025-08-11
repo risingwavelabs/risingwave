@@ -664,6 +664,15 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         },
                     )
                     .await?;
+
+                // Report that the materialize refresh is finished
+                let refresh_args = self.refresh_args.as_ref().unwrap();
+                self.local_barrier_manager.report_refresh_finished(
+                    yielded_epoch,
+                    self.actor_context.id,
+                    refresh_args.table_id.into(),
+                );
+                tracing::info!(table_id = %refresh_args.table_id, "Materialize refresh finished - reported to barrier manager");
             }
             // stage 2 finished, go back to stage 1
         }
