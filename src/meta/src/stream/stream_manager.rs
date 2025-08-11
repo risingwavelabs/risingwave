@@ -659,7 +659,7 @@ impl GlobalStreamManager {
                     "streaming job is creating, cancel it with drop directly"
                 );
                 self.metadata_manager
-                    .notify_cancelled(Some(database_id), job_id)
+                    .notify_cancelled(database_id, job_id)
                     .await;
             }
         }

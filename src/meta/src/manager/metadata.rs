@@ -859,8 +859,8 @@ impl MetadataManager {
         mgr.notify_finish_failed(database_id.map(|id| id.database_id as _), err);
     }
 
-    pub(crate) async fn notify_cancelled(&self, database_id: Option<DatabaseId>, id: ObjectId) {
+    pub(crate) async fn notify_cancelled(&self, database_id: DatabaseId, id: ObjectId) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
-        mgr.notify_cancelled(database_id.map(|id| id.database_id as _), id);
+        mgr.notify_cancelled(database_id.database_id as _, id);
     }
 }

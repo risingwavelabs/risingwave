@@ -29,7 +29,7 @@ statement ok
 recover;
 
 onlyif can-use-recover
-statement count 1 retry 5 backoff 2s
+statement count 1
 show jobs;
 
 statement ok
@@ -66,7 +66,7 @@ statement ok
 recover;
 
 onlyif can-use-recover
-statement count 1 retry 5 backoff 2s
+statement count 1
 show jobs;
 
 statement ok

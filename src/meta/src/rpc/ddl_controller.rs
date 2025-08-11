@@ -1359,16 +1359,16 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match (streaming_job.create_type(), &streaming_job) {
-            (CreateType::Unspecified, _) | (CreateType::Foreground, _) => {
+        match streaming_job.create_type() {
+            CreateType::Unspecified | CreateType::Foreground => {
                 let version = self
                     .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
                     .await?;
                 Ok(version)
             }
-            (CreateType::Background, _) => {
-                let await_tree_key = format!("Background DDL Worker ({})", streaming_job.id());
+            CreateType::Background => {
+                let await_tree_key = format!("Background DDL Worker ({})", stream_job_id);
                 let await_tree_span =
                     span!("{:?}({})", streaming_job.job_type(), streaming_job.name());
 
