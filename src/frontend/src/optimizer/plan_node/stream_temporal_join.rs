@@ -52,7 +52,7 @@ impl StreamTemporalJoin {
         is_nested_loop: bool,
     ) -> Result<Self> {
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
-        // TODO(kind): theoretically, even if input is upsert, the output can be retract
+        // TODO(kind): theoretically, the impl can handle upsert stream.
         let stream_kind = reject_upsert_input!(core.left);
         let append_only = stream_kind.is_append_only();
         assert!(!is_nested_loop || append_only);

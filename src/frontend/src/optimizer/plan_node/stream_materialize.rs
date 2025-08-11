@@ -54,22 +54,32 @@ pub struct StreamMaterialize {
 }
 
 impl StreamMaterialize {
-    #[must_use]
-    pub fn new(input: PlanRef, table: TableCatalog) -> Self {
+    pub fn new(input: PlanRef, table: TableCatalog) -> Result<Self> {
+        let kind = match table.conflict_behavior() {
+            ConflictBehavior::NoCheck => reject_upsert_input!(input),
+
+            // When conflict handling is enabled, upsert stream can be converted to retract stream.
+            ConflictBehavior::Overwrite
+            | ConflictBehavior::IgnoreConflict
+            | ConflictBehavior::DoUpdateIfNotNull => match input.stream_kind() {
+                StreamKind::AppendOnly | StreamKind::Retract => input.stream_kind(),
+                StreamKind::Upsert => StreamKind::Retract,
+            },
+        };
+
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             Some(table.stream_key.clone()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            // TODO(kind): if conflict handling is enabled, the output can be retract even if input is upsert;
-            // if not, we should reject upsert input.
-            input.stream_kind(),
+            kind,
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
-        Self { base, input, table }
+
+        Ok(Self { base, input, table })
     }
 
     /// Create a materialize node, for `MATERIALIZED VIEW` and `INDEX`.
@@ -130,7 +140,7 @@ impl StreamMaterialize {
             false,
         )?;
 
-        Ok(Self::new(input, table))
+        Self::new(input, table)
     }
 
     /// Create a materialize node, for `TABLE`.
@@ -182,7 +192,7 @@ impl StreamMaterialize {
             refreshable,
         )?;
 
-        Ok(Self::new(input, table))
+        Self::new(input, table)
     }
 
     /// Rewrite the input to satisfy the required distribution if necessary, according to the type.
@@ -389,7 +399,7 @@ impl PlanTreeNodeUnary<Stream> for StreamMaterialize {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let new = Self::new(input, self.table().clone());
+        let new = Self::new(input, self.table().clone()).unwrap();
         new.base
             .schema()
             .fields

@@ -42,6 +42,9 @@ impl StreamKind {
     }
 
     /// Returns the stream kind representing the merge (union) of the two.
+    ///
+    /// Note that there should be no conflict on the stream key between the two streams,
+    /// otherwise it will result in an "inconsistent" stream.
     pub fn merge(self, other: Self) -> Self {
         self.max(other)
     }

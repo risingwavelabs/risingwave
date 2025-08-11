@@ -29,7 +29,9 @@ use super::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
 use crate::catalog::TableCatalog;
+use crate::error::Result;
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, collect_input_refs};
+use crate::optimizer::property::reject_upsert_input;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
@@ -74,7 +76,11 @@ impl Distill for StreamMaterializedExprs {
 
 impl StreamMaterializedExprs {
     /// Creates a new `StreamMaterializedExprs` node.
-    pub fn new(input: PlanRef, exprs: Vec<ExprImpl>, field_names: BTreeMap<usize, String>) -> Self {
+    pub fn new(
+        input: PlanRef,
+        exprs: Vec<ExprImpl>,
+        field_names: BTreeMap<usize, String>,
+    ) -> Result<Self> {
         let input_watermark_cols = input.watermark_columns();
 
         // Determine if we have a watermark column for state cleaning
@@ -108,20 +114,20 @@ impl StreamMaterializedExprs {
             input.stream_key().map(|v| v.to_vec()),
             fd_set,
             input.distribution().clone(),
-            // TODO(kind): theoretically, even if input is upsert, the output can be retract
-            input.stream_kind(),
+            // TODO(kind): theoretically, the impl can handle upsert stream.
+            reject_upsert_input!(input),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
 
-        Self {
+        Ok(Self {
             base,
             input,
             exprs,
             field_names,
             state_clean_col_idx,
-        }
+        })
     }
 
     fn derive_schema(
@@ -211,7 +217,7 @@ impl PlanTreeNodeUnary<Stream> for StreamMaterializedExprs {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.exprs.clone(), self.field_names.clone())
+        Self::new(input, self.exprs.clone(), self.field_names.clone()).unwrap()
     }
 }
 impl_plan_tree_node_for_unary! { Stream, StreamMaterializedExprs }
@@ -241,7 +247,9 @@ impl ExprRewritable<Stream> for StreamMaterializedExprs {
             .iter()
             .map(|e| r.rewrite_expr(e.clone()))
             .collect();
-        Self::new(self.input.clone(), new_exprs, self.field_names.clone()).into()
+        Self::new(self.input.clone(), new_exprs, self.field_names.clone())
+            .unwrap()
+            .into()
     }
 }
 

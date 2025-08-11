@@ -46,7 +46,7 @@ impl StreamCdcTableScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            StreamKind::Retract, // TODO(kind): could this be upsert?
+            StreamKind::Retract,
             false,
             core.watermark_columns(),
             core.columns_monotonicity(),

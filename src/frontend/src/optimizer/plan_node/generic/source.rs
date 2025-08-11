@@ -108,7 +108,7 @@ impl Source {
             if catalog.append_only {
                 StreamKind::AppendOnly
             } else {
-                // TODO(kind): this could be upsert.
+                // TODO(kind): some source can be upsert, differentiate them.
                 StreamKind::Retract
             }
         } else {

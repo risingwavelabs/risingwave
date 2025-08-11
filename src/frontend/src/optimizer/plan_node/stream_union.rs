@@ -72,12 +72,9 @@ impl StreamUnion {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            if inputs.iter().all(|x| x.append_only()) {
-                StreamKind::AppendOnly
-            } else {
-                // TODO(kind): handle `StreamKind::Upsert`
-                StreamKind::Retract
-            },
+            (inputs.iter().map(|i| i.stream_kind()))
+                .reduce(StreamKind::merge)
+                .unwrap_or(/* empty inputs */ StreamKind::AppendOnly),
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
             MonotonicityMap::new(),
