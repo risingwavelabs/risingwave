@@ -113,7 +113,7 @@ pub struct RedShiftConfig {
     pub with_s3: bool,
 
     #[serde(flatten)]
-    pub s3_inner: S3Common,
+    pub s3_inner: Option<S3Common>,
 }
 
 fn default_schedule() -> u64 {
@@ -287,7 +287,9 @@ impl RedShiftSinkWriter {
         if config.with_s3 {
             let executor_id = writer_param.executor_id;
             let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
-                config.s3_inner,
+                config.s3_inner.ok_or_else(|| {
+                    SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
+                })?,
                 schema,
                 is_append_only,
                 executor_id,
@@ -599,9 +601,12 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
             })
             .collect::<Result<Vec<_>>>()?;
         if !paths.is_empty() {
-            let s3_operator = FileSink::<S3Sink>::new_s3_sink(&self.config.s3_inner)?;
+            let s3_inner = self.config.s3_inner.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
+            })?;
+            let s3_operator = FileSink::<S3Sink>::new_s3_sink(&s3_inner)?;
             let (mut writer, path) =
-                build_opendal_writer_path(&self.config.s3_inner, 0, &s3_operator, &None).await?;
+                build_opendal_writer_path(&s3_inner, 0, &s3_operator, &None).await?;
             let manifest_json = json!({
                 "entries": paths
             });
@@ -621,13 +626,16 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                     ))
                 })?
             };
+            let s3_inner = self.config.s3_inner.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
+            })?;
             let copy_into_sql = build_copy_into_sql(
                 self.config.schema.as_deref(),
                 table,
                 &path,
-                &self.config.s3_inner.access,
-                &self.config.s3_inner.secret,
-                &self.config.s3_inner.assume_role,
+                &s3_inner.access,
+                &s3_inner.secret,
+                &s3_inner.assume_role,
             )?;
             // run copy into
             self.client.execute_sql_sync(&vec![copy_into_sql])?;

@@ -106,7 +106,7 @@ pub struct SnowflakeConfig {
     pub with_s3: bool,
 
     #[serde(flatten)]
-    pub s3_inner: S3Common,
+    pub s3_inner: Option<S3Common>,
 
     #[serde(rename = "stage")]
     pub stage: Option<String>,
@@ -371,7 +371,11 @@ impl SnowflakeSinkWriter {
         if config.with_s3 {
             let executor_id = writer_param.executor_id;
             let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
-                config.s3_inner,
+                config.s3_inner.ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "S3 configuration is required for Snowflake S3 sink"
+                    ))
+                })?,
                 schema,
                 is_append_only,
                 executor_id,
