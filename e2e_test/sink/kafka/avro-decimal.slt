@@ -56,7 +56,7 @@ insert into t_sink_decimal_scale_0 values ('0'::decimal), ('-0'::decimal), ('792
 
 sleep 1s
 
-query I
+query I retry 5 backoff 1s
 select * from ingest_decimal_scale_0 order by decimal_field;
 ----
 -79228162514264337593543950335
