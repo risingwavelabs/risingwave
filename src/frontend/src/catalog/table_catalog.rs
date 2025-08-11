@@ -197,6 +197,9 @@ pub struct TableCatalog {
     pub engine: Engine,
 
     pub clean_watermark_index_in_pk: Option<usize>,
+
+    /// TOAST-able column indices for PostgreSQL CDC tables. None for non-CDC tables or CDC tables without TOAST columns.
+    pub toastable_column_indices: Option<Vec<usize>>,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -582,6 +585,11 @@ impl TableCatalog {
             job_id: self.job_id.map(|id| id.table_id),
             engine: Some(self.engine.to_protobuf().into()),
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
+            toastable_column_indices: self
+                .toastable_column_indices
+                .as_ref()
+                .map(|indices| indices.iter().map(|&x| x as i32).collect())
+                .unwrap_or_default(),
         }
     }
 
@@ -784,6 +792,16 @@ impl From<PbTable> for TableCatalog {
             job_id: tb.job_id.map(TableId::from),
             engine,
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
+            toastable_column_indices: if tb.toastable_column_indices.is_empty() {
+                None
+            } else {
+                Some(
+                    tb.toastable_column_indices
+                        .iter()
+                        .map(|&x| x as usize)
+                        .collect(),
+                )
+            },
         }
     }
 }
@@ -875,6 +893,7 @@ mod tests {
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
             clean_watermark_index_in_pk: None,
+            toastable_column_indices: vec![],
         }
         .into();
 
@@ -943,6 +962,7 @@ mod tests {
                 job_id: None,
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
+                toastable_column_indices: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost()));

@@ -319,7 +319,8 @@ impl StreamMaterialize {
                     engine
                 }
             },
-            clean_watermark_index_in_pk: None, // TODO: fill this field
+            clean_watermark_index_in_pk: None,
+            toastable_column_indices: None, // Materialized views don't have TOAST columns
         })
     }
 

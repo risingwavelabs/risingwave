@@ -73,8 +73,8 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
     is_dummy_table: bool,
 
-    /// Whether this table is a CDC table.
-    is_cdc_table: bool,
+    /// Indices of TOAST columns for PostgreSQL CDC tables. None means either non-CDC table or CDC table without TOAST columns.
+    toastable_column_indices: Option<Vec<usize>>,
 }
 
 fn get_op_consistency_level(
@@ -155,7 +155,18 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
 
-        let is_cdc_table = table_catalog.cdc_table_id.is_some();
+        // Extract TOAST-able column indices from table catalog.
+        let toastable_column_indices = if table_catalog.toastable_column_indices.is_empty() {
+            None
+        } else {
+            Some(
+                table_catalog
+                    .toastable_column_indices
+                    .iter()
+                    .map(|&x| x as usize)
+                    .collect(),
+            )
+        };
 
         Self {
             input,
@@ -175,7 +186,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             may_have_downstream,
             depended_subscription_ids,
             metrics: mv_metrics,
-            is_cdc_table,
+            toastable_column_indices,
         }
     }
 
@@ -216,12 +227,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         && self.version_column_index.is_none()
                         && self.conflict_behavior == ConflictBehavior::Overwrite;
 
-                    // For CDC tables, disable optimization to ensure TOAST column fix is applied
-                    let do_not_handle_conflict = if self.is_cdc_table {
-                        false
-                    } else {
-                        do_not_handle_conflict
-                    };
+                    // // For CDC tables with TOAST-able columns, disable optimization to ensure TOAST column fix is applied
+                    // let do_not_handle_conflict = if self.toastable_column_indices.is_some() {
+                    //     false
+                    // } else {
+                    //     do_not_handle_conflict
+                    // };
 
                     match self.conflict_behavior {
                         checked_conflict_behaviors!() if !do_not_handle_conflict => {
@@ -270,7 +281,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     &self.state_table,
                                     self.conflict_behavior,
                                     &self.metrics,
-                                    self.is_cdc_table,
+                                    self.toastable_column_indices.as_deref(),
                                 )
                                 .await?;
 
@@ -433,7 +444,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             conflict_behavior,
             version_column_index: None,
             is_dummy_table: false,
-            is_cdc_table: false,
+            toastable_column_indices: None,
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
             metrics,
@@ -441,22 +452,25 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     }
 }
 
-/// Debezium's default unavailable value placeholder for TOAST columns
+/// Debezium's default unavailable value placeholder for TOAST columns.
 const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
 
-/// Fix TOAST columns by replacing unavailable values with old row values
-fn handle_toast_columns_for_cdc(old_row: &OwnedRow, new_row: &OwnedRow) -> OwnedRow {
+/// Fix TOAST columns by replacing unavailable values with old row values.
+fn handle_toast_columns_for_cdc(
+    old_row: &OwnedRow,
+    new_row: &OwnedRow,
+    toastable_indices: &[usize],
+) -> OwnedRow {
     let mut fixed_row_data = new_row.as_inner().to_vec();
 
-    for (i, new_datum) in new_row.iter().enumerate() {
-        if let Some(new_scalar_ref) = new_datum {
-            if let risingwave_common::types::ScalarRefImpl::Utf8(val) = new_scalar_ref {
-                if val == DEBEZIUM_UNAVAILABLE_VALUE {
-                    // Replace with old row value if available
-                    if let Some(old_datum_ref) = old_row.datum_at(i) {
-                        fixed_row_data[i] = Some(old_datum_ref.into_scalar_impl());
-                    }
-                }
+    for &toast_idx in toastable_indices {
+        if let Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) =
+            new_row.datum_at(toast_idx)
+            && val == DEBEZIUM_UNAVAILABLE_VALUE
+        {
+            // Replace with old row value if available
+            if let Some(old_datum_ref) = old_row.datum_at(toast_idx) {
+                fixed_row_data[toast_idx] = Some(old_datum_ref.into_scalar_impl());
             }
         }
     }
@@ -633,7 +647,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         table: &StateTableInner<S, SD>,
         conflict_behavior: ConflictBehavior,
         metrics: &MaterializeMetrics,
-        is_cdc_table: bool,
+        toastable_column_indices: Option<&[usize]>,
     ) -> StreamExecutorResult<ChangeBuffer> {
         assert_matches!(conflict_behavior, checked_conflict_behaviors!());
 
@@ -683,8 +697,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 true
                             };
                             if need_overwrite {
-                                let final_row = if is_cdc_table {
-                                    // Apply TOAST column fix for CDC tables
+                                let final_row = if let Some(toastable_indices) =
+                                    toastable_column_indices
+                                {
+                                    // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
                                     let old_row_deserialized =
                                         row_serde.deserializer.deserialize(old_row.row.clone())?;
                                     let new_row_deserialized =
@@ -692,6 +708,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                     let fixed_row = handle_toast_columns_for_cdc(
                                         &old_row_deserialized,
                                         &new_row_deserialized,
+                                        toastable_indices,
                                     );
                                     Bytes::from(row_serde.serializer.serialize(fixed_row))
                                 } else {
@@ -736,8 +753,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 );
                                 let mut updated_row = OwnedRow::new(row_deserialized_vec);
 
-                                // Apply TOAST column fix for CDC tables
-                                if is_cdc_table {
+                                // Apply TOAST column fix for CDC tables with TOAST columns
+                                if let Some(toastable_indices) = toastable_column_indices {
                                     // Note: we need to use old_row_deserialized again, but it was moved above
                                     // So we re-deserialize the old row
                                     let old_row_deserialized_again =
@@ -745,6 +762,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                     updated_row = handle_toast_columns_for_cdc(
                                         &old_row_deserialized_again,
                                         &updated_row,
+                                        toastable_indices,
                                     );
                                 }
 

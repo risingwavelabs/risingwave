@@ -24,8 +24,8 @@ use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use sea_schema::postgres::def::{ColumnType as SeaType, TableDef, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use serde_derive::Deserialize;
-use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
+use sqlx::{PgPool, Row};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Kind as PgKind;
 use tokio_postgres::{Client as PgClient, NoTls};
@@ -62,6 +62,8 @@ impl Default for SslMode {
 pub struct PostgresExternalTable {
     column_descs: Vec<ColumnDesc>,
     pk_names: Vec<String>,
+    /// Column names that are TOAST-able (have storage types other than 'p' for plain)
+    toastable_column_names: Vec<String>,
 }
 
 impl PostgresExternalTable {
@@ -110,6 +112,76 @@ impl PostgresExternalTable {
             )
             .await?;
         Ok(table_schema)
+    }
+
+    /// Query TOAST-able column information from PostgreSQL system tables
+    async fn discover_toastable_columns(
+        username: &str,
+        password: &str,
+        host: &str,
+        port: u16,
+        database: &str,
+        ssl_mode: &SslMode,
+        ssl_root_cert: &Option<String>,
+        schema_name: &str,
+        table_name: &str,
+    ) -> ConnectorResult<Vec<String>> {
+        let mut options = PgConnectOptions::new()
+            .username(username)
+            .password(password)
+            .host(host)
+            .port(port)
+            .database(database)
+            .ssl_mode(match ssl_mode {
+                SslMode::Disabled => PgSslMode::Disable,
+                SslMode::Preferred => PgSslMode::Prefer,
+                SslMode::Required => PgSslMode::Require,
+                SslMode::VerifyCa => PgSslMode::VerifyCa,
+                SslMode::VerifyFull => PgSslMode::VerifyFull,
+            });
+
+        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
+            && let Some(root_cert) = ssl_root_cert
+        {
+            options = options.ssl_root_cert(root_cert.as_str());
+        }
+
+        let connection = PgPool::connect_with(options).await?;
+
+        // Query pg_attribute to find columns with TOAST storage
+        // attstorage values: 'p' = plain, 'e' = external, 'm' = main, 'x' = extended
+        // We want columns that are not 'p' (plain) as they can potentially use TOAST
+        let query = "
+            SELECT attname 
+            FROM pg_attribute a 
+            JOIN pg_class c ON a.attrelid = c.oid 
+            JOIN pg_namespace n ON c.relnamespace = n.oid 
+            WHERE n.nspname = $1 
+            AND c.relname = $2 
+            AND a.attnum > 0 
+            AND NOT a.attisdropped 
+            AND a.attstorage != 'p'
+            ORDER BY a.attnum
+        ";
+
+        let rows = sqlx::query(query)
+            .bind(schema_name)
+            .bind(table_name)
+            .fetch_all(&connection)
+            .await?;
+
+        let toastable_columns: Vec<String> = rows
+            .iter()
+            .map(|row| row.get::<String, _>("attname"))
+            .collect();
+        tracing::debug!(
+            schema = schema_name,
+            table = table_name,
+            toastable_columns = ?toastable_columns,
+            "discovered toastable columns"
+        );
+
+        Ok(toastable_columns)
     }
 
     pub async fn connect(
@@ -179,9 +251,24 @@ impl PostgresExternalTable {
             pk_names.extend(pk.columns.clone());
         });
 
+        // Discover toastable columns
+        let toastable_column_names = Self::discover_toastable_columns(
+            username,
+            password,
+            host,
+            port,
+            database,
+            ssl_mode,
+            ssl_root_cert,
+            schema,
+            table,
+        )
+        .await?;
+
         Ok(Self {
             column_descs,
             pk_names,
+            toastable_column_names,
         })
     }
 
@@ -231,6 +318,10 @@ impl PostgresExternalTable {
 
     pub fn pk_names(&self) -> &Vec<String> {
         &self.pk_names
+    }
+
+    pub fn toastable_column_names(&self) -> &Vec<String> {
+        &self.toastable_column_names
     }
 }
 

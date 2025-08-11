@@ -601,6 +601,7 @@ pub(crate) mod tests {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
+            toastable_column_indices: None,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_owned(),

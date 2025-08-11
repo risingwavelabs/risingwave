@@ -804,6 +804,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     schema_id: SchemaId,
     table_id: TableId,
     engine: Engine,
+    toastable_column_indices: Option<Vec<usize>>,
 ) -> Result<(PlanRef, TableCatalog)> {
     let session = context.session_ctx().clone();
 
@@ -918,6 +919,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
+    table.toastable_column_indices = toastable_column_indices;
 
     Ok((materialize.into(), table))
 }
@@ -1147,7 +1149,7 @@ pub(super) async fn handle_create_table_plan(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) = match wildcard_idx {
+            let (columns, pk_names, toastable_column_indices) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
                 None => {
                     for column_def in &column_defs {
@@ -1168,11 +1170,39 @@ pub(super) async fn handle_create_table_plan(
                         bind_cdc_table_schema(&column_defs, &constraints, false)?;
                     // read default value definition from external db
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    // NOTE: if the external table has a default column, we will only treat it as a normal column.
-                    (columns, pk_names)
+                    // Auto-detect TOAST-able columns even for manually defined columns
+                    let toastable_column_indices = match ExternalTableImpl::connect(config).await {
+                        Ok(table) => {
+                            if let Some(toastable_column_names) = table.toastable_column_names() {
+                                // Calculate column indices for TOAST columns
+                                let mut indices = Vec::new();
+                                for toast_name in toastable_column_names {
+                                    if let Some(index) = columns
+                                        .iter()
+                                        .position(|col| &col.column_desc.name == toast_name)
+                                    {
+                                        indices.push(index);
+                                    }
+                                }
+                                if indices.is_empty() {
+                                    None
+                                } else {
+                                    Some(indices)
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(error = %err, "Failed to connect to external table for TOAST detection, skipping TOAST column detection");
+                            None
+                        }
+                    };
+
+                    (columns, pk_names, toastable_column_indices)
                 }
             };
 
@@ -1197,6 +1227,7 @@ pub(super) async fn handle_create_table_plan(
                 schema_id,
                 TableId::placeholder(),
                 engine,
+                toastable_column_indices,
             )?;
 
             (
@@ -1328,7 +1359,7 @@ fn sanity_check_for_table_on_cdc_source(
 /// Derive schema for cdc table when create a new Table or alter an existing Table
 async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
-) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
+) -> Result<(Vec<ColumnCatalog>, Vec<String>, Option<Vec<usize>>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
@@ -1337,18 +1368,37 @@ async fn bind_cdc_table_schema_externally(
     let table = ExternalTableImpl::connect(config)
         .await
         .context("failed to auto derive table schema")?;
-    Ok((
-        table
-            .column_descs()
-            .iter()
-            .cloned()
-            .map(|column_desc| ColumnCatalog {
-                column_desc,
-                is_hidden: false,
-            })
-            .collect(),
-        table.pk_names().clone(),
-    ))
+
+    let columns: Vec<ColumnCatalog> = table
+        .column_descs()
+        .iter()
+        .cloned()
+        .map(|column_desc| ColumnCatalog {
+            column_desc,
+            is_hidden: false,
+        })
+        .collect();
+
+    // Get TOAST column indices for PostgreSQL CDC tables
+    let toastable_column_indices = table.toastable_column_names().map(|toast_names| {
+        let mut indices = Vec::new();
+        for toast_name in toast_names {
+            if let Some(index) = columns
+                .iter()
+                .position(|col| col.column_desc.name == *toast_name)
+            {
+                indices.push(index);
+            }
+        }
+        tracing::debug!(
+            toastable_column_names = ?toast_names,
+            toastable_column_indices = ?indices,
+            "computed TOAST column indices for CDC table"
+        );
+        indices
+    });
+
+    Ok((columns, table.pk_names().clone(), toastable_column_indices))
 }
 
 /// Derive schema for cdc table when create a new Table or alter an existing Table
@@ -2124,6 +2174,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 schema_id,
                 original_catalog.id(),
                 engine,
+                None, // TOAST columns not detected in replace workflow
             )?;
 
             ((plan, None, table), TableJobType::SharedCdcSource)

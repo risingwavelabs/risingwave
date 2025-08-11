@@ -219,7 +219,8 @@ impl TableCatalogBuilder {
             webhook_info: None,
             job_id: None,
             engine: Engine::Hummock,
-            clean_watermark_index_in_pk: None, // TODO: fill this field
+            clean_watermark_index_in_pk: None,
+            toastable_column_indices: None,
         }
     }
 
