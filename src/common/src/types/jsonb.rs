@@ -143,6 +143,13 @@ impl std::str::FromStr for JsonbVal {
     type Err = <Value as std::str::FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        println!("parse josnb的时候s: {:?}", s);
+        // Special handling for Debezium's unavailable value placeholder
+        if s == "__debezium_unavailable_value" {
+            let mut builder = jsonbb::Builder::default();
+            builder.add_string("__debezium_unavailable_value");
+            return Ok(Self(builder.finish()));
+        }
         Ok(Self(s.parse()?))
     }
 }
