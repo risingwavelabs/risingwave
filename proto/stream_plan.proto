@@ -376,6 +376,9 @@ message MaterializeNode {
   repeated common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
+  // For refreshable tables, staging table for collecting new data during refresh.
+  // This table has the same schema as the main table but with a different table_id.
+  optional catalog.Table staging_table = 5;
 }
 
 message AggCallState {

@@ -132,7 +132,7 @@ pub async fn compute_node_serve(
             internal_rpc_host_addr: "".to_owned(),
             resource_group: Some(opts.resource_group.clone()),
         },
-        &config.meta,
+        Arc::new(config.meta.clone()),
     )
     .await;
 
