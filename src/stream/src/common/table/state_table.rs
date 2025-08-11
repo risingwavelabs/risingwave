@@ -17,12 +17,12 @@ use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use either::Either;
 use foyer::Hint;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::for_await;
-use itertools::{Itertools, izip};
+use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
@@ -34,7 +34,6 @@ use risingwave_common::row::{self, Once, OwnedRow, Row, RowExt, once};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
@@ -58,9 +57,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::*;
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{
-    ChangeLogRow, KeyedRow, TableDistribution, deserialize_log_stream,
-};
+use risingwave_storage::table::{KeyedRow, TableDistribution};
 use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
@@ -87,7 +84,6 @@ macro_rules! insane_mode_discard_point {
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
-#[derive(Clone)]
 pub struct StateTableInner<
     S,
     SD = BasicSerde,
@@ -101,7 +97,7 @@ pub struct StateTableInner<
     table_id: TableId,
 
     /// State store backend.
-    local_store: S::Local,
+    row_store: StateTableRowStore<S::Local, SD>,
 
     /// State store for accessing snapshot data
     store: S,
@@ -111,9 +107,6 @@ pub struct StateTableInner<
 
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
-
-    /// Row deserializer with value encoding
-    row_serde: Arc<SD>,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -128,9 +121,6 @@ pub struct StateTableInner<
     distribution: TableDistribution,
 
     prefix_hint_len: usize,
-
-    /// Used for catalog `table_properties`
-    table_option: TableOption,
 
     value_indices: Option<Vec<usize>>,
 
@@ -188,7 +178,7 @@ where
     /// In streaming executors, this methods must be called **after** receiving and yielding the first barrier,
     /// and otherwise, deadlock can be likely to happen.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.local_store.init(InitOptions::new(epoch)).await?;
+        self.row_store.init(epoch).await?;
         assert_eq!(None, self.epoch.replace(epoch), "should not init for twice");
         Ok(())
     }
@@ -240,6 +230,77 @@ fn consistent_old_value_op(
             }
         }),
         is_log_store,
+    }
+}
+
+macro_rules! dispatch_value_indices {
+    ($value_indices:expr, [$($row_var_name:ident),+], $body:expr) => {
+        if let Some(value_indices) = $value_indices {
+            $(
+                let $row_var_name = $row_var_name.project(value_indices);
+            )+
+            $body
+        } else {
+            $body
+        }
+    };
+}
+
+struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
+    state_store: LS,
+
+    table_id: TableId,
+    table_option: TableOption,
+    row_serde: Arc<SD>,
+    // should be only used for debugging in panic message of handle_mem_table_error
+    pk_serde: OrderedRowSerde,
+}
+
+impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
+    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        Ok(self.state_store.init(InitOptions::new(epoch)).await?)
+    }
+
+    async fn update_vnode_bitmap(
+        &mut self,
+        vnodes: Arc<Bitmap>,
+    ) -> StreamExecutorResult<Arc<Bitmap>> {
+        Ok(self.state_store.update_vnode_bitmap(vnodes).await?)
+    }
+
+    async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state_store.try_flush().await?;
+        Ok(())
+    }
+
+    async fn seal_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)>,
+        switch_consistent_op: Option<StateTableOpConsistencyLevel>,
+    ) -> StreamExecutorResult<()> {
+        self.state_store
+            .flush()
+            .instrument(tracing::info_span!("state_table_flush"))
+            .await?;
+        let switch_op_consistency_level =
+            switch_consistent_op.map(|new_consistency_level| match new_consistency_level {
+                StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
+                StateTableOpConsistencyLevel::ConsistentOldValue => {
+                    consistent_old_value_op(self.row_serde.clone(), false)
+                }
+                StateTableOpConsistencyLevel::LogStoreEnabled => {
+                    consistent_old_value_op(self.row_serde.clone(), true)
+                }
+            });
+        self.state_store.seal_current_epoch(
+            next_epoch,
+            SealCurrentEpochOptions {
+                table_watermarks,
+                switch_op_consistency_level,
+            },
+        );
+        Ok(())
     }
 }
 
@@ -515,15 +576,19 @@ where
 
         Self {
             table_id,
-            local_store: local_state_store,
+            row_store: StateTableRowStore {
+                table_option,
+                state_store: local_state_store,
+                row_serde,
+                pk_serde: pk_serde.clone(),
+                table_id,
+            },
             store,
             epoch: None,
             pk_serde,
-            row_serde,
             pk_indices,
             distribution,
             prefix_hint_len,
-            table_option,
             value_indices,
             pending_watermark: None,
             committed_watermark,
@@ -546,7 +611,7 @@ where
     }
 
     /// Get the vnode value with given (prefix of) primary key
-    fn compute_prefix_vnode(&self, pk_prefix: impl Row) -> VirtualNode {
+    fn compute_prefix_vnode(&self, pk_prefix: &impl Row) -> VirtualNode {
         self.distribution
             .try_compute_vnode_by_pk_prefix(pk_prefix)
             .expect("For streaming, the given prefix must be enough to calculate the vnode")
@@ -627,11 +692,8 @@ where
 {
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
-        // TODO: avoid clone when `on_key_value_fn` can be non-static
-        let row_serde = self.row_serde.clone();
-        let row = self
-            .get_inner(pk, move |_, value| Ok(row_serde.deserialize(value)?))
-            .await?;
+        let (serialized_pk, prefix_hint) = self.serialize_pk_and_get_prefix_hint(&pk);
+        let row = self.row_store.get(serialized_pk, prefix_hint).await?;
         match row {
             Some(row) => {
                 if IS_REPLICATED {
@@ -640,7 +702,7 @@ where
                     let row = row.project(&self.output_indices);
                     Ok(Some(row.into_owned_row()))
                 } else {
-                    Ok(Some(OwnedRow::new(row)))
+                    Ok(Some(row))
                 }
             }
             None => Ok(None),
@@ -648,21 +710,18 @@ where
     }
 
     /// Get a raw encoded row from state table.
-    pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
-        self.get_inner(pk, |_, value| Ok(Bytes::copy_from_slice(value)))
-            .await
+    pub async fn exists(&self, pk: impl Row) -> StreamExecutorResult<bool> {
+        let (serialized_pk, prefix_hint) = self.serialize_pk_and_get_prefix_hint(&pk);
+        self.row_store.exists(serialized_pk, prefix_hint).await
     }
 
-    async fn get_inner<O: Send + 'static>(
-        &self,
-        pk: impl Row,
-        on_key_value_fn: impl risingwave_storage::store::KeyValueFn<O>,
-    ) -> StreamExecutorResult<Option<O>> {
+    fn serialize_pk(&self, pk: &impl Row) -> TableKey<Bytes> {
         assert!(pk.len() <= self.pk_indices.len());
+        serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode_by_pk(pk))
+    }
 
-        let serialized_pk =
-            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode_by_pk(&pk));
-
+    fn serialize_pk_and_get_prefix_hint(&self, pk: &impl Row) -> (TableKey<Bytes>, Option<Bytes>) {
+        let serialized_pk = self.serialize_pk(&pk);
         let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
             Some(serialized_pk.slice(VirtualNode::SIZE..))
         } else {
@@ -674,7 +733,16 @@ where
             }
             None
         };
+        (serialized_pk, prefix_hint)
+    }
+}
 
+impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
+    async fn get(
+        &self,
+        key_bytes: TableKey<Bytes>,
+        prefix_hint: Option<Bytes>,
+    ) -> StreamExecutorResult<Option<OwnedRow>> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -682,10 +750,34 @@ where
             ..Default::default()
         };
 
-        self.local_store
-            .on_key_value(serialized_pk, read_options, on_key_value_fn)
+        // TODO: avoid clone when `on_key_value_fn` can be non-static
+        let row_serde = self.row_serde.clone();
+
+        self.state_store
+            .on_key_value(key_bytes, read_options, move |_, value| {
+                let row = row_serde.deserialize(value)?;
+                Ok(OwnedRow::new(row))
+            })
             .await
             .map_err(Into::into)
+    }
+
+    async fn exists(
+        &self,
+        key_bytes: TableKey<Bytes>,
+        prefix_hint: Option<Bytes>,
+    ) -> StreamExecutorResult<bool> {
+        let read_options = ReadOptions {
+            prefix_hint,
+            retention_seconds: self.table_option.retention_seconds,
+            cache_policy: CachePolicy::Fill(Hint::Normal),
+            ..Default::default()
+        };
+        let result = self
+            .state_store
+            .on_key_value(key_bytes, read_options, move |_, _| Ok(()))
+            .await?;
+        Ok(result.is_some())
     }
 }
 
@@ -757,7 +849,7 @@ where
     ) -> StreamExecutorResult<(Arc<Bitmap>, bool)> {
         let prev_vnodes = self
             .inner
-            .local_store
+            .row_store
             .update_vnode_bitmap(new_vnodes.clone())
             .await?;
         assert_eq!(
@@ -792,12 +884,7 @@ where
 }
 
 // write
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
-where
-    S: StateStore,
-    SD: ValueRowSerde,
-{
+impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     fn handle_mem_table_error(&self, e: StorageError) {
         let e = match e.into_inner() {
             ErrorKind::MemTable(e) => e,
@@ -808,7 +895,7 @@ where
                 let (vnode, key) = deserialize_pk_with_vnode(&key, &self.pk_serde).unwrap();
                 panic!(
                     "mem-table operation inconsistent! table_id: {}, vnode: {}, key: {:?}, prev: {}, new: {}",
-                    self.table_id(),
+                    self.table_id,
                     vnode,
                     &key,
                     prev.debug_fmt(&*self.row_serde),
@@ -818,42 +905,38 @@ where
         }
     }
 
-    fn serialize_value(&self, value: impl Row) -> Bytes {
-        if let Some(value_indices) = self.value_indices.as_ref() {
-            self.row_serde
-                .serialize(value.project(value_indices))
-                .into()
-        } else {
-            self.row_serde.serialize(value).into()
-        }
-    }
-
-    fn insert_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
+    fn insert(&mut self, key: TableKey<Bytes>, value: impl Row) {
         insane_mode_discard_point!();
-        self.local_store
+        let value_bytes = self.row_serde.serialize(value).into();
+        self.state_store
             .insert(key, value_bytes, None)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
-    fn delete_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
+    fn delete(&mut self, key: TableKey<Bytes>, value: impl Row) {
         insane_mode_discard_point!();
-        self.local_store
+        let value_bytes = self.row_serde.serialize(value).into();
+        self.state_store
             .delete(key, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
-    fn update_inner(
-        &mut self,
-        key_bytes: TableKey<Bytes>,
-        old_value_bytes: Option<Bytes>,
-        new_value_bytes: Bytes,
-    ) {
+    fn update(&mut self, key_bytes: TableKey<Bytes>, old_value: impl Row, new_value: impl Row) {
         insane_mode_discard_point!();
-        self.local_store
-            .insert(key_bytes, new_value_bytes, old_value_bytes)
+        let new_value_bytes = self.row_serde.serialize(new_value).into();
+        let old_value_bytes = self.row_serde.serialize(old_value).into();
+        self.state_store
+            .insert(key_bytes, new_value_bytes, Some(old_value_bytes))
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
+}
 
+impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: impl Row) {
@@ -863,9 +946,10 @@ where
             self.watermark_cache.insert(&pk);
         }
 
-        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode_by_pk(pk));
-        let value_bytes = self.serialize_value(value);
-        self.insert_inner(key_bytes, value_bytes);
+        let key_bytes = self.serialize_pk(&pk);
+        dispatch_value_indices!(&self.value_indices, [value], {
+            self.row_store.insert(key_bytes, value)
+        })
     }
 
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
@@ -877,9 +961,10 @@ where
             self.watermark_cache.delete(&pk);
         }
 
-        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode_by_pk(pk));
-        let value_bytes = self.serialize_value(old_value);
-        self.delete_inner(key_bytes, value_bytes);
+        let key_bytes = self.serialize_pk(&pk);
+        dispatch_value_indices!(&self.value_indices, [old_value], {
+            self.row_store.delete(key_bytes, old_value)
+        })
     }
 
     /// Update a row. The old and new value should have the same pk.
@@ -892,12 +977,10 @@ where
             self.table_id
         );
 
-        let new_key_bytes =
-            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_vnode_by_pk(new_pk));
-        let old_value_bytes = self.serialize_value(old_value);
-        let new_value_bytes = self.serialize_value(new_value);
-
-        self.update_inner(new_key_bytes, Some(old_value_bytes), new_value_bytes);
+        let key_bytes = self.serialize_pk(&new_pk);
+        dispatch_value_indices!(&self.value_indices, [old_value, new_value], {
+            self.row_store.update(key_bytes, old_value, new_value)
+        })
     }
 
     /// Write a record into state table. Must have the same schema with the table.
@@ -922,74 +1005,27 @@ where
         } else {
             chunk
         };
-        let (chunk, op) = chunk.into_parts();
 
-        let vnodes = self
-            .distribution
-            .compute_chunk_vnode(&chunk, &self.pk_indices);
-
-        let values = if let Some(ref value_indices) = self.value_indices {
-            chunk
-                .project(value_indices)
-                .serialize_with(&*self.row_serde)
-        } else {
-            chunk.serialize_with(&*self.row_serde)
-        };
-
-        // TODO(kwannoel): Seems like we are doing vis check twice here.
-        // Once below, when using vis, and once here,
-        // when using vis to set rows empty or not.
-        // If we are to use the vis optimization, we should skip this.
-        let key_chunk = chunk.project(self.pk_indices());
-        let vnode_and_pks = key_chunk
-            .rows_with_holes()
-            .zip_eq_fast(vnodes.iter())
-            .map(|(r, vnode)| {
-                let mut buffer = BytesMut::new();
-                buffer.put_slice(&vnode.to_be_bytes()[..]);
-                if let Some(r) = r {
-                    self.pk_serde.serialize(r, &mut buffer);
+        for (op, row) in chunk.rows() {
+            let pk = row.project(&self.pk_indices);
+            let vnode = self.distribution.compute_vnode_by_pk(pk);
+            let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, vnode);
+            match op {
+                Op::Insert | Op::UpdateInsert => {
+                    if USE_WATERMARK_CACHE {
+                        self.watermark_cache.insert(&pk);
+                    }
+                    dispatch_value_indices!(&self.value_indices, [row], {
+                        self.row_store.insert(key_bytes, row);
+                    });
                 }
-                (r, buffer.freeze())
-            })
-            .collect_vec();
-
-        if !key_chunk.is_compacted() {
-            for ((op, (key, key_bytes), value), vis) in
-                izip!(op.iter(), vnode_and_pks, values).zip_eq_debug(key_chunk.visibility().iter())
-            {
-                if vis {
-                    match op {
-                        Op::Insert | Op::UpdateInsert => {
-                            if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.insert(pk);
-                            }
-                            self.insert_inner(TableKey(key_bytes), value);
-                        }
-                        Op::Delete | Op::UpdateDelete => {
-                            if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.delete(pk);
-                            }
-                            self.delete_inner(TableKey(key_bytes), value);
-                        }
+                Op::Delete | Op::UpdateDelete => {
+                    if USE_WATERMARK_CACHE {
+                        self.watermark_cache.delete(&pk);
                     }
-                }
-            }
-        } else {
-            for (op, (key, key_bytes), value) in izip!(op.iter(), vnode_and_pks, values) {
-                match op {
-                    Op::Insert | Op::UpdateInsert => {
-                        if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                            self.watermark_cache.insert(pk);
-                        }
-                        self.insert_inner(TableKey(key_bytes), value);
-                    }
-                    Op::Delete | Op::UpdateDelete => {
-                        if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                            self.watermark_cache.delete(pk);
-                        }
-                        self.delete_inner(TableKey(key_bytes), value);
-                    }
+                    dispatch_value_indices!(&self.value_indices, [row], {
+                        self.row_store.delete(key_bytes, row);
+                    });
                 }
             }
         }
@@ -1065,37 +1101,20 @@ where
             self.epoch.expect("should only be called after init").curr,
             new_epoch.prev
         );
-        let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
+        if let Some(new_consistency_level) = switch_consistent_op {
             assert_ne!(self.op_consistency_level, new_consistency_level);
             self.op_consistency_level = new_consistency_level;
-            match new_consistency_level {
-                StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
-                StateTableOpConsistencyLevel::ConsistentOldValue => {
-                    consistent_old_value_op(self.row_serde.clone(), false)
-                }
-                StateTableOpConsistencyLevel::LogStoreEnabled => {
-                    consistent_old_value_op(self.row_serde.clone(), true)
-                }
-            }
-        });
+        }
         trace!(
             table_id = %self.table_id,
             epoch = ?self.epoch,
             "commit state table"
         );
 
-        self.local_store
-            .flush()
-            .instrument(tracing::info_span!("state_table_flush"))
-            .await?;
         let table_watermarks = self.commit_pending_watermark();
-        self.local_store.seal_current_epoch(
-            new_epoch.curr,
-            SealCurrentEpochOptions {
-                table_watermarks,
-                switch_op_consistency_level,
-            },
-        );
+        self.row_store
+            .seal_current_epoch(new_epoch.curr, table_watermarks, switch_consistent_op)
+            .await?;
         self.epoch = Some(new_epoch);
 
         // Refresh watermark cache if it is out of sync.
@@ -1253,7 +1272,7 @@ where
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
-        self.local_store.try_flush().await?;
+        self.row_store.try_flush().await?;
         Ok(())
     }
 }
@@ -1281,12 +1300,10 @@ where
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl RowStream<'_>> {
-        Ok(deserialize_keyed_row_stream::<'_, ()>(
-            self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
-                .await?,
-            &*self.row_serde,
-        )
-        .map_ok(|(_, row)| row))
+        Ok(self
+            .iter_kv_with_pk_range::<()>(pk_range, vnode, prefetch_options)
+            .await?
+            .map_ok(|(_, row)| row))
     }
 
     pub async fn iter_keyed_row_with_vnode(
@@ -1295,12 +1312,10 @@ where
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
-        Ok(deserialize_keyed_row_stream(
-            self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
-                .await?,
-            &*self.row_serde,
-        )
-        .map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)))
+        Ok(self
+            .iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
+            .await?
+            .map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)))
     }
 
     pub async fn iter_with_vnode_and_output_indices(
@@ -1315,13 +1330,15 @@ where
             .await?;
         Ok(stream.map(|row| row.map(|row| row.project(&self.output_indices).into_owned_row())))
     }
+}
 
-    async fn iter_kv(
+impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
+    async fn iter_kv<K: CopyFromSlice>(
         &self,
         table_key_range: TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
+    ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -1329,15 +1346,18 @@ where
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
 
-        Ok(self.local_store.iter(table_key_range, read_options).await?)
+        Ok(deserialize_keyed_row_stream(
+            self.state_store.iter(table_key_range, read_options).await?,
+            &*self.row_serde,
+        ))
     }
 
-    async fn rev_iter_kv(
+    async fn rev_iter_kv<K: CopyFromSlice>(
         &self,
         table_key_range: TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::RevIter<'_>> {
+    ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -1345,12 +1365,21 @@ where
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
 
-        Ok(self
-            .local_store
-            .rev_iter(table_key_range, read_options)
-            .await?)
+        Ok(deserialize_keyed_row_stream(
+            self.state_store
+                .rev_iter(table_key_range, read_options)
+                .await?,
+            &*self.row_serde,
+        ))
     }
+}
 
+impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
     /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
     /// `vnode`. If `sub_range` is (Unbounded, Unbounded), it scans rows from the relational table with specific `pk_prefix`.
     /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
@@ -1401,7 +1430,7 @@ where
     ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
         Ok(
             self.iter_with_prefix_inner::</* REVERSE */ false, Bytes>(pk_prefix, sub_range, prefetch_options)
-            .await?.map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)),
+                .await?.map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)),
         )
     }
 
@@ -1414,7 +1443,7 @@ where
     ) -> StreamExecutorResult<impl RowStream<'_>> {
         Ok(
             self.iter_with_prefix_inner::</* REVERSE */ true, ()>(pk_prefix, sub_range, prefetch_options)
-            .await?.map_ok(|(_, row)| row),
+                .await?.map_ok(|(_, row)| row),
         )
     }
 
@@ -1465,80 +1494,51 @@ where
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
         Ok(if REVERSE {
-            futures::future::Either::Left(deserialize_keyed_row_stream(
-                self.rev_iter_kv(
-                    memcomparable_range_with_vnode,
-                    prefix_hint,
-                    prefetch_options,
-                )
-                .await?,
-                &*self.row_serde,
-            ))
+            futures::future::Either::Left(
+                self.row_store
+                    .rev_iter_kv(
+                        memcomparable_range_with_vnode,
+                        prefix_hint,
+                        prefetch_options,
+                    )
+                    .await?,
+            )
         } else {
-            futures::future::Either::Right(deserialize_keyed_row_stream(
-                self.iter_kv(
-                    memcomparable_range_with_vnode,
-                    prefix_hint,
-                    prefetch_options,
-                )
-                .await?,
-                &*self.row_serde,
-            ))
+            futures::future::Either::Right(
+                self.row_store
+                    .iter_kv(
+                        memcomparable_range_with_vnode,
+                        prefix_hint,
+                        prefetch_options,
+                    )
+                    .await?,
+            )
         })
     }
 
     /// This function scans raw key-values from the relational table with specific `pk_range` under
     /// the same `vnode`.
-    async fn iter_kv_with_pk_range(
-        &self,
+    async fn iter_kv_with_pk_range<'a, K: CopyFromSlice>(
+        &'a self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
+    ) -> StreamExecutorResult<impl PkRowStream<'a, K>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
         // TODO: provide a trace of useful params.
-        self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
+        self.row_store
+            .iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
             .await
     }
 
     #[cfg(test)]
     pub fn get_watermark_cache(&self) -> &StateTableWatermarkCache {
         &self.watermark_cache
-    }
-}
-
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
-where
-    S: StateStore,
-    SD: ValueRowSerde,
-{
-    pub async fn iter_log_with_vnode(
-        &self,
-        vnode: VirtualNode,
-        epoch_range: (u64, u64),
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
-    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<ChangeLogRow>> + '_> {
-        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
-        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
-        Ok(deserialize_log_stream(
-            self.store
-                .iter_log(
-                    epoch_range,
-                    memcomparable_range_with_vnode,
-                    ReadLogOptions {
-                        table_id: self.table_id,
-                    },
-                )
-                .await?,
-            &*self.row_serde,
-        )
-        .map_err(Into::into))
     }
 }
 
