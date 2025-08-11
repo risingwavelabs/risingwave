@@ -14,23 +14,15 @@
 
 use core::num::NonZeroU64;
 use std::collections::BTreeMap;
-use std::fmt::Write;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
-use bytes::BytesMut;
-use opendal::Operator;
 use phf::{Set, phf_set};
-use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
-use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
-use serde_json::{Map, Value};
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
@@ -41,14 +33,10 @@ use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
-use crate::sink::encoder::{
-    JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
-    TimestamptzHandlingMode,
-};
-use crate::sink::file_sink::opendal_sink::FileSink;
-use crate::sink::file_sink::s3::{S3Common, S3Sink};
+use crate::sink::file_sink::s3::S3Common;
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::remote::CoordinatedRemoteSinkWriter;
+use crate::sink::snowflake_redshift::{AugmentedChunk, SnowflakeRedshiftSinkS3Writer};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkCommitCoordinator,
@@ -367,62 +355,8 @@ impl Sink for SnowflakeSink {
     }
 }
 
-pub struct AugmentedChunk {
-    current_epoch: u64,
-    current_row_count: usize,
-    is_append_only: bool,
-}
-
-impl AugmentedChunk {
-    pub fn new(current_epoch: u64, is_append_only: bool) -> Self {
-        Self {
-            current_epoch,
-            current_row_count: 0,
-            is_append_only,
-        }
-    }
-
-    pub fn reset_epoch(&mut self, current_epoch: u64) {
-        if self.is_append_only || current_epoch == self.current_epoch {
-            return;
-        }
-        self.current_epoch = current_epoch;
-        self.current_row_count = 0;
-    }
-
-    pub fn augmented_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
-        if self.is_append_only {
-            return Ok(chunk);
-        }
-        let (data_chunk, ops) = chunk.into_parts();
-        let chunk_row_count = data_chunk.capacity();
-        let (columns, visibility) = data_chunk.into_parts();
-
-        let op_column = ops.iter().map(|op| op.to_i16() as i32).collect::<Vec<_>>();
-        let row_column_strings: Vec<String> = (0..chunk_row_count)
-            .map(|i| format!("{}_{}", self.current_epoch, self.current_row_count + i))
-            .collect();
-
-        let row_column_refs: Vec<&str> = row_column_strings.iter().map(|s| s.as_str()).collect();
-        self.current_row_count += chunk_row_count;
-
-        let mut arrays: Vec<Arc<ArrayImpl>> = columns;
-        arrays.push(Arc::new(ArrayImpl::Utf8(Utf8Array::from_iter(
-            row_column_refs,
-        ))));
-        arrays.push(Arc::new(ArrayImpl::Int32(
-            PrimitiveArray::<i32>::from_iter(op_column),
-        )));
-
-        let chunk = DataChunk::new(arrays, visibility);
-        let ops = vec![Op::Insert; chunk_row_count];
-        let chunk = StreamChunk::from_parts(ops, chunk);
-        Ok(chunk)
-    }
-}
-
 pub enum SnowflakeSinkWriter {
-    S3(SnowflakeSinkS3Writer),
+    S3(SnowflakeRedshiftSinkS3Writer),
     Jdbc(SnowflakeSinkJdbcWriter),
 }
 
@@ -436,8 +370,17 @@ impl SnowflakeSinkWriter {
         let schema = param.schema();
         if config.with_s3 {
             let executor_id = writer_param.executor_id;
-            let s3_writer =
-                SnowflakeSinkS3Writer::new(config, schema, is_append_only, executor_id)?;
+            let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
+                config.s3_inner.ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "S3 configuration is required for Snowflake S3 sink"
+                    ))
+                })?,
+                schema,
+                is_append_only,
+                executor_id,
+                config.snowflake_target_table_name,
+            )?;
             Ok(Self::S3(s3_writer))
         } else {
             let jdbc_writer =
@@ -467,9 +410,20 @@ impl SinkWriter for SnowflakeSinkWriter {
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
         match self {
-            Self::S3(writer) => writer.barrier(is_checkpoint).await,
-            Self::Jdbc(writer) => writer.barrier(is_checkpoint).await,
+            Self::S3(writer) => {
+                writer.barrier(is_checkpoint).await?;
+            }
+            Self::Jdbc(writer) => {
+                writer.barrier(is_checkpoint).await?;
+            }
         }
+        Ok(Some(SinkMetadata {
+            metadata: Some(sink_metadata::Metadata::Serialized(
+                risingwave_pb::connector_service::sink_metadata::SerializedMetadata {
+                    metadata: vec![],
+                },
+            )),
+        }))
     }
 
     async fn abort(&mut self) -> Result<()> {
@@ -478,163 +432,6 @@ impl SinkWriter for SnowflakeSinkWriter {
         } else {
             Ok(())
         }
-    }
-}
-
-struct AugmentedRow {
-    row_encoder: JsonEncoder,
-    current_epoch: u64,
-    current_row_count: usize,
-    is_append_only: bool,
-}
-
-impl AugmentedRow {
-    fn new(current_epoch: u64, is_append_only: bool, schema: Schema) -> Self {
-        let row_encoder = JsonEncoder::new(
-            schema,
-            None,
-            crate::sink::encoder::DateHandlingMode::String,
-            TimestampHandlingMode::String,
-            TimestamptzHandlingMode::UtcString,
-            TimeHandlingMode::String,
-            JsonbHandlingMode::String,
-        );
-        Self {
-            row_encoder,
-            current_epoch,
-            current_row_count: 0,
-            is_append_only,
-        }
-    }
-
-    fn reset_epoch(&mut self, current_epoch: u64) {
-        if self.is_append_only || current_epoch == self.current_epoch {
-            return;
-        }
-        self.current_epoch = current_epoch;
-        self.current_row_count = 0;
-    }
-
-    fn augmented_row(&mut self, row: impl Row, op: Op) -> Result<Map<String, Value>> {
-        let mut row = self.row_encoder.encode(row)?;
-        if self.is_append_only {
-            return Ok(row);
-        }
-        self.current_row_count += 1;
-        row.insert(
-            SNOWFLAKE_SINK_ROW_ID.to_owned(),
-            Value::String(format!("{}_{}", self.current_epoch, self.current_row_count)),
-        );
-        row.insert(
-            SNOWFLAKE_SINK_OP.to_owned(),
-            Value::Number(serde_json::Number::from(op.to_i16())),
-        );
-        Ok(row)
-    }
-}
-
-pub struct SnowflakeSinkS3Writer {
-    config: SnowflakeConfig,
-    s3_operator: Operator,
-    augmented_row: AugmentedRow,
-    opendal_writer: Option<opendal::Writer>,
-    executor_id: u64,
-}
-async fn build_opendal_writer(
-    config: &SnowflakeConfig,
-    executor_id: u64,
-    operator: &Operator,
-) -> Result<opendal::Writer> {
-    let mut base_path = config
-        .s3_inner
-        .as_ref()
-        .ok_or_else(|| {
-            SinkError::Config(anyhow!(
-                "S3 configuration is required for Snowflake S3 sink"
-            ))
-        })?
-        .path
-        .clone()
-        .unwrap_or("".to_owned());
-    if !base_path.ends_with('/') {
-        base_path.push('/');
-    }
-    if let Some(table_name) = &config.snowflake_target_table_name {
-        base_path.push_str(&format!("{}/", table_name));
-    }
-    let create_time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    let object_name = format!(
-        "{}{}_{}.{}",
-        base_path,
-        executor_id,
-        create_time.as_secs(),
-        "json",
-    );
-    Ok(operator.writer_with(&object_name).concurrent(8).await?)
-}
-
-impl SnowflakeSinkS3Writer {
-    pub fn new(
-        config: SnowflakeConfig,
-        schema: Schema,
-        is_append_only: bool,
-        executor_id: u64,
-    ) -> Result<Self> {
-        let s3_operator =
-            FileSink::<S3Sink>::new_s3_sink(config.s3_inner.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!(
-                    "S3 configuration is required for Snowflake S3 sink"
-                ))
-            })?)?;
-        Ok(Self {
-            config,
-            s3_operator,
-            opendal_writer: None,
-            executor_id,
-            augmented_row: AugmentedRow::new(0, is_append_only, schema),
-        })
-    }
-}
-
-impl SnowflakeSinkS3Writer {
-    fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.augmented_row.reset_epoch(epoch);
-        Ok(())
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.opendal_writer.is_none() {
-            let opendal_writer =
-                build_opendal_writer(&self.config, self.executor_id, &self.s3_operator).await?;
-            self.opendal_writer = Some(opendal_writer);
-        }
-        let mut chunk_buf = BytesMut::new();
-        for (op, row) in chunk.rows() {
-            let encoded_row = self.augmented_row.augmented_row(row, op)?;
-            writeln!(chunk_buf, "{}", Value::Object(encoded_row)).unwrap(); // write to a `BytesMut` should never fail
-        }
-        self.opendal_writer
-            .as_mut()
-            .ok_or_else(|| SinkError::File("Sink writer is not created.".to_owned()))?
-            .write(chunk_buf.freeze())
-            .await?;
-        Ok(())
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
-        if is_checkpoint && let Some(mut writer) = self.opendal_writer.take() {
-            writer
-                .close()
-                .await
-                .map_err(|e| SinkError::File(e.to_report_string()))?;
-        }
-        Ok(Some(SinkMetadata {
-            metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
-                metadata: vec![],
-            })),
-        }))
     }
 }
 
@@ -739,13 +536,9 @@ impl SnowflakeSinkJdbcWriter {
         Ok(())
     }
 
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
         self.jdbc_sink_writer.barrier(is_checkpoint).await?;
-        Ok(Some(SinkMetadata {
-            metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
-                metadata: vec![],
-            })),
-        }))
+        Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {

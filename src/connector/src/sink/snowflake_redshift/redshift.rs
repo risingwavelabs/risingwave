@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use core::num::NonZero;
+use std::fmt::Write;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use bytes::BytesMut;
 use phf::{Set, phf_set};
 use crate::sink::snowflake::AugmentedChunk;
 use risingwave_common::array::StreamChunk;
@@ -25,7 +27,9 @@ use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
+use serde_json::json;
 use serde_with::{DisplayFromStr, serde_as};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::time::{MissedTickBehavior, interval};
 use tonic::async_trait;
@@ -35,9 +39,13 @@ use with_options::WithOptions;
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
+use crate::sink::file_sink::opendal_sink::FileSink;
+use crate::sink::file_sink::s3::{S3Common, S3Sink};
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::remote::CoordinatedRemoteSinkWriter;
-use crate::sink::snowflake::{SNOWFLAKE_SINK_OP, SNOWFLAKE_SINK_ROW_ID};
+use crate::sink::snowflake_redshift::{
+    __OP, __ROW_ID, AugmentedChunk, SnowflakeRedshiftSinkS3Writer, build_opendal_writer_path,
+};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam,
@@ -99,6 +107,14 @@ pub struct RedShiftConfig {
     #[serde(rename = "batch.insert.rows")]
     #[serde_as(as = "DisplayFromStr")]
     pub batch_insert_rows: u32,
+
+    #[serde(default)]
+    #[serde(rename = "with_s3")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub with_s3: bool,
+
+    #[serde(flatten)]
+    pub s3_inner: Option<S3Common>,
 }
 
 fn default_schedule() -> u64 {
@@ -255,12 +271,94 @@ impl Sink for RedshiftSink {
         Ok(coordinator)
     }
 }
-pub struct RedShiftSinkWriter {
+
+pub enum RedShiftSinkWriter {
+    S3(SnowflakeRedshiftSinkS3Writer),
+    Jdbc(RedShiftSinkJdbcWriter),
+}
+
+impl RedShiftSinkWriter {
+    pub async fn new(
+        config: RedShiftConfig,
+        is_append_only: bool,
+        writer_param: super::SinkWriterParam,
+        param: SinkParam,
+    ) -> Result<Self> {
+        let schema = param.schema();
+        if config.with_s3 {
+            let executor_id = writer_param.executor_id;
+            let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
+                config.s3_inner.ok_or_else(|| {
+                    SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
+                })?,
+                schema,
+                is_append_only,
+                executor_id,
+                Some(config.table),
+            )?;
+            Ok(Self::S3(s3_writer))
+        } else {
+            let jdbc_writer =
+                RedShiftSinkJdbcWriter::new(config, is_append_only, writer_param, param).await?;
+            Ok(Self::Jdbc(jdbc_writer))
+        }
+    }
+}
+
+#[async_trait]
+impl SinkWriter for RedShiftSinkWriter {
+    type CommitMetadata = Option<SinkMetadata>;
+
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        match self {
+            Self::S3(writer) => writer.begin_epoch(epoch),
+            Self::Jdbc(writer) => writer.begin_epoch(epoch).await,
+        }
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        match self {
+            Self::S3(writer) => writer.write_batch(chunk).await,
+            Self::Jdbc(writer) => writer.write_batch(chunk).await,
+        }
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
+        let metadata = match self {
+            Self::S3(writer) => {
+                if let Some(path) = writer.barrier(is_checkpoint).await? {
+                    path.into_bytes()
+                } else {
+                    vec![]
+                }
+            }
+            Self::Jdbc(writer) => {
+                writer.barrier(is_checkpoint).await?;
+                vec![]
+            }
+        };
+        Ok(Some(SinkMetadata {
+            metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
+                metadata,
+            })),
+        }))
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        if let Self::Jdbc(writer) = self {
+            writer.abort().await
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub struct RedShiftSinkJdbcWriter {
     augmented_row: AugmentedChunk,
     jdbc_sink_writer: CoordinatedRemoteSinkWriter,
 }
 
-impl RedShiftSinkWriter {
+impl RedShiftSinkJdbcWriter {
     pub async fn new(
         config: RedShiftConfig,
         is_append_only: bool,
@@ -280,12 +378,12 @@ impl RedShiftSinkWriter {
                 .max()
                 .unwrap_or(0);
             (*column_descs).push(ColumnDesc::named(
-                SNOWFLAKE_SINK_ROW_ID,
+                __ROW_ID,
                 ColumnId::new(max_column_id + 1),
                 DataType::Varchar,
             ));
             (*column_descs).push(ColumnDesc::named(
-                SNOWFLAKE_SINK_OP,
+                __OP,
                 ColumnId::new(max_column_id + 2),
                 DataType::Int32,
             ));
@@ -316,11 +414,6 @@ impl RedShiftSinkWriter {
             jdbc_sink_writer,
         })
     }
-}
-
-#[async_trait]
-impl SinkWriter for RedShiftSinkWriter {
-    type CommitMetadata = Option<SinkMetadata>;
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.augmented_row.reset_epoch(epoch);
@@ -334,13 +427,9 @@ impl SinkWriter for RedShiftSinkWriter {
         Ok(())
     }
 
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
         self.jdbc_sink_writer.barrier(is_checkpoint).await?;
-        Ok(Some(SinkMetadata {
-            metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
-                metadata: vec![],
-            })),
-        }))
+        Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
@@ -351,10 +440,8 @@ impl SinkWriter for RedShiftSinkWriter {
 }
 
 pub struct RedshiftSinkCommitter {
+    config: RedShiftConfig,
     client: JdbcJniClient,
-    schema_name: Option<String>,
-    table_name: String,
-    cdc_table_name: Option<String>,
     pk_column_names: Vec<String>,
     all_column_names: Vec<String>,
     schedule_seconds: u64,
@@ -409,9 +496,7 @@ impl RedshiftSinkCommitter {
 
         Ok(Self {
             client,
-            schema_name: config.schema.clone(),
-            table_name: config.table.clone(),
-            cdc_table_name: config.cdc_table.clone(),
+            config,
             pk_column_names: pk_column_names.clone(),
             all_column_names: all_column_names.clone(),
             is_append_only,
@@ -486,9 +571,77 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
     async fn commit(
         &mut self,
         _epoch: u64,
-        _metadata: Vec<SinkMetadata>,
+        metadata: Vec<SinkMetadata>,
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
+        let paths = metadata
+            .into_iter()
+            .filter(|m| {
+                if let Some(sink_metadata::Metadata::Serialized(SerializedMetadata { metadata })) =
+                    &m.metadata
+                {
+                    !metadata.is_empty()
+                } else {
+                    false
+                }
+            })
+            .map(|metadata| {
+                let path = if let Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
+                    metadata,
+                })) = metadata.metadata
+                {
+                    String::from_utf8(metadata)
+                        .map_err(|e| SinkError::Config(anyhow!("Invalid UTF-8 in metadata: {}", e)))
+                } else {
+                    Err(SinkError::Config(anyhow!("Invalid metadata format")))
+                }?;
+                Ok(json!({
+                    "url": path,
+                    "mandatory": true
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if !paths.is_empty() {
+            let s3_inner = self.config.s3_inner.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
+            })?;
+            let s3_operator = FileSink::<S3Sink>::new_s3_sink(&s3_inner)?;
+            let (mut writer, path) =
+                build_opendal_writer_path(&s3_inner, 0, &s3_operator, &None).await?;
+            let manifest_json = json!({
+                "entries": paths
+            });
+            let mut chunk_buf = BytesMut::new();
+            writeln!(chunk_buf, "{}", manifest_json).unwrap();
+            writer.write(chunk_buf.freeze()).await?;
+            writer
+                .close()
+                .await
+                .map_err(|e| SinkError::File(e.to_report_string()))?;
+            let table = if self.is_append_only {
+                &self.config.table
+            } else {
+                self.config.cdc_table.as_ref().ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "intermediate.table.name is required for non-append-only sink"
+                    ))
+                })?
+            };
+            let s3_inner = self.config.s3_inner.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
+            })?;
+            let copy_into_sql = build_copy_into_sql(
+                self.config.schema.as_deref(),
+                table,
+                &path,
+                &s3_inner.access,
+                &s3_inner.secret,
+                &s3_inner.assume_role,
+            )?;
+            // run copy into
+            self.client.execute_sql_sync(&vec![copy_into_sql])?;
+        }
+
         if let Some(add_columns) = add_columns {
             if let Some(shutdown_sender) = &self.shutdown_sender {
                 // Send shutdown signal to the periodic task before altering the table
@@ -497,8 +650,8 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 })?;
             }
             let sql = build_alter_add_column_sql(
-                self.schema_name.as_deref(),
-                &self.table_name,
+                self.config.schema.as_deref(),
+                &self.config.table,
                 &add_columns
                     .iter()
                     .map(|f| (f.name.clone(), f.data_type.to_string()))
@@ -520,13 +673,13 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 .execute_sql_sync(&vec![sql.clone()])
                 .or_else(check_column_exists)?;
             if !self.is_append_only {
-                let cdc_table_name = self.cdc_table_name.as_ref().ok_or_else(|| {
+                let cdc_table_name = self.config.cdc_table.as_ref().ok_or_else(|| {
                     SinkError::Config(anyhow!(
                         "intermediate.table.name is required for non-append-only sink"
                     ))
                 })?;
                 let sql = build_alter_add_column_sql(
-                    self.schema_name.as_deref(),
+                    self.config.schema.as_deref(),
                     cdc_table_name,
                     &add_columns
                         .iter()
@@ -548,9 +701,9 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
 
                 let (shutdown_sender, shutdown_receiver) = unbounded_channel();
                 let client = self.client.clone();
-                let schema_name = self.schema_name.clone();
-                let cdc_table_name = self.cdc_table_name.clone().unwrap();
-                let target_table_name = self.table_name.clone();
+                let schema_name = self.config.schema.clone();
+                let cdc_table_name = self.config.cdc_table.clone().unwrap();
+                let target_table_name = self.config.table.clone();
                 let pk_column_names = self.pk_column_names.clone();
                 let all_column_names = self.all_column_names.clone();
                 let schedule_seconds = self.schedule_seconds;
@@ -590,8 +743,8 @@ pub fn build_create_table_sql(
         })
         .collect::<Result<Vec<String>>>()?;
     if need_op_and_row_id {
-        columns.push(format!("{} VARCHAR", SNOWFLAKE_SINK_ROW_ID));
-        columns.push(format!("{} INT", SNOWFLAKE_SINK_OP));
+        columns.push(format!("{} VARCHAR", __ROW_ID));
+        columns.push(format!("{} INT", __OP));
     }
     let columns_str = columns.join(", ");
     let full_table_name = build_full_table_name(schema_name, table_name);
@@ -660,7 +813,7 @@ fn build_create_merge_into_task_sql(
             SELECT COALESCE(MAX({redshift_sink_row_id}), '0') AS max_row_id
             FROM {cdc_table_name};
             "#,
-            redshift_sink_row_id = SNOWFLAKE_SINK_ROW_ID,
+            redshift_sink_row_id = __ROW_ID,
             cdc_table_name = cdc_table_name,
         ),
         format!(
@@ -682,9 +835,9 @@ fn build_create_merge_into_task_sql(
             "#,
             target_table_name = target_table_name,
             pk_names_str = pk_names_str,
-            redshift_sink_row_id = SNOWFLAKE_SINK_ROW_ID,
+            redshift_sink_row_id = __ROW_ID,
             cdc_table_name = cdc_table_name,
-            redshift_sink_op = SNOWFLAKE_SINK_OP,
+            redshift_sink_op = __OP,
             pk_names_eq_str = pk_names_eq_str,
         ),
         format!(
@@ -710,9 +863,9 @@ fn build_create_merge_into_task_sql(
             "#,
             target_table_name = target_table_name,
             pk_names_str = pk_names_str,
-            redshift_sink_row_id = SNOWFLAKE_SINK_ROW_ID,
+            redshift_sink_row_id = __ROW_ID,
             cdc_table_name = cdc_table_name,
-            redshift_sink_op = SNOWFLAKE_SINK_OP,
+            redshift_sink_op = __OP,
             pk_names_eq_str = pk_names_eq_str,
             all_column_names_set_str = all_column_names_set_str,
             all_column_names_str = all_column_names_str,
@@ -725,8 +878,43 @@ fn build_create_merge_into_task_sql(
             WHERE {cdc_table_name}.{redshift_sink_row_id} <= max_id_table.max_row_id;
             "#,
             cdc_table_name = cdc_table_name,
-            redshift_sink_row_id = SNOWFLAKE_SINK_ROW_ID,
+            redshift_sink_row_id = __ROW_ID,
         ),
         "DROP TABLE IF EXISTS max_id_table;".to_owned(),
     ]
+}
+
+fn build_copy_into_sql(
+    schema_name: Option<&str>,
+    table_name: &str,
+    manifest_path: &str,
+    access_key: &Option<String>,
+    secret_key: &Option<String>,
+    assume_role: &Option<String>,
+) -> Result<String> {
+    let table_name = build_full_table_name(schema_name, table_name);
+    let credentials = if let Some(assume_role) = assume_role {
+        assume_role
+    } else if let (Some(access_key), Some(secret_key)) = (access_key, secret_key) {
+        &format!(
+            "aws_access_key_id={};aws_secret_access_key={}",
+            access_key, secret_key
+        )
+    } else {
+        return Err(SinkError::Config(anyhow!(
+            "Either assume_role or access_key and secret_key must be provided for Redshift COPY command"
+        )));
+    };
+    Ok(format!(
+        r#"
+        COPY {table_name}
+        FROM '{manifest_path}'
+        CREDENTIALS '{credentials}'
+        FORMAT AS JSON 'auto'
+        MANIFEST;
+        "#,
+        table_name = table_name,
+        manifest_path = manifest_path,
+        credentials = credentials
+    ))
 }
