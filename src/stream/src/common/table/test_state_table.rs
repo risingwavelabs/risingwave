@@ -1953,7 +1953,6 @@ async fn test_replicated_state_table_replication() {
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state_table.init_epoch(epoch).await.unwrap();
-    replicated_state_table.init_epoch(epoch).await.unwrap();
 
     // Insert first record into base state table
     state_table.insert(OwnedRow::new(vec![
@@ -1967,8 +1966,8 @@ async fn test_replicated_state_table_replication() {
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
     state_table.commit_for_test(epoch).await.unwrap();
-    replicated_state_table.commit_for_test(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
+    replicated_state_table.init_epoch(epoch).await.unwrap();
 
     {
         let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = (
