@@ -315,6 +315,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)>,
         switch_consistent_op: Option<StateTableOpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
+        // TODO: remove the temp logic and clear range when seeing watermark
+        if table_watermarks.is_some() {
+            self.all_rows = None;
+        }
         self.state_store
             .flush()
             .instrument(tracing::info_span!("state_table_flush"))
