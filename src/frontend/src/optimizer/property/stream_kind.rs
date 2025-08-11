@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
+
 /// The kind of the changelog stream output by a stream operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StreamKind {
@@ -33,6 +35,20 @@ pub enum StreamKind {
     /// Stateful operators typically can not process such streams correctly. It must be converted
     /// to `Retract` before being sent to stateful operators in this case.
     Upsert,
+}
+
+impl Display for StreamKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::AppendOnly => "append-only",
+                Self::Retract => "retract",
+                Self::Upsert => "upsert",
+            }
+        )
+    }
 }
 
 impl StreamKind {

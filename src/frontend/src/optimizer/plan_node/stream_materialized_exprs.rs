@@ -114,7 +114,8 @@ impl StreamMaterializedExprs {
             input.stream_key().map(|v| v.to_vec()),
             fd_set,
             input.distribution().clone(),
-            // TODO(kind): theoretically, the impl can handle upsert stream.
+            // Note: even though we persist the evaluation results, there are still passthrough columns.
+            // We still cannot handle upsert input.
             reject_upsert_input!(input),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),

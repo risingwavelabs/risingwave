@@ -56,7 +56,9 @@ pub struct StreamMaterialize {
 impl StreamMaterialize {
     pub fn new(input: PlanRef, table: TableCatalog) -> Result<Self> {
         let kind = match table.conflict_behavior() {
-            ConflictBehavior::NoCheck => reject_upsert_input!(input),
+            ConflictBehavior::NoCheck => {
+                reject_upsert_input!(input, "Materialize without conflict handling")
+            }
 
             // When conflict handling is enabled, upsert stream can be converted to retract stream.
             ConflictBehavior::Overwrite
