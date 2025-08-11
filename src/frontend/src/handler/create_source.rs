@@ -849,13 +849,9 @@ pub async fn bind_create_source_or_table_with_connector(
         .into());
         }
 
-        // reject unsupported formats for CREATE SOURCE
         match format_encode.format {
-            Format::Upsert
-            | Format::Debezium
-            | Format::DebeziumMongo
-            | Format::Maxwell
-            | Format::Canal => {
+            // reject unsupported formats for CREATE SOURCE
+            Format::Debezium | Format::DebeziumMongo | Format::Maxwell | Format::Canal => {
                 return Err(ErrorCode::BindError(format!(
                     "can't CREATE SOURCE with FORMAT {}.\n\nHint: use CREATE TABLE instead\n\n{}",
                     format_encode.format,
@@ -863,9 +859,14 @@ pub async fn bind_create_source_or_table_with_connector(
                 ))
                 .into());
             }
-            _ => {
-                // TODO: enhance error message for other formats
+            // hint limitations for some other formats
+            Format::Upsert => {
+                notice_to_user(format!(
+                    "Use of `CREATE SOURCE` with `FORMAT {}` can be limited. Use `CREATE TABLE` instead if your query is not supported.",
+                    format_encode.format
+                ));
             }
+            _ => {}
         }
     }
 
@@ -973,13 +974,13 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
     )
     .await?;
 
-    if is_create_source && !pk_names.is_empty() {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
-                .to_owned(),
-        )
-        .into());
-    }
+    // if is_create_source && !pk_names.is_empty() {
+    //     return Err(ErrorCode::InvalidInputSyntax(
+    //         "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
+    //             .to_owned(),
+    //     )
+    //     .into());
+    // }
 
     // User may specify a generated or additional column with the same name as one from the external schema.
     // Ensure duplicated column names are handled here.
