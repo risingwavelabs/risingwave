@@ -36,12 +36,15 @@ use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus};
+use risingwave_pb::meta::{
+    EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus, RefreshRequest,
+    RefreshResponse,
+};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
-use crate::catalog::DatabaseId;
+use crate::catalog::{DatabaseId, SinkId};
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
@@ -69,6 +72,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
+    async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
+
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
@@ -76,8 +81,6 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
-
-    async fn get_system_params(&self) -> Result<SystemParamsReader>;
 
     async fn set_system_param(
         &self,
@@ -97,7 +100,7 @@ pub trait FrontendMetaClient: Send + Sync {
         include_dropped_table: bool,
     ) -> Result<HashMap<u32, Table>>;
 
-    /// Returns vector of (worker_id, min_pinned_version_id)
+    /// Returns vector of (`worker_id`, `min_pinned_version_id`)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
@@ -154,9 +157,25 @@ pub trait FrontendMetaClient: Send + Sync {
         connector_conn_ref: Option<u32>,
     ) -> Result<()>;
 
+    async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()>;
+
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
+
+    fn worker_id(&self) -> u32;
+
+    async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
+
+    async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64>;
+
+    async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -198,6 +217,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_fragment_distributions().await
     }
 
+    async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
+        self.0.list_creating_fragment_distribution().await
+    }
+
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         self.0.list_actor_states().await
     }
@@ -213,10 +236,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
         let manifest = self.0.get_meta_snapshot_manifest().await?;
         Ok(manifest.snapshot_metadata)
-    }
-
-    async fn get_system_params(&self) -> Result<SystemParamsReader> {
-        self.0.get_system_params().await
     }
 
     async fn set_system_param(
@@ -383,11 +402,44 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .await
     }
 
+    async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        self.0
+            .alter_source_connector_props(
+                source_id,
+                changed_props,
+                changed_secret_refs,
+                connector_conn_ref,
+            )
+            .await
+    }
+
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         self.0.list_hosted_iceberg_tables().await
     }
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>> {
         self.0.get_fragment_by_id(fragment_id).await
+    }
+
+    fn worker_id(&self) -> u32 {
+        self.0.worker_id()
+    }
+
+    async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
+        self.0.set_sync_log_store_aligned(job_id, aligned).await
+    }
+
+    async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
+        self.0.compact_iceberg_table(sink_id).await
+    }
+
+    async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
+        self.0.refresh(request).await
     }
 }

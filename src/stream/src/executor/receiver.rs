@@ -17,7 +17,7 @@ use itertools::Itertools;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use super::exchange::input::BoxedInput;
+use super::exchange::input::BoxedActorInput;
 use crate::executor::DispatcherMessage;
 use crate::executor::exchange::input::{
     assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
@@ -30,7 +30,7 @@ use crate::task::{FragmentId, LocalBarrierManager};
 /// messages down to the executors.
 pub struct ReceiverExecutor {
     /// Input from upstream.
-    input: BoxedInput,
+    input: BoxedActorInput,
 
     /// The context of the actor.
     actor_context: ActorContextRef,
@@ -61,7 +61,7 @@ impl ReceiverExecutor {
         ctx: ActorContextRef,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
-        input: BoxedInput,
+        input: BoxedActorInput,
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         barrier_rx: mpsc::UnboundedReceiver<Barrier>,
@@ -84,7 +84,7 @@ impl ReceiverExecutor {
         local_barrier_manager: crate::task::LocalBarrierManager,
     ) -> Self {
         use super::exchange::input::LocalInput;
-        use crate::executor::exchange::input::Input;
+        use crate::executor::exchange::input::ActorInput;
 
         let barrier_rx = local_barrier_manager.subscribe_barrier(actor_id);
 
@@ -144,14 +144,14 @@ impl Execute for ReceiverExecutor {
                                 .unwrap_or(self.upstream_fragment_id);
                             let removed_upstream_actor_id: Vec<_> =
                                 if update.new_upstream_fragment_id.is_some() {
-                                    vec![self.input.actor_id()]
+                                    vec![self.input.id()]
                                 } else {
                                     update.removed_upstream_actor_id.clone()
                                 };
 
                             assert_eq!(
                                 removed_upstream_actor_id,
-                                vec![self.input.actor_id()],
+                                vec![self.input.id()],
                                 "the removed upstream actor should be the same as the current input"
                             );
                             let upstream_actor = update
@@ -248,6 +248,7 @@ mod tests {
                 dropped_actors: Default::default(),
                 actor_splits: Default::default(),
                 actor_new_dispatchers: Default::default(),
+                actor_cdc_table_snapshot_splits: Default::default(),
             },
         ));
 

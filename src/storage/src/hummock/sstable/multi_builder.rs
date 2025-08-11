@@ -205,10 +205,10 @@ where
         // the captured reference to `current_builder` is also required to be `Send`, and then
         // `current_builder` itself is required to be `Sync`, which is unnecessary.
         let mut need_seal_current = false;
-        if let Some(builder) = self.current_builder.as_mut() {
-            if is_new_user_key {
-                need_seal_current = switch_builder || builder.reach_capacity();
-            }
+        if let Some(builder) = self.current_builder.as_mut()
+            && is_new_user_key
+        {
+            need_seal_current = switch_builder || builder.reach_capacity();
         }
 
         if need_seal_current {
@@ -241,17 +241,17 @@ where
             if new_vnode_partition_count.is_some()
                 || self.table_vnode_partition.contains_key(&self.last_table_id)
             {
-                if new_vnode_partition_count.is_some() {
-                    if (*new_vnode_partition_count.unwrap() as usize) > self.vnode_count {
+                if let Some(new_vnode_partition_count) = new_vnode_partition_count {
+                    if (*new_vnode_partition_count as usize) > self.vnode_count {
                         tracing::warn!(
                             "vnode partition count {} is larger than vnode count {}",
-                            new_vnode_partition_count.unwrap(),
+                            new_vnode_partition_count,
                             self.vnode_count
                         );
 
                         self.split_weight_by_vnode = 0;
                     } else {
-                        self.split_weight_by_vnode = *new_vnode_partition_count.unwrap()
+                        self.split_weight_by_vnode = *new_vnode_partition_count;
                     };
                 } else {
                     self.split_weight_by_vnode = 0;

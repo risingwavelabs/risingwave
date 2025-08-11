@@ -300,7 +300,7 @@ async fn bind_columns_from_source_for_non_cdc(
             format_encode.row_encode,
             format_encode_options_to_consume
                 .keys()
-                .map(|k| k.to_string())
+                .cloned()
                 .collect::<Vec<String>>()
                 .join(","),
         );
@@ -360,7 +360,7 @@ fn bind_columns_from_source_for_cdc(
             format_encode.row_encode,
             format_encode_options_to_consume
                 .keys()
-                .map(|k| k.to_string())
+                .cloned()
                 .collect::<Vec<String>>()
                 .join(","),
         );

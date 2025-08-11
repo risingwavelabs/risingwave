@@ -18,12 +18,11 @@ use risingwave_common::types::DataType;
 use risingwave_common::types::DataType::Boolean;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{
     CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall,
     InputRef,
 };
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNode, PlanTreeNodeBinary,
@@ -86,7 +85,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///              Domain   T2
 /// ```
 pub struct ApplyJoinTransposeRule {}
-impl Rule for ApplyJoinTransposeRule {
+impl Rule<Logical> for ApplyJoinTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (

@@ -33,7 +33,14 @@ message RunningSql {
   optional string sql = 6;
 }
 
+message CancelRunningSqlRequest {
+  int32 process_id = 1;
+}
+
+message CancelRunningSqlResponse {}
+
 service FrontendService {
   rpc GetTableReplacePlan(GetTableReplacePlanRequest) returns (GetTableReplacePlanResponse);
   rpc GetRunningSqls(GetRunningSqlsRequest) returns (GetRunningSqlsResponse);
+  rpc CancelRunningSql(CancelRunningSqlRequest) returns (CancelRunningSqlResponse);
 }

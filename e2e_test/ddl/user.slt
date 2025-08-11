@@ -26,6 +26,18 @@ DROP USER ddl_user;
 statement ok
 DROP USER IF EXISTS ddl_user;
 
+statement error Permission denied
+ALTER USER rwadmin RENAME TO rwa;
+
+statement error Permission denied
+ALTER USER rwadmin WITH NOLOGIN NOSUPERUSER;
+
+statement error Permission denied
+ALTER USER rwadmin WITH PASSWORD '';
+
+statement error Permission denied
+DROP USER rwadmin;
+
 # Test quoting
 statement ok
 CREATE USER "n-m";

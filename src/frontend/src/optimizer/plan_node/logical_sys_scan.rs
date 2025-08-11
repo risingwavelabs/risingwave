@@ -22,8 +22,8 @@ use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    PlanBase, PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::error::Result;
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
@@ -181,7 +181,7 @@ impl LogicalSysScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalSysScan}
+impl_plan_tree_node_for_leaf! { Logical, LogicalSysScan}
 
 impl Distill for LogicalSysScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -207,7 +207,7 @@ impl Distill for LogicalSysScan {
                             Pretty::from(if verbose {
                                 format!("{}.{}", self.table_name(), col_name)
                             } else {
-                                col_name.to_string()
+                                col_name.clone()
                             })
                         })
                         .collect(),
@@ -250,7 +250,7 @@ impl ColPrunable for LogicalSysScan {
     }
 }
 
-impl ExprRewritable for LogicalSysScan {
+impl ExprRewritable<Logical> for LogicalSysScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -322,7 +322,10 @@ impl PredicatePushdown for LogicalSysScan {
 
 impl LogicalSysScan {
     // TODO(kwannoel): Unify this with logical_scan.
-    fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_inner_with_required(
+        &self,
+        required_order: &Order,
+    ) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         if self.predicate().always_true() {
             required_order
                 .enforce_if_not_satisfies(BatchSysSeqScan::new(self.core.clone(), vec![]).into())
@@ -334,12 +337,12 @@ impl LogicalSysScan {
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
 
-            let plan: PlanRef = if scan.core.predicate.always_false() {
+            let plan = if scan.core.predicate.always_false() {
                 LogicalValues::create(vec![], scan.core.schema(), scan.core.ctx).to_batch()?
             } else {
                 let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-                let mut plan: PlanRef = BatchSysSeqScan::new(scan, scan_ranges).into();
+                let mut plan = BatchSysSeqScan::new(scan, scan_ranges).into();
                 if !predicate.always_true() {
                     plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
                 }
@@ -356,18 +359,24 @@ impl LogicalSysScan {
 }
 
 impl ToBatch for LogicalSysScan {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         self.to_batch_with_order_required(&Order::any())
     }
 
-    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_with_order_required(
+        &self,
+        required_order: &Order,
+    ) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new = self.clone_with_predicate(self.predicate().clone());
         new.to_batch_inner_with_required(required_order)
     }
 }
 
 impl ToStream for LogicalSysScan {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         bail_not_implemented!("streaming on system table");
     }
 

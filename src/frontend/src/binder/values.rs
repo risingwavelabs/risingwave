@@ -60,9 +60,14 @@ impl BoundValues {
         self.rows.iter_mut().flatten()
     }
 
-    pub fn is_correlated(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        self.exprs()
+            .any(|expr| expr.has_correlated_input_ref_by_correlated_id(correlated_id))
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -88,16 +93,16 @@ impl Binder {
     /// If values are shorter than expected, `NULL`s will be filled.
     pub(super) fn bind_values(
         &mut self,
-        values: Values,
-        expected_types: Option<Vec<DataType>>,
+        values: &Values,
+        expected_types: Option<&[DataType]>,
     ) -> Result<BoundValues> {
         assert!(!values.0.is_empty());
 
         self.context.clause = Some(Clause::Values);
-        let vec2d = values.0;
+        let vec2d = &values.0;
         let mut bound = vec2d
-            .into_iter()
-            .map(|vec| vec.into_iter().map(|expr| self.bind_expr(expr)).collect())
+            .iter()
+            .map(|vec| vec.iter().map(|expr| self.bind_expr(expr)).collect())
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
@@ -113,10 +118,10 @@ impl Binder {
             Some(types) => {
                 bound = bound
                     .into_iter()
-                    .map(|vec| Self::cast_on_insert(&types.clone(), vec))
+                    .map(|vec| Self::cast_on_insert(types, vec))
                     .try_collect()?;
 
-                types
+                types.to_vec()
             }
             None => (0..num_columns)
                 .map(|col_index| align_types(bound.iter_mut().map(|row| &mut row[col_index])))
@@ -145,7 +150,7 @@ impl Binder {
         {
             bail_not_implemented!("Subquery in VALUES");
         }
-        if bound_values.is_correlated(1) {
+        if bound_values.is_correlated_by_depth(1) {
             bail_not_implemented!("CorrelatedInputRef in VALUES");
         }
         Ok(bound_values)
@@ -169,7 +174,7 @@ mod tests {
         let expr1 = Expr::Value(Value::Number("1".to_owned()));
         let expr2 = Expr::Value(Value::Number("1.1".to_owned()));
         let values = Values(vec![vec![expr1], vec![expr2]]);
-        let res = binder.bind_values(values, None).unwrap();
+        let res = binder.bind_values(&values, None).unwrap();
 
         let types = vec![DataType::Decimal];
         let n_cols = types.len();

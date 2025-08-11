@@ -288,7 +288,7 @@ where
                                         // Consume remaining rows in the builder.
                                         for (vnode, builder) in &mut builders {
                                             if let Some(data_chunk) = builder.consume_all() {
-                                                yield Message::Chunk(Self::handle_snapshot_chunk(
+                                                let chunk = Self::handle_snapshot_chunk(
                                                     data_chunk,
                                                     *vnode,
                                                     &pk_in_output_indices,
@@ -296,7 +296,16 @@ where
                                                     &mut cur_barrier_snapshot_processed_rows,
                                                     &mut total_snapshot_processed_rows,
                                                     &self.output_indices,
-                                                )?);
+                                                )?;
+                                                tracing::trace!(
+                                                    source = "snapshot",
+                                                    state = "finish_backfill_stream",
+                                                    action = "drain_snapshot_buffers",
+                                                    ?vnode,
+                                                    "{:#?}",
+                                                    chunk,
+                                                );
+                                                yield Message::Chunk(chunk);
                                             }
                                         }
 
@@ -310,10 +319,15 @@ where
                                             let chunk_cardinality = chunk.cardinality() as u64;
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk_cardinality;
-                                            yield Message::Chunk(mapping_chunk(
+                                            let chunk = mapping_chunk(chunk, &self.output_indices);
+                                            tracing::trace!(
+                                                source = "upstream",
+                                                state = "finish_backfill_stream",
+                                                action = "drain_upstream_buffer",
+                                                "{:#?}",
                                                 chunk,
-                                                &self.output_indices,
-                                            ));
+                                            );
+                                            yield Message::Chunk(chunk);
                                         }
                                         metrics
                                             .backfill_snapshot_read_row_count
@@ -326,7 +340,7 @@ where
                                     Some((vnode, row)) => {
                                         let builder = builders.get_mut(&vnode).unwrap();
                                         if let Some(chunk) = builder.append_one_row(row) {
-                                            yield Message::Chunk(Self::handle_snapshot_chunk(
+                                            let chunk = Self::handle_snapshot_chunk(
                                                 chunk,
                                                 vnode,
                                                 &pk_in_output_indices,
@@ -334,7 +348,15 @@ where
                                                 &mut cur_barrier_snapshot_processed_rows,
                                                 &mut total_snapshot_processed_rows,
                                                 &self.output_indices,
-                                            )?);
+                                            )?;
+                                            tracing::trace!(
+                                                source = "snapshot",
+                                                state = "process_backfill_stream",
+                                                action = "drain_full_snapshot_buffer",
+                                                "{:#?}",
+                                                chunk,
+                                            );
+                                            yield Message::Chunk(chunk);
                                         }
                                     }
                                 }
@@ -371,7 +393,7 @@ where
                                 Some((vnode, row)) => {
                                     let builder = builders.get_mut(&vnode).unwrap();
                                     if let Some(chunk) = builder.append_one_row(row) {
-                                        yield Message::Chunk(Self::handle_snapshot_chunk(
+                                        let chunk = Self::handle_snapshot_chunk(
                                             chunk,
                                             vnode,
                                             &pk_in_output_indices,
@@ -379,7 +401,15 @@ where
                                             &mut cur_barrier_snapshot_processed_rows,
                                             &mut total_snapshot_processed_rows,
                                             &self.output_indices,
-                                        )?);
+                                        )?;
+                                        tracing::trace!(
+                                            source = "snapshot",
+                                            state = "process_backfill_stream",
+                                            action = "snapshot_read_at_least_one",
+                                            "{:#?}",
+                                            chunk,
+                                        );
+                                        yield Message::Chunk(chunk);
                                     }
 
                                     break;
@@ -429,7 +459,15 @@ where
 
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                         total_snapshot_processed_rows += chunk_cardinality;
-                        yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                        let chunk = mapping_chunk(chunk, &self.output_indices);
+                        tracing::trace!(
+                            source = "snapshot",
+                            state = "process_barrier",
+                            action = "consume_remaining_snapshot",
+                            "{:#?}",
+                            chunk,
+                        );
+                        yield Message::Chunk(chunk);
                     }
                 }
 
@@ -441,7 +479,7 @@ where
                     // If no current_pos, means no snapshot processed yet.
                     // Also means we don't need propagate any updates <= current_pos.
                     if backfill_state.has_progress() {
-                        yield Message::Chunk(mapping_chunk(
+                        let chunk = mapping_chunk(
                             mark_chunk_ref_by_vnode(
                                 &chunk,
                                 &backfill_state,
@@ -450,7 +488,15 @@ where
                                 &pk_order,
                             )?,
                             &self.output_indices,
-                        ));
+                        );
+                        tracing::trace!(
+                            source = "upstream",
+                            state = "process_barrier",
+                            action = "consume_remaining_upstream",
+                            "{:#?}",
+                            chunk,
+                        );
+                        yield Message::Chunk(chunk);
                     }
 
                     // Replicate

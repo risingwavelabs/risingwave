@@ -111,5 +111,30 @@ drop connection conn;
 statement ok
 drop secret sec_broker;
 
+# test alter schema
+
+statement ok
+create schema test_schema;
+
+statement ok
+create connection conn with (type = 'kafka', properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', properties.security.protocol = 'plaintext');
+
+statement ok
+ALTER CONNECTION conn SET SCHEMA test_schema;
+
+query ?? retry 3 backoff 1s
+SELECT name AS connectionname, nspname AS schemaname
+FROM rw_connections
+JOIN pg_namespace ON pg_namespace.oid = rw_connections.schema_id
+WHERE nspname = 'test_schema';
+----
+conn test_schema
+
+statement ok
+drop connection test_schema.conn;
+
+statement ok
+drop schema test_schema;
+
 statement ok
 set streaming_use_shared_source to true;

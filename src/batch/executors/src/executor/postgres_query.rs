@@ -134,11 +134,22 @@ impl PostgresQueryExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         tracing::debug!("postgres_query_executor: started");
-        let conn_str = format!(
-            "host={} port={} user={} password={} dbname={}",
-            self.host, self.port, self.username, self.password, self.database
-        );
-        let (client, conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await?;
+        let mut conf = tokio_postgres::Config::new();
+        let port = self
+            .port
+            .parse()
+            .map_err(|_| risingwave_expr::ExprError::InvalidParam {
+                name: "port",
+                reason: self.port.clone().into(),
+            })?;
+        let (client, conn) = conf
+            .host(&self.host)
+            .port(port)
+            .user(&self.username)
+            .password(self.password)
+            .dbname(&self.database)
+            .connect(tokio_postgres::NoTls)
+            .await?;
 
         tokio::spawn(async move {
             if let Err(e) = conn.await {

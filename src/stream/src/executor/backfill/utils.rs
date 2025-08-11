@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::ops::Bound;
 
@@ -358,6 +359,18 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
                 cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()).is_le()
             }
         };
+        if !visible {
+            tracing::trace!(
+                source = "upstream",
+                state = "process_barrier",
+                action = "mark_chunk",
+                ?vnode,
+                ?op,
+                ?pk,
+                ?row,
+                "update_filtered",
+            );
+        }
         new_visibility.append(visible);
 
         normalize_unmatched_updates(
@@ -851,9 +864,10 @@ pub fn create_builder(
 ) -> DataChunkBuilder {
     let batch_size = match rate_limit {
         RateLimit::Disabled | RateLimit::Pause => chunk_size,
-        RateLimit::Fixed(limit) if limit.get() as usize >= chunk_size => chunk_size,
-        RateLimit::Fixed(limit) => limit.get() as usize,
+        RateLimit::Fixed(limit) => min(limit.get() as usize, chunk_size),
     };
+    // Ensure that the batch size is at least 2, to have enough space for two rows in a single update.
+    let batch_size = max(2, batch_size);
     DataChunkBuilder::new(data_types, batch_size)
 }
 

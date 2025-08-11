@@ -5,7 +5,7 @@
 
 FROM ubuntu:24.04 AS risingwave-build-env
 
-ENV LANG en_US.utf8
+ENV LANG=en_US.utf8
 
 # Use AWS ubuntu mirror
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://us-east-2.ec2.archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list
@@ -16,16 +16,17 @@ RUN apt-get update -yy && \
     python3.12 python3.12-dev \
     golang perl \
     dumb-init \
+    libblas-dev liblapack-dev libomp-dev \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
 # Install nvm and zx
-ENV NVM_DIR /root/.nvm
-ENV NODE_VERSION 20.11.1
+ENV NVM_DIR=/root/.nvm
+ENV NODE_VERSION=20.11.1
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
   && . $NVM_DIR/nvm.sh \
   && nvm install $NODE_VERSION
-ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
+ENV PATH=$NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 RUN npm install -g zx
 
 SHELL ["/bin/bash", "-c"]
@@ -38,7 +39,7 @@ COPY rust-toolchain rust-toolchain
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 
-ENV PATH /root/.cargo/bin/:$PATH
+ENV PATH=/root/.cargo/bin/:$PATH
 
 RUN rustup toolchain install --profile minimal && \
     rustup show && \
@@ -64,7 +65,7 @@ RUN if [ "$(uname -m)" = "amd64" ] || [ "$(uname -m)" = "x86_64" ]; then \
         unzip rpk-linux-arm64.zip -d ~/.local/bin/ && \
         rm rpk-linux-arm64.zip; \
     fi
-ENV PATH /root/.local/bin:$PATH
+ENV PATH=/root/.local/bin:$PATH
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
@@ -72,14 +73,14 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
     cargo-make@0.37.24 \
-    sqllogictest-bin@0.28.2 \
-    sccache@0.7.4 \
+    sqllogictest-bin@0.28.3 \
+    sccache@0.10.0 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db" \
     && cargo uninstall cargo-cache
-RUN cargo install cargo-dylint@4.0.1 dylint-link@4.0.1
+RUN cargo install cargo-dylint@4.1.0 dylint-link@4.1.0
 
 # install risedev
 COPY <<EOF /root/.cargo/bin/risedev

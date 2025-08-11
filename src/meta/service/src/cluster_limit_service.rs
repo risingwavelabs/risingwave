@@ -89,7 +89,6 @@ impl ClusterLimitServiceImpl {
 
 #[async_trait::async_trait]
 impl ClusterLimitService for ClusterLimitServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_cluster_limits(
         &self,
         _request: Request<GetClusterLimitsRequest>,

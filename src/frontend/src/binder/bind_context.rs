@@ -21,7 +21,7 @@ use either::Either;
 use parse_display::Display;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::TableAlias;
+use risingwave_sqlparser::ast::{TableAlias, WindowSpec};
 
 use crate::binder::Relation;
 use crate::error::{ErrorCode, Result};
@@ -160,6 +160,8 @@ pub struct BindContext {
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
     /// Whether the security invoker is set, currently only used for views.
     pub disable_security_invoker: bool,
+    /// Named window definitions from the `WINDOW` clause
+    pub named_windows: HashMap<String, WindowSpec>,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.

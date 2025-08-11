@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    DataType as AstDataType, Distinct, Expr, Select, SelectItem, Value,
+    DataType as AstDataType, Distinct, Expr, Select, SelectItem, Value, WindowSpec,
 };
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -42,6 +42,7 @@ pub struct BoundSelect {
     pub where_clause: Option<ExprImpl>,
     pub group_by: GroupBy,
     pub having: Option<ExprImpl>,
+    pub window: HashMap<String, WindowSpec>,
     pub schema: Schema,
 }
 
@@ -128,11 +129,20 @@ impl BoundSelect {
             .chain(self.having.iter_mut())
     }
 
-    pub fn is_correlated(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
             || match self.from.as_ref() {
-                Some(relation) => relation.is_correlated(depth),
+                Some(relation) => relation.is_correlated_by_depth(depth),
+                None => false,
+            }
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        self.exprs()
+            .any(|expr| expr.has_correlated_input_ref_by_correlated_id(correlated_id))
+            || match self.from.as_ref() {
+                Some(relation) => relation.is_correlated_by_correlated_id(correlated_id),
                 None => false,
             }
     }
@@ -189,21 +199,40 @@ impl BoundDistinct {
 }
 
 impl Binder {
-    pub(super) fn bind_select(&mut self, select: Select) -> Result<BoundSelect> {
+    pub(super) fn bind_select(&mut self, select: &Select) -> Result<BoundSelect> {
         // Bind FROM clause.
-        let from = self.bind_vec_table_with_joins(select.from)?;
+        let from = self.bind_vec_table_with_joins(&select.from)?;
+
+        // Bind WINDOW clause early - store named window definitions for window function resolution
+        let mut named_windows = HashMap::new();
+        for named_window in &select.window {
+            let window_name = named_window.name.real_value();
+            if named_windows.contains_key(&window_name) {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "window \"{}\" is already defined",
+                    window_name
+                ))
+                .into());
+            }
+            named_windows.insert(window_name, named_window.window_spec.clone());
+        }
+
+        // Store window definitions in bind context for window function resolution
+        self.context.named_windows = named_windows.clone();
 
         // Bind SELECT clause.
-        let (select_items, aliases) = self.bind_select_list(select.projection)?;
+        let (select_items, aliases) = self.bind_select_list(&select.projection)?;
         let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
 
         // Bind DISTINCT ON.
-        let distinct = self.bind_distinct_on(select.distinct, &out_name_to_index, &select_items)?;
+        let distinct =
+            self.bind_distinct_on(&select.distinct, &out_name_to_index, &select_items)?;
 
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
         let selection = select
             .selection
+            .as_ref()
             .map(|expr| {
                 self.bind_expr(expr)
                     .and_then(|expr| expr.enforce_bool_clause("WHERE"))
@@ -253,7 +282,7 @@ impl Binder {
             GroupBy::GroupKey(
                 select
                     .group_by
-                    .into_iter()
+                    .iter()
                     .map(|expr| {
                         self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items)
                     })
@@ -266,6 +295,7 @@ impl Binder {
         self.context.clause = Some(Clause::Having);
         let having = select
             .having
+            .as_ref()
             .map(|expr| {
                 self.bind_expr(expr)
                     .and_then(|expr| expr.enforce_bool_clause("HAVING"))
@@ -283,15 +313,15 @@ impl Binder {
             })
             .collect::<Result<Vec<Field>>>()?;
 
-        if let Some(Relation::Share(bound)) = &from {
-            if matches!(bound.input, BoundShareInput::ChangeLog(_))
-                && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
-            {
-                return Err(ErrorCode::BindError(
-                    "The source table of changelog cannot have `changelog_op`, please rename it first".to_owned()
-                )
-                .into());
-            }
+        if let Some(Relation::Share(bound)) = &from
+            && matches!(bound.input, BoundShareInput::ChangeLog(_))
+            && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
+        {
+            return Err(ErrorCode::BindError(
+                "The source table of changelog cannot have `changelog_op`, please rename it first"
+                    .to_owned(),
+            )
+            .into());
         }
 
         Ok(BoundSelect {
@@ -302,20 +332,21 @@ impl Binder {
             where_clause: selection,
             group_by,
             having,
+            window: named_windows,
             schema: Schema { fields },
         })
     }
 
     pub fn bind_select_list(
         &mut self,
-        select_items: Vec<SelectItem>,
+        select_items: &[SelectItem],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let mut select_list = vec![];
         let mut aliases = vec![];
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let alias = derive_alias(&expr);
+                    let alias = derive_alias(expr);
                     let bound = self.bind_expr(expr)?;
                     select_list.push(bound);
                     aliases.push(alias);
@@ -329,7 +360,7 @@ impl Binder {
                 }
                 SelectItem::QualifiedWildcard(obj_name, except) => {
                     let table_name = &obj_name.0.last().unwrap().real_value();
-                    let except_indices = self.generate_except_indices(except)?;
+                    let except_indices = self.generate_except_indices(except.as_deref())?;
                     let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
                         ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
                     })?;
@@ -361,7 +392,7 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
 
-                    let except_indices = self.generate_except_indices(except)?;
+                    let except_indices = self.generate_except_indices(except.as_deref())?;
 
                     // Bind columns that are not in groups
                     let (exprs, names) =
@@ -415,7 +446,7 @@ impl Binder {
     ///   marked with `usize::MAX`.
     fn bind_group_by_expr_in_select(
         &mut self,
-        expr: Expr,
+        expr: &Expr,
         name_to_index: &HashMap<String, usize>,
         select_items: &[ExprImpl],
     ) -> Result<ExprImpl> {
@@ -467,7 +498,7 @@ impl Binder {
                     Expr::Identifier(ident) => Some(ident.real_value()),
                     _ => None,
                 };
-                let expr_impl = match self.bind_expr(expr) {
+                let expr_impl = match self.bind_expr(&expr) {
                     Ok(ExprImpl::Literal(lit)) => match lit.get_data() {
                         Some(ScalarImpl::Int32(idx)) => idx
                             .saturating_sub(1)
@@ -509,7 +540,7 @@ impl Binder {
         &mut self,
         returning_items: Vec<SelectItem>,
     ) -> Result<(Vec<ExprImpl>, Vec<Field>)> {
-        let (returning_list, aliases) = self.bind_select_list(returning_items)?;
+        let (returning_list, aliases) = self.bind_select_list(&returning_items)?;
         if returning_list
             .iter()
             .any(|expr| expr.has_agg_call() || expr.has_window_function())
@@ -594,7 +625,7 @@ impl Binder {
     ///   marked with `usize::MAX`.
     fn bind_distinct_on(
         &mut self,
-        distinct: Distinct,
+        distinct: &Distinct,
         name_to_index: &HashMap<String, usize>,
         select_items: &[ExprImpl],
     ) -> Result<BoundDistinct> {
@@ -641,7 +672,7 @@ impl Binder {
         })
     }
 
-    fn generate_except_indices(&mut self, except: Option<Vec<Expr>>) -> Result<HashSet<usize>> {
+    fn generate_except_indices(&mut self, except: Option<&[Expr]>) -> Result<HashSet<usize>> {
         let mut except_indices: HashSet<usize> = HashSet::new();
         if let Some(exprs) = except {
             for expr in exprs {
@@ -714,6 +745,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Jsonb => "jsonb".to_owned(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
+        AstDataType::Vector(_) => "vector".to_owned(),
         AstDataType::Struct(_) | AstDataType::Map(_) => {
             // It doesn't bother to derive aliases for these types.
             return None;

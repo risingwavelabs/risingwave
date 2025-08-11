@@ -1,0 +1,10 @@
+control substitution on
+
+system ok
+rpk topic create test_kafka_start_millis;
+
+system ok
+python e2e_test/source_inline/kafka/kafka_startup_millis.py --db-name $__DATABASE__ --topic test_kafka_start_millis
+
+system ok
+rpk topic delete test_kafka_start_millis;

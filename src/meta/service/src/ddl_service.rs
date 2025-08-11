@@ -19,21 +19,21 @@ use anyhow::anyhow;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
+use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
-use risingwave_pb::catalog::{Comment, Connection, CreateType, Secret, Table};
+use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
+use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
@@ -57,6 +57,7 @@ pub struct DdlServiceImpl {
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     meta_metrics: Arc<MetaMetrics>,
+    iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
 }
 
 impl DdlServiceImpl {
@@ -69,6 +70,7 @@ impl DdlServiceImpl {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         meta_metrics: Arc<MetaMetrics>,
+        iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
     ) -> Self {
         let ddl_controller = DdlController::new(
             env.clone(),
@@ -84,20 +86,16 @@ impl DdlServiceImpl {
             sink_manager,
             ddl_controller,
             meta_metrics,
+            iceberg_compaction_manager,
         }
     }
 
     fn extract_replace_table_info(
         ReplaceJobPlan {
             fragment_graph,
-            table_col_index_mapping,
             replace_job,
         }: ReplaceJobPlan,
     ) -> ReplaceStreamJobInfo {
-        let col_index_mapping = table_col_index_mapping
-            .as_ref()
-            .map(ColIndexMapping::from_protobuf);
-
         let replace_streaming_job: StreamingJob = match replace_job.unwrap() {
             replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
                 table,
@@ -111,12 +109,14 @@ impl DdlServiceImpl {
             replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
                 StreamingJob::Source(source.unwrap())
             }
+            replace_job_plan::ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView {
+                table,
+            }) => StreamingJob::MaterializedView(table.unwrap()),
         };
 
         ReplaceStreamJobInfo {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
-            col_index_mapping,
         }
     }
 }
@@ -271,15 +271,14 @@ impl DdlService for DdlServiceImpl {
                 let stream_job = StreamingJob::Source(source);
                 let version = self
                     .ddl_controller
-                    .run_command(DdlCommand::CreateStreamingJob(
+                    .run_command(DdlCommand::CreateStreamingJob {
                         stream_job,
                         fragment_graph,
-                        CreateType::Foreground,
-                        None,
-                        HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
-                        None,
-                        req.if_not_exists,
-                    ))
+                        affected_table_replace_info: None,
+                        dependencies: HashSet::new(),
+                        specific_resource_group: None,
+                        if_not_exists: req.if_not_exists,
+                    })
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
@@ -340,15 +339,14 @@ impl DdlService for DdlServiceImpl {
             }
         };
 
-        let command = DdlCommand::CreateStreamingJob(
+        let command = DdlCommand::CreateStreamingJob {
             stream_job,
             fragment_graph,
-            CreateType::Foreground,
-            affected_table_change,
+            affected_table_replace_info: affected_table_change,
             dependencies,
-            None,
-            req.if_not_exists,
-        );
+            specific_resource_group: None,
+            if_not_exists: req.if_not_exists,
+        };
 
         let version = self.ddl_controller.run_command(command).await?;
 
@@ -366,13 +364,13 @@ impl DdlService for DdlServiceImpl {
         let sink_id = request.sink_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
-        let command = DdlCommand::DropStreamingJob(
-            StreamingJobId::Sink(sink_id as _),
+        let command = DdlCommand::DropStreamingJob {
+            job_id: StreamingJobId::Sink(sink_id as _),
             drop_mode,
-            request
+            target_replace_info: request
                 .affected_table_change
                 .map(Self::extract_replace_table_info),
-        );
+        };
 
         let version = self.ddl_controller.run_command(command).await?;
 
@@ -431,7 +429,6 @@ impl DdlService for DdlServiceImpl {
 
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
-        let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
         let specific_resource_group = req.specific_resource_group.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req
@@ -443,15 +440,14 @@ impl DdlService for DdlServiceImpl {
         let stream_job = StreamingJob::MaterializedView(mview);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(
+            .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                create_type,
-                None,
+                affected_table_replace_info: None,
                 dependencies,
                 specific_resource_group,
-                req.if_not_exists,
-            ))
+                if_not_exists: req.if_not_exists,
+            })
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
@@ -472,11 +468,11 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::MaterializedView(table_id as _),
+            .run_command(DdlCommand::DropStreamingJob {
+                job_id: StreamingJobId::MaterializedView(table_id as _),
                 drop_mode,
-                None,
-            ))
+                target_replace_info: None,
+            })
             .await?;
 
         Ok(Response::new(DropMaterializedViewResponse {
@@ -499,15 +495,14 @@ impl DdlService for DdlServiceImpl {
         let stream_job = StreamingJob::Index(index, index_table);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(
+            .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                CreateType::Foreground,
-                None,
-                HashSet::new(),
-                None,
-                req.if_not_exists,
-            ))
+                affected_table_replace_info: None,
+                dependencies: HashSet::new(),
+                specific_resource_group: None,
+                if_not_exists: req.if_not_exists,
+            })
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
@@ -527,11 +522,11 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::Index(index_id as _),
+            .run_command(DdlCommand::DropStreamingJob {
+                job_id: StreamingJobId::Index(index_id as _),
                 drop_mode,
-                None,
-            ))
+                target_replace_info: None,
+            })
             .await?;
 
         Ok(Response::new(DropIndexResponse {
@@ -581,6 +576,11 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
         let job_type = request.get_job_type().unwrap_or_default();
+        let dependencies = request
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect();
         let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
@@ -588,15 +588,14 @@ impl DdlService for DdlServiceImpl {
         let stream_job = StreamingJob::Table(source, mview, job_type);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(
+            .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                CreateType::Foreground,
-                None,
-                HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
-                None,
-                request.if_not_exists,
-            ))
+                affected_table_replace_info: None,
+                dependencies,
+                specific_resource_group: None,
+                if_not_exists: request.if_not_exists,
+            })
             .await?;
 
         Ok(Response::new(CreateTableResponse {
@@ -616,11 +615,14 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id as _), table_id as _),
+            .run_command(DdlCommand::DropStreamingJob {
+                job_id: StreamingJobId::Table(
+                    source_id.map(|PbSourceId::Id(id)| id as _),
+                    table_id as _,
+                ),
                 drop_mode,
-                None,
-            ))
+                target_replace_info: None,
+            })
             .await?;
 
         Ok(Response::new(DropTableResponse {
@@ -635,10 +637,15 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateViewResponse>, Status> {
         let req = request.into_inner();
         let view = req.get_view()?.clone();
+        let dependencies = req
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect::<HashSet<_>>();
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateView(view))
+            .run_command(DdlCommand::CreateView(view, dependencies))
             .await?;
 
         Ok(Response::new(CreateViewResponse {
@@ -836,10 +843,14 @@ impl DdlService for DdlServiceImpl {
         request: Request<DropConnectionRequest>,
     ) -> Result<Response<DropConnectionResponse>, Status> {
         let req = request.into_inner();
+        let drop_mode = DropMode::from_request_setting(req.cascade);
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(req.connection_id as _))
+            .run_command(DdlCommand::DropConnection(
+                req.connection_id as _,
+                drop_mode,
+            ))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
@@ -872,7 +883,6 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_tables(
         &self,
         request: Request<GetTablesRequest>,
@@ -900,6 +910,25 @@ impl DdlService for DdlServiceImpl {
     async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
         self.ddl_controller.wait().await?;
         Ok(Response::new(WaitResponse {}))
+    }
+
+    async fn alter_cdc_table_backfill_parallelism(
+        &self,
+        request: Request<AlterCdcTableBackfillParallelismRequest>,
+    ) -> Result<Response<AlterCdcTableBackfillParallelismResponse>, Status> {
+        let req = request.into_inner();
+        let job_id = req.get_table_id();
+        let parallelism = *req.get_parallelism()?;
+        self.ddl_controller
+            .reschedule_cdc_table_backfill(
+                job_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
+                    resource_group: JobResourceGroupTarget::Keep,
+                },
+            )
+            .await?;
+        Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
     }
 
     async fn alter_parallelism(
@@ -992,19 +1021,34 @@ impl DdlService for DdlServiceImpl {
                 let original_columns: HashSet<(String, DataType)> =
                     HashSet::from_iter(table.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
-                        let data_type = col.data_type().clone();
-                        if col.is_generated() {
+                        if col.is_generated() || col.is_hidden() {
                             None
                         } else {
-                            Some((col.column_desc.name, data_type))
+                            Some((col.column_desc.name.clone(), col.data_type().clone()))
                         }
                     }));
-                let new_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table_change.columns.iter().map(|col| {
+
+                let mut new_columns: HashSet<(String, DataType)> =
+                    HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
-                        let data_type = col.data_type().clone();
-                        (col.column_desc.name, data_type)
+                        if col.is_generated() || col.is_hidden() {
+                            None
+                        } else {
+                            Some((col.column_desc.name.clone(), col.data_type().clone()))
+                        }
                     }));
+
+                // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns
+                // This includes both _rw columns and user-defined INCLUDE columns (e.g., INCLUDE TIMESTAMP AS xxx)
+                for col in &table.columns {
+                    let col = ColumnCatalog::from(col.clone());
+                    if col.is_connector_additional_column()
+                        && !col.is_hidden()
+                        && !col.is_generated()
+                    {
+                        new_columns.insert((col.column_desc.name.clone(), col.data_type().clone()));
+                    }
+                }
 
                 if !(original_columns.is_subset(&new_columns)
                     || original_columns.is_superset(&new_columns))
@@ -1015,9 +1059,9 @@ impl DdlService for DdlServiceImpl {
                                     upstraem_ddl = table_change.upstream_ddl,
                                     original_columns = ?original_columns,
                                     new_columns = ?new_columns,
-                                    "New columns should be a subset or superset of the original columns, since only `ADD COLUMN` and `DROP COLUMN` is supported");
+                                    "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported");
                     return Err(Status::invalid_argument(
-                        "New columns should be a subset or superset of the original columns",
+                        "New columns should be a subset or superset of the original columns (including hidden columns)",
                     ));
                 }
                 // skip the schema change if there is no change to original columns
@@ -1168,6 +1212,54 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(AlterResourceGroupResponse {}))
+    }
+
+    async fn alter_database_param(
+        &self,
+        request: Request<AlterDatabaseParamRequest>,
+    ) -> Result<Response<AlterDatabaseParamResponse>, Status> {
+        let req = request.into_inner();
+        let database_id = req.database_id;
+
+        let param = match req.param.unwrap() {
+            alter_database_param_request::Param::BarrierIntervalMs(value) => {
+                AlterDatabaseParam::BarrierIntervalMs(value.value)
+            }
+            alter_database_param_request::Param::CheckpointFrequency(value) => {
+                AlterDatabaseParam::CheckpointFrequency(value.value)
+            }
+        };
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterDatabaseParam(database_id as _, param))
+            .await?;
+
+        return Ok(Response::new(AlterDatabaseParamResponse {
+            status: None,
+            version,
+        }));
+    }
+
+    async fn compact_iceberg_table(
+        &self,
+        request: Request<CompactIcebergTableRequest>,
+    ) -> Result<Response<CompactIcebergTableResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
+
+        // Trigger manual compaction directly using the sink ID
+        let task_id = self
+            .iceberg_compaction_manager
+            .trigger_manual_compaction(sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!("Failed to trigger compaction: {}", e.as_report()))
+            })?;
+
+        Ok(Response::new(CompactIcebergTableResponse {
+            status: None,
+            task_id,
+        }))
     }
 }
 

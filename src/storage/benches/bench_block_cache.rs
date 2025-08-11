@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use criterion::{Criterion, criterion_group, criterion_main};
-use foyer::Engine;
+use foyer::{Engine, LargeEngineOptions};
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
@@ -185,7 +185,7 @@ impl FoyerHybridCache {
             .with_eviction_config(foyer::LruConfig {
                 high_priority_pool_ratio: 0.8,
             })
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .await
             .unwrap();
@@ -205,7 +205,7 @@ impl FoyerHybridCache {
                 cmsketch_eps: 0.001,
                 cmsketch_confidence: 0.9,
             })
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .await
             .unwrap();

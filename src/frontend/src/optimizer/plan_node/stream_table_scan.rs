@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode, generic};
+use super::{ExprRewritable, PlanBase, PlanNodeId, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
@@ -48,6 +48,12 @@ pub struct StreamTableScan {
 }
 
 impl StreamTableScan {
+    pub const BACKFILL_FINISHED_COLUMN_NAME: &str = "backfill_finished";
+    pub const EPOCH_COLUMN_NAME: &str = "epoch";
+    pub const IS_EPOCH_FINISHED_COLUMN_NAME: &str = "is_epoch_finished";
+    pub const ROW_COUNT_COLUMN_NAME: &str = "row_count";
+    pub const VNODE_COLUMN_NAME: &str = "vnode";
+
     pub fn new_with_stream_scan_type(
         core: generic::TableScan,
         stream_scan_type: StreamScanType,
@@ -174,7 +180,10 @@ impl StreamTableScan {
 
         // We use vnode as primary key in state table.
         // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
-        catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
+        catalog_builder.add_column(&Field::with_name(
+            VirtualNode::RW_TYPE,
+            Self::VNODE_COLUMN_NAME,
+        ));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
         match stream_scan_type {
@@ -190,22 +199,33 @@ impl StreamTableScan {
                 }
 
                 // `backfill_finished` column
-                catalog_builder
-                    .add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+                catalog_builder.add_column(&Field::with_name(
+                    DataType::Boolean,
+                    Self::BACKFILL_FINISHED_COLUMN_NAME,
+                ));
 
                 // `row_count` column
-                catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+                catalog_builder.add_column(&Field::with_name(
+                    DataType::Int64,
+                    Self::ROW_COUNT_COLUMN_NAME,
+                ));
             }
             StreamScanType::SnapshotBackfill | StreamScanType::CrossDbSnapshotBackfill => {
                 // `epoch` column
-                catalog_builder.add_column(&Field::with_name(DataType::Int64, "epoch"));
+                catalog_builder
+                    .add_column(&Field::with_name(DataType::Int64, Self::EPOCH_COLUMN_NAME));
 
                 // `row_count` column
-                catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+                catalog_builder.add_column(&Field::with_name(
+                    DataType::Int64,
+                    Self::ROW_COUNT_COLUMN_NAME,
+                ));
 
                 // `is_finished` column
-                catalog_builder
-                    .add_column(&Field::with_name(DataType::Boolean, "is_epoch_finished"));
+                catalog_builder.add_column(&Field::with_name(
+                    DataType::Boolean,
+                    Self::IS_EPOCH_FINISHED_COLUMN_NAME,
+                ));
 
                 // pk columns
                 for col_order in self.core.primary_key() {
@@ -231,7 +251,7 @@ impl StreamTableScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamTableScan }
+impl_plan_tree_node_for_leaf! { Stream, StreamTableScan }
 
 impl Distill for StreamTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -406,7 +426,7 @@ impl StreamTableScan {
     }
 }
 
-impl ExprRewritable for StreamTableScan {
+impl ExprRewritable<Stream> for StreamTableScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

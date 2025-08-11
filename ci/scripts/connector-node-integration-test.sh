@@ -63,7 +63,7 @@ sleep 3
 wget --no-verbose https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
 chmod +x mc
 MC_PATH=${PWD}/mc
-${MC_PATH} config host add minio http://127.0.0.1:9000 minioadmin minioadmin
+${MC_PATH} alias set minio http://127.0.0.1:9000 minioadmin minioadmin
 
 echo "--- starting connector-node service"
 mkdir -p "${RISINGWAVE_ROOT}"/java/connector-node/assembly/target/

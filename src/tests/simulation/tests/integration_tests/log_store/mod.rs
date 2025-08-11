@@ -14,3 +14,7 @@
 
 #[cfg(madsim)]
 mod recovery;
+#[cfg(madsim)]
+mod scale;
+#[cfg(madsim)]
+mod utils;

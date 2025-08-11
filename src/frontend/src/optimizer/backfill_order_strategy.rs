@@ -15,10 +15,10 @@
 use risingwave_pb::stream_plan::BackfillOrder;
 use risingwave_sqlparser::ast::BackfillOrderStrategy;
 
-use crate::PlanRef;
 use crate::error::Result;
 use crate::optimizer::backfill_order_strategy::auto::plan_auto_strategy;
 use crate::optimizer::backfill_order_strategy::fixed::plan_fixed_strategy;
+use crate::optimizer::plan_node::StreamPlanRef;
 use crate::session::SessionImpl;
 
 pub mod auto {
@@ -27,9 +27,9 @@ pub mod auto {
     use risingwave_common::catalog::ObjectId;
     use risingwave_pb::common::Uint32Vector;
 
-    use crate::PlanRef;
     use crate::optimizer::PlanNodeType;
     use crate::optimizer::backfill_order_strategy::common::has_cycle;
+    use crate::optimizer::plan_node::StreamPlanRef;
     use crate::session::SessionImpl;
 
     #[derive(Debug)]
@@ -50,7 +50,7 @@ pub mod auto {
     /// TODO: Handle stream share
     fn plan_graph_to_backfill_tree(
         session: &SessionImpl,
-        plan: PlanRef,
+        plan: StreamPlanRef,
     ) -> Option<BackfillTreeNode> {
         match plan.node_type() {
             PlanNodeType::StreamHashJoin => {
@@ -66,6 +66,11 @@ pub mod auto {
             PlanNodeType::StreamTableScan => {
                 let table_scan = plan.as_stream_table_scan().expect("table scan");
                 let relation_id = table_scan.core().table_catalog.id().into();
+                Some(BackfillTreeNode::Scan { id: relation_id })
+            }
+            PlanNodeType::StreamSourceScan => {
+                let source_scan = plan.as_stream_source_scan().expect("source scan");
+                let relation_id = source_scan.source_catalog().id;
                 Some(BackfillTreeNode::Scan { id: relation_id })
             }
             PlanNodeType::StreamUnion => {
@@ -212,7 +217,7 @@ pub mod auto {
 
     pub(super) fn plan_auto_strategy(
         session: &SessionImpl,
-        plan: PlanRef,
+        plan: StreamPlanRef,
     ) -> HashMap<ObjectId, Uint32Vector> {
         if let Some(tree) = plan_graph_to_backfill_tree(session, plan) {
             let order = fold_backfill_tree_to_partial_order(tree);
@@ -317,7 +322,7 @@ mod common {
         session: &SessionImpl,
         name: ObjectName,
     ) -> Result<ObjectId> {
-        let (db_name, schema_name, rel_name) = Binder::resolve_db_schema_qualified_name(name)?;
+        let (db_name, schema_name, rel_name) = Binder::resolve_db_schema_qualified_name(&name)?;
         let db_name = db_name.unwrap_or(session.database());
 
         let reader = session.env().catalog_reader().read_guard();
@@ -350,16 +355,13 @@ mod common {
     }
 
     fn bind_table(schema_catalog: &SchemaCatalog, name: &String) -> crate::error::Result<ObjectId> {
-        if let Some(table) = schema_catalog.get_created_table_or_any_internal_table_by_name(name) {
+        if let Some(table) = schema_catalog.get_created_table_by_name(name) {
             Ok(table.id().table_id)
+        } else if let Some(source) = schema_catalog.get_source_by_name(name) {
+            Ok(source.id)
         } else {
-            Err(CatalogError::NotFound("table", name.to_owned()).into())
+            Err(CatalogError::NotFound("table or source", name.to_owned()).into())
         }
-        // TODO: support source catalog
-        // else if let Some(source) = schema_catalog.get_source_by_name(name) {
-        //     Ok(source.id)
-        // }
-        // Err(CatalogError::NotFound("table or source", name.to_owned()).into())
     }
 }
 
@@ -417,7 +419,7 @@ pub mod display {
 pub fn plan_backfill_order(
     session: &SessionImpl,
     backfill_order_strategy: BackfillOrderStrategy,
-    plan: PlanRef,
+    plan: StreamPlanRef,
 ) -> Result<BackfillOrder> {
     let order = match backfill_order_strategy {
         BackfillOrderStrategy::Default | BackfillOrderStrategy::None => Default::default(),
@@ -431,7 +433,7 @@ pub fn plan_backfill_order(
 pub fn explain_backfill_order_in_dot_format(
     session: &SessionImpl,
     backfill_order_strategy: BackfillOrderStrategy,
-    plan: PlanRef,
+    plan: StreamPlanRef,
 ) -> Result<String> {
     let order = plan_backfill_order(session, backfill_order_strategy, plan)?;
     let dot_formatted_backfill_order =

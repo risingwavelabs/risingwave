@@ -43,47 +43,44 @@ async fn test_license_cpu_limit() -> Result<()> {
         };
     }
 
-    macro_rules! test_paid_tier {
+    macro_rules! test_feature {
         () => {
-            session.run("SELECT rw_test_paid_tier();").await
+            session.run("SELECT rw_test_feature('TestDummy');").await
         };
     }
 
     set_license_key!("");
-    let error = test_paid_tier!().unwrap_err().to_report_string();
-    assert!(error.contains("feature TestPaid is only available for tier Paid and above, while the current tier is Free"), "{error}");
+    let error = test_feature!().unwrap_err().to_report_string();
+    assert!(
+        error.contains("feature TestDummy is not available based on your license"),
+        "{error}"
+    );
 
     // Set a license key with CPU limit 100, it should work.
     set_license_key!(KEY_100);
-    test_paid_tier!().unwrap().assert_result_eq("t");
+    test_feature!().unwrap().assert_result_eq("t");
 
     // Set a license key with CPU limit 20, which is lower than the current CPU cores.
     // Paid-tier features should not be available.
     set_license_key!(KEY_20);
-    let error = test_paid_tier!().unwrap_err().to_report_string();
-    assert!(
-        error.contains("the license key is currently not effective"),
-        "{error}"
-    );
+    let error = test_feature!().unwrap_err().to_report_string();
+    assert!(error.contains("currently not effective"), "{error}");
 
     // Kill a compute node, the total cores will be reduced to 16, which is under the limit.
     // The paid-tier features should be available again.
     cluster.simple_kill_nodes(["compute-2"]).await;
     tokio::time::sleep(std::time::Duration::from_secs(100)).await;
-    test_paid_tier!().unwrap().assert_result_eq("t");
+    test_feature!().unwrap().assert_result_eq("t");
 
     // Add it back, will be unavailable again.
     cluster.simple_restart_nodes(["compute-2"]).await;
     tokio::time::sleep(std::time::Duration::from_secs(100)).await;
-    let error = test_paid_tier!().unwrap_err().to_report_string();
-    assert!(
-        error.contains("the license key is currently not effective"),
-        "{error}"
-    );
+    let error = test_feature!().unwrap_err().to_report_string();
+    assert!(error.contains("currently not effective"), "{error}");
 
     // Set a license key with CPU limit 100, it should work again.
     set_license_key!(KEY_100);
-    test_paid_tier!().unwrap().assert_result_eq("t");
+    test_feature!().unwrap().assert_result_eq("t");
 
     Ok(())
 }

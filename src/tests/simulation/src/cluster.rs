@@ -434,7 +434,7 @@ impl Cluster {
         for i in 1..=conf.meta_nodes {
             meta_addrs.push(format!("http://meta-{i}:5690"));
         }
-        std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
+        unsafe { std::env::set_var("RW_META_ADDR", meta_addrs.join(",")) };
 
         let sqlite_file_handle: NamedTempFile = NamedTempFile::new().unwrap();
         let file_path = sqlite_file_handle.path().display().to_string();
@@ -765,7 +765,7 @@ impl Cluster {
         self.kill_nodes(nodes, opts.restart_delay_secs).await
     }
 
-    /// Kill the given nodes by their names and restart them in 2s + restart_delay_secs with a
+    /// Kill the given nodes by their names and restart them in 2s + `restart_delay_secs` with a
     /// probability of 0.1.
     #[cfg_or_panic(madsim)]
     pub async fn kill_nodes(
@@ -915,7 +915,29 @@ impl Cluster {
                 {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_nanos(10)).await;
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// This function only works if all actors in your cluster are following adaptive scaling.
+    pub async fn wait_for_scale(&mut self, parallelism: usize) -> Result<()> {
+        let timeout = Duration::from_secs(200);
+        let mut session = self.start_session();
+        tokio::time::timeout(timeout, async {
+            loop {
+                let parallelism_sql = format!(
+                    "select count(parallelism) filter (where parallelism != {parallelism})\
+                from (select count(*) parallelism from rw_actors group by fragment_id);"
+                );
+                if let Ok(result) = session.run(&parallelism_sql).await
+                    && result == "0"
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_nanos(10)).await;
             }
         })
         .await?;

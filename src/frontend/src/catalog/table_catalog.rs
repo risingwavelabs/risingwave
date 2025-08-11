@@ -86,8 +86,6 @@ pub struct TableCatalog {
 
     pub name: String,
 
-    pub dependent_relations: Vec<TableId>,
-
     /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
 
@@ -199,6 +197,9 @@ pub struct TableCatalog {
     pub engine: Engine,
 
     pub clean_watermark_index_in_pk: Option<usize>,
+
+    /// Whether the table supports manual refresh operations
+    pub refreshable: bool,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -544,7 +545,6 @@ impl TableCatalog {
                 .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
-            dependent_relations: vec![],
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
@@ -585,6 +585,7 @@ impl TableCatalog {
             job_id: self.job_id.map(|id| id.table_id),
             engine: Some(self.engine.to_protobuf().into()),
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
+            refreshable: self.refreshable,
         }
     }
 
@@ -781,17 +782,13 @@ impl From<PbTable> for TableCatalog {
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
             initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
             retention_seconds: tb.retention_seconds,
-            dependent_relations: tb
-                .dependent_relations
-                .into_iter()
-                .map(TableId::from)
-                .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
             webhook_info: tb.webhook_info,
             job_id: tb.job_id.map(TableId::from),
             engine,
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
+            refreshable: tb.refreshable,
         }
     }
 }
@@ -846,7 +843,6 @@ mod tests {
             ],
             pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
-            dependent_relations: vec![],
             distribution_key: vec![0],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
@@ -884,6 +880,7 @@ mod tests {
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
             clean_watermark_index_in_pk: None,
+            refreshable: false,
         }
         .into();
 
@@ -945,7 +942,6 @@ mod tests {
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
-                dependent_relations: vec![],
                 version_column_index: None,
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
@@ -953,6 +949,7 @@ mod tests {
                 job_id: None,
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
+                refreshable: false,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost()));

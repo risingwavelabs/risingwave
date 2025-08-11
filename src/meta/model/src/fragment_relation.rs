@@ -15,7 +15,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{DispatcherType, FragmentId, I32Array};
+use crate::{DispatcherType, FragmentId, I32Array, TypePairArray};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "fragment_relation")]
@@ -27,6 +27,8 @@ pub struct Model {
     pub dispatcher_type: DispatcherType,
     pub dist_key_indices: I32Array,
     pub output_indices: I32Array,
+    // `None` or empty array means no output type mapping.
+    pub output_type_mapping: Option<TypePairArray>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

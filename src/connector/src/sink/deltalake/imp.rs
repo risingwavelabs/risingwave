@@ -69,6 +69,7 @@ pub struct DeltaLakeCommon {
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 }
 
@@ -315,7 +316,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         }
         _ => {
             return Err(SinkError::DeltaLake(anyhow!(
-                "deltalake cannot support type {:?}",
+                "Type {:?} is not supported for DeltaLake sink.",
                 rw_data_type.to_owned()
             )));
         }
@@ -327,7 +328,6 @@ impl Sink for DeltaLakeSink {
     type Coordinator = DeltaLakeSinkCommitter;
     type LogSinker = CoordinatedLogSinker<DeltaLakeSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = super::DELTALAKE_SINK;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {

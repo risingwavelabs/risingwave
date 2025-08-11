@@ -18,6 +18,36 @@ use risingwave_common_estimate_size::EstimateSize;
 
 use crate::executor::StreamExecutorResult;
 
+pub trait JoinEncoding: 'static + Send + Sync + Default {
+    type EncodedRow: CachedJoinRow + Default;
+    fn encode<R: Row>(row: &JoinRow<R>) -> Self::EncodedRow;
+}
+
+#[derive(Default)]
+pub struct CpuEncoding {}
+
+impl JoinEncoding for CpuEncoding {
+    type EncodedRow = JoinRow<OwnedRow>;
+
+    fn encode<R: Row>(row: &JoinRow<R>) -> JoinRow<OwnedRow> {
+        JoinRow::new(row.row.to_owned_row(), row.degree)
+    }
+}
+
+#[derive(Default)]
+pub struct MemoryEncoding {}
+
+impl JoinEncoding for MemoryEncoding {
+    type EncodedRow = EncodedJoinRow;
+
+    fn encode<R: Row>(row: &JoinRow<R>) -> EncodedJoinRow {
+        EncodedJoinRow {
+            compacted_row: (&row.row).into(),
+            degree: row.degree,
+        }
+    }
+}
+
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
 pub struct JoinRow<R: Row> {
@@ -46,13 +76,6 @@ impl<R: Row> JoinRow<R> {
         let degree = build_degree_row(order_key, self.degree);
         (&self.row, degree)
     }
-
-    pub fn encode(&self) -> EncodedJoinRow {
-        EncodedJoinRow {
-            compacted_row: (&self.row).into(),
-            degree: self.degree,
-        }
-    }
 }
 
 pub type DegreeType = u64;
@@ -61,22 +84,74 @@ fn build_degree_row(order_key: impl Row, degree: DegreeType) -> impl Row {
     order_key.chain(row::once(Some(ScalarImpl::Int64(degree as i64))))
 }
 
-#[derive(Clone, Debug, EstimateSize)]
+pub trait CachedJoinRow: EstimateSize + Default + Send + Sync {
+    fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>>;
+
+    fn increase_degree(&mut self);
+
+    fn decrease_degree(&mut self);
+}
+
+#[derive(Clone, Debug, EstimateSize, Default)]
 pub struct EncodedJoinRow {
     pub compacted_row: CompactedRow,
     pub degree: DegreeType,
 }
 
-impl EncodedJoinRow {
-    pub fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
-        Ok(JoinRow {
-            row: self.decode_row(data_types)?,
-            degree: self.degree,
-        })
+impl CachedJoinRow for EncodedJoinRow {
+    fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
+        let row = self.compacted_row.deserialize(data_types)?;
+        Ok(JoinRow::new(row, self.degree))
     }
 
-    fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<OwnedRow> {
-        let row = self.compacted_row.deserialize(data_types)?;
-        Ok(row)
+    fn increase_degree(&mut self) {
+        self.degree += 1;
+    }
+
+    fn decrease_degree(&mut self) {
+        self.degree -= 1;
+    }
+}
+
+impl Default for JoinRow<OwnedRow> {
+    fn default() -> JoinRow<OwnedRow> {
+        Self {
+            row: OwnedRow::default(),
+            degree: DegreeType::default(),
+        }
+    }
+}
+
+impl EstimateSize for JoinRow<OwnedRow> {
+    fn estimated_heap_size(&self) -> usize {
+        self.row.estimated_heap_size()
+    }
+}
+
+impl CachedJoinRow for JoinRow<OwnedRow> {
+    fn decode(&self, _data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
+        Ok(self.clone())
+    }
+
+    fn increase_degree(&mut self) {
+        self.degree += 1;
+    }
+
+    fn decrease_degree(&mut self) {
+        self.degree -= 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cached_join_row_sizes() {
+        let encoded_size = size_of::<EncodedJoinRow>();
+        let unencoded_size = size_of::<JoinRow<OwnedRow>>();
+
+        assert_eq!(encoded_size, 40);
+        assert_eq!(unencoded_size, 24);
     }
 }

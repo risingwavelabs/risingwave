@@ -37,7 +37,7 @@ start_standalone_without_compactor() {
        --listen-addr 127.0.0.1:4566 \
        --advertise-addr 127.0.0.1:4566 \
        --prometheus-listener-addr 127.0.0.1:2222 \
-       --health-check-listener-addr 127.0.0.1:6786 \
+       --health-check-listener-addr 0.0.0.0:6786 \
        --meta-addr http://127.0.0.1:5690 \
        --config-path src/config/ci-single-node-standalone.toml" >"$1" 2>&1
 }
@@ -71,7 +71,7 @@ start_standalone() {
        --listen-addr 127.0.0.1:4566 \
        --advertise-addr 127.0.0.1:4566 \
        --prometheus-listener-addr 127.0.0.1:2222 \
-       --health-check-listener-addr 127.0.0.1:6786 \
+       --health-check-listener-addr 0.0.0.0:6786 \
        --meta-addr http://127.0.0.1:5690 \
        --config-path src/config/ci-single-node-standalone.toml" \
      --compactor-opts=" \

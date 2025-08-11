@@ -17,7 +17,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 #[macro_use]
 extern crate tracing;

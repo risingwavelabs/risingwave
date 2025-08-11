@@ -16,15 +16,14 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use crate::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::{
     Distill, childless_record, infer_synced_kv_log_store_table_catalog_inner,
 };
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -81,7 +80,7 @@ impl Distill for StreamSyncLogStore {
     }
 }
 
-impl PlanTreeNodeUnary for StreamSyncLogStore {
+impl PlanTreeNodeUnary<Stream> for StreamSyncLogStore {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -91,7 +90,7 @@ impl PlanTreeNodeUnary for StreamSyncLogStore {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamSyncLogStore }
+impl_plan_tree_node_for_unary! { Stream, StreamSyncLogStore }
 
 impl StreamNode for StreamSyncLogStore {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -104,10 +103,11 @@ impl StreamNode for StreamSyncLogStore {
             log_store_table,
             pause_duration_ms: self.pause_duration_ms as _,
             buffer_size: self.buffer_size as _,
+            aligned: false,
         }))
     }
 }
 
-impl ExprRewritable for StreamSyncLogStore {}
+impl ExprRewritable<Stream> for StreamSyncLogStore {}
 
 impl ExprVisitable for StreamSyncLogStore {}

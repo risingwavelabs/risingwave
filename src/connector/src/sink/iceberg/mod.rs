@@ -26,7 +26,8 @@ use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
 use iceberg::spec::{
-    DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
+    DataFile, MAIN_BRANCH, SerializedDataFile, Transform, UnboundPartitionField,
+    UnboundPartitionSpec,
 };
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
@@ -95,9 +96,21 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+pub const ICEBERG_COW_BRANCH: &str = "ingestion";
+pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
+pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
+
+pub const ENABLE_COMPACTION: &str = "enable_compaction";
+pub const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
+pub const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
+pub const WRITE_MODE: &str = "write_mode";
 
 fn default_commit_retry_num() -> u32 {
     8
+}
+
+fn default_iceberg_write_mode() -> String {
+    ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned()
 }
 
 #[serde_as]
@@ -128,12 +141,13 @@ pub struct IcebergConfig {
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
-    /// Whether it is exactly_once, the default is not.
+    /// Whether it is `exactly_once`, the default is not.
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
@@ -146,12 +160,23 @@ pub struct IcebergConfig {
 
     /// Whether to enable iceberg compaction.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_compaction: bool,
 
     /// The interval of iceberg compaction
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub compaction_interval_sec: Option<u64>,
+
+    /// Whether to enable iceberg expired snapshots.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
+    pub enable_snapshot_expiration: bool,
+
+    /// The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
+    #[serde(default = "default_iceberg_write_mode")]
+    pub write_mode: String,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -208,8 +233,9 @@ impl IcebergConfig {
                     && k != &"catalog.uri"
                     && k != &"catalog.type"
                     && k != &"catalog.name"
+                    && k != &"catalog.header"
             })
-            .map(|(k, v)| (k[8..].to_string(), v.to_string()))
+            .map(|(k, v)| (k[8..].to_string(), v.clone()))
             .collect();
 
         if config.commit_checkpoint_interval == 0 {
@@ -241,6 +267,15 @@ impl IcebergConfig {
 
     pub fn full_table_name(&self) -> Result<TableIdent> {
         self.common.full_table_name().map_err(Into::into)
+    }
+
+    pub fn catalog_name(&self) -> String {
+        self.common.catalog_name()
+    }
+
+    pub fn compaction_interval_sec(&self) -> u64 {
+        // default to 1 hour
+        self.compaction_interval_sec.unwrap_or(3600)
     }
 }
 
@@ -475,11 +510,6 @@ impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
     type LogSinker = CoordinatedLogSinker<IcebergSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
-        "commit_checkpoint_interval",
-        "enable_compaction",
-        "compaction_interval_sec",
-    ];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -491,9 +521,10 @@ impl Sink for IcebergSink {
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
-
-        if self.config.enable_compaction && self.config.compaction_interval_sec.is_none() {
-            bail!("`compaction_interval_sec` must be set when `enable_compaction` is true");
+        if self.config.enable_compaction {
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         let _ = self.create_and_validate_table().await?;
@@ -708,8 +739,17 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
+        let parquet_writer_properties = WriterProperties::builder()
+            .set_max_row_group_size(
+                writer_param
+                    .streaming_config
+                    .developer
+                    .iceberg_sink_write_parquet_max_row_group_rows,
+            )
+            .build();
+
         let parquet_writer_builder = ParquetWriterBuilder::new(
-            WriterProperties::new(),
+            parquet_writer_properties,
             schema.clone(),
             table.file_io().clone(),
             DefaultLocationGenerator::new(table.metadata().clone())
@@ -847,9 +887,18 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
+        let parquet_writer_properties = WriterProperties::builder()
+            .set_max_row_group_size(
+                writer_param
+                    .streaming_config
+                    .developer
+                    .iceberg_sink_write_parquet_max_row_group_rows,
+            )
+            .build();
+
         let data_file_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 schema.clone(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
@@ -868,7 +917,7 @@ impl IcebergSinkWriter {
         };
         let position_delete_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 POSITION_DELETE_SCHEMA.clone(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
@@ -901,7 +950,7 @@ impl IcebergSinkWriter {
             )
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 Arc::new(
                     arrow_schema_to_schema(config.projected_arrow_schema_ref())
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1800,7 +1849,11 @@ impl IcebergSinkCommitter {
             let txn = Transaction::new(&table);
             let mut append_action = txn
                 .fast_append(Some(snapshot_id), None, vec![])
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
+                .with_to_branch(commit_branch(
+                    self.config.r#type.as_str(),
+                    self.config.write_mode.as_str(),
+                ));
             append_action
                 .add_data_files(data_files.clone())
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
@@ -1833,7 +1886,7 @@ impl IcebergSinkCommitter {
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: SinkId::new(self.sink_id),
-                    compaction_interval: self.config.compaction_interval_sec.unwrap(),
+                    compaction_interval: self.config.compaction_interval_sec(),
                 })
                 .is_err()
         {
@@ -2030,6 +2083,18 @@ pub fn parse_partition_by_exprs(
     Ok(partition_columns)
 }
 
+pub fn commit_branch(sink_type: &str, write_mode: &str) -> String {
+    if should_enable_iceberg_cow(sink_type, write_mode) {
+        ICEBERG_COW_BRANCH.to_owned()
+    } else {
+        MAIN_BRANCH.to_owned()
+    }
+}
+
+pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: &str) -> bool {
+    sink_type == SINK_TYPE_UPSERT && write_mode == ICEBERG_WRITE_MODE_COPY_ON_WRITE
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::BTreeMap;
@@ -2040,7 +2105,7 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::IcebergConfig;
+    use crate::sink::iceberg::{ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig};
 
     pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
@@ -2233,6 +2298,7 @@ mod test {
             ("table.name", "demo_table"),
             ("enable_compaction", "true"),
             ("compaction_interval_sec", "1800"),
+            ("enable_snapshot_expiration", "true"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -2267,6 +2333,7 @@ mod test {
                 azblob_account_name: None,
                 azblob_account_key: None,
                 azblob_endpoint_url: None,
+                header: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
@@ -2282,6 +2349,8 @@ mod test {
             commit_retry_num: 8,
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
+            enable_snapshot_expiration: true,
+            write_mode: ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

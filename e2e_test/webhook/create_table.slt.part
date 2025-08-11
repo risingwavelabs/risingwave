@@ -76,3 +76,14 @@ create table validate_raw_string (
 
 statement error Adding/dropping a column of a table with webhook has not been implemented.
 ALTER TABLE github_hmac_sha1 ADD COLUMN new_col int;
+
+statement ok
+create table batched (
+  data JSONB
+) WITH (
+  connector = 'webhook',
+  is_batched = true,
+) VALIDATE AS secure_compare(
+  headers->>'x-hub-signature',
+  'sha1=' || encode(hmac('TEST_WEBHOOK', data, 'sha1'), 'hex')
+);

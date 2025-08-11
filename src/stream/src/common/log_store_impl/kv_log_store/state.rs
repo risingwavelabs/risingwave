@@ -36,6 +36,7 @@ pub(crate) struct LogStoreReadState<S: StateStoreRead> {
     pub(super) table_id: TableId,
     pub(super) state_store: Arc<S>,
     pub(super) serde: LogStoreRowSerde,
+    pub(super) chunk_size: usize,
 }
 
 impl<S: StateStoreRead> LogStoreReadState<S> {
@@ -60,6 +61,7 @@ pub(crate) fn new_log_store_state<S: LocalStateStore>(
     table_id: TableId,
     state_store: S,
     serde: LogStoreRowSerde,
+    chunk_size: usize,
 ) -> (
     LogStoreReadState<S::FlushedSnapshotReader>,
     LogStoreWriteState<S>,
@@ -70,6 +72,7 @@ pub(crate) fn new_log_store_state<S: LocalStateStore>(
             table_id,
             state_store: Arc::new(flushed_reader),
             serde: serde.clone(),
+            chunk_size,
         },
         LogStoreWriteState {
             state_store,
@@ -187,6 +190,7 @@ pub(crate) type LogStoreStateWriteChunkFuture<S: LocalStateStore> =
     impl Future<Output = (LogStoreWriteState<S>, LogStoreResult<(FlushInfo, Bitmap)>)> + 'static;
 
 impl<S: LocalStateStore> LogStoreWriteState<S> {
+    #[define_opaque(LogStoreStateWriteChunkFuture)]
     pub(crate) fn into_write_chunk_future(
         mut self,
         chunk: StreamChunk,
@@ -327,9 +331,11 @@ mod tests {
                         table_option: Default::default(),
                         is_replicated: false,
                         vnodes: vnodes.clone(),
+                        upload_on_flush: false,
                     })
                     .await,
                 serde.clone(),
+                1024,
             );
             write_state
                 .init(EpochPair::new_test_epoch(epoch1))

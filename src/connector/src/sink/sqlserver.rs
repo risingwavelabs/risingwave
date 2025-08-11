@@ -35,7 +35,7 @@ use super::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
+use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
 
 pub const SQLSERVER_SINK: &str = "sqlserver";
 
@@ -165,7 +165,6 @@ impl TryFrom<SinkParam> for SqlServerSink {
 }
 
 impl Sink for SqlServerSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = LogSinkerOf<SqlServerSinkWriter>;
 
     const SINK_NAME: &'static str = SQLSERVER_SINK;
@@ -611,6 +610,7 @@ fn bind_params(
                 ScalarRefImpl::Int256(_) => return Err(data_type_not_supported("Int256")),
                 ScalarRefImpl::Serial(_) => return Err(data_type_not_supported("Serial")),
                 ScalarRefImpl::Map(_) => return Err(data_type_not_supported("Map")),
+                ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             },
             None => match schema[col_idx].data_type {
                 DataType::Boolean => {
@@ -659,6 +659,7 @@ fn bind_params(
                 DataType::Serial => return Err(data_type_not_supported("Serial")),
                 DataType::Int256 => return Err(data_type_not_supported("Int256")),
                 DataType::Map(_) => return Err(data_type_not_supported("Map")),
+                DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             },
         };
     }
@@ -693,6 +694,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Serial => Err(data_type_not_supported("Serial")),
         DataType::Int256 => Err(data_type_not_supported("Int256")),
         DataType::Map(_) => Err(data_type_not_supported("Map")),
+        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
     }
 }
 

@@ -23,9 +23,10 @@ use itertools::{Itertools, repeat_n};
 use super::DataType;
 use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
+use crate::util::quote_ident::QuoteIdent;
 
 /// A cheaply cloneable struct type.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
@@ -45,7 +46,8 @@ impl Debug for StructType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, educe::Educe)]
+#[educe(PartialEq, Eq, Hash)] // ignore ids for backward compatibility
 struct StructTypeInner {
     /// The name and data type of each field.
     ///
@@ -56,9 +58,11 @@ struct StructTypeInner {
     ///
     /// Only present if this data type is persisted within a table schema (`ColumnDesc`)
     /// in a new version of the catalog that supports nested-schema evolution.
+    #[educe(PartialEq(ignore), Hash(ignore))]
     field_ids: Option<Box<[ColumnId]>>,
 
     /// Whether the fields are unnamed.
+    #[educe(PartialEq(ignore), Hash(ignore))]
     is_unnamed: bool,
 }
 
@@ -167,6 +171,14 @@ impl StructType {
         self.0.field_ids.as_ref().map(|ids| ids.iter().copied())
     }
 
+    /// Gets the field id at the given index.
+    ///
+    /// Returns `None` if they are not present. See documentation on the field `field_ids`
+    /// for the cases.
+    pub fn id_at(&self, index: usize) -> Option<ColumnId> {
+        self.0.field_ids.as_ref().map(|ids| ids[index])
+    }
+
     /// Get an iterator over the field ids, or a sequence of placeholder ids if they are not present.
     pub fn ids_or_placeholder(&self) -> impl ExactSizeIterator<Item = ColumnId> + '_ {
         match self.ids() {
@@ -197,7 +209,7 @@ impl Display for StructType {
                 f,
                 "struct<{}>",
                 self.iter()
-                    .map(|(name, ty)| format!("{} {}", name, ty))
+                    .map(|(name, ty)| format!("{} {}", QuoteIdent(name), ty))
                     .join(", ")
             )
         }

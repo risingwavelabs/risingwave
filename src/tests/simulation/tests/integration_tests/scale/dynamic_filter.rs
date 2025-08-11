@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
@@ -47,7 +47,7 @@ async fn test_dynamic_filter() -> Result<()> {
         .await?;
 
     let mut upstream_fragment_ids = HashSet::new();
-    visit_stream_node(
+    visit_stream_node_body(
         dynamic_filter_fragment.inner.nodes.as_ref().unwrap(),
         |node| {
             if let NodeBody::Merge(merge) = node {

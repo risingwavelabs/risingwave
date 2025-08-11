@@ -1,0 +1,37 @@
+control substitution on
+
+# called from `ci/scripts/e2e-source-kafka-sasl-test.sh`
+# rpk cannot connect to cluster with sasl_plaintext + plain (it requires scram)
+
+system ok
+cat << EOF | kcat -b message_queue_sasl_1:19092 -X security.protocol=SASL_PLAINTEXT -X sasl.mechanism=PLAIN -X sasl.username=dev -X sasl.password=rw -P -t test_kafka_sasl_basic
+{"x": "a"}
+{"x": "b"}
+{"x": "c"}
+EOF
+
+statement ok
+CREATE TABLE table_sasl(x varchar)
+WITH(
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue_sasl_1:19092',
+    topic = 'test_kafka_sasl_basic',
+    scan.startup.mode = 'earliest',
+    properties.security.protocol = 'sasl_plaintext',
+    properties.sasl.mechanism = 'PLAIN',
+    properties.sasl.username = 'dev',
+    properties.sasl.password = 'rw',
+) FORMAT PLAIN ENCODE JSON;
+
+sleep 1s
+
+query I retry 5 backoff 1s
+select count(*) from table_sasl;
+----
+3
+
+
+# clean up
+
+statement ok
+drop table table_sasl;

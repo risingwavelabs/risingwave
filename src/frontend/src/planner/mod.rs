@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use crate::binder::{BoundStatement, ShareId};
 use crate::error::Result;
-use crate::optimizer::{OptimizerContextRef, PlanRoot};
+use crate::optimizer::{LogicalPlanRoot, OptimizerContextRef};
 
 mod changelog;
 mod delete;
@@ -32,9 +32,9 @@ mod update;
 mod values;
 pub use query::LIMIT_ALL_COUNT;
 
-use crate::PlanRef;
+use crate::optimizer::plan_node::LogicalPlanRef as PlanRef;
 
-/// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
+/// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::LogicalPlanNode`] tree
 pub struct Planner {
     ctx: OptimizerContextRef,
     /// Mapping of `ShareId` to its share plan.
@@ -94,7 +94,7 @@ impl Planner {
     }
 
     /// Plan a [`BoundStatement`]. Need to bind a statement before plan.
-    pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
+    pub fn plan(&mut self, stmt: BoundStatement) -> Result<LogicalPlanRoot> {
         self.plan_statement(stmt)
     }
 

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnDesc, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
@@ -26,8 +26,9 @@ use risingwave_sqlparser::ast::AsOf;
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PredicatePushdown, StreamTableScan, ToBatch, ToStream, generic,
+    BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
+    LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamTableScan, ToBatch,
+    ToStream, generic,
 };
 use crate::TableCatalog;
 use crate::catalog::{ColumnId, IndexCatalog};
@@ -36,11 +37,12 @@ use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, Input
 use crate::optimizer::ApplyResult;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::plan_node_meta::AnyPlanNodeMeta;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{Cardinality, Order, WatermarkColumns};
+use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -61,6 +63,28 @@ impl From<generic::TableScan> for LogicalScan {
 impl From<generic::TableScan> for PlanRef {
     fn from(core: generic::TableScan) -> Self {
         LogicalScan::from(core).into()
+    }
+}
+
+impl GenericPlanRef for LogicalScan {
+    fn id(&self) -> PlanNodeId {
+        self.plan_base().id()
+    }
+
+    fn schema(&self) -> &Schema {
+        self.plan_base().schema()
+    }
+
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.plan_base().ctx()
+    }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.plan_base().functional_dependency()
     }
 }
 
@@ -328,7 +352,7 @@ impl LogicalScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalScan}
+impl_plan_tree_node_for_leaf! { Logical, LogicalScan}
 
 impl Distill for LogicalScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -354,7 +378,7 @@ impl Distill for LogicalScan {
                             Pretty::from(if verbose {
                                 format!("{}.{}", self.table_name(), col_name)
                             } else {
-                                col_name.to_string()
+                                col_name.clone()
                             })
                         })
                         .collect(),
@@ -397,7 +421,7 @@ impl ColPrunable for LogicalScan {
     }
 }
 
-impl ExprRewritable for LogicalScan {
+impl ExprRewritable<Logical> for LogicalScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -467,7 +491,7 @@ impl PredicatePushdown for LogicalScan {
 }
 
 impl LogicalScan {
-    fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<BatchPlanRef> {
         if self.predicate().always_true() {
             required_order
                 .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![], None).into())
@@ -479,12 +503,12 @@ impl LogicalScan {
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
 
-            let plan: PlanRef = if scan.core.predicate.always_false() {
+            let plan: BatchPlanRef = if scan.core.predicate.always_false() {
                 LogicalValues::create(vec![], scan.core.schema(), scan.core.ctx).to_batch()?
             } else {
                 let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-                let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges, None).into();
+                let mut plan: BatchPlanRef = BatchSeqScan::new(scan, scan_ranges, None).into();
                 if !predicate.always_true() {
                     plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
                 }
@@ -504,7 +528,7 @@ impl LogicalScan {
     fn use_index_scan_if_order_is_satisfied(
         &self,
         required_order: &Order,
-    ) -> Option<Result<PlanRef>> {
+    ) -> Option<Result<BatchPlanRef>> {
         if required_order.column_orders.is_empty() {
             return None;
         }
@@ -521,11 +545,14 @@ impl LogicalScan {
 }
 
 impl ToBatch for LogicalScan {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         self.to_batch_with_order_required(&Order::any())
     }
 
-    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_with_order_required(
+        &self,
+        required_order: &Order,
+    ) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new = self.clone_with_predicate(self.predicate().clone());
 
         if !new.indexes().is_empty() {
@@ -553,7 +580,10 @@ impl ToBatch for LogicalScan {
 }
 
 impl ToStream for LogicalScan {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self.predicate().always_true() {
             // Force rewrite scan type to cross-db scan
             if self.core.table_catalog.database_id != self.base.ctx().session_ctx().database_id() {

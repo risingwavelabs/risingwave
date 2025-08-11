@@ -149,7 +149,7 @@ async fn test_merger_sum_aggr() {
                 receiver_op,
                 vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
                     inputs,
-                    vec![0],
+                    DispatchOutputMapping::Simple(vec![0]),
                     0,
                 ))],
                 0,
@@ -197,6 +197,7 @@ async fn test_merger_sum_aggr() {
                     outputs,
                     local_barrier_manager.clone(),
                     schema,
+                    100,
                 )
                 .boxed(),
             );

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -222,18 +223,22 @@ impl FrontendEnv {
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::for_test());
         let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
-        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
-            Builder::new_multi_thread()
-                .worker_threads(
-                    load_config("", FrontendOpts::default())
-                        .batch
-                        .frontend_compute_runtime_worker_threads,
-                )
+        let runtime = {
+            let mut builder = Builder::new_multi_thread();
+            if let Some(frontend_compute_runtime_worker_threads) =
+                load_config("", FrontendOpts::default())
+                    .batch
+                    .frontend_compute_runtime_worker_threads
+            {
+                builder.worker_threads(frontend_compute_runtime_worker_threads);
+            }
+            builder
                 .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
-                .unwrap(),
-        ));
+                .unwrap()
+        };
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(runtime));
         let sessions_map = Arc::new(RwLock::new(HashMap::new()));
         Self {
             meta_client,
@@ -324,7 +329,7 @@ impl FrontendEnv {
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(CatalogWriterImpl::new(
             meta_client.clone(),
-            catalog_updated_rx,
+            catalog_updated_rx.clone(),
             hummock_snapshot_manager.clone(),
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
@@ -349,11 +354,10 @@ impl FrontendEnv {
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
-        let (user_info_updated_tx, user_info_updated_rx) = watch::channel(0);
         let user_info_reader = UserInfoReader::new(user_info_manager.clone());
         let user_info_writer = Arc::new(UserInfoWriterImpl::new(
             meta_client.clone(),
-            user_info_updated_rx,
+            catalog_updated_rx,
         ));
 
         let system_params_manager =
@@ -375,7 +379,6 @@ impl FrontendEnv {
             catalog,
             catalog_updated_tx,
             user_info_manager,
-            user_info_updated_tx,
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
             session_params.clone(),
@@ -432,14 +435,20 @@ impl FrontendEnv {
         let creating_streaming_job_tracker =
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
-        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
-            Builder::new_multi_thread()
-                .worker_threads(config.batch.frontend_compute_runtime_worker_threads)
+        let runtime = {
+            let mut builder = Builder::new_multi_thread();
+            if let Some(frontend_compute_runtime_worker_threads) =
+                config.batch.frontend_compute_runtime_worker_threads
+            {
+                builder.worker_threads(frontend_compute_runtime_worker_threads);
+            }
+            builder
                 .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
-                .unwrap(),
-        ));
+                .unwrap()
+        };
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(runtime));
 
         let sessions = sessions_map.clone();
         // Idle transaction background monitor
@@ -627,27 +636,13 @@ impl FrontendEnv {
     /// Cancel queries (i.e. batch queries) in session.
     /// If the session exists return true, otherwise, return false.
     pub fn cancel_queries_in_session(&self, session_id: SessionId) -> bool {
-        let guard = self.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_query();
-            true
-        } else {
-            info!("Current session finished, ignoring cancel query request");
-            false
-        }
+        cancel_queries_in_session(session_id, self.sessions_map.clone())
     }
 
     /// Cancel creating jobs (i.e. streaming queries) in session.
     /// If the session exists return true, otherwise, return false.
     pub fn cancel_creating_jobs_in_session(&self, session_id: SessionId) -> bool {
-        let guard = self.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_creating_job();
-            true
-        } else {
-            info!("Current session finished, ignoring cancel creating request");
-            false
-        }
+        cancel_creating_jobs_in_session(session_id, self.sessions_map.clone())
     }
 
     pub fn mem_context(&self) -> MemoryContext {
@@ -949,7 +944,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
             let (schema_name, relation_name) =
-                Binder::resolve_schema_qualified_name(db_name, name)?;
+                Binder::resolve_schema_qualified_name(db_name, &name)?;
             let search_path = self.config().search_path();
             let user_name = &self.user_name();
             let schema_name = match schema_name {
@@ -996,7 +991,7 @@ impl SessionImpl {
         let db_name = &self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, secret_name) = {
-            let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+            let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
             let search_path = self.config().search_path();
             let user_name = &self.user_name();
             let schema_name = match schema_name {
@@ -1017,7 +1012,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, connection_name) = {
             let (schema_name, connection_name) =
-                Binder::resolve_schema_qualified_name(db_name, name)?;
+                Binder::resolve_schema_qualified_name(db_name, &name)?;
             let search_path = self.config().search_path();
             let user_name = &self.user_name();
             let schema_name = match schema_name {
@@ -1041,7 +1036,7 @@ impl SessionImpl {
         if_not_exists: bool,
     ) -> Result<Either<(), RwPgResponse>> {
         let db_name = &self.database();
-        let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+        let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
         let (database_id, schema_id) = self.get_database_and_schema_id_for_create(schema_name)?;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -1086,11 +1081,13 @@ impl SessionImpl {
             Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
             None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
         };
+        let schema_name = schema.name();
 
-        check_schema_writable(&schema.name())?;
+        check_schema_writable(&schema_name)?;
         self.check_privileges(&[ObjectCheckItem::new(
             schema.owner(),
             AclMode::Create,
+            schema_name,
             Object::SchemaId(schema.id()),
         )])?;
 
@@ -1115,6 +1112,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             connection.owner(),
             AclMode::Usage,
+            connection.name.clone(),
             Object::ConnectionId(connection.id),
         )])?;
 
@@ -1183,6 +1181,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             table.owner(),
             AclMode::Select,
+            table_name.to_owned(),
             Object::TableId(table.id.table_id()),
         )])?;
 
@@ -1205,6 +1204,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             secret.owner(),
             AclMode::Create,
+            secret.name.clone(),
             Object::SecretId(secret.id.secret_id()),
         )])?;
 
@@ -1504,15 +1504,15 @@ impl SessionManagerImpl {
     ) -> std::result::Result<Arc<SessionImpl>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        let database_name = reader
-            .get_database_by_id(&database_id)
-            .map_err(|_| {
+        let (database_name, database_owner) = {
+            let db = reader.get_database_by_id(&database_id).map_err(|_| {
                 Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("database \"{}\" does not exist", database_id),
                 ))
-            })?
-            .name();
+            })?;
+            (db.name(), db.owner())
+        };
 
         let user_reader = self.env.user_info_reader();
         let reader = user_reader.read_guard();
@@ -1525,7 +1525,7 @@ impl SessionManagerImpl {
             }
             let has_privilege =
                 user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
-            if !user.is_super && !has_privilege {
+            if !user.is_super && database_owner != user.id && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,
                     "User does not have CONNECT privilege.",
@@ -1687,6 +1687,10 @@ impl Session for SessionImpl {
         }
     }
 
+    fn get_config(&self, key: &str) -> std::result::Result<String, BoxedError> {
+        self.config().get(key).map_err(Into::into)
+    }
+
     fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
@@ -1736,10 +1740,9 @@ impl Session for SessionImpl {
                     // Idle timeout.
                     if let Some(elapse_since_last_idle_instant) =
                         self.elapse_since_last_idle_instant()
+                        && elapse_since_last_idle_instant > idle_in_transaction_session_timeout
                     {
-                        if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
-                            return Err(PsqlError::IdleInTxnTimeout);
-                        }
+                        return Err(PsqlError::IdleInTxnTimeout);
                     }
                 }
             }
@@ -1781,5 +1784,66 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             DataType::Varchar.type_len(),
         )]),
         _ => Ok(vec![]),
+    }
+}
+
+pub struct WorkerProcessId {
+    pub worker_id: u32,
+    pub process_id: i32,
+}
+
+impl WorkerProcessId {
+    pub fn new(worker_id: u32, process_id: i32) -> Self {
+        Self {
+            worker_id,
+            process_id,
+        }
+    }
+}
+
+impl Display for WorkerProcessId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.worker_id, self.process_id)
+    }
+}
+
+impl TryFrom<String> for WorkerProcessId {
+    type Error = String;
+
+    fn try_from(worker_process_id: String) -> std::result::Result<Self, Self::Error> {
+        const INVALID: &str = "invalid WorkerProcessId";
+        let splits: Vec<&str> = worker_process_id.split(":").collect();
+        if splits.len() != 2 {
+            return Err(INVALID.to_owned());
+        }
+        let Ok(worker_id) = splits[0].parse::<u32>() else {
+            return Err(INVALID.to_owned());
+        };
+        let Ok(process_id) = splits[1].parse::<i32>() else {
+            return Err(INVALID.to_owned());
+        };
+        Ok(WorkerProcessId::new(worker_id, process_id))
+    }
+}
+
+pub fn cancel_queries_in_session(session_id: SessionId, sessions_map: SessionMapRef) -> bool {
+    let guard = sessions_map.read();
+    if let Some(session) = guard.get(&session_id) {
+        session.cancel_current_query();
+        true
+    } else {
+        info!("Current session finished, ignoring cancel query request");
+        false
+    }
+}
+
+pub fn cancel_creating_jobs_in_session(session_id: SessionId, sessions_map: SessionMapRef) -> bool {
+    let guard = sessions_map.read();
+    if let Some(session) = guard.get(&session_id) {
+        session.cancel_current_creating_job();
+        true
+    } else {
+        info!("Current session finished, ignoring cancel creating request");
+        false
     }
 }

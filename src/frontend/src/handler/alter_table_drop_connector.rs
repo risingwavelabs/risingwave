@@ -43,7 +43,7 @@ fn fetch_schema_info(
 ) -> Result<(Arc<TableCatalog>, Arc<SourceCatalog>)> {
     let db_name = session.database();
     let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(db_name.as_str(), table_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name.as_str(), &table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
@@ -161,7 +161,7 @@ pub async fn handle_alter_table_drop_connector(
     let original_definition = table_def.create_sql_ast_purified()?;
 
     let new_statement = rewrite_table_definition(&table_def, &source_def, original_definition)?;
-    let (_, table, graph, col_index_mapping, _) = get_replace_table_plan(
+    let (_, table, graph, _) = get_replace_table_plan(
         &session,
         table_name,
         new_statement,
@@ -172,13 +172,7 @@ pub async fn handle_alter_table_drop_connector(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .replace_table(
-            None,
-            table,
-            graph,
-            col_index_mapping,
-            TableJobType::General as _,
-        )
+        .replace_table(None, table.to_prost(), graph, TableJobType::General as _)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))

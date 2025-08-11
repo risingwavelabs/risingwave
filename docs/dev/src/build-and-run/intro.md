@@ -7,7 +7,7 @@
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf tmux cyrus-sasl lld openssl@3
+brew install postgresql cmake protobuf tmux cyrus-sasl lld openssl@3 libomp
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -16,9 +16,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev libsasl2-dev
+sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev libsasl2-dev libblas-dev liblapack-dev libomp-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
+
+> If you encounter CMake error when compiling some third-party crates, it may be because the CMake version installed by package manager (ie. `brew/apt`) is too high and is incompatible with old CMake files in these crates. You can first uninstall, then manually download the required version from the [official source](https://cmake.org/download/).
 
 ### nix shell
 
@@ -68,7 +70,7 @@ Then you'll be able to compile and start RisingWave!
 
 ## Start and monitor a dev cluster
 
-RiseDev is the RisingWave developers' tool. You can now use RiseDev to start a dev cluster. It is as simple as:
+RiseDev is the RisingWave developers' tool. You can now use RiseDev to start a dev cluster. Just run `risedev` script in the repo's root directory. It is as simple as:
 
 ```shell
 ./risedev d                        # shortcut for ./risedev dev
@@ -107,7 +109,7 @@ Use the `./risedev configure` command to enable and disable components.
 
 - Hummock (MinIO + MinIO-CLI): Enable this component to persist state data.
 - Prometheus and Grafana: Enable this component to view RisingWave metrics. You can view the metrics through a built-in Grafana dashboard.
-- Etcd: Enable this component if you want to persist metadata node data.
+- Postgres/Mysql/Sqlite: Enable this component if you want to persist metadata node data.
 - Kafka: Enable this component if you want to create a streaming source from a Kafka topic.
 - Grafana Tempo: Use this component for tracing.
 

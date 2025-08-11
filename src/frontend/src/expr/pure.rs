@@ -105,6 +105,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::CharLength
             | Type::Repeat
             | Type::ConcatOp
+            | Type::ByteaConcatOp
             | Type::Concat
             | Type::ConcatVariadic
             | Type::BoolOut
@@ -266,11 +267,18 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapCat
             | Type::MapContains
             | Type::MapDelete
+            | Type::MapFilter
             | Type::MapInsert
             | Type::MapLength
+            | Type::L2Distance
+            | Type::CosineDistance
+            | Type::L1Distance
+            | Type::InnerProduct
+            | Type::VecConcat
             | Type::VnodeUser
             | Type::RwEpochToTs
-            | Type::CheckNotNull =>
+            | Type::CheckNotNull
+            | Type::CompositeCast =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -280,7 +288,7 @@ impl ExprVisitor for ImpureAnalyzer {
             }
             // expression output is not deterministic
             Type::Vnode // obtain vnode count from the context
-            | Type::TestPaidTier
+            | Type::TestFeature
             | Type::License
             | Type::Proctime
             | Type::PgSleep
@@ -302,7 +310,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
             | Type::PgTableIsVisible
-            | Type::HasFunctionPrivilege => self.impure = true,
+            | Type::HasFunctionPrivilege
+            | Type::OpenaiEmbedding
+            | Type::HasDatabasePrivilege => self.impure = true,
         }
     }
 }

@@ -420,8 +420,8 @@ pub mod group_split {
                             insert_table_infos.push(branch_sst);
                         }
 
-                        if left.is_some() {
-                            *sst = left.unwrap();
+                        if let Some(s) = left {
+                            *sst = s;
                             true
                         } else {
                             false

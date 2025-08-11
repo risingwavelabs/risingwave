@@ -52,10 +52,10 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         for attr in &field.attrs {
             if attr.path.is_ident("doc") {
                 let meta = attr.parse_meta().expect_or_abort("Failed to parse meta");
-                if let syn::Meta::NameValue(val) = meta {
-                    if let syn::Lit::Str(desc) = val.lit {
-                        doc_list.push(desc.value().trim().to_owned());
-                    }
+                if let syn::Meta::NameValue(val) = meta
+                    && let syn::Lit::Str(desc) = val.lit
+                {
+                    doc_list.push(desc.value().trim().to_owned());
                 }
             }
         }

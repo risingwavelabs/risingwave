@@ -46,7 +46,7 @@ pub use distributed_dml_visitor::*;
 pub use read_storage_table_visitor::*;
 pub use rw_timestamp_validator::*;
 
-use crate::for_all_plan_nodes;
+use crate::for_each_convention_all_plan_nodes;
 use crate::optimizer::plan_node::*;
 
 /// The behavior for the default implementations of `visit_xxx`.
@@ -83,65 +83,83 @@ where
     }
 }
 
+pub trait PlanVisitor<C: ConventionMarker> {
+    type Result;
+    fn visit(&mut self, plan: PlanRef<C>) -> Self::Result;
+}
+
 /// Define `PlanVisitor` trait.
 macro_rules! def_visitor {
-    ($({ $convention:ident, $name:ident }),*) => {
-        /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
-        /// and leaf node returns `R::default()`
-        pub trait PlanVisitor {
-            type Result: Default;
-            type DefaultBehavior: DefaultBehavior<Self::Result>;
+    ({
+        $( $convention:ident, { $( $name:ident ),* }),*
+    }) => {
+        paste! {
+            $(
+                /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
+                /// and leaf node returns `R::default()`
+                pub trait [<$convention  PlanVisitor>] {
+                    type Result: Default;
+                    type DefaultBehavior: DefaultBehavior<Self::Result>;
 
-            /// The behavior for the default implementations of `visit_xxx`.
-            fn default_behavior() -> Self::DefaultBehavior;
+                    /// The behavior for the default implementations of `visit_xxx`.
+                    fn default_behavior() -> Self::DefaultBehavior;
 
-            paste! {
-                fn visit(&mut self, plan: PlanRef) -> Self::Result {
-                    use risingwave_common::util::recursive::{tracker, Recurse};
-                    use crate::session::current::notice_to_user;
+                    fn [<visit_ $convention:snake>](&mut self, plan: PlanRef<$convention>) -> Self::Result {
+                        use risingwave_common::util::recursive::{tracker, Recurse};
+                        use crate::session::current::notice_to_user;
 
-                    tracker!().recurse(|t| {
-                        if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
-                            notice_to_user(PLAN_TOO_DEEP_NOTICE);
+                        tracker!().recurse(|t| {
+                            if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
+                                notice_to_user(PLAN_TOO_DEEP_NOTICE);
+                            }
+
+                            match plan.node_type() {
+                                $(
+                                    PlanNodeType::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
+                                )*
+                                _ => unreachable!(),
+                            }
+                        })
+                    }
+
+                    $(
+                        #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
+                        fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> Self::Result {
+                            let results = plan.inputs().into_iter().map(|input| self.[<visit_ $convention:snake>](input));
+                            Self::default_behavior().apply(results)
                         }
+                    )*
 
-                        match plan.node_type() {
-                            $(
-                                PlanNodeType::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
-                            )*
-                        }
-                    })
                 }
 
-                $(
-                    #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
-                    fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> Self::Result {
-                        let results = plan.inputs().into_iter().map(|input| self.visit(input));
-                        Self::default_behavior().apply(results)
+                impl<V: [<$convention  PlanVisitor>]> PlanVisitor<$convention> for V {
+                    type Result = V::Result;
+                    fn visit(&mut self, plan: PlanRef<$convention>) -> Self::Result {
+                        self.[<visit_ $convention:snake>](plan)
                     }
-                )*
-            }
+                }
+            )*
         }
     }
 }
 
-for_all_plan_nodes! { def_visitor }
+for_each_convention_all_plan_nodes! { def_visitor }
 
 macro_rules! impl_has_variant {
-    ( $($variant:ty),* ) => {
+    ( $({$convention:ident $variant_name:ident}),* ) => {
         paste! {
             $(
-                pub fn [<has_ $variant:snake _where>]<P>(plan: PlanRef, pred: P) -> bool
+                pub fn [<has_ $convention:snake _ $variant_name:snake _where>]<P>(plan: PlanRef<$convention>, pred: P) -> bool
                 where
-                    P: FnMut(&$variant) -> bool,
+                    P: FnMut(&[<$convention $variant_name>]) -> bool,
                 {
                     struct HasWhere<P> {
                         pred: P,
                     }
 
-                    impl<P> PlanVisitor for HasWhere<P>
+                    impl<P> [<$convention PlanVisitor>] for HasWhere<P>
                     where
-                        P: FnMut(&$variant) -> bool,
+                        P: FnMut(&[<$convention $variant_name>]) -> bool,
                     {
                         type Result = bool;
                         type DefaultBehavior = impl DefaultBehavior<Self::Result>;
@@ -150,7 +168,7 @@ macro_rules! impl_has_variant {
                             Merge(|a, b| a | b)
                         }
 
-                        fn [<visit_ $variant:snake>](&mut self, node: &$variant) -> Self::Result {
+                        fn [<visit_ $convention:snake _ $variant_name:snake>](&mut self, node: &[<$convention $variant_name>]) -> Self::Result {
                             (self.pred)(node)
                         }
                     }
@@ -160,8 +178,8 @@ macro_rules! impl_has_variant {
                 }
 
                 #[allow(dead_code)]
-                pub fn [<has_ $variant:snake>](plan: PlanRef) -> bool {
-                    [<has_ $variant:snake _where>](plan, |_| true)
+                pub fn [<has_ $convention:snake _ $variant_name:snake>](plan: PlanRef<$convention>) -> bool {
+                    [<has_ $convention:snake _$variant_name:snake _where>](plan, |_| true)
                 }
             )*
         }
@@ -169,15 +187,15 @@ macro_rules! impl_has_variant {
 }
 
 impl_has_variant! {
-    LogicalApply,
-    LogicalMaxOneRow,
-    LogicalOverWindow,
-    LogicalScan,
-    LogicalSource,
-    BatchExchange,
-    BatchSeqScan,
-    BatchSource,
-    BatchInsert,
-    BatchDelete,
-    BatchUpdate
+    {Logical Apply},
+    {Logical MaxOneRow},
+    {Logical OverWindow},
+    {Logical Scan},
+    {Logical Source},
+    {Batch Exchange},
+    {Batch SeqScan},
+    {Batch Source},
+    {Batch Insert},
+    {Batch Delete},
+    {Batch Update}
 }

@@ -19,15 +19,19 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 use assert_matches::assert_matches;
+use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_pb::catalog::Database;
+use rw_futures_util::pending_on_none;
 use tokio::select;
 use tokio::sync::{oneshot, watch};
-use tokio::time::Interval;
+use tokio_stream::wrappers::IntervalStream;
+use tokio_stream::{StreamExt, StreamMap};
 use tracing::{info, warn};
 
 use super::notifier::Notifier;
@@ -38,7 +42,8 @@ use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
 
 pub(super) struct NewBarrier {
-    pub command: Option<(DatabaseId, Command, Vec<Notifier>)>,
+    pub database_id: DatabaseId,
+    pub command: Option<(Command, Vec<Notifier>)>,
     pub span: tracing::Span,
     pub checkpoint: bool,
 }
@@ -241,6 +246,7 @@ impl BarrierScheduler {
     /// Returns the barrier info of each command.
     ///
     /// TODO: atomicity of multiple commands is not guaranteed.
+    #[await_tree::instrument("run_commands({})", commands.iter().join(", "))]
     async fn run_multiple_commands(
         &self,
         database_id: DatabaseId,
@@ -269,6 +275,7 @@ impl BarrierScheduler {
             // Wait for this command to be injected, and record the result.
             tracing::trace!("waiting for injected_rx");
             injected_rx
+                .instrument_await("wait_injected")
                 .await
                 .ok()
                 .context("failed to inject barrier")??;
@@ -276,6 +283,7 @@ impl BarrierScheduler {
             tracing::trace!("waiting for collect_rx");
             // Throw the error if it occurs when collecting this barrier.
             collect_rx
+                .instrument_await("wait_collected")
                 .await
                 .ok()
                 .context("failed to collect barrier")??;
@@ -315,63 +323,219 @@ pub struct ScheduledBarriers {
     inner: Arc<Inner>,
 }
 
+/// State specific to each database for barrier generation.
+#[derive(Debug)]
+pub struct DatabaseBarrierState {
+    pub barrier_interval: Option<Duration>,
+    pub checkpoint_frequency: Option<u64>,
+    // Force checkpoint in next barrier.
+    pub force_checkpoint: bool,
+    // The numbers of barrier (checkpoint = false) since the last barrier (checkpoint = true)
+    pub num_uncheckpointed_barrier: u64,
+}
+
+impl DatabaseBarrierState {
+    fn new(barrier_interval_ms: Option<u32>, checkpoint_frequency: Option<u64>) -> Self {
+        Self {
+            barrier_interval: barrier_interval_ms.map(|ms| Duration::from_millis(ms as u64)),
+            checkpoint_frequency,
+            force_checkpoint: false,
+            num_uncheckpointed_barrier: 0,
+        }
+    }
+}
+
 /// Held by the [`crate::barrier::worker::GlobalBarrierWorker`] to execute these commands.
-pub(super) struct PeriodicBarriers {
-    min_interval: Interval,
-
-    /// Force checkpoint in next barrier.
-    force_checkpoint: bool,
-
-    /// The numbers of barrier (checkpoint = false) since the last barrier (checkpoint = true)
-    num_uncheckpointed_barrier: usize,
-    checkpoint_frequency: usize,
+#[derive(Default, Debug)]
+pub struct PeriodicBarriers {
+    /// Default system params for barrier interval and checkpoint frequency.
+    sys_barrier_interval: Duration,
+    sys_checkpoint_frequency: u64,
+    /// Per-database state.
+    databases: HashMap<DatabaseId, DatabaseBarrierState>,
+    /// Holds `IntervalStream` for each database, keyed by `DatabaseId`.
+    /// `StreamMap` will yield `(DatabaseId, Instant)` when a timer ticks.
+    timer_streams: StreamMap<DatabaseId, IntervalStream>,
 }
 
 impl PeriodicBarriers {
-    pub(super) fn new(min_interval: Duration, checkpoint_frequency: usize) -> PeriodicBarriers {
+    pub(super) fn new(
+        sys_barrier_interval: Duration,
+        sys_checkpoint_frequency: u64,
+        database_infos: Vec<Database>,
+    ) -> Self {
+        let mut databases = HashMap::with_capacity(database_infos.len());
+        let mut timer_streams = StreamMap::with_capacity(database_infos.len());
+        database_infos.into_iter().for_each(|database| {
+            let database_id: DatabaseId = database.id.into();
+            let barrier_interval_ms = database.barrier_interval_ms;
+            let checkpoint_frequency = database.checkpoint_frequency;
+            databases.insert(
+                database_id,
+                DatabaseBarrierState::new(barrier_interval_ms, checkpoint_frequency),
+            );
+            let duration = if let Some(ms) = barrier_interval_ms {
+                Duration::from_millis(ms as u64)
+            } else {
+                sys_barrier_interval
+            };
+            // Create an `IntervalStream` for the database with the specified interval.
+            let interval_stream = Self::new_interval_stream(duration);
+            timer_streams.insert(database_id, interval_stream);
+        });
         Self {
-            min_interval: tokio::time::interval(min_interval),
-            force_checkpoint: false,
-            num_uncheckpointed_barrier: 0,
-            checkpoint_frequency,
+            sys_barrier_interval,
+            sys_checkpoint_frequency,
+            databases,
+            timer_streams,
         }
     }
 
-    pub(super) fn set_min_interval(&mut self, min_interval: Duration) {
-        let set_new_interval = min_interval != self.min_interval.period();
-        if set_new_interval {
-            let mut min_interval = tokio::time::interval(min_interval);
-            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            self.min_interval = min_interval;
+    // Create a new interval stream with the specified duration.
+    fn new_interval_stream(duration: Duration) -> IntervalStream {
+        let mut interval = tokio::time::interval(duration);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        IntervalStream::new(interval)
+    }
+
+    /// Update the system barrier interval.
+    pub(super) fn set_sys_barrier_interval(&mut self, duration: Duration) {
+        if self.sys_barrier_interval == duration {
+            return;
+        }
+        self.sys_barrier_interval = duration;
+        // Reset the `IntervalStream` for all databases that use default param.
+        for (db_id, db_state) in &mut self.databases {
+            if db_state.barrier_interval.is_none() {
+                let interval_stream = Self::new_interval_stream(duration);
+                self.timer_streams.insert(*db_id, interval_stream);
+            }
         }
     }
 
+    /// Update the system checkpoint frequency.
+    pub fn set_sys_checkpoint_frequency(&mut self, frequency: u64) {
+        if self.sys_checkpoint_frequency == frequency {
+            return;
+        }
+        self.sys_checkpoint_frequency = frequency;
+        // Reset the `num_uncheckpointed_barrier` for all databases that use default param.
+        for db_state in self.databases.values_mut() {
+            if db_state.checkpoint_frequency.is_none() {
+                db_state.num_uncheckpointed_barrier = 0;
+                db_state.force_checkpoint = false;
+            }
+        }
+    }
+
+    pub(super) fn update_database_barrier(
+        &mut self,
+        database_id: DatabaseId,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
+    ) {
+        match self.databases.entry(database_id) {
+            Entry::Occupied(mut entry) => {
+                let db_state = entry.get_mut();
+                db_state.barrier_interval =
+                    barrier_interval_ms.map(|ms| Duration::from_millis(ms as u64));
+                db_state.checkpoint_frequency = checkpoint_frequency;
+                // Reset the `num_uncheckpointed_barrier` since the barrier interval or checkpoint frequency is changed.
+                db_state.num_uncheckpointed_barrier = 0;
+                db_state.force_checkpoint = false;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(DatabaseBarrierState::new(
+                    barrier_interval_ms,
+                    checkpoint_frequency,
+                ));
+            }
+        }
+
+        // If the database already has a timer stream, reset it with the new interval.
+        let duration = if let Some(ms) = barrier_interval_ms {
+            Duration::from_millis(ms as u64)
+        } else {
+            self.sys_barrier_interval
+        };
+        let interval_stream = Self::new_interval_stream(duration);
+        self.timer_streams.insert(database_id, interval_stream);
+    }
+
+    /// Make the `checkpoint` of the next barrier must be true.
+    pub fn force_checkpoint_in_next_barrier(&mut self, database_id: DatabaseId) {
+        if let Some(db_state) = self.databases.get_mut(&database_id) {
+            db_state.force_checkpoint = true;
+        } else {
+            warn!(
+                ?database_id,
+                "force checkpoint in next barrier for non-existing database"
+            );
+        }
+    }
+
+    #[await_tree::instrument]
     pub(super) async fn next_barrier(
         &mut self,
         context: &impl GlobalBarrierWorkerContext,
     ) -> NewBarrier {
-        let checkpoint = self.try_get_checkpoint();
-        let scheduled = select! {
+        let new_barrier = select! {
             biased;
             scheduled = context.next_scheduled() => {
-                self.min_interval.reset();
-                let checkpoint = scheduled.command.need_checkpoint() || checkpoint;
+                let database_id = scheduled.database_id;
+                // Check if the database exists.
+                assert!(self.databases.contains_key(&database_id), "database {} not found in periodic barriers", database_id);
+                assert!(self.timer_streams.contains_key(&database_id), "timer stream for database {} not found in periodic barriers", database_id);
+                // New command will trigger the barriers, so reset the timer for the specific database.
+                for (db_id, timer_stream) in self.timer_streams.iter_mut() {
+                    if *db_id == database_id {
+                        timer_stream.as_mut().reset();
+                    }
+                }
+                let checkpoint = scheduled.command.need_checkpoint() || self.try_get_checkpoint(database_id);
                 NewBarrier {
-                    command: Some((scheduled.database_id, scheduled.command, scheduled.notifiers)),
+                    database_id: scheduled.database_id,
+                    command: Some((scheduled.command, scheduled.notifiers)),
                     span: scheduled.span,
                     checkpoint,
                 }
             },
-            _ = self.min_interval.tick() => {
+            // If there is no database, we won't wait for `Interval`, but only wait for command.
+            // Normally it will not return None, because there is always at least one database.
+            next_timer = pending_on_none(self.timer_streams.next()) => {
+                let (database_id, _instant) = next_timer;
+                let checkpoint = self.try_get_checkpoint(database_id);
                 NewBarrier {
+                    database_id,
                     command: None,
                     span: tracing_span(),
                     checkpoint,
                 }
             }
         };
-        self.update_num_uncheckpointed_barrier(scheduled.checkpoint);
-        scheduled
+        self.update_num_uncheckpointed_barrier(new_barrier.database_id, new_barrier.checkpoint);
+
+        new_barrier
+    }
+
+    /// Whether the barrier(checkpoint = true) should be injected.
+    fn try_get_checkpoint(&self, database_id: DatabaseId) -> bool {
+        let db_state = self.databases.get(&database_id).unwrap();
+        let checkpoint_frequency = db_state
+            .checkpoint_frequency
+            .unwrap_or(self.sys_checkpoint_frequency);
+        db_state.num_uncheckpointed_barrier + 1 >= checkpoint_frequency || db_state.force_checkpoint
+    }
+
+    /// Update the `num_uncheckpointed_barrier`
+    fn update_num_uncheckpointed_barrier(&mut self, database_id: DatabaseId, checkpoint: bool) {
+        let db_state = self.databases.get_mut(&database_id).unwrap();
+        if checkpoint {
+            db_state.num_uncheckpointed_barrier = 0;
+            db_state.force_checkpoint = false;
+        } else {
+            db_state.num_uncheckpointed_barrier += 1;
+        }
     }
 }
 
@@ -592,29 +756,289 @@ impl ScheduledBarriers {
     }
 }
 
-impl PeriodicBarriers {
-    /// Whether the barrier(checkpoint = true) should be injected.
-    fn try_get_checkpoint(&self) -> bool {
-        self.num_uncheckpointed_barrier + 1 >= self.checkpoint_frequency || self.force_checkpoint
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    /// Make the `checkpoint` of the next barrier must be true
-    pub fn force_checkpoint_in_next_barrier(&mut self) {
-        self.force_checkpoint = true;
-    }
-
-    /// Update the `checkpoint_frequency`
-    pub fn set_checkpoint_frequency(&mut self, frequency: usize) {
-        self.checkpoint_frequency = frequency;
-    }
-
-    /// Update the `num_uncheckpointed_barrier`
-    fn update_num_uncheckpointed_barrier(&mut self, checkpoint: bool) {
-        if checkpoint {
-            self.num_uncheckpointed_barrier = 0;
-            self.force_checkpoint = false;
-        } else {
-            self.num_uncheckpointed_barrier += 1;
+    fn create_test_database(
+        id: u32,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
+    ) -> Database {
+        Database {
+            id,
+            name: format!("test_db_{}", id),
+            barrier_interval_ms,
+            checkpoint_frequency,
+            ..Default::default()
         }
+    }
+
+    // Mock context for testing next_barrier
+    struct MockGlobalBarrierWorkerContext {
+        scheduled_rx: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<Scheduled>>,
+    }
+
+    impl MockGlobalBarrierWorkerContext {
+        fn new() -> (Self, tokio::sync::mpsc::UnboundedSender<Scheduled>) {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            (
+                Self {
+                    scheduled_rx: tokio::sync::Mutex::new(rx),
+                },
+                tx,
+            )
+        }
+    }
+
+    impl GlobalBarrierWorkerContext for MockGlobalBarrierWorkerContext {
+        async fn next_scheduled(&self) -> Scheduled {
+            self.scheduled_rx.lock().await.recv().await.unwrap()
+        }
+
+        async fn commit_epoch(
+            &self,
+            _commit_info: crate::hummock::CommitEpochInfo,
+        ) -> MetaResult<risingwave_pb::hummock::HummockVersionStats> {
+            unimplemented!()
+        }
+
+        fn abort_and_mark_blocked(
+            &self,
+            _database_id: Option<DatabaseId>,
+            _recovery_reason: crate::barrier::RecoveryReason,
+        ) {
+            unimplemented!()
+        }
+
+        fn mark_ready(&self, _options: MarkReadyOptions) {
+            unimplemented!()
+        }
+
+        async fn post_collect_command<'a>(
+            &'a self,
+            _command: &'a crate::barrier::command::CommandContext,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn notify_creating_job_failed(&self, _database_id: Option<DatabaseId>, _err: String) {
+            unimplemented!()
+        }
+
+        async fn finish_creating_job(
+            &self,
+            _job: crate::barrier::progress::TrackingJob,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn new_control_stream(
+            &self,
+            _node: &risingwave_pb::common::WorkerNode,
+            _init_request: &risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest,
+        ) -> MetaResult<risingwave_rpc_client::StreamingControlHandle> {
+            unimplemented!()
+        }
+
+        async fn reload_runtime_info(
+            &self,
+        ) -> MetaResult<crate::barrier::BarrierWorkerRuntimeInfoSnapshot> {
+            unimplemented!()
+        }
+
+        async fn reload_database_runtime_info(
+            &self,
+            _database_id: DatabaseId,
+        ) -> MetaResult<Option<crate::barrier::DatabaseRuntimeInfoSnapshot>> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_with_different_intervals() {
+        // Create databases with different intervals
+        let databases = vec![
+            create_test_database(1, Some(50), Some(2)), // 50ms interval, checkpoint every 2
+            create_test_database(2, Some(100), Some(3)), // 100ms interval, checkpoint every 3
+            create_test_database(3, None, Some(5)), /* Use system default (200ms), checkpoint every 5 */
+        ];
+
+        let mut periodic = PeriodicBarriers::new(
+            Duration::from_millis(200), // System default
+            10,                         // System checkpoint frequency
+            databases,
+        );
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        // Call next_barrier for each database once, because the first tick is returned immediately
+        for _ in 0..3 {
+            let barrier = periodic.next_barrier(&context).await;
+            assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
+            assert!(!barrier.checkpoint); // First barrier shouldn't be a checkpoint
+        }
+
+        // Since we have 3 databases with intervals 50ms, 100ms, and 200ms,
+        // the first barrier should come from database 1 (50ms interval)
+        let start_time = Instant::now();
+        let barrier = periodic.next_barrier(&context).await;
+        let elapsed = start_time.elapsed();
+
+        // Verify the barrier properties
+        assert_eq!(barrier.database_id, DatabaseId::from(1));
+        assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
+        assert!(barrier.checkpoint); // Second barrier should be checkpoint for database 1
+        assert!(
+            elapsed <= Duration::from_millis(100),
+            "Elapsed time exceeded: {:?}",
+            elapsed
+        ); // Should be around 50ms
+
+        // Verify that the checkpoint frequency works
+        let db1_id = DatabaseId::from(1);
+        let db1_state = periodic.databases.get_mut(&db1_id).unwrap();
+        assert_eq!(db1_state.num_uncheckpointed_barrier, 0); // Should reset after checkpoint
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_with_scheduled_command() {
+        let databases = vec![
+            create_test_database(1, Some(1000), Some(2)), // Long interval to avoid interference
+        ];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(1000), 10, databases);
+
+        let (context, tx) = MockGlobalBarrierWorkerContext::new();
+
+        // Skip the first barrier to let the timers start
+        periodic.next_barrier(&context).await;
+
+        // Schedule a command
+        let scheduled_command = Scheduled {
+            database_id: DatabaseId::from(1),
+            command: Command::Flush,
+            notifiers: vec![],
+            span: tracing::Span::none(),
+        };
+
+        // Send scheduled command in background
+        let tx_clone = tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            tx_clone.send(scheduled_command).unwrap();
+        });
+
+        let barrier = periodic.next_barrier(&context).await;
+
+        // Should return the scheduled command
+        assert!(barrier.command.is_some());
+        assert_eq!(barrier.database_id, DatabaseId::from(1));
+
+        if let Some((command, _)) = barrier.command {
+            assert!(matches!(command, Command::Flush));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_multiple_databases_timing() {
+        let databases = vec![
+            create_test_database(1, Some(30), Some(10)), // Fast interval
+            create_test_database(2, Some(100), Some(10)), // Slower interval
+        ];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(500), 10, databases);
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        // Skip first 2 barriers to let the timers start
+        for _ in 0..2 {
+            periodic.next_barrier(&context).await;
+        }
+
+        let mut barrier_counts = HashMap::new();
+
+        // Collect barriers for a short period
+        let mut barriers = Vec::new();
+        for _ in 0..5 {
+            let barrier = periodic.next_barrier(&context).await;
+            barriers.push(barrier);
+        }
+
+        // Count barriers per database
+        for barrier in barriers {
+            *barrier_counts.entry(barrier.database_id).or_insert(0) += 1;
+        }
+
+        // Database 1 (30ms interval) should have more barriers than database 2 (100ms interval)
+        let db1_count = barrier_counts.get(&DatabaseId::from(1)).unwrap_or(&0);
+        let db2_count = barrier_counts.get(&DatabaseId::from(2)).unwrap_or(&0);
+
+        // Due to timing, db1 should generally have more barriers, but allow for some variance
+        assert!(*db1_count >= *db2_count);
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_force_checkpoint() {
+        let databases = vec![create_test_database(1, Some(100), Some(10))];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(100), 10, databases);
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        // Force checkpoint for next barrier
+        periodic.force_checkpoint_in_next_barrier(DatabaseId::from(1));
+
+        let barrier = periodic.next_barrier(&context).await;
+
+        // Should be a checkpoint barrier due to force_checkpoint
+        assert!(barrier.checkpoint);
+        assert_eq!(barrier.database_id, DatabaseId::from(1));
+        assert!(barrier.command.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_checkpoint_frequency() {
+        let databases = vec![create_test_database(1, Some(50), Some(2))]; // Checkpoint every 2 barriers
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(50), 10, databases);
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        // First barrier - should not be checkpoint
+        let barrier1 = periodic.next_barrier(&context).await;
+        assert!(!barrier1.checkpoint);
+
+        // Second barrier - should be checkpoint (frequency = 2)
+        let barrier2 = periodic.next_barrier(&context).await;
+        assert!(barrier2.checkpoint);
+
+        // Third barrier - should not be checkpoint (counter reset)
+        let barrier3 = periodic.next_barrier(&context).await;
+        assert!(!barrier3.checkpoint);
+    }
+
+    #[tokio::test]
+    async fn test_update_database_barrier() {
+        let databases = vec![create_test_database(1, Some(1000), Some(10))];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(500), 20, databases);
+
+        // Update existing database
+        periodic.update_database_barrier(DatabaseId::from(1), Some(2000), Some(15));
+
+        let db_state = periodic.databases.get(&DatabaseId::from(1)).unwrap();
+        assert_eq!(db_state.barrier_interval, Some(Duration::from_millis(2000)));
+        assert_eq!(db_state.checkpoint_frequency, Some(15));
+        assert_eq!(db_state.num_uncheckpointed_barrier, 0);
+        assert!(!db_state.force_checkpoint);
+
+        // Add new database
+        periodic.update_database_barrier(DatabaseId::from(2), None, None);
+
+        assert!(periodic.databases.contains_key(&DatabaseId::from(2)));
+        let db2_state = periodic.databases.get(&DatabaseId::from(2)).unwrap();
+        assert_eq!(db2_state.barrier_interval, None);
+        assert_eq!(db2_state.checkpoint_frequency, None);
     }
 }

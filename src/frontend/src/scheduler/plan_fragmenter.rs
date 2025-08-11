@@ -57,11 +57,11 @@ use super::SchedulerError;
 use crate::catalog::TableId;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::error::RwError;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
-    BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
+    BatchIcebergScan, BatchKafkaScan, BatchPlanRef as PlanRef, BatchSource, PlanNodeId,
+    PlanNodeType,
 };
 use crate::optimizer::property::Distribution;
 use crate::scheduler::SchedulerResult;
@@ -353,8 +353,11 @@ impl SourceScanInfo {
                 Ok(SourceScanInfo::Complete(res))
             }
             (ConnectorProperties::OpendalS3(prop), SourceFetchParameters::Empty) => {
-                let lister: OpendalEnumerator<OpendalS3> =
-                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let lister: OpendalEnumerator<OpendalS3> = OpendalEnumerator::new_s3_source(
+                    &prop.s3_properties,
+                    prop.assume_role,
+                    prop.fs_common.compression_format,
+                )?;
                 let stream = build_opendal_fs_list_for_batch(lister);
 
                 let batch_res: Vec<_> = stream.try_collect().await?;

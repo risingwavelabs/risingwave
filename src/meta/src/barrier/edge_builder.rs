@@ -144,7 +144,7 @@ impl FragmentEdgeBuilder {
             &downstream_fragment.actors,
             downstream.dispatcher_type,
             downstream.dist_key_indices.clone(),
-            downstream.output_indices.clone(),
+            downstream.output_mapping.clone(),
         );
         let downstream_fragment_upstreams = self
             .result
