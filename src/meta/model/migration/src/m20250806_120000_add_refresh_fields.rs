@@ -6,17 +6,12 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Add refresh_state column
+        // Add refresh_state column as string, default to "IDLE"
         manager
             .alter_table(
                 Table::alter()
                     .table(TableEnum::Table)
-                    .add_column(
-                        ColumnDef::new(TableEnum::RefreshState)
-                            .integer()
-                            .not_null()
-                            .default(0), // REFRESH_STATE_IDLE = 0
-                    )
+                    .add_column(ColumnDef::new(TableEnum::RefreshState).string())
                     .to_owned(),
             )
             .await

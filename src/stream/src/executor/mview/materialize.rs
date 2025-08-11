@@ -15,23 +15,21 @@
 use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::f64::consts::E;
 use std::marker::PhantomData;
 use std::ops::{Bound, Deref, Index};
-use std::time::Instant;
 
 use bytes::Bytes;
-use futures::future::{Either, select};
-use futures::stream;
+use futures::future::Either;
+use futures::stream::{self, select_with_strategy};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
-use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{CompactedRow, RowDeserializer};
-use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
@@ -43,17 +41,14 @@ use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
-use tokio::select;
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
 use crate::common::table::test_utils::gen_pbtable;
-use crate::executor::EpochPair;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::prelude::*;
-use crate::executor::source::WAIT_BARRIER_MULTIPLE_TIMES;
-use crate::task::{ActorId, LocalBarrierManager};
+use crate::task::LocalBarrierManager;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
@@ -523,190 +518,128 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     self.state_table.vnodes(),
                     refresh_args.staging_table.vnodes()
                 );
-                let mut last_barrier_time = Instant::now();
-                let mut is_from_break = false;
 
-                // TODO: can we delete while iterating?
+                let mut pending_barrier: Option<Barrier> = None;
+
                 let mut rows_to_delete = vec![];
-                'merge_sort: for vnode in self.state_table.vnodes().clone().iter_vnodes() {
-                    let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) =
-                        (Bound::Unbounded, Bound::Unbounded);
+                let mut merge_complete = false;
 
-                    {
-                        let iter_main = self
-                            .state_table
-                            .iter_keyed_row_with_vnode(
-                                vnode,
-                                &pk_range,
-                                PrefetchOptions::prefetch_for_large_range_scan(),
-                            )
-                            .await?;
-                        let iter_staging = refresh_args
-                            .staging_table
-                            .iter_keyed_row_with_vnode(
-                                vnode,
-                                &pk_range,
-                                PrefetchOptions::prefetch_for_large_range_scan(),
-                            )
-                            .await?;
-                        pin_mut!(iter_main);
-                        pin_mut!(iter_staging);
+                // Scope to limit immutable borrows to state tables
+                {
+                    let left_input = input.by_ref().map(Either::Left);
+                    let right_merge_sort = pin!(
+                        Self::make_mergesort_stream(&self.state_table, &refresh_args.staging_table)
+                            .map(Either::Right)
+                    );
 
-                        // Sort-merge join implementation using dual pointers
-                        // TODO: persist iterate progress in state table
-                        let mut main_item: Option<KeyedRow<Bytes>> =
-                            iter_main.next().await.transpose()?;
+                    // Prefer to select input stream to handle barriers promptly
+                    let mut merge_stream =
+                        select_with_strategy(left_input, right_merge_sort, |_: &mut ()| {
+                            stream::PollNext::Left
+                        });
 
-                        let mut main_iter_cnt = 1;
-                        // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
-                        // milliseconds, considering some other latencies like network and cost in Meta.
-                        let max_wait_barrier_time_ms =
-                            self.actor_context
-                                .stream_env
-                                .system_params_manager_ref()
-                                .get_params()
-                                .load()
-                                .barrier_interval_ms() as u128
-                                * WAIT_BARRIER_MULTIPLE_TIMES;
-
-                        let mut staging_item: Option<KeyedRow<Bytes>> =
-                            iter_staging.next().await.transpose()?;
-
-                        while let Some(main_kv) = main_item {
-                            let main_key = main_kv.key();
-
-                            // Advance staging iterator until we find a key >= main_key
-                            while let Some(staging_kv) = &staging_item {
-                                let staging_key = staging_kv.key();
-                                match main_key.cmp(staging_key) {
-                                    std::cmp::Ordering::Greater => {
-                                        // main_key > staging_key, advance staging
-                                        staging_item = iter_staging.next().await.transpose()?;
+                    #[for_await]
+                    for either in &mut merge_stream {
+                        match either {
+                            Either::Left(msg) => {
+                                let msg = msg?;
+                                match msg {
+                                    Message::Watermark(w) => yield Message::Watermark(w),
+                                    Message::Chunk(chunk) => {
+                                        tracing::warn!(chunk = %chunk.to_pretty(), "chunk is ignored during merge phase");
                                     }
-                                    std::cmp::Ordering::Equal => {
-                                        // Keys match, this row exists in both tables, no need to delete
-                                        break;
-                                    }
-                                    std::cmp::Ordering::Less => {
-                                        // main_key < staging_key, main row doesn't exist in staging, delete it
-                                        rows_to_delete.push(main_kv.row().clone());
+                                    Message::Barrier(b) => {
+                                        pending_barrier = Some(b);
                                         break;
                                     }
                                 }
                             }
-
-                            // If staging_item is None, all remaining main rows should be deleted
-                            if staging_item.is_none() {
-                                rows_to_delete.push(main_kv.row().clone());
-                            }
-
-                            // Advance main iterator
-                            main_item = iter_main.next().await.transpose()?;
-                            main_iter_cnt += 1;
-                            const BATCH_SIZE: usize = 1000;
-                            let barrier_pending_for_too_long =
-                                last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms;
-                            if main_iter_cnt % BATCH_SIZE == 0 || barrier_pending_for_too_long {
-                                is_from_break = true;
-                                break 'merge_sort;
+                            Either::Right(result) => {
+                                match result? {
+                                    Some((_vnode, row)) => {
+                                        rows_to_delete.push(row);
+                                    }
+                                    None => {
+                                        // Merge stream finished
+                                        merge_complete = true;
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
                 }
+
+                // Process collected rows for deletion
                 tracing::trace!(?rows_to_delete, "on_load_finish: rows to delete");
                 for row in rows_to_delete {
                     self.state_table.delete(row);
-                    // FIXME: yield streamchunk to downstream
+                    // TODO: yield streamchunk to downstream
                 }
 
-                if !is_from_break {
-                    // Iter finished!
+                if merge_complete {
+                    tracing::info!("merge sort completed");
                     break 'stage_2;
                 }
 
-                'handle_barrier: {
-                    // poll barrier until pending.
-                    match select(input.next(), futures::future::ready(())).await {
-                        Either::Left((msg, _right_fut)) => {
-                            let msg = msg.expect("input stream should not end");
-                            let msg = msg?;
-                            match msg {
-                                Message::Watermark(w) => yield Message::Watermark(w),
-                                Message::Chunk(chunk) => {
-                                    tracing::warn!(chunk = %chunk.to_pretty(), "chunk is ignored during merge phase");
-                                }
-                                Message::Barrier(b) => {
-                                    // If a downstream mv depends on the current table, we need to do conflict check again.
-                                    if !self.may_have_downstream
-                                        && b.has_more_downstream_fragments(self.actor_context.id)
-                                    {
-                                        self.may_have_downstream = true;
-                                    }
-                                    Self::may_update_depended_subscriptions(
-                                        &mut self.depended_subscription_ids,
-                                        &b,
-                                        mv_table_id,
-                                    );
-                                    let op_consistency_level = get_op_consistency_level(
-                                        self.conflict_behavior,
-                                        self.may_have_downstream,
-                                        &self.depended_subscription_ids,
-                                    );
-                                    let post_commit = self
-                                        .state_table
-                                        .commit_may_switch_consistent_op(
-                                            b.epoch,
-                                            op_consistency_level,
-                                        )
-                                        .await?;
-                                    if !post_commit.inner().is_consistent_op() {
-                                        assert_eq!(
-                                            self.conflict_behavior,
-                                            ConflictBehavior::Overwrite
-                                        );
-                                    }
+                let Some(b) = pending_barrier else {
+                    tracing::info!("unexpected: no pending barrier");
+                    continue;
+                };
 
-                                    let update_vnode_bitmap =
-                                        b.as_update_vnode_bitmap(self.actor_context.id);
-
-                                    // Commit staging table for refreshable materialized views
-                                    let staging_post_commit =
-                                        refresh_args.staging_table.commit(b.epoch).await?;
-
-                                    let b_epoch = b.epoch;
-                                    yield Message::Barrier(b);
-                                    yielded_epoch = b_epoch;
-
-                                    // Update the vnode bitmap for the state table if asked.
-                                    if let Some((_, cache_may_stale)) = post_commit
-                                        .post_yield_barrier(update_vnode_bitmap.clone())
-                                        .await?
-                                        && cache_may_stale
-                                    {
-                                        self.materialize_cache.lru_cache.clear();
-                                    }
-
-                                    // Handle staging table post commit
-                                    staging_post_commit
-                                        .post_yield_barrier(update_vnode_bitmap)
-                                        .await?;
-
-                                    self.metrics
-                                        .materialize_current_epoch
-                                        .set(b_epoch.curr as i64);
-                                }
-                            }
-                        }
-                        Either::Right(_) => {
-                            // no more barriers, continue merging
-                            break 'handle_barrier;
-                        }
-                    }
-
-                    last_barrier_time = Instant::now();
+                // handle barrier
+                // If a downstream mv depends on the current table, we need to do conflict check again.
+                if !self.may_have_downstream
+                    && b.has_more_downstream_fragments(self.actor_context.id)
+                {
+                    self.may_have_downstream = true;
+                }
+                Self::may_update_depended_subscriptions(
+                    &mut self.depended_subscription_ids,
+                    &b,
+                    mv_table_id,
+                );
+                let op_consistency_level = get_op_consistency_level(
+                    self.conflict_behavior,
+                    self.may_have_downstream,
+                    &self.depended_subscription_ids,
+                );
+                let post_commit = self
+                    .state_table
+                    .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
+                    .await?;
+                if !post_commit.inner().is_consistent_op() {
+                    assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
                 }
 
-                // 'handle_barrier finished, go back to 'merge_sort_loop
+                let update_vnode_bitmap = b.as_update_vnode_bitmap(self.actor_context.id);
+
+                // Commit staging table for refreshable materialized views
+                let staging_post_commit = refresh_args.staging_table.commit(b.epoch).await?;
+
+                let b_epoch = b.epoch;
+                yield Message::Barrier(b);
+                yielded_epoch = b_epoch;
+
+                // Update the vnode bitmap for the state table if asked.
+                if let Some((_, cache_may_stale)) = post_commit
+                    .post_yield_barrier(update_vnode_bitmap.clone())
+                    .await?
+                    && cache_may_stale
+                {
+                    self.materialize_cache.lru_cache.clear();
+                }
+
+                // Handle staging table post commit
+                staging_post_commit
+                    .post_yield_barrier(update_vnode_bitmap)
+                    .await?;
+
+                self.metrics
+                    .materialize_current_epoch
+                    .set(b_epoch.curr as i64);
+
+                // handle barrier finished, go back to 'merge_sort_loop
             }
 
             // stage2 cleanup
@@ -734,6 +667,82 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             }
             // stage 2 finished, go back to stage 1
         }
+    }
+
+    /// Stream that yields rows to be deleted from main table.
+    /// Yields `Some((vnode, row))` for rows that exist in main but not in staging.
+    /// Yields `None` when finished processing all vnodes.
+    #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
+    async fn make_mergesort_stream<'a>(
+        main_table: &'a StateTableInner<S, SD>,
+        staging_table: &'a StateTableInner<S, SD>,
+    ) {
+        for vnode in main_table.vnodes().clone().iter_vnodes() {
+            let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
+
+            let iter_main = main_table
+                .iter_keyed_row_with_vnode(
+                    vnode,
+                    &pk_range,
+                    PrefetchOptions::prefetch_for_large_range_scan(),
+                )
+                .await?;
+            let iter_staging = staging_table
+                .iter_keyed_row_with_vnode(
+                    vnode,
+                    &pk_range,
+                    PrefetchOptions::prefetch_for_large_range_scan(),
+                )
+                .await?;
+
+            pin_mut!(iter_main);
+            pin_mut!(iter_staging);
+
+            // Sort-merge join implementation using dual pointers
+            let mut main_item: Option<KeyedRow<Bytes>> = iter_main.next().await.transpose()?;
+            let mut staging_item: Option<KeyedRow<Bytes>> =
+                iter_staging.next().await.transpose()?;
+
+            while let Some(main_kv) = main_item {
+                let main_key = main_kv.key();
+
+                // Advance staging iterator until we find a key >= main_key
+                let mut should_delete = false;
+                while let Some(staging_kv) = &staging_item {
+                    let staging_key = staging_kv.key();
+                    match main_key.cmp(staging_key) {
+                        std::cmp::Ordering::Greater => {
+                            // main_key > staging_key, advance staging
+                            staging_item = iter_staging.next().await.transpose()?;
+                        }
+                        std::cmp::Ordering::Equal => {
+                            // Keys match, this row exists in both tables, no need to delete
+                            break;
+                        }
+                        std::cmp::Ordering::Less => {
+                            // main_key < staging_key, main row doesn't exist in staging, delete it
+                            should_delete = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If staging_item is None, all remaining main rows should be deleted
+                if staging_item.is_none() {
+                    should_delete = true;
+                }
+
+                if should_delete {
+                    yield Some((vnode, main_kv.row().clone()));
+                }
+
+                // Advance main iterator
+                main_item = iter_main.next().await.transpose()?;
+            }
+        }
+
+        // Signal completion
+        yield None;
     }
 
     /// return true when changed

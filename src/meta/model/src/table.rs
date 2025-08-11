@@ -102,16 +102,16 @@ impl From<PbHandleConflictBehavior> for HandleConflictBehavior {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum RefreshState {
     /// The table is refreshable and the current state is `Pending`.
     #[sea_orm(string_value = "IDLE")]
     Idle,
-    /// The table is refreshable and the current state is `Refreshing`.
+    /// The table is refreshable and the current state is `Refreshing` (`RefreshStart` barrier passed).
     #[sea_orm(string_value = "REFRESHING")]
     Refreshing,
-    /// The table is refreshable and the current state is `Finishing`.
+    /// The table is refreshable and the current state is `Finishing`. (`LoadFinish` barrier passed).
     #[sea_orm(string_value = "FINISHING")]
     Finishing,
 }
@@ -135,6 +135,16 @@ impl From<risingwave_pb::catalog::RefreshState> for RefreshState {
             risingwave_pb::catalog::RefreshState::Unspecified => {
                 unreachable!("Unspecified refresh state")
             }
+        }
+    }
+}
+
+impl std::fmt::Display for RefreshState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefreshState::Idle => write!(f, "IDLE"),
+            RefreshState::Refreshing => write!(f, "REFRESHING"),
+            RefreshState::Finishing => write!(f, "FINISHING"),
         }
     }
 }

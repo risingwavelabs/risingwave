@@ -88,6 +88,7 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn only_left(message_stream: ExecutorMessageStream) -> Self {
         Self::new(message_stream, futures::stream::empty().boxed())
     }

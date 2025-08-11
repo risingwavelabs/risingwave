@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
+use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
@@ -399,8 +400,20 @@ impl CommandContext {
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
             Command::StartFragmentBackfill { .. } => {}
-            Command::Refresh { .. } => {}
-            Command::LoadFinish { .. } => {}
+            Command::Refresh { table_id, .. } => {
+                barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .set_table_refresh_state(table_id.table_id() as i32, RefreshState::Refreshing)
+                    .await?;
+            }
+            Command::LoadFinish { table_id, .. } => {
+                barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .set_table_refresh_state(table_id.table_id() as i32, RefreshState::Finishing)
+                    .await?;
+            }
         }
 
         Ok(())

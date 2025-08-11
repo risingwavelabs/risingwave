@@ -111,6 +111,7 @@ impl CompleteBarrierTask {
                 context
                     .handle_load_finished_source_ids(self.load_finished_source_ids.clone())
                     .await?;
+                // TODO: add another signal (maybe refresh_finished_table_ids), reported by Materialize refresh finish.
             }
 
             for command_ctx in self

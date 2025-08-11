@@ -231,6 +231,7 @@ impl<S: StateStore> RefreshProgressTable<S> {
     }
 
     /// Parse `OwnedRow` from storage to `RefreshProgressEntry`
+    #[allow(dead_code)]
     fn parse_row_to_entry(&self, row: &impl Row) -> Option<RefreshProgressEntry> {
         let datums = row.iter().collect::<Vec<_>>();
         if datums.len() != 7 {
