@@ -30,7 +30,7 @@ pub enum StreamKind {
     /// When a row is going to be deleted, an incomplete `Delete` record may be emitted, where
     /// only the primary key columns are guaranteed to be set.
     ///
-    /// Stateful operators typically can not process such streams correctly. It will be converted
+    /// Stateful operators typically can not process such streams correctly. It must be converted
     /// to `Retract` before being sent to stateful operators in this case.
     Upsert,
 }
