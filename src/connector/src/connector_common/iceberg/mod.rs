@@ -343,7 +343,7 @@ impl IcebergCommon {
                 java_catalog_configs.insert("s3.secret-access-key".to_owned(), secret_key.clone());
             }
 
-            if let Some(path_style_access) = self.path_style_access {
+            if let Some(path_style_access) = &self.path_style_access {
                 java_catalog_configs.insert(
                     "s3.path-style-access".to_owned(),
                     path_style_access.to_string(),
@@ -472,6 +472,7 @@ impl IcebergCommon {
                             .secret_key(self.secret_key.clone())
                             .region(self.region.clone())
                             .endpoint(self.endpoint.clone())
+                            .path_style_access(self.path_style_access)
                             .enable_config_load(Some(self.enable_config_load()))
                             .build(),
                     ),
@@ -514,6 +515,12 @@ impl IcebergCommon {
                     }
                     if let Some(secret_key) = &self.secret_key {
                         iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                    }
+                    if let Some(path_style_access) = &self.path_style_access {
+                        iceberg_configs.insert(
+                            S3_PATH_STYLE_ACCESS.to_owned(),
+                            path_style_access.to_string(),
+                        );
                     }
                 };
 
@@ -576,6 +583,12 @@ impl IcebergCommon {
                 }
                 if let Some(secret_key) = &self.secret_key {
                     iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                }
+                if let Some(path_style_access) = &self.path_style_access {
+                    iceberg_configs.insert(
+                        S3_PATH_STYLE_ACCESS.to_owned(),
+                        path_style_access.to_string(),
+                    );
                 }
                 let config_builder =
                     iceberg_catalog_glue::GlueCatalogConfig::builder()
