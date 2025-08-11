@@ -258,7 +258,7 @@ impl SourceManagerCore {
                     WithOptionsSecResolved::without_secrets(new_props.into_iter().collect());
                 let props = ConnectorProperties::extract(props_wrapper, false).unwrap(); // already checked when sending barrier
                 handle.update_props(props);
-                tracing::info!("recreate source {source_id} in source manager");
+                tracing::info!("update source {source_id} properties in source manager");
             } else {
                 tracing::info!("job id {source_id} is not registered in source manager");
             }

@@ -39,8 +39,8 @@ pub async fn handle_alter_connection_connector_props(
 
         session.check_privilege_for_drop_alter(schema_name, &**connection)?;
 
-        tracing::info!(
-            "handle_alter_connection_connector_props: connection_name: {}, connection_id: {}",
+        tracing::debug!(
+            "handle_alter_connection_connector_props triggered: connection_name: {}, connection_id: {}",
             real_connection_name,
             connection.id
         );

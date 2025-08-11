@@ -621,9 +621,9 @@ impl StreamManagerService for StreamServiceImpl {
                 // Broadcast changes to dependent sources and sinks if any exist
                 if !dependent_mutation.is_empty() {
                     tracing::info!(
-                        "broadcasting connection {} property changes to {} dependent sources/sinks",
+                        "broadcasting connection {} property changes to job ids: {:?}",
                         request.object_id,
-                        dependent_mutation.len()
+                        dependent_mutation.keys().collect_vec()
                     );
                     let _dependent_version = self
                         .barrier_scheduler

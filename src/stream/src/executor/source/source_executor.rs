@@ -659,9 +659,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                 if let Some(new_props) = maybe_mutation.get(&source_id.table_id()) {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
-                                        "updating source properties from {:?} to {:?}",
-                                        source_desc.source.config,
-                                        new_props
+                                        actor_id = self.actor_ctx.id,
+                                        source_id = %source_id,
+                                        "updating source connector properties",
                                     );
                                     source_desc.update_reader(new_props.clone())?;
                                     // suppose the connector props change will not involve state change
