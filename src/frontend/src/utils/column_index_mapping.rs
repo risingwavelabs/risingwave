@@ -72,22 +72,25 @@ impl ColIndexMapping {
     /// accurate distribution.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `SomeShard`.
+    ///
+    /// For non-HashShard distribution, it will return the original distribution.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
-        let mapped_dist_key = self.rewrite_dist_key(dist.dist_column_indices());
-
-        match (mapped_dist_key, dist) {
-            (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_, _)) => {
-                Distribution::SomeShard
-            }
-            (Some(mapped_dist_key), Distribution::HashShard(_)) => {
-                Distribution::HashShard(mapped_dist_key)
-            }
-            (Some(mapped_dist_key), Distribution::UpstreamHashShard(_, table_id)) => {
-                Distribution::UpstreamHashShard(mapped_dist_key, *table_id)
-            }
-            _ => {
-                assert!(dist.dist_column_indices().is_empty());
+        match dist {
+            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
                 dist.clone()
+            }
+
+            Distribution::HashShard(_) => match self.rewrite_dist_key(dist.dist_column_indices()) {
+                Some(mapped_dist_key) => Distribution::HashShard(mapped_dist_key),
+                None => Distribution::SomeShard,
+            },
+            Distribution::UpstreamHashShard(_, table_id) => {
+                match self.rewrite_dist_key(dist.dist_column_indices()) {
+                    Some(mapped_dist_key) => {
+                        Distribution::UpstreamHashShard(mapped_dist_key, *table_id)
+                    }
+                    None => Distribution::SomeShard,
+                }
             }
         }
     }
@@ -127,9 +130,9 @@ impl ColIndexMapping {
                         None => RequiredDist::Any,
                     }
                 }
-                Distribution::Single => RequiredDist::PhysicalDist(Distribution::Single),
-                Distribution::Broadcast => RequiredDist::PhysicalDist(Distribution::Broadcast),
-                Distribution::SomeShard => RequiredDist::PhysicalDist(Distribution::SomeShard),
+                Distribution::Single | Distribution::Broadcast | Distribution::SomeShard => {
+                    RequiredDist::PhysicalDist(dist.clone())
+                }
             },
             RequiredDist::Any => RequiredDist::Any,
             RequiredDist::AnyShard => RequiredDist::AnyShard,

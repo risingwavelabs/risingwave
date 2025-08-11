@@ -153,7 +153,7 @@ impl Planner {
                             .map(|(i, column)| (column.name().to_owned(), (i, column)))
                             .collect();
                         let exprs = scan
-                            .table_catalog()
+                            .table()
                             .column_schema()
                             .fields()
                             .iter()

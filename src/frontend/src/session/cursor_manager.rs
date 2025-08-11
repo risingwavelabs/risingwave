@@ -16,7 +16,6 @@ use core::mem;
 use core::time::Duration;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -922,7 +921,7 @@ impl SubscriptionCursor {
                             .into(),
                     ],
                 }
-                .split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)?;
+                .split_to_scan_ranges(&table_catalog, max_split_range_gap)?;
                 if scan.len() > 1 {
                     return Err(ErrorCode::InternalError(
                         "Seek pk row should only generate one scan range".to_owned(),
@@ -939,7 +938,7 @@ impl SubscriptionCursor {
             let core = generic::LogScan::new(
                 table_catalog.name.clone(),
                 output_col_idx,
-                Rc::new(table_catalog.table_desc()),
+                table_catalog.clone(),
                 context,
                 epoch_range,
                 version_id,

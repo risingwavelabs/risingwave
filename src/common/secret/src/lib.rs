@@ -20,3 +20,4 @@ mod encryption;
 pub use encryption::*;
 mod error;
 pub use error::*;
+pub mod vault_client;

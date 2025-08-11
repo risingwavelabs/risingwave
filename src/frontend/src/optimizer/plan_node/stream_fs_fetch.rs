@@ -52,7 +52,7 @@ impl StreamFsFetch {
         let base = PlanBase::new_stream_with_core(
             &source,
             Distribution::SomeShard,
-            source.catalog.as_ref().is_none_or(|s| s.append_only),
+            source.stream_kind(),
             false,
             WatermarkColumns::new(),
             MonotonicityMap::new(), // TODO: derive monotonicity

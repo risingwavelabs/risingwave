@@ -216,7 +216,7 @@ impl IndexSelectionRule {
         );
         // We use `schema.len` instead of `index_item.len` here,
         // because schema contains system columns like `_rw_timestamp` column which is not represented in the index item.
-        let offset = index_scan.table_catalog().columns().len();
+        let offset = index_scan.table().columns().len();
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.clone(),
@@ -320,15 +320,15 @@ impl IndexSelectionRule {
         };
         let new_predicate = predicate.rewrite_expr(&mut shift_input_ref_rewriter);
 
-        let primary_table_desc = logical_scan.table_desc();
+        let primary_table = logical_scan.table();
 
         let primary_table_scan = LogicalScan::create(
-            logical_scan.table_catalog(),
+            logical_scan.table().clone(),
             logical_scan.ctx(),
             logical_scan.as_of().clone(),
         );
 
-        let conjunctions = primary_table_desc
+        let conjunctions = primary_table
             .pk
             .iter()
             .enumerate()
@@ -337,7 +337,7 @@ impl IndexSelectionRule {
                     x,
                     schema.fields[x].data_type.clone(),
                     y.column_index + index_access_len,
-                    primary_table_desc.columns[y.column_index].data_type.clone(),
+                    primary_table.columns[y.column_index].data_type.clone(),
                 )
             })
             .chain(new_predicate)
@@ -541,21 +541,21 @@ impl IndexSelectionRule {
         }
 
         // try primary index
-        let primary_table_desc = logical_scan.table_desc();
+        let primary_table = logical_scan.table();
         if let Some(idx) = column_index {
             assert_eq!(conjunctions.len(), 1);
-            if primary_table_desc.pk[0].column_index != idx {
+            if primary_table.pk[0].column_index != idx {
                 return result;
             }
         }
 
         let primary_access = generic::TableScan::new(
-            primary_table_desc
+            primary_table
                 .pk
                 .iter()
                 .map(|x| x.column_index)
                 .collect_vec(),
-            logical_scan.table_catalog(),
+            logical_scan.table().clone(),
             vec![],
             logical_scan.ctx(),
             Condition {
@@ -714,18 +714,13 @@ impl<'a> TableScanIoEstimator<'a> {
     pub fn estimate_row_size(table_scan: &LogicalScan) -> usize {
         // 5 for table_id + 1 for vnode + 8 for epoch
         let row_meta_field_estimate_size = 14_usize;
-        let table_desc = table_scan.table_desc();
+        let table = table_scan.table();
         row_meta_field_estimate_size
-            + table_desc
+            + table
                 .columns
                 .iter()
                 // add order key twice for its appearance both in key and value
-                .chain(
-                    table_desc
-                        .pk
-                        .iter()
-                        .map(|x| &table_desc.columns[x.column_index]),
-                )
+                .chain(table.pk.iter().map(|x| &table.columns[x.column_index]))
                 .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
                 .sum::<usize>()
     }
@@ -769,13 +764,11 @@ impl<'a> TableScanIoEstimator<'a> {
     }
 
     fn estimate_conjunctions(&mut self, conjunctions: &[ExprImpl]) -> IndexCost {
-        let order_column_indices = self.table_scan.table_desc().order_column_indices();
-
         let mut new_conjunctions = conjunctions.to_owned();
 
         let mut match_item_vec = vec![];
 
-        for column_idx in order_column_indices {
+        for column_idx in self.table_scan.table().order_column_indices() {
             let match_item = self.match_index_column(column_idx, &mut new_conjunctions);
             // seeing range, we don't need to match anymore.
             let should_break = match match_item {

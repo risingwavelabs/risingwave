@@ -43,7 +43,7 @@ impl StreamSource {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::SomeShard,
-            core.catalog.as_ref().is_none_or(|s| s.append_only),
+            core.stream_kind(),
             false,
             WatermarkColumns::new(),
             MonotonicityMap::new(),

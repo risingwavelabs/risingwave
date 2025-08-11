@@ -16,7 +16,7 @@ use educe::Educe;
 
 use super::generic::GenericPlanNode;
 use super::*;
-use crate::optimizer::property::{Distribution, WatermarkColumns};
+use crate::optimizer::property::{Distribution, StreamKind, WatermarkColumns};
 
 /// No extra fields for logical plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -51,9 +51,9 @@ pub struct StreamExtra {
     /// Common fields for physical plan nodes.
     physical: PhysicalCommonExtra,
 
-    /// The append-only property of the `PlanNode`'s output is a stream-only property. Append-only
-    /// means the stream contains only insert operation.
-    append_only: bool,
+    /// Whether the `PlanNode`'s output is append-only, retract, or upsert.
+    stream_kind: StreamKind,
+
     /// Whether the output is emitted on window close.
     emit_on_window_close: bool,
     /// The watermark column indices of the `PlanNode`'s output. There could be watermark output from
@@ -159,8 +159,8 @@ where
 }
 
 impl stream::StreamPlanNodeMetadata for PlanBase<Stream> {
-    fn append_only(&self) -> bool {
-        self.extra.append_only
+    fn stream_kind(&self) -> StreamKind {
+        self.extra.stream_kind
     }
 
     fn emit_on_window_close(&self) -> bool {
@@ -225,7 +225,7 @@ impl PlanBase<Stream> {
         stream_key: Option<Vec<usize>>,
         functional_dependency: FunctionalDependencySet,
         dist: Distribution,
-        append_only: bool,
+        stream_kind: StreamKind,
         emit_on_window_close: bool,
         watermark_columns: WatermarkColumns,
         columns_monotonicity: MonotonicityMap,
@@ -239,7 +239,7 @@ impl PlanBase<Stream> {
             functional_dependency,
             extra: StreamExtra {
                 physical: PhysicalCommonExtra { dist },
-                append_only,
+                stream_kind,
                 emit_on_window_close,
                 watermark_columns,
                 columns_monotonicity,
@@ -250,7 +250,7 @@ impl PlanBase<Stream> {
     pub fn new_stream_with_core(
         core: &impl GenericPlanNode,
         dist: Distribution,
-        append_only: bool,
+        stream_kind: StreamKind,
         emit_on_window_close: bool,
         watermark_columns: WatermarkColumns,
         columns_monotonicity: MonotonicityMap,
@@ -261,7 +261,7 @@ impl PlanBase<Stream> {
             core.stream_key(),
             core.functional_dependency(),
             dist,
-            append_only,
+            stream_kind,
             emit_on_window_close,
             watermark_columns,
             columns_monotonicity,
