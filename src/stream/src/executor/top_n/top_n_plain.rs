@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Op;
+use risingwave_common::array::{ChunkType, Op};
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -168,7 +168,8 @@ where
         if staging.is_empty() {
             return Ok(None);
         }
-        let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(staging.len()));
+        let mut chunk_builder =
+            StreamChunkBuilder::<{ ChunkType::Column }>::unlimited(data_types, Some(staging.len()));
         for res in staging.into_deserialized_changes(&deserializer) {
             let (op, row) = res?;
             let _none = chunk_builder.append_row(op, row);

@@ -15,7 +15,7 @@
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Op};
+use risingwave_common::array::{ChunkType, DataChunk, Op};
 use risingwave_common::types::Interval;
 use risingwave_expr::ExprError;
 use risingwave_expr::expr::NonStrictExpression;
@@ -164,7 +164,8 @@ impl HopWindowExecutor {
                     let mut row_iters = chunks.iter().map(|c| c.rows()).collect_vec();
 
                     let data_types = chunks[0].data_types();
-                    let mut chunk_builder = StreamChunkBuilder::new(chunk_size, data_types);
+                    let mut chunk_builder =
+                        StreamChunkBuilder::<{ ChunkType::Column }>::new(chunk_size, data_types);
 
                     for &op in &*ops {
                         // Since there could be multiple rows for the same input row, we need to

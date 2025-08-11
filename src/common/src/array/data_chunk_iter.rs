@@ -108,6 +108,13 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
             DataChunkRefIter::Rows(r) => r.next(),
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            DataChunkRefIter::Columns(c) => c.size_hint(),
+            DataChunkRefIter::Rows(r) => r.size_hint(),
+        }
+    }
 }
 
 pub struct RowChunkRefIter<'a> {
@@ -210,6 +217,13 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
         match self {
             DataChunkRefIterWithHoles::Columns(c) => c.next(),
             DataChunkRefIterWithHoles::Rows(r) => r.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            DataChunkRefIterWithHoles::Columns(c) => c.size_hint(),
+            DataChunkRefIterWithHoles::Rows(r) => r.size_hint(),
         }
     }
 }

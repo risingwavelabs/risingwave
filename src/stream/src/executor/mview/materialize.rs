@@ -807,7 +807,9 @@ mod tests {
 
     use rand::rngs::SmallRng;
     use rand::{Rng, RngCore, SeedableRng};
+    use risingwave_common::array::ChunkType;
     use risingwave_common::array::stream_chunk::{StreamChunkMut, StreamChunkTestExt};
+    use risingwave_common::array::stream_chunk_builder::ChunkTypePrimitive;
     use risingwave_common::catalog::Field;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
@@ -1908,8 +1910,10 @@ mod tests {
         const KN: u32 = 4;
         const SEED: u64 = 998244353;
         let mut ret = vec![];
-        let mut builder =
-            StreamChunkBuilder::new(chunk_size, vec![DataType::Int32, DataType::Int32]);
+        let mut builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(
+            chunk_size,
+            vec![DataType::Int32, DataType::Int32],
+        );
         let mut rng = SmallRng::seed_from_u64(SEED);
 
         let random_vis = |c: StreamChunk, rng: &mut SmallRng| -> StreamChunk {

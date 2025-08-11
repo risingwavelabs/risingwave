@@ -18,7 +18,7 @@ use std::task::{Context, Poll};
 
 use anyhow::Context as _;
 use futures::future::try_join_all;
-use risingwave_common::array::StreamChunkBuilder;
+use risingwave_common::array::{ChunkType, StreamChunkBuilder};
 use risingwave_common::config::MetricLevel;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -357,7 +357,7 @@ impl Execute for MergeExecutor {
 /// to be emitted immediately along with the message itself.
 struct BufferChunks<S: Stream> {
     inner: S,
-    chunk_builder: StreamChunkBuilder,
+    chunk_builder: StreamChunkBuilder<{ ChunkType::Column }>,
 
     /// The items to be emitted. Whenever there's something here, we should return a `Poll::Ready` immediately.
     pending_items: VecDeque<S::Item>,
@@ -366,7 +366,8 @@ struct BufferChunks<S: Stream> {
 impl<S: Stream> BufferChunks<S> {
     pub(super) fn new(inner: S, chunk_size: usize, schema: Schema) -> Self {
         assert!(chunk_size > 0);
-        let chunk_builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
+        let chunk_builder =
+            StreamChunkBuilder::<{ ChunkType::Column }>::new(chunk_size, schema.data_types());
         Self {
             inner,
             chunk_builder,

@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::array::Op;
+use risingwave_common::array::{ChunkType, Op};
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -189,7 +189,10 @@ where
             .group_top_n_cached_entry_count
             .set(self.caches.len() as i64);
 
-        let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(chunk.capacity()));
+        let mut chunk_builder = StreamChunkBuilder::<{ ChunkType::Column }>::unlimited(
+            data_types,
+            Some(chunk.capacity()),
+        );
         for staging in stagings.into_values() {
             for res in staging.into_deserialized_changes(&deserializer) {
                 let (op, row) = res?;

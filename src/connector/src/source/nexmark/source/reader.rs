@@ -21,7 +21,7 @@ use nexmark::EventGenerator;
 use nexmark::config::NexmarkConfig;
 use nexmark::event::EventType;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ChunkType, Op, StreamChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common_estimate_size::EstimateSize;
@@ -163,8 +163,10 @@ impl NexmarkSplitReader {
         let mut event_dtypes_with_offset = get_event_data_types(self.event_type, self.row_id_index);
         event_dtypes_with_offset.extend([DataType::Varchar, DataType::Varchar]);
 
-        let mut chunk_builder =
-            StreamChunkBuilder::new(self.max_chunk_size as usize, event_dtypes_with_offset);
+        let mut chunk_builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(
+            self.max_chunk_size as usize,
+            event_dtypes_with_offset,
+        );
         loop {
             if self.generator.global_offset() >= self.event_num {
                 break;

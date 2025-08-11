@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 use futures::future::try_join_all;
 use futures::stream;
 use itertools::Itertools;
+use risingwave_common::array::ChunkType;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::epoch::EpochPair;
@@ -157,7 +158,7 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
     window_watermark: Option<ScalarImpl>,
 
     /// Stream chunk builder.
-    chunk_builder: StreamChunkBuilder,
+    chunk_builder: StreamChunkBuilder<{ ChunkType::Column }>,
 
     buffer: SortBuffer<S>,
 }
@@ -597,7 +598,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
-            chunk_builder: StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types()),
+            chunk_builder: StreamChunkBuilder::<{ ChunkType::Column }>::new(
+                this.chunk_size,
+                this.info.schema.data_types(),
+            ),
             buffer: SortBuffer::new(window_col_idx_in_group_key, &this.intermediate_state_table),
         };
 

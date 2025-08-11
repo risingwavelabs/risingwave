@@ -18,8 +18,8 @@ use std::ops::RangeInclusive;
 
 use delta_btree_map::Change;
 use itertools::Itertools;
-use risingwave_common::array::Op;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::array::{ChunkType, Op};
 use risingwave_common::row::RowExt;
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::DefaultOrdered;
@@ -413,7 +413,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
         // `input pk` => `Record`
         let mut key_change_update_buffer: BTreeMap<DefaultOrdered<OwnedRow>, Record<OwnedRow>> =
             BTreeMap::new();
-        let mut chunk_builder = StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
+        let mut chunk_builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(
+            this.chunk_size,
+            this.schema.data_types(),
+        );
 
         // Build final changes partition by partition.
         for (part_key, (delta, no_effect_delta)) in deltas {

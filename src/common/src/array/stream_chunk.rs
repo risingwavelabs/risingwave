@@ -25,8 +25,9 @@ use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbOp, PbStreamChunk};
+use risingwave_pb::plan_common::additional_column::ColumnType;
 
-use super::stream_chunk_builder::StreamChunkBuilder;
+use super::stream_chunk_builder::{ChunkType, StreamChunkBuilder};
 use super::{ArrayImpl, ArrayRef, ArrayResult, ColumnChunk, DataChunkTestExt, RowRef};
 use crate::array::DataChunk;
 use crate::bitmap::{Bitmap, BitmapBuilder};
@@ -150,7 +151,10 @@ impl StreamChunk {
     /// Should prefer using [`StreamChunkBuilder`] instead to avoid unnecessary
     /// allocation of rows.
     pub fn from_rows(rows: &[(Op, impl Row)], data_types: &[DataType]) -> Self {
-        let mut builder = StreamChunkBuilder::unlimited(data_types.to_vec(), Some(rows.len()));
+        let mut builder = StreamChunkBuilder::<{ ChunkType::Column }>::unlimited(
+            data_types.to_vec(),
+            Some(rows.len()),
+        );
 
         for (op, row) in rows {
             let none = builder.append_row(*op, row);
@@ -161,7 +165,7 @@ impl StreamChunk {
     }
 
     pub fn empty(data_types: &[DataType]) -> Self {
-        StreamChunkBuilder::build_empty(data_types.to_vec())
+        StreamChunkBuilder::<{ ChunkType::Column }>::build_empty(data_types.to_vec())
     }
 
     /// Get the reference of the underlying data chunk.
@@ -199,20 +203,42 @@ impl StreamChunk {
     /// For consecutive `UpdateDelete` and `UpdateInsert`, they will be kept in one chunk.
     /// As a result, some chunks may have `size + 1` rows.
     pub fn split(&self, size: usize) -> Vec<Self> {
-        let mut builder = StreamChunkBuilder::new(size, self.data_types());
-        let mut outputs = Vec::new();
+        match self.data_chunk() {
+            DataChunk::Columns(c) => {
+                let mut builder =
+                    StreamChunkBuilder::<{ ChunkType::Column }>::new(size, self.data_types());
+                let mut outputs = Vec::new();
 
-        // TODO: directly append the chunk.
-        for (op, row) in self.rows() {
-            if let Some(chunk) = builder.append_row(op, row) {
-                outputs.push(chunk);
+                // TODO: directly append the chunk.
+                for (op, row) in self.rows() {
+                    if let Some(chunk) = builder.append_row(op, row) {
+                        outputs.push(chunk);
+                    }
+                }
+                if let Some(output) = builder.take() {
+                    outputs.push(output);
+                }
+
+                outputs
+            }
+            DataChunk::Rows(r) => {
+                let mut builder =
+                    StreamChunkBuilder::<{ ChunkType::Row }>::new(size, self.data_types());
+                let mut outputs = Vec::new();
+
+                // TODO: directly append the chunk.
+                for (op, row) in self.rows() {
+                    if let Some(chunk) = builder.append_row(op, row) {
+                        outputs.push(chunk);
+                    }
+                }
+                if let Some(output) = builder.take() {
+                    outputs.push(output);
+                }
+
+                outputs
             }
         }
-        if let Some(output) = builder.take() {
-            outputs.push(output);
-        }
-
-        outputs
     }
 
     pub fn into_parts(self) -> (DataChunk, Arc<[Op]>) {
@@ -685,7 +711,8 @@ impl StreamChunk {
         let data_types = chunks[0].data_types();
         let size = chunks.iter().map(|c| c.cardinality()).sum::<usize>();
 
-        let mut builder = StreamChunkBuilder::unlimited(data_types, Some(size));
+        let mut builder =
+            StreamChunkBuilder::<{ ChunkType::Column }>::unlimited(data_types, Some(size));
 
         for chunk in chunks {
             // TODO: directly append chunks.

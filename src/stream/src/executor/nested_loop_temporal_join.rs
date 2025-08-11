@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
+use risingwave_common::array::{ChunkType, StreamChunk};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -67,7 +67,7 @@ async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
     right_table: &mut TemporalSide<S>,
     chunk: StreamChunk,
 ) {
-    let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
+    let mut builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(chunk_size, full_schema);
 
     for (op, left_row) in chunk.rows() {
         let mut matched = false;

@@ -23,7 +23,7 @@ use prehash::{Passthru, Prehashed, new_prehashed_map_with_capacity};
 use risingwave_common::array::stream_chunk::{OpRowMutRef, StreamChunkMut};
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::{ChunkType, Op, RowRef, StreamChunk};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::{Project, RowExt};
 use risingwave_common::types::DataType;
@@ -186,7 +186,7 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
 
     pub fn into_chunks(self, chunk_size: usize, data_types: Vec<DataType>) -> Vec<StreamChunk> {
         let mut ret = vec![];
-        let mut builder = StreamChunkBuilder::new(chunk_size, data_types);
+        let mut builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(chunk_size, data_types);
         for (_, row_op) in self.map {
             match row_op {
                 RowOp::Insert(row) => {

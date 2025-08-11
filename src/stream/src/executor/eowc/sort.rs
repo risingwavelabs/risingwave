@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Op;
+use risingwave_common::array::{ChunkType, Op};
 
 use super::sort_buffer::SortBuffer;
 use crate::executor::prelude::*;
@@ -93,8 +93,10 @@ impl<S: StateStore> SortExecutor<S> {
                 Message::Watermark(watermark @ Watermark { col_idx, .. })
                     if col_idx == this.sort_column_index =>
                 {
-                    let mut chunk_builder =
-                        StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
+                    let mut chunk_builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(
+                        this.chunk_size,
+                        this.schema.data_types(),
+                    );
 
                     #[for_await]
                     for row in vars

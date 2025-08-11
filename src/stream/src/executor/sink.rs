@@ -19,8 +19,8 @@ use anyhow::anyhow;
 use futures::stream::select;
 use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
-use risingwave_common::array::Op;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
+use risingwave_common::array::{ChunkType, Op};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge};
@@ -477,7 +477,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             }
                         } else {
                             let mut chunk_builder =
-                                StreamChunkBuilder::new(chunk_size, input_data_types.clone());
+                                StreamChunkBuilder::<{ ChunkType::Column }>::new(
+                                    chunk_size,
+                                    input_data_types.clone(),
+                                );
                             for chunk in chunks {
                                 for (op, row) in chunk.rows() {
                                     if let Some(c) = chunk_builder.append_row(op, row) {

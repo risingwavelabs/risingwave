@@ -19,8 +19,17 @@ use crate::row::Row;
 use crate::types::{DataType, DatumRef};
 use crate::util::iter_util::ZipEqFast;
 
+pub type ChunkTypePrimitive = u8;
+
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod ChunkType {
+    use super::ChunkTypePrimitive;
+    pub const Column: ChunkTypePrimitive = 0;
+    pub const Row: ChunkTypePrimitive = 1;
+}
+
 /// Build stream chunks with fixed chunk size from rows or records.
-pub struct StreamChunkBuilder {
+pub struct StreamChunkBuilder<const T: ChunkTypePrimitive> {
     /// operations in the data chunk to build
     ops: Vec<Op>,
 
@@ -45,7 +54,7 @@ pub struct StreamChunkBuilder {
     size: usize,
 }
 
-impl Drop for StreamChunkBuilder {
+impl<const T: ChunkTypePrimitive> Drop for StreamChunkBuilder<T> {
     fn drop(&mut self) {
         // Possible to fail when async task gets cancelled.
         if self.size != 0 {
@@ -60,7 +69,10 @@ impl Drop for StreamChunkBuilder {
 const MAX_INITIAL_CAPACITY: usize = 4096;
 const DEFAULT_INITIAL_CAPACITY: usize = 64;
 
-impl StreamChunkBuilder {
+pub type ColumnChunkBuilder = StreamChunkBuilder<{ ChunkType::Column }>;
+pub type RowChunkBuilder = StreamChunkBuilder<{ ChunkType::Row }>;
+
+impl<const T: ChunkTypePrimitive> StreamChunkBuilder<T> {
     /// Create a new `StreamChunkBuilder` with a fixed max chunk size.
     /// Note that in the case of ending with `Update`, the builder may yield a chunk with size
     /// `max_chunk_size + 1`.
@@ -75,7 +87,8 @@ impl StreamChunkBuilder {
             .map(|datatype| datatype.create_array_builder(initial_capacity))
             .collect();
         let vis_builder = BitmapBuilder::with_capacity(initial_capacity);
-        Self {
+
+        StreamChunkBuilder::<T> {
             ops,
             column_builders,
             data_types,
@@ -90,7 +103,7 @@ impl StreamChunkBuilder {
     /// The builder will only yield chunks when `take` is called.
     pub fn unlimited(data_types: Vec<DataType>, initial_capacity: Option<usize>) -> Self {
         let initial_capacity = initial_capacity.unwrap_or(DEFAULT_INITIAL_CAPACITY);
-        Self {
+        StreamChunkBuilder::<T> {
             ops: Vec::with_capacity(initial_capacity),
             column_builders: data_types
                 .iter()
@@ -103,9 +116,11 @@ impl StreamChunkBuilder {
             size: 0,
         }
     }
+}
 
+impl<const T: ChunkTypePrimitive> StreamChunkBuilder<T> {
     pub fn build_empty(data_types: Vec<DataType>) -> StreamChunk {
-        Self::new(1, data_types).take_inner()
+        StreamChunkBuilder::<{ ChunkType::Column }>::new(1, data_types).take_inner()
     }
 
     /// Get the current number of rows in the builder.
@@ -232,7 +247,8 @@ mod tests {
     #[test]
     fn test_stream_chunk_builder() {
         let row = OwnedRow::new(vec![Datum::None, Datum::None]);
-        let mut builder = StreamChunkBuilder::new(3, vec![DataType::Int32, DataType::Int32]);
+        let mut builder =
+            StreamChunkBuilder::<ChunkType::Column>::new(3, vec![DataType::Int32, DataType::Int32]);
         let res = builder.append_row(Op::Delete, row.clone());
         assert!(res.is_none());
         let res = builder.append_row(Op::Insert, row.clone());
@@ -292,7 +308,10 @@ mod tests {
     #[test]
     fn test_stream_chunk_builder_with_max_size_1() {
         let row = OwnedRow::new(vec![Datum::None, Datum::None]);
-        let mut builder = StreamChunkBuilder::new(1, vec![DataType::Int32, DataType::Int32]);
+        let mut builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(
+            1,
+            vec![DataType::Int32, DataType::Int32],
+        );
 
         let res = builder.append_row(Op::Delete, row.clone());
         assert_eq!(
@@ -340,8 +359,10 @@ mod tests {
     #[test]
     fn test_unlimited_stream_chunk_builder() {
         let row = OwnedRow::new(vec![Datum::None, Datum::None]);
-        let mut builder =
-            StreamChunkBuilder::unlimited(vec![DataType::Int32, DataType::Int32], None);
+        let mut builder = StreamChunkBuilder::<{ ChunkType::Column }>::unlimited(
+            vec![DataType::Int32, DataType::Int32],
+            None,
+        );
 
         let res = builder.append_row(Op::Delete, row.clone());
         assert!(res.is_none());

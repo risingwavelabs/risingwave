@@ -17,7 +17,7 @@ use either::Either;
 use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
 use parking_lot::Mutex;
-use risingwave_common::array::Op;
+use risingwave_common::array::{ChunkType, Op};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::ConnectorProperties;
@@ -128,7 +128,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
                     .build()
                     .context("failed to build iceberg scan")?;
 
-                let mut chunk_builder = StreamChunkBuilder::new(
+                let mut chunk_builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(
                     self.streaming_config.developer.chunk_size,
                     vec![DataType::Varchar, DataType::Jsonb],
                 );

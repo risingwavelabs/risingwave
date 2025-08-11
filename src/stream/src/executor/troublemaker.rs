@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use rand::Rng;
-use risingwave_common::array::Op;
 use risingwave_common::array::stream_record::{Record, RecordType};
+use risingwave_common::array::{ChunkType, Op};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::util::iter_util::ZipEqFast;
 use smallvec::SmallVec;
@@ -36,7 +36,7 @@ struct Inner {
 }
 
 struct Vars {
-    chunk_builder: StreamChunkBuilder,
+    chunk_builder: StreamChunkBuilder<{ ChunkType::Column }>,
     met_delete_before: bool,
     field_generators: Box<[Option<FieldGeneratorImpl>]>,
 }
@@ -75,7 +75,10 @@ impl TroublemakerExecutor {
         }
 
         let mut vars = Vars {
-            chunk_builder: StreamChunkBuilder::new(this.chunk_size, input.schema().data_types()),
+            chunk_builder: StreamChunkBuilder::<{ ChunkType::Column }>::new(
+                this.chunk_size,
+                input.schema().data_types(),
+            ),
             met_delete_before: false,
             field_generators: field_generators.into_boxed_slice(),
         };
