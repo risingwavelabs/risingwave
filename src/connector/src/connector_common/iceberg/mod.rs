@@ -26,7 +26,7 @@ use ::iceberg::{Catalog, TableIdent};
 use anyhow::{Context, anyhow};
 use iceberg::io::{
     AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, GCS_CREDENTIALS_JSON,
-    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD,
+    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use phf::{Set, phf_set};
@@ -297,6 +297,13 @@ impl IcebergCommon {
                 GCS_DISABLE_CONFIG_LOAD.to_owned(),
                 (!enable_config_load).to_string(),
             );
+
+            if let Some(path_style_access) = self.path_style_access {
+                iceberg_configs.insert(
+                    S3_PATH_STYLE_ACCESS.to_owned(),
+                    path_style_access.to_string(),
+                );
+            }
 
             iceberg_configs
         };
