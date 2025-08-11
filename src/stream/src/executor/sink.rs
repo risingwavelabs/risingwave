@@ -516,7 +516,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 // the frontend derivation result.
                                 yield Message::Chunk(force_append_only(chunk))
                             }
-                            SinkType::Upsert => yield Message::Chunk(chunk),
+                            SinkType::Upsert => {
+                                for chunk in
+                                    StreamChunkCompactor::new(stream_key.clone(), vec![chunk])
+                                        .into_compacted_chunks()
+                                {
+                                    yield Message::Chunk(chunk)
+                                }
+                            }
                         }
                     }
                     Message::Barrier(barrier) => {
