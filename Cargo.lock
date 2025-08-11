@@ -926,9 +926,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.28.3"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4df839a6643e1e3248733b01f229dc4f462d7256f808bbaf04cac40739b345c2"
+checksum = "31acf814d6b499e33ec894bb0fd7ddaf2665b44fbdd42b858d736449271fde0c"
 dependencies = [
  "async-openai-macros",
  "backoff",
@@ -11684,14 +11684,21 @@ dependencies = [
  "anyhow",
  "aws-lc-rs",
  "bincode 1.3.3",
+ "cfg-or-panic",
  "hex",
+ "madsim-tokio",
+ "moka",
  "parking_lot 0.12.1",
  "prost 0.13.4",
+ "reqwest 0.12.15",
  "risingwave_pb",
  "serde",
+ "serde_json",
+ "serde_with",
  "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tracing",
+ "url",
 ]
 
 [[package]]
