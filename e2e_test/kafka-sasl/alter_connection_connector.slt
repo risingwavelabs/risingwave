@@ -89,7 +89,7 @@ cat << EOF | rpk topic produce test_alter_conn_1 -X brokers=message_queue_sasl_1
 {"x": 15}
 EOF
 
-sleep 10s
+sleep 5s
 
 query I retry 5 backoff 3s
 select * from t_conn order by x;
@@ -120,7 +120,7 @@ statement ok
 drop secret s_broker;
 
 system ok
-rpk topic delete test_alter_conn_1 -X brokers=localhost:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
+rpk topic delete test_alter_conn_1 -X brokers=message_queue_sasl_1:19092 -X sasl.mechanism=PLAIN -X user=dev -X pass=rw
 
 system ok
-rpk topic delete test_alter_conn_1 -X brokers=localhost:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+rpk topic delete test_alter_conn_1 -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
