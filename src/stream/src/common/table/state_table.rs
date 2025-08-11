@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
@@ -178,7 +178,9 @@ where
     /// In streaming executors, this methods must be called **after** receiving and yielding the first barrier,
     /// and otherwise, deadlock can be likely to happen.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.row_store.init(epoch).await?;
+        self.row_store
+            .init(epoch, self.distribution.vnodes())
+            .await?;
         assert_eq!(None, self.epoch.replace(epoch), "should not init for twice");
         Ok(())
     }
@@ -248,6 +250,7 @@ macro_rules! dispatch_value_indices {
 
 struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
     state_store: LS,
+    all_rows: Option<BTreeMap<TableKey<Bytes>, OwnedRow>>,
 
     table_id: TableId,
     table_option: TableOption,
@@ -257,15 +260,48 @@ struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
 }
 
 impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
-    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        Ok(self.state_store.init(InitOptions::new(epoch)).await?)
+    async fn may_reload_all_rows(&mut self, vnode_bitmap: &Bitmap) -> StreamExecutorResult<()> {
+        if let Some(rows) = &mut self.all_rows {
+            rows.clear();
+            for vnode in vnode_bitmap.iter_vnodes() {
+                let memcomparable_range_with_vnode = prefixed_range_with_vnode::<Bytes>(.., vnode);
+                // TODO: set read options
+                let stream = deserialize_keyed_row_stream::<Bytes>(
+                    self.state_store
+                        .iter(
+                            memcomparable_range_with_vnode,
+                            ReadOptions {
+                                prefix_hint: None,
+                                prefetch_options: Default::default(),
+                                cache_policy: Default::default(),
+                                retention_seconds: self.table_option.retention_seconds,
+                            },
+                        )
+                        .await?,
+                    &*self.row_serde,
+                );
+                pin_mut!(stream);
+                while let Some((encoded_key, row)) = stream.try_next().await? {
+                    let key = TableKey(encoded_key);
+                    rows.try_insert(key, row).expect("non-duplicated");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn init(&mut self, epoch: EpochPair, vnode_bitmap: &Bitmap) -> StreamExecutorResult<()> {
+        self.state_store.init(InitOptions::new(epoch)).await?;
+        self.may_reload_all_rows(vnode_bitmap).await
     }
 
     async fn update_vnode_bitmap(
         &mut self,
         vnodes: Arc<Bitmap>,
     ) -> StreamExecutorResult<Arc<Bitmap>> {
-        Ok(self.state_store.update_vnode_bitmap(vnodes).await?)
+        let prev_vnodes = self.state_store.update_vnode_bitmap(vnodes.clone()).await?;
+        self.may_reload_all_rows(&vnodes).await?;
+        Ok(prev_vnodes)
     }
 
     async fn try_flush(&mut self) -> StreamExecutorResult<()> {
@@ -574,9 +610,12 @@ where
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
+        // TODO: provide options to enable or disable loading all rows
+
         Self {
             table_id,
             row_store: StateTableRowStore {
+                all_rows: Some(BTreeMap::new()),
                 table_option,
                 state_store: local_state_store,
                 row_serde,
@@ -743,6 +782,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         key_bytes: TableKey<Bytes>,
         prefix_hint: Option<Bytes>,
     ) -> StreamExecutorResult<Option<OwnedRow>> {
+        if let Some(row) = &self.all_rows {
+            return Ok(row.get(&key_bytes).cloned());
+        }
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -767,6 +809,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         key_bytes: TableKey<Bytes>,
         prefix_hint: Option<Bytes>,
     ) -> StreamExecutorResult<bool> {
+        if let Some(row) = &self.all_rows {
+            return Ok(row.contains_key(&key_bytes));
+        }
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -907,7 +952,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
     fn insert(&mut self, key: TableKey<Bytes>, value: impl Row) {
         insane_mode_discard_point!();
-        let value_bytes = self.row_serde.serialize(value).into();
+        let value_bytes = self.row_serde.serialize(&value).into();
+        if let Some(rows) = &mut self.all_rows {
+            rows.insert(key.clone(), value.into_owned_row());
+        }
         self.state_store
             .insert(key, value_bytes, None)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -916,6 +964,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     fn delete(&mut self, key: TableKey<Bytes>, value: impl Row) {
         insane_mode_discard_point!();
         let value_bytes = self.row_serde.serialize(value).into();
+        if let Some(rows) = &mut self.all_rows {
+            rows.remove(&key);
+        }
         self.state_store
             .delete(key, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -923,8 +974,11 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
     fn update(&mut self, key_bytes: TableKey<Bytes>, old_value: impl Row, new_value: impl Row) {
         insane_mode_discard_point!();
-        let new_value_bytes = self.row_serde.serialize(new_value).into();
+        let new_value_bytes = self.row_serde.serialize(&new_value).into();
         let old_value_bytes = self.row_serde.serialize(old_value).into();
+        if let Some(rows) = &mut self.all_rows {
+            rows.insert(key_bytes.clone(), new_value.into_owned_row());
+        }
         self.state_store
             .insert(key_bytes, new_value_bytes, Some(old_value_bytes))
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -1335,10 +1389,16 @@ where
 impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     async fn iter_kv<K: CopyFromSlice>(
         &self,
-        table_key_range: TableKeyRange,
+        (start, end): TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
+        if let Some(rows) = &self.all_rows {
+            return Ok(futures::future::Either::Left(futures::stream::iter(
+                rows.range((start, end))
+                    .map(|(key, value)| Ok((K::copy_from_slice(key.to_ref().0), value.clone()))),
+            )));
+        }
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -1346,18 +1406,27 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
 
-        Ok(deserialize_keyed_row_stream(
-            self.state_store.iter(table_key_range, read_options).await?,
-            &*self.row_serde,
+        Ok(futures::future::Either::Right(
+            deserialize_keyed_row_stream(
+                self.state_store.iter((start, end), read_options).await?,
+                &*self.row_serde,
+            ),
         ))
     }
 
     async fn rev_iter_kv<K: CopyFromSlice>(
         &self,
-        table_key_range: TableKeyRange,
+        (start, end): TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
+        if let Some(rows) = &self.all_rows {
+            return Ok(futures::future::Either::Left(futures::stream::iter(
+                rows.range((start, end))
+                    .rev()
+                    .map(|(key, value)| Ok((K::copy_from_slice(key.to_ref().0), value.clone()))),
+            )));
+        }
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -1365,11 +1434,13 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
 
-        Ok(deserialize_keyed_row_stream(
-            self.state_store
-                .rev_iter(table_key_range, read_options)
-                .await?,
-            &*self.row_serde,
+        Ok(futures::future::Either::Right(
+            deserialize_keyed_row_stream(
+                self.state_store
+                    .rev_iter((start, end), read_options)
+                    .await?,
+                &*self.row_serde,
+            ),
         ))
     }
 }
