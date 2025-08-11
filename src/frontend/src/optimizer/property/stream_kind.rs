@@ -76,16 +76,15 @@ macro_rules! reject_upsert_input {
     };
 
     ($input:expr, $curr:expr) => {{
+        use crate::optimizer::plan_node::Explain;
         use crate::optimizer::property::StreamKind;
+
         let kind = $input.stream_kind();
         if let StreamKind::Upsert = kind {
             risingwave_common::bail!(
-                "{} yields upsert stream, which is not supported as input of {}",
-                std::any::type_name_of_val(&$input)
-                    .split("::")
-                    .last()
-                    .unwrap(),
+                "upsert stream is not supported as input of {}, plan:\n{}",
                 $curr,
+                $input.explain_to_string()
             );
         }
         kind
