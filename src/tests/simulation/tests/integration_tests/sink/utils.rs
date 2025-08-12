@@ -31,6 +31,7 @@ use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::{Rng, rng as thread_rng};
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::Field;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl, Serial};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -321,6 +322,7 @@ impl SinkCommitCoordinator for TestCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
     ) -> risingwave_connector::sink::Result<()> {
         let file_ids = metadata.into_iter().map(|metadata| {
             let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
