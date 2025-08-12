@@ -510,7 +510,7 @@ impl VectorFileBuilder {
     }
 }
 
-pub(crate) struct FileVectorStore {
+pub struct FileVectorStore {
     sstable_store: SstableStoreRef,
 
     pub(super) flushed_vector_files: Vec<VectorFileInfo>,
@@ -519,7 +519,7 @@ pub(crate) struct FileVectorStore {
 }
 
 impl FileVectorStore {
-    pub(crate) fn new_for_reader(index: &HnswFlatIndex, sstable_store: SstableStoreRef) -> Self {
+    pub fn new_for_reader(index: &HnswFlatIndex, sstable_store: SstableStoreRef) -> Self {
         let next_vector_id = index.vector_store_info.next_vector_id;
         Self {
             sstable_store,
