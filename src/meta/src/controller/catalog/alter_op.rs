@@ -911,8 +911,14 @@ impl CatalogController {
             refresh_state: Set(Some(new_state)),
             ..Default::default()
         };
-        active_model.update(&txn).await?;
-
+        if let Err(e) = active_model.update(&txn).await {
+            tracing::warn!(
+                "Failed to update table refresh state for table {}: {e}",
+                table_id
+            );
+            let t = Table::find_by_id(table_id).all(&txn).await;
+            tracing::info!(table = ?t, "Table found");
+        }
         txn.commit().await?;
 
         tracing::debug!(

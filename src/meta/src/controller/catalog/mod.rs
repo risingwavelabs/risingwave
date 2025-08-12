@@ -25,7 +25,7 @@ use std::iter;
 use std::mem::take;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_SCHEMA_NAME, FragmentTypeFlag, SYSTEM_SCHEMAS, TableOption,
@@ -635,11 +635,10 @@ impl CatalogController {
 
         let table_ids: Vec<TableId> = Table::find()
             .find_also_related(Object)
-            .select_only()
-            .column(table::Column::TableId)
             .filter(filter_condition)
             .all(&txn)
-            .await?
+            .await
+            .context("reset_refreshing_tables: finding table ids")?
             .into_iter()
             .map(|(t, _)| t.table_id)
             .collect();
@@ -648,7 +647,8 @@ impl CatalogController {
             .col_expr(table::Column::RefreshState, Expr::value(RefreshState::Idle))
             .filter(table::Column::TableId.is_in(table_ids))
             .exec(&txn)
-            .await?;
+            .await
+            .context("reset_refreshing_tables: update refresh state")?;
 
         txn.commit().await?;
 

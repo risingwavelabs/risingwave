@@ -123,14 +123,15 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 tracing::info!(%associated_source_id, "Scheduling LoadFinish command for refreshable batch source");
 
                 // For refreshable batch sources, associated_source_id is the table_id
-                let table_id = TableId::new(associated_source_id);
-                let associated_source_id = table_id;
+                let associated_source_id = TableId::new(associated_source_id);
+                // FIXME: handle this more gracefully
+                let table_id = TableId::new(associated_source_id - 1);
 
                 // Find the database ID for this table
                 let database_id = self
                     .metadata_manager
                     .catalog_controller
-                    .get_object_database_id(table_id.table_id() as _)
+                    .get_object_database_id(associated_source_id.table_id() as _)
                     .await
                     .context("Failed to get database id for table")?;
 
@@ -148,7 +149,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                     )
                     .context("Failed to schedule LoadFinish command")?;
 
-                tracing::info!(%table_id, %associated_source_id, "LoadFinish command scheduled successfully");
+                tracing::info!(%associated_source_id, %associated_source_id, "LoadFinish command scheduled successfully");
             };
             if let Err(e) = res {
                 tracing::error!(error = %e.as_report(), %associated_source_id, "Failed to handle source load finished");

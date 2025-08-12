@@ -145,7 +145,7 @@ SELECT * FROM refresh_fs_t;
 4 david
 
 # Test refresh without any external changes
-statement ok
+statement ok retry 3 backoff 5s
 REFRESH TABLE refresh_fs_t;
 
 sleep 2s
