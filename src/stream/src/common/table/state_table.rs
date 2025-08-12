@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::marker::PhantomData;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
@@ -357,6 +358,71 @@ pub enum StateTableOpConsistencyLevel {
     LogStoreEnabled,
 }
 
+pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+{
+    table_catalog: &'a Table,
+    store: S,
+    vnodes: Option<Arc<Bitmap>>,
+    op_consistency_level: Option<StateTableOpConsistencyLevel>,
+    output_column_ids: Option<Vec<ColumnId>>,
+    preload_all_rows: Option<bool>,
+
+    _serde: PhantomData<SD>,
+}
+
+impl<
+    'a,
+    S: StateStore,
+    SD: ValueRowSerde,
+    const IS_REPLICATED: bool,
+    const USE_WATERMARK_CACHE: bool,
+> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+{
+    pub fn new(table_catalog: &'a Table, store: S, vnodes: Option<Arc<Bitmap>>) -> Self {
+        Self {
+            table_catalog,
+            store,
+            vnodes,
+            op_consistency_level: None,
+            output_column_ids: None,
+            preload_all_rows: None,
+            _serde: Default::default(),
+        }
+    }
+
+    pub fn with_op_consistency_level(
+        mut self,
+        op_consistency_level: StateTableOpConsistencyLevel,
+    ) -> Self {
+        self.op_consistency_level = Some(op_consistency_level);
+        self
+    }
+
+    pub fn with_output_column_ids(mut self, output_column_ids: Vec<ColumnId>) -> Self {
+        self.output_column_ids = Some(output_column_ids);
+        self
+    }
+
+    pub fn preload_all_rows(mut self, preload_all_rows: bool) -> Self {
+        self.preload_all_rows = Some(preload_all_rows);
+        self
+    }
+
+    pub async fn build(self) -> StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE> {
+        // TODO: disable preload by default
+        StateTableInner::from_table_catalog_inner(
+            self.table_catalog,
+            self.store,
+            self.vnodes,
+            self.op_consistency_level
+                .unwrap_or(StateTableOpConsistencyLevel::ConsistentOldValue),
+            self.output_column_ids.unwrap_or_default(),
+            self.preload_all_rows.unwrap_or(true),
+        )
+        .await
+    }
+}
+
 // initialize
 // FIXME(kwannoel): Enforce that none of the constructors here
 // should be used by replicated state table.
@@ -375,13 +441,9 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_with_consistency_level(
-            table_catalog,
-            store,
-            vnodes,
-            StateTableOpConsistencyLevel::ConsistentOldValue,
-        )
-        .await
+        StateTableBuilder::new(table_catalog, store, vnodes)
+            .build()
+            .await
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
@@ -390,22 +452,9 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        Self::from_table_catalog_with_consistency_level(
-            table_catalog,
-            store,
-            vnodes,
-            StateTableOpConsistencyLevel::Inconsistent,
-        )
-        .await
-    }
-
-    pub async fn from_table_catalog_with_consistency_level(
-        table_catalog: &Table,
-        store: S,
-        vnodes: Option<Arc<Bitmap>>,
-        consistency_level: StateTableOpConsistencyLevel,
-    ) -> Self {
-        Self::from_table_catalog_inner(table_catalog, store, vnodes, consistency_level, vec![])
+        StateTableBuilder::new(table_catalog, store, vnodes)
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .build()
             .await
     }
 
@@ -416,6 +465,7 @@ where
         vnodes: Option<Arc<Bitmap>>,
         op_consistency_level: StateTableOpConsistencyLevel,
         output_column_ids: Vec<ColumnId>,
+        preload_all_rows: bool,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -614,12 +664,10 @@ where
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
-        // TODO: provide options to enable or disable loading all rows
-
         Self {
             table_id,
             row_store: StateTableRowStore {
-                all_rows: Some(BTreeMap::new()),
+                all_rows: preload_all_rows.then(BTreeMap::new),
                 table_option,
                 state_store: local_state_store,
                 row_serde,
@@ -709,20 +757,18 @@ where
     SD: ValueRowSerde,
 {
     /// Create replicated state table from table catalog with output indices
-    pub async fn from_table_catalog_with_output_column_ids(
+    pub async fn new_replicated(
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
-        Self::from_table_catalog_inner(
-            table_catalog,
-            store,
-            vnodes,
-            StateTableOpConsistencyLevel::Inconsistent,
-            output_column_ids,
-        )
-        .await
+        // TODO: can it be ConsistentOldValue?
+        StateTableBuilder::new(table_catalog, store, vnodes)
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .with_output_column_ids(output_column_ids)
+            .build()
+            .await
     }
 }
 

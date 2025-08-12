@@ -1939,8 +1939,8 @@ async fn test_replicated_state_table_replication() {
 
     // Create a replicated state table
     let output_column_ids = vec![ColumnId::from(2), ColumnId::from(0)];
-    let mut replicated_state_table =
-        TestReplicatedStateTable::from_table_catalog_with_output_column_ids(
+    let mut replicated_state_table: TestReplicatedStateTable =
+        TestReplicatedStateTable::new_replicated(
             &table,
             test_env.storage.clone(),
             None,
