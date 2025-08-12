@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail;
+use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::VectorIndexWriteNode;
 use risingwave_storage::StateStore;
 
@@ -31,21 +33,30 @@ impl ExecutorBuilder for VectorIndexWriteExecutorBuilder {
         store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let vector_column_id = node.vector_column_idx as usize;
-        let info_column_ids = node
-            .info_column_indices
-            .iter()
-            .map(|&id| id as usize)
-            .collect();
 
-        let executor = VectorIndexWriteExecutor::<_>::new(
-            input,
-            store,
-            node.table_id.into(),
-            vector_column_id,
-            info_column_ids,
-        )
-        .await?;
+        let table = node.table.as_ref().unwrap();
+        assert_eq!(table.columns.len(), input.schema().len());
+        let index_col_type = DataType::from(
+            table.columns[0]
+                .column_desc
+                .as_ref()
+                .unwrap()
+                .column_type
+                .as_ref()
+                .unwrap(),
+        );
+        let DataType::Vector(dimention) = &index_col_type else {
+            bail!("expect vector column but got: {:?}", index_col_type)
+        };
+        let DataType::Vector(input_dimension) = &input.schema().fields[0].data_type else {
+            bail!(
+                "expect first input vector column but got: {:?}",
+                index_col_type
+            )
+        };
+        assert_eq!(dimention, input_dimension);
+
+        let executor = VectorIndexWriteExecutor::new(input, store, table.id.into()).await?;
         Ok(Executor::new(params.info, Box::new(executor)))
     }
 }

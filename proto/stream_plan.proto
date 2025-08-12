@@ -939,13 +939,7 @@ message MaterializedExprsNode {
 }
 
 message VectorIndexWriteNode {
-  // The table id of the vector index.
-  uint32 table_id = 1;
-  catalog.Table table = 2;
-  // The indexes of vector index info columns.
-  repeated uint32 info_column_indices = 3;
-  // The column id of the vector data.
-  uint32 vector_column_idx = 4;
+  catalog.Table table = 1;
 }
 
 message StreamNode {

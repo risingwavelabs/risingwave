@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use futures::TryStreamExt;
+use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::TableId;
 use risingwave_common::row::{Row, RowExt};
@@ -35,10 +36,6 @@ pub struct VectorIndexWriteExecutor<S: StateStore> {
     input: Executor,
     vector_writer: S::VectorWriter,
     serializer: BasicSerializer,
-    _store: S,
-
-    vector_column_id: usize,
-    info_column_ids: Vec<usize>,
 }
 
 impl<S: StateStore> Execute for VectorIndexWriteExecutor<S> {
@@ -48,28 +45,20 @@ impl<S: StateStore> Execute for VectorIndexWriteExecutor<S> {
 }
 
 impl<S: StateStore> VectorIndexWriteExecutor<S> {
-    pub async fn new(
-        input: Executor,
-        store: S,
-        table_id: TableId,
-        vector_column_id: usize,
-        info_column_ids: Vec<usize>,
-    ) -> StreamExecutorResult<Self> {
+    pub async fn new(input: Executor, store: S, table_id: TableId) -> StreamExecutorResult<Self> {
         let vector_writer = store
             .new_vector_writer(NewVectorWriterOptions { table_id })
             .await;
         Ok(Self {
             input,
-            _store: store,
             vector_writer,
             serializer: BasicSerializer,
-            vector_column_id,
-            info_column_ids,
         })
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self) {
+        let info_column_indices = (1..self.input.schema().len()).collect_vec();
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
@@ -101,7 +90,7 @@ impl<S: StateStore> VectorIndexWriteExecutor<S> {
                             )
                             .into());
                         }
-                        let vector_datum = row.datum_at(self.vector_column_id);
+                        let vector_datum = row.datum_at(0);
                         let Some(vector_datum) = vector_datum else {
                             warn!(
                                 ?row,
@@ -113,7 +102,7 @@ impl<S: StateStore> VectorIndexWriteExecutor<S> {
                         let vector = Vector::new(vector.into_slice());
                         let info = self
                             .serializer
-                            .serialize(row.project(&self.info_column_ids))
+                            .serialize(row.project(&info_column_indices))
                             .into();
                         self.vector_writer.insert(vector, info)?;
                     }

@@ -200,7 +200,6 @@ impl BuildingFragment {
                 }
             }
             NodeBody::VectorIndexWrite(node) => {
-                node.table_id = job_id;
                 let table = node.table.as_mut().unwrap();
                 table.id = job_id;
                 table.database_id = job.database_id();
