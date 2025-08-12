@@ -35,7 +35,7 @@ use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_pb::catalog::PbTable;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::{StateTable, StateTablePostCommit};
+use crate::common::table::state_table::{StateTable, StateTableBuilder, StateTablePostCommit};
 use crate::executor::StreamExecutorResult;
 
 pub struct SourceStateTableHandler<S: StateStore> {
@@ -48,7 +48,10 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     /// Refer to `infer_internal_table_catalog` in `src/frontend/src/optimizer/plan_node/generic/source.rs` for more details.
     pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
         Self {
-            state_table: StateTable::from_table_catalog(table_catalog, store, None).await,
+            state_table: StateTableBuilder::new(table_catalog, store, None)
+                .preload_all_rows(false)
+                .build()
+                .await,
         }
     }
 
