@@ -14,9 +14,10 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message;
-use risingwave_common::bail_not_implemented;
 use risingwave_common::license::Feature;
+use risingwave_common::secret::vault_client::{HashiCorpVaultClient, HashiCorpVaultConfig};
 use risingwave_sqlparser::ast::{CreateSecretStatement, SqlOption, Value};
+use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, RwPgResponse};
@@ -49,7 +50,15 @@ pub async fn handle_create_secret(
     }
     let with_options = WithOptions::try_from(stmt.with_properties.0.as_ref() as &[SqlOption])?;
 
-    let secret_payload = get_secret_payload(stmt.credential, with_options)?;
+    // Check for secret references in WITH options (forbid them during secret creation)
+    if !with_options.secret_ref().is_empty() {
+        return Err(ErrorCode::InvalidParameterValue(
+            "Secret references are not allowed when creating a secret".to_owned(),
+        )
+        .into());
+    }
+
+    let secret_payload = get_secret_payload(stmt.credential, with_options).await?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
@@ -77,12 +86,14 @@ pub fn secret_to_str(value: &Value) -> Result<String> {
     }
 }
 
-pub(crate) fn get_secret_payload(credential: Value, with_options: WithOptions) -> Result<Vec<u8>> {
-    let secret = secret_to_str(&credential)?.as_bytes().to_vec();
-
+pub(crate) async fn get_secret_payload(
+    credential: Value,
+    with_options: WithOptions,
+) -> Result<Vec<u8>> {
     if let Some(backend) = with_options.get(SECRET_BACKEND_KEY) {
         match backend.to_lowercase().as_ref() {
             SECRET_BACKEND_META => {
+                let secret = secret_to_str(&credential)?.as_bytes().to_vec();
                 let backend = risingwave_pb::secret::Secret {
                     secret_backend: Some(risingwave_pb::secret::secret::SecretBackend::Meta(
                         risingwave_pb::secret::SecretMetaBackend { value: secret },
@@ -97,7 +108,42 @@ pub(crate) fn get_secret_payload(credential: Value, with_options: WithOptions) -
                     )
                     .into());
                 }
-                bail_not_implemented!("hashicorp_vault backend is not implemented yet")
+
+                // Convert WithOptions to a map for serde deserialization
+                let mut config_map = std::collections::HashMap::new();
+                for (key, value) in with_options.iter() {
+                    config_map.insert(key.clone(), value.clone());
+                }
+
+                // Deserialize using serde with validation
+                let config: HashiCorpVaultConfig =
+                    serde_json::from_value(serde_json::Value::Object(
+                        config_map
+                            .into_iter()
+                            .map(|(k, v)| (k, serde_json::Value::String(v)))
+                            .collect(),
+                    ))
+                    .map_err(|e| {
+                        ErrorCode::InvalidParameterValue(format!(
+                            "Invalid HashiCorp Vault configuration: {}",
+                            e.as_report()
+                        ))
+                    })?;
+
+                {
+                    // validate
+                    let client = HashiCorpVaultClient::new(config.clone())?;
+                    client.get_secret().await?;
+                }
+
+                let backend = risingwave_pb::secret::Secret {
+                    secret_backend: Some(
+                        risingwave_pb::secret::secret::SecretBackend::HashicorpVault(
+                            config.to_protobuf(),
+                        ),
+                    ),
+                };
+                Ok(backend.encode_to_vec())
             }
             _ => Err(ErrorCode::InvalidParameterValue(format!(
                 "secret backend \"{}\" is not supported. Supported backends are: {}",

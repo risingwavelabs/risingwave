@@ -23,3 +23,18 @@
     - logical_plan
     - batch_plan
     - stream_plan
+- name: materialize impure expressions after singleton (top-n)
+  sql: |
+    create table t (v int);
+    with cte as (select v from t order by v limit 10) select pg_sleep(v) from cte;
+  expected_outputs:
+    - stream_plan
+    - stream_dist_plan
+- name: materialized impure expressions after some-shard (full outer join), an exchange is required
+  sql: |
+    create table t1 (v int);
+    create table t2 (v int);
+    with cte as (select t1.v v from t1 full outer join t2 on t1.v = t2.v) select pg_sleep(v) from cte;
+  expected_outputs:
+    - stream_plan
+    - stream_dist_plan
