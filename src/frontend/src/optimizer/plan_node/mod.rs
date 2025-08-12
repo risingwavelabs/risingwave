@@ -415,7 +415,7 @@ impl LogicalPlanRef {
 
                 // If it is the first visit, recursively call `prune_col` for its input and
                 // replace it.
-                if ctx.visit_share_at_second_round(self.id()) {
+                if ctx.visit_share_at_first_round(self.id()) {
                     let new_logical_share: &LogicalShare = new_share
                         .as_logical_share()
                         .expect("must be share operator");
