@@ -42,7 +42,8 @@ impl MigrationTrait for Migration {
                     .drop_column(UserEnum::IsAdmin)
                     .to_owned(),
             )
-            .await
+            .await?;
+        Ok(())
     }
 }
 
