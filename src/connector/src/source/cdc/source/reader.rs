@@ -221,7 +221,10 @@ impl<T: CdcSourceTypeTrait> CdcSplitReader<T> {
         while let Some(result) = rx.recv().await {
             match result {
                 Ok(GetEventStreamResponse { events, .. }) => {
-                    tracing::trace!("receive {} cdc events ", events.len());
+                    tracing::info!("{} receive {} cdc events ", source_id, events.len());
+                    for event in &events {
+                        tracing::info!(?event, "cdc event");
+                    }
                     let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
                     yield msgs;
                 }
