@@ -17,7 +17,7 @@ use risingwave_hummock_sdk::vector_index::VectorFileInfo;
 use crate::hummock::vector::file::{VectorBlock, VectorBlockBuilder, VectorBlockMeta};
 use crate::hummock::{HummockResult, SstableStoreRef, VectorBlockHolder};
 use crate::vector::VectorRef;
-use crate::vector::hnsw::{VectorAccessor, VectorStore};
+use crate::vector::hnsw::VectorAccessor;
 
 pub(crate) mod file;
 pub(crate) mod writer;
@@ -73,31 +73,6 @@ pub async fn get_vector_block(
         .get_vector_block(vector_file, block_idx, block_meta)
         .await?;
     Ok(VectorBlockAccessor { block, idx: offset })
-}
-
-pub struct FileVectorStore {
-    vector_files: Vec<VectorFileInfo>,
-    sstable_store: SstableStoreRef,
-}
-
-impl FileVectorStore {
-    pub fn new(vector_files: Vec<VectorFileInfo>, sstable_store: SstableStoreRef) -> Self {
-        Self {
-            vector_files,
-            sstable_store,
-        }
-    }
-}
-
-impl VectorStore for FileVectorStore {
-    type Accessor<'a>
-        = VectorBlockAccessor
-    where
-        Self: 'a;
-
-    async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>> {
-        get_vector_block(&self.sstable_store, &self.vector_files, idx).await
-    }
 }
 
 fn search_vector_files(files: &[VectorFileInfo], idx: usize) -> &VectorFileInfo {

@@ -54,7 +54,7 @@ use crate::hummock::utils::{
     filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap,
     search_sst_idx,
 };
-use crate::hummock::vector::FileVectorStore;
+use crate::hummock::vector::writer::HnswVectorStore;
 use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
@@ -1220,11 +1220,8 @@ impl HummockVersionReader {
 
                 let graph = self.sstable_store.get_hnsw_graph(graph_file).await?;
 
-                // TODO: avoid vector_files deep-copy
-                let vector_store = FileVectorStore::new(
-                    hnsw_flat.vector_store_info.vector_files.clone(),
-                    self.sstable_store.clone(),
-                );
+                let vector_store =
+                    HnswVectorStore::new_for_reader(hnsw_flat, self.sstable_store.clone());
                 let (items, _stats) = nearest::<O, M>(
                     &vector_store,
                     &*graph,
