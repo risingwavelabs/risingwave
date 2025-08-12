@@ -48,6 +48,7 @@ impl StreamUnion {
             core.all,
             "After UnionToDistinctRule, union should become union all"
         );
+        assert!(!core.inputs.is_empty());
 
         let inputs = &core.inputs;
         let ctx = core.ctx();
@@ -69,10 +70,7 @@ impl StreamUnion {
             watermark_columns.insert(idx, ctx.next_watermark_group_id());
         }
 
-        let kind = if inputs.is_empty() {
-            // No data. Can be interpreted as append-only.
-            StreamKind::AppendOnly
-        } else if core.source_col.is_some() {
+        let kind = if core.source_col.is_some() {
             // There's no handling on key conflict in executor implementation. However, in most cases
             // there's a `source_col` as a part of stream key, indicating which input the row comes from,
             // there won't be actual key conflict and we can safely call `merge`.
