@@ -20,96 +20,20 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use risingwave_hummock_sdk::HummockObjectId;
 use risingwave_hummock_sdk::vector_index::{
-    HnswFlatIndex, HnswFlatIndexAdd, HnswGraphFileInfo, VectorFileInfo, VectorStoreInfoDelta,
+    HnswFlatIndex, HnswFlatIndexAdd, HnswGraphFileInfo, VectorStoreInfoDelta,
 };
 use risingwave_pb::hummock::PbHnswGraph;
 
 use crate::dispatch_measurement;
-use crate::hummock::vector::file::VectorFileBuilder;
-use crate::hummock::vector::writer::{VectorObjectIdManagerRef, new_vector_file_builder};
-use crate::hummock::vector::{EnumVectorAccessor, get_vector_block};
+use crate::hummock::vector::file::FileVectorStore;
+use crate::hummock::vector::writer::VectorObjectIdManagerRef;
 use crate::hummock::{HummockResult, SstableStoreRef};
 use crate::opts::StorageOpts;
 use crate::store::Vector;
 use crate::vector::DistanceMeasurement;
 use crate::vector::hnsw::{
-    HnswBuilderOptions, HnswGraphBuilder, VectorAccessor, VectorStore, insert_graph, new_node,
+    HnswBuilderOptions, HnswGraphBuilder, VectorAccessor, insert_graph, new_node,
 };
-
-pub(crate) struct HnswVectorStore {
-    sstable_store: SstableStoreRef,
-
-    flushed_vector_files: Vec<VectorFileInfo>,
-    flushed_next_vector_id: usize,
-    building_vectors: Option<VectorFileBuilder>,
-}
-
-impl HnswVectorStore {
-    pub(crate) fn new_for_reader(index: &HnswFlatIndex, sstable_store: SstableStoreRef) -> Self {
-        let next_vector_id = index.vector_store_info.next_vector_id;
-        Self {
-            sstable_store,
-            flushed_vector_files: index.vector_store_info.vector_files.clone(),
-            flushed_next_vector_id: next_vector_id,
-            building_vectors: None,
-        }
-    }
-
-    fn new_for_writer(
-        index: &HnswFlatIndex,
-        dimension: usize,
-        sstable_store: SstableStoreRef,
-        object_id_manager: VectorObjectIdManagerRef,
-        storage_opts: &StorageOpts,
-    ) -> Self {
-        let next_vector_id = index.vector_store_info.next_vector_id;
-        Self {
-            sstable_store: sstable_store.clone(),
-            flushed_vector_files: index.vector_store_info.vector_files.clone(),
-            flushed_next_vector_id: next_vector_id,
-            building_vectors: Some(new_vector_file_builder(
-                dimension,
-                next_vector_id,
-                sstable_store,
-                object_id_manager,
-                storage_opts,
-            )),
-        }
-    }
-
-    async fn flush(&mut self) -> HummockResult<usize> {
-        let building_vectors = self.building_vectors.as_mut().expect("for write");
-        if let Some((vector_file, blocks, meta)) = building_vectors.finish().await? {
-            self.sstable_store
-                .insert_vector_cache(vector_file.object_id, meta, blocks);
-            let file_size = vector_file.file_size as usize;
-            self.flushed_vector_files.push(vector_file);
-            self.flushed_next_vector_id = building_vectors.next_vector_id();
-            Ok(file_size)
-        } else {
-            Ok(0)
-        }
-    }
-}
-
-impl VectorStore for HnswVectorStore {
-    type Accessor<'a>
-        = EnumVectorAccessor<'a>
-    where
-        Self: 'a;
-
-    async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>> {
-        if let Some(building_vectors) = self.building_vectors.as_ref()
-            && idx >= self.flushed_next_vector_id
-        {
-            Ok(building_vectors.get_vector(idx))
-        } else {
-            Ok(EnumVectorAccessor::BlockHolder(
-                get_vector_block(&self.sstable_store, &self.flushed_vector_files, idx).await?,
-            ))
-        }
-    }
-}
 
 pub(crate) struct HnswFlatIndexWriter {
     measure: DistanceMeasurement,
@@ -117,7 +41,7 @@ pub(crate) struct HnswFlatIndexWriter {
     sstable_store: SstableStoreRef,
     object_id_manager: VectorObjectIdManagerRef,
 
-    vector_store: HnswVectorStore,
+    vector_store: FileVectorStore,
     next_pending_vector_id: usize,
     graph_builder: Option<HnswGraphBuilder>,
     flushed_graph_file: Option<HnswGraphFileInfo>,
@@ -147,7 +71,7 @@ impl HnswFlatIndexWriter {
                 ef_construction: index.config.ef_construction.try_into().unwrap(),
                 max_level: index.config.max_level.try_into().unwrap(),
             },
-            vector_store: HnswVectorStore::new_for_writer(
+            vector_store: FileVectorStore::new_for_writer(
                 index,
                 dimension,
                 sstable_store.clone(),
