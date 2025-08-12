@@ -48,6 +48,7 @@ impl StreamUnion {
             core.all,
             "After UnionToDistinctRule, union should become union all"
         );
+        assert!(core.source_col.is_some());
 
         let inputs = &core.inputs;
         let ctx = core.ctx();
@@ -72,6 +73,9 @@ impl StreamUnion {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
+            // There's no handling on key conflict in executor implementation. However, we guarantee
+            // that there's a `source_col` as a part of stream key, indicating which input the row
+            // comes from. As a result, there's in fact no key conflict and we can safely call `merge`.
             (inputs.iter().map(|i| i.stream_kind()))
                 .reduce(StreamKind::merge)
                 .unwrap_or(/* empty inputs */ StreamKind::AppendOnly),
