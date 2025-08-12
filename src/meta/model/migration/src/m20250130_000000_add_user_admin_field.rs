@@ -22,6 +22,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Set is_admin = true for the rwadmin user if it exists
+        // Note: rwadmin is already a superuser by default, but we ensure consistency
         let update_stmt = Query::update()
             .table(UserEnum::User)
             .values([(UserEnum::IsAdmin, true.into())])

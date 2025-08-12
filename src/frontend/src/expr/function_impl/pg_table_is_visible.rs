@@ -57,7 +57,7 @@ fn pg_table_is_visible_impl(
         if let Ok(schema) = catalog_reader.get_schema_by_name(db_name, schema)
             && schema.contains_object(oid as u32)
         {
-            return if user_info.is_super || user_info.is_admin
+            return if user_info.is_super
                 || user_info.has_privilege(&GrantObject::SchemaId(schema.id()), AclMode::Usage)
             {
                 Ok(Some(true))

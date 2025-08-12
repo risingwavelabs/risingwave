@@ -67,7 +67,6 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
             .0;
 
         if user.is_super
-            || user.is_admin
             || table.owner == user.id
             || user.has_privilege(
                 &GrantObject::TableId(table.id().table_id()),

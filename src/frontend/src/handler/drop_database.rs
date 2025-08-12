@@ -64,11 +64,11 @@ pub async fn handle_drop_database(
             ErrorCode::PermissionDenied("Session user is invalid".to_owned())
         })?;
 
-    // If the database owner was an admin, only admin users or superusers can delete it
+    // If the database owner was an admin, only admin users can delete it
     if let Some(database_owner) = user_reader.get_user_by_id(&database.owner()) {
-        if database_owner.is_admin && !current_user.is_admin && !current_user.is_super {
+        if database_owner.is_admin && !current_user.is_admin {
             return Err(ErrorCode::PermissionDenied(
-                "Only admin users or superusers can drop databases created by admin users".to_owned()
+                "only admin users can drop databases created by admin users".to_owned()
             ).into());
         }
     }

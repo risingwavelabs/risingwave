@@ -70,20 +70,21 @@ pub async fn handle_create_user(
                 );
             }
 
-            let require_admin = stmt
-                .with_options
-                .0
-                .iter()
-                .any(|option| matches!(option, UserOption::Admin));
-            if require_admin && !session_user.is_admin {
-                return Err(
-                    PermissionDenied("must be admin to create admin users".to_owned()).into(),
-                );
-            }
-
             if !session_user.can_create_user {
                 return Err(PermissionDenied("permission denied to create user".to_owned()).into());
             }
+        }
+
+        // Admin users can only be created by other admin users
+        let require_admin = stmt
+            .with_options
+            .0
+            .iter()
+            .any(|option| matches!(option, UserOption::Admin));
+        if require_admin && !session_user.is_admin {
+            return Err(
+                PermissionDenied("only admin users can create admin users".to_owned()).into(),
+            );
         }
 
         // Since we don't have a concept of PUBLIC group yet, here we simply grant new user with CONNECT
@@ -107,7 +108,10 @@ pub async fn handle_create_user(
                 UserOption::NoCreateUser => user_info.can_create_user = false,
                 UserOption::Login => user_info.can_login = true,
                 UserOption::NoLogin => user_info.can_login = false,
-                UserOption::Admin => user_info.is_admin = true,
+                UserOption::Admin => {
+                    user_info.is_admin = true;
+                    user_info.is_super = true; // Admin users are always superusers
+                }
                 UserOption::NoAdmin => user_info.is_admin = false,
                 UserOption::EncryptedPassword(password) => {
                     if !password.0.is_empty() {
@@ -254,8 +258,9 @@ mod tests {
             .cloned()
             .unwrap();
         
-        // Should be admin because ADMIN comes last and overrides NOADMIN
+        // Should be admin and also superuser because ADMIN comes last and overrides NOADMIN
         assert!(admin_user2.is_admin);
+        assert!(admin_user2.is_super); // Admin users are always superusers
         
         // Create admin user with only ADMIN
         frontend.run_sql("CREATE USER admin_user3 WITH ADMIN").await.unwrap();
@@ -266,7 +271,28 @@ mod tests {
             .cloned()
             .unwrap();
         
-        // Should be admin
+        // Should be admin and superuser
         assert!(admin_user3.is_admin);
+        assert!(admin_user3.is_super); // Admin users are always superusers
+        
+        // Test that non-admin users cannot create admin users
+        frontend.run_sql("CREATE USER normal_user WITH NOSUPERUSER CREATEUSER").await.unwrap();
+        let normal_user = user_info_reader
+            .read_guard()
+            .get_user_by_name("normal_user")
+            .cloned()
+            .unwrap();
+        
+        assert!(
+            frontend
+                .run_user_sql(
+                    "CREATE USER should_fail WITH ADMIN",
+                    "dev".to_owned(),
+                    "normal_user".to_owned(),
+                    normal_user.id
+                )
+                .await
+                .is_err()
+        );
     }
 }

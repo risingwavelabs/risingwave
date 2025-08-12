@@ -70,7 +70,7 @@ fn alter_prost_user_info(
                 .any(|option| matches!(option, UserOption::Admin | UserOption::NoAdmin));
         if require_admin && !session_user.is_admin {
             return Err(PermissionDenied(
-                "must be admin to alter admin users or change admin attribute"
+                "only admin users can alter admin users or change admin attribute"
                     .to_owned(),
             )
             .into());
@@ -90,8 +90,12 @@ fn alter_prost_user_info(
                 update_fields.push(UpdateField::Super);
             }
             UserOption::NoSuperUser => {
-                user_info.is_super = false;
-                update_fields.push(UpdateField::Super);
+                if user_info.is_admin {
+                    notice = Some("admin users cannot have superuser privilege removed".to_owned());
+                } else {
+                    user_info.is_super = false;
+                    update_fields.push(UpdateField::Super);
+                }
             }
             UserOption::CreateDB => {
                 user_info.can_create_db = true;
@@ -119,7 +123,11 @@ fn alter_prost_user_info(
             }
             UserOption::Admin => {
                 user_info.is_admin = true;
+                user_info.is_super = true; // Admin users are always superusers
                 update_fields.push(UpdateField::Admin);
+                if !update_fields.contains(&UpdateField::Super) {
+                    update_fields.push(UpdateField::Super);
+                }
             }
             UserOption::NoAdmin => {
                 user_info.is_admin = false;
@@ -286,5 +294,41 @@ mod tests {
                 metadata: HashMap::new(),
             })
         );
+    }
+
+    #[tokio::test]
+    async fn test_alter_admin_user() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let user_info_reader = session.env().user_info_reader();
+
+        // Create admin user
+        frontend.run_sql("CREATE USER admin_user WITH ADMIN").await.unwrap();
+        
+        let admin_user = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user")
+            .cloned()
+            .unwrap();
+        
+        // Should be both admin and superuser
+        assert!(admin_user.is_admin);
+        assert!(admin_user.is_super);
+        
+        // Try to remove superuser status from admin user - should be ignored with notice
+        let response = frontend.run_sql("ALTER USER admin_user WITH NOSUPERUSER").await.unwrap();
+        
+        let admin_user_after = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user")
+            .cloned()
+            .unwrap();
+        
+        // Should still be superuser despite NOSUPERUSER command
+        assert!(admin_user_after.is_admin);
+        assert!(admin_user_after.is_super);
+        
+        // Should get a notice about this
+        // Note: The exact response checking would need to be implemented based on how notices are handled
     }
 }

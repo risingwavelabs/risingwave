@@ -61,18 +61,20 @@ pub async fn handle_drop_user(
                         )
                         .into());
                     }
-                    if is_admin && !current_user.is_admin {
-                        return Err(ErrorCode::PermissionDenied(
-                            "must be admin to drop admin users".to_owned(),
-                        )
-                        .into());
-                    }
                     if !current_user.can_create_user {
                         return Err(ErrorCode::PermissionDenied(
                             "permission denied to drop user".to_owned(),
                         )
                         .into());
                     }
+                }
+                
+                // Only admin users can drop admin users
+                if is_admin && !current_user.is_admin {
+                    return Err(ErrorCode::PermissionDenied(
+                        "only admin users can drop admin users".to_owned(),
+                    )
+                    .into());
                 }
             } else {
                 return Err(
