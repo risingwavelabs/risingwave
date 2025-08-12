@@ -45,7 +45,7 @@ impl ExecutorBuilder for VectorIndexWriteExecutorBuilder {
                 .as_ref()
                 .unwrap(),
         );
-        let DataType::Vector(dimention) = &index_col_type else {
+        let DataType::Vector(dimension) = &index_col_type else {
             bail!("expect vector column but got: {:?}", index_col_type)
         };
         let DataType::Vector(input_dimension) = &input.schema().fields[0].data_type else {
@@ -54,7 +54,7 @@ impl ExecutorBuilder for VectorIndexWriteExecutorBuilder {
                 index_col_type
             )
         };
-        assert_eq!(dimention, input_dimension);
+        assert_eq!(dimension, input_dimension);
 
         let executor = VectorIndexWriteExecutor::new(input, store, table.id.into()).await?;
         Ok(Executor::new(params.info, Box::new(executor)))
