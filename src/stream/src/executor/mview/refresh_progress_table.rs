@@ -19,15 +19,18 @@
 //! enabling fault-tolerant refresh operations that can be resumed after interruption.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use risingwave_common::bitmap::Bitmap;
 // use futures_async_stream::for_await; // Commented out as it's unused
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTableInner, StateTablePostCommit};
 use crate::executor::StreamExecutorResult;
 
 /// Schema for the refresh progress table:
@@ -38,9 +41,9 @@ use crate::executor::StreamExecutorResult;
 /// - `processed_rows` (i64): Number of rows processed so far in this vnode
 /// - `is_completed` (bool): Whether this vnode has completed processing
 /// - `last_updated_at` (i64): Timestamp of last update
-pub struct RefreshProgressTable<S: StateStore> {
+pub struct RefreshProgressTable<S: StateStore, SD: ValueRowSerde> {
     /// The underlying state table for persistence
-    state_table: StateTable<S>,
+    pub state_table: StateTableInner<S, SD>,
     /// In-memory cache of progress information for quick access
     cache: HashMap<VirtualNode, RefreshProgressEntry>,
 }
@@ -79,9 +82,9 @@ impl From<i32> for RefreshStage {
     }
 }
 
-impl<S: StateStore> RefreshProgressTable<S> {
+impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     /// Create a new `RefreshProgressTable`
-    pub fn new(state_table: StateTable<S>) -> Self {
+    pub fn new(state_table: StateTableInner<S, SD>) -> Self {
         Self {
             state_table,
             cache: HashMap::new(),
@@ -89,13 +92,10 @@ impl<S: StateStore> RefreshProgressTable<S> {
     }
 
     /// Initialize the progress table by loading existing entries from storage
-    pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub async fn recover(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.state_table.init_epoch(epoch).await?;
 
-        // Load existing progress entries from storage into cache
-        // For simplicity, we'll iterate through all rows since this is initialization
-        // and typically the number of VNodes is limited
-        // TODO: In production, consider using more efficient iteration methods
+        // TODO: implement recovery here
 
         tracing::debug!("Loading existing progress entries during initialization");
 
@@ -212,15 +212,17 @@ impl<S: StateStore> RefreshProgressTable<S> {
     }
 
     /// Commit changes to storage
-    pub async fn commit(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        let _post_commit = self.state_table.commit(epoch).await?;
-        Ok(())
+    pub async fn commit(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD>> {
+        self.state_table.commit(epoch).await
     }
 
     /// Convert `RefreshProgressEntry` to `OwnedRow` for storage
     fn entry_to_row(&self, entry: &RefreshProgressEntry) -> OwnedRow {
         OwnedRow::new(vec![
-            Some(ScalarImpl::Int32(entry.vnode.to_index() as i32)),
+            entry.vnode.to_datum(),
             Some(ScalarImpl::Int32(entry.stage as i32)),
             Some(ScalarImpl::Int64(entry.started_epoch as i64)),
             Some(ScalarImpl::Int64(entry.current_epoch as i64)),
@@ -294,6 +296,10 @@ impl<S: StateStore> RefreshProgressTable<S> {
             "is_completed",
             "last_updated_at",
         ]
+    }
+
+    pub fn vnodes(&self) -> &Arc<Bitmap> {
+        &self.state_table.vnodes()
     }
 }
 

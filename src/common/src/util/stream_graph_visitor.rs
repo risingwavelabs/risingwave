@@ -279,6 +279,7 @@ pub fn visit_stream_node_tables_inner<F>(
                 }
                 // Also visit the staging table if it exists (for refreshable tables)
                 optional!(node.staging_table, "MaterializeStaging");
+                optional!(node.refresh_progress_table, "MaterializeRefreshProgress");
             }
 
             // Global Approx Percentile

@@ -882,6 +882,7 @@ mod tests {
             engine: Some(PbEngine::Hummock as i32),
             clean_watermark_index_in_pk: None,
             refreshable: false,
+            refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
         }
         .into();
 

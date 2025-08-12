@@ -23,6 +23,7 @@ use risingwave_common::catalog::{
     TableId,
 };
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -55,12 +56,14 @@ pub struct StreamMaterialize {
     table: TableCatalog,
     /// For refreshable tables, staging table for collecting new data during refresh
     staging_table: Option<TableCatalog>,
+    /// For refreshable tables, progress table for tracking refresh progress
+    refresh_progress_table: Option<TableCatalog>,
 }
 
 impl StreamMaterialize {
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
-        Self::new_with_staging(input, table, None)
+        Self::new_with_staging_and_progress(input, table, None, None)
     }
 
     #[must_use]
@@ -68,6 +71,16 @@ impl StreamMaterialize {
         input: PlanRef,
         table: TableCatalog,
         staging_table: Option<TableCatalog>,
+    ) -> Self {
+        Self::new_with_staging_and_progress(input, table, staging_table, None)
+    }
+
+    #[must_use]
+    pub fn new_with_staging_and_progress(
+        input: PlanRef,
+        table: TableCatalog,
+        staging_table: Option<TableCatalog>,
+        refresh_progress_table: Option<TableCatalog>,
     ) -> Self {
         let base = PlanBase::new_stream(
             input.ctx(),
@@ -85,6 +98,7 @@ impl StreamMaterialize {
             input,
             table,
             staging_table,
+            refresh_progress_table,
         }
     }
 
@@ -198,21 +212,29 @@ impl StreamMaterialize {
             refreshable,
         )?;
 
-        // For refreshable tables, create a staging table
-        let staging_table = if refreshable {
-            Some(Self::derive_staging_table_catalog(table.clone()))
+        // For refreshable tables, create staging table and progress table
+        let (staging_table, refresh_progress_table) = if refreshable {
+            let staging = Some(Self::derive_staging_table_catalog(table.clone()));
+            let progress = Some(Self::derive_refresh_progress_table_catalog(table.clone()));
+            (staging, progress)
         } else {
-            None
+            (None, None)
         };
 
         tracing::info!(
             table_name = %name,
             refreshable = %refreshable,
             has_staging_table = %staging_table.is_some(),
-            "Creating StreamMaterialize with staging table info"
+            has_progress_table = %refresh_progress_table.is_some(),
+            "Creating StreamMaterialize with staging and progress table info"
         );
 
-        Ok(Self::new_with_staging(input, table, staging_table))
+        Ok(Self::new_with_staging_and_progress(
+            input,
+            table,
+            staging_table,
+            refresh_progress_table,
+        ))
     }
 
     /// Rewrite the input to satisfy the required distribution if necessary, according to the type.
@@ -478,6 +500,126 @@ impl StreamMaterialize {
         }
     }
 
+    /// The refresh progress table is used to track refresh operation progress.
+    /// Schema: vnode (i32), stage (i32), started_epoch (i64), current_epoch (i64),
+    /// processed_rows (i64), is_completed (bool), last_updated_at (i64)
+    fn derive_refresh_progress_table_catalog(table: TableCatalog) -> TableCatalog {
+        tracing::info!(
+            table_name = %table.name,
+            "Creating refresh progress table for refreshable table"
+        );
+
+        // Define the schema for the refresh progress table
+        let columns = vec![
+            ColumnCatalog {
+                column_desc: risingwave_common::catalog::ColumnDesc::named(
+                    "vnode",
+                    0.into(),
+                    DataType::Int16,
+                ),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: risingwave_common::catalog::ColumnDesc::named(
+                    "stage",
+                    1.into(),
+                    DataType::Int32,
+                ),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: risingwave_common::catalog::ColumnDesc::named(
+                    "started_epoch",
+                    2.into(),
+                    DataType::Int64,
+                ),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: risingwave_common::catalog::ColumnDesc::named(
+                    "current_epoch",
+                    3.into(),
+                    DataType::Int64,
+                ),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: risingwave_common::catalog::ColumnDesc::named(
+                    "processed_rows",
+                    4.into(),
+                    DataType::Int64,
+                ),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: risingwave_common::catalog::ColumnDesc::named(
+                    "is_completed",
+                    5.into(),
+                    DataType::Boolean,
+                ),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: risingwave_common::catalog::ColumnDesc::named(
+                    "last_updated_at",
+                    6.into(),
+                    DataType::Int64,
+                ),
+                is_hidden: false,
+            },
+        ];
+
+        // Primary key is vnode (column 0)
+        let pk = vec![ColumnOrder::new(0, OrderType::ascending())];
+        let stream_key = vec![0];
+        let distribution_key = vec![0];
+
+        TableCatalog {
+            id: TableId::placeholder(),
+            schema_id: table.schema_id,
+            database_id: table.database_id,
+            associated_source_id: None,
+            name: table.name.clone(),
+            columns,
+            pk,
+            stream_key,
+            distribution_key,
+            table_type: TableType::Internal,
+            append_only: false,
+            owner: table.owner,
+            fragment_id: OBJECT_ID_PLACEHOLDER,
+            dml_fragment_id: None,
+            vnode_col_index: Some(0),
+            row_id_index: None,
+            value_indices: (0..7).collect(),
+            definition: table.definition.clone(),
+            conflict_behavior: ConflictBehavior::NoCheck,
+            version_column_index: None,
+            read_prefix_len_hint: 1,
+            version: table.version.clone(),
+            watermark_columns: FixedBitSet::new(),
+            dist_key_in_pk: vec![0],
+            cardinality: table.cardinality.clone(),
+            created_at_epoch: table.created_at_epoch,
+            initialized_at_epoch: table.initialized_at_epoch,
+            cleaned_by_watermark: false,
+            create_type: table.create_type.clone(),
+            stream_job_status: table.stream_job_status.clone(),
+            description: table.description.clone(),
+            incoming_sinks: vec![],
+            created_at_cluster_version: table.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
+            retention_seconds: None,
+            cdc_table_id: None,
+            vnode_count: table.vnode_count,
+            webhook_info: None,
+            job_id: table.job_id,
+            engine: table.engine,
+            clean_watermark_index_in_pk: None,
+            refreshable: false,
+        }
+    }
+
     /// Get a reference to the stream materialize's table.
     #[must_use]
     pub fn table(&self) -> &TableCatalog {
@@ -488,6 +630,12 @@ impl StreamMaterialize {
     #[must_use]
     pub fn staging_table(&self) -> Option<&TableCatalog> {
         self.staging_table.as_ref()
+    }
+
+    /// Get a reference to the stream materialize's refresh progress table.
+    #[must_use]
+    pub fn refresh_progress_table(&self) -> Option<&TableCatalog> {
+        self.refresh_progress_table.as_ref()
     }
 
     pub fn name(&self) -> &str {
@@ -541,7 +689,12 @@ impl PlanTreeNodeUnary<Stream> for StreamMaterialize {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let new = Self::new_with_staging(input, self.table().clone(), self.staging_table.clone());
+        let new = Self::new_with_staging_and_progress(
+            input,
+            self.table().clone(),
+            self.staging_table.clone(),
+            self.refresh_progress_table.clone(),
+        );
         new.base
             .schema()
             .fields
@@ -565,7 +718,9 @@ impl StreamNode for StreamMaterialize {
             table_name = %self.table().name(),
             refreshable = %self.table().refreshable,
             has_staging_table = %self.staging_table.is_some(),
+            has_progress_table = %self.refresh_progress_table.is_some(),
             staging_table_name = ?self.staging_table.as_ref().map(|t| &t.name),
+            progress_table_name = ?self.refresh_progress_table.as_ref().map(|t| &t.name),
             "Converting StreamMaterialize to protobuf"
         );
 
@@ -579,6 +734,16 @@ impl StreamNode for StreamMaterialize {
             prost
         });
 
+        let refresh_progress_table_prost = self.refresh_progress_table.clone().map(|t| {
+            let prost = t.with_id(state.gen_table_id_wrapped()).to_prost();
+            tracing::info!(
+                progress_table_id = %prost.id,
+                progress_table_name = %prost.name,
+                "Refresh progress table converted to protobuf"
+            );
+            prost
+        });
+
         PbNodeBody::Materialize(Box::new(MaterializeNode {
             // Do not fill `table` and `table_id` here to avoid duplication. It will be filled by
             // meta service after global information is generated.
@@ -586,6 +751,8 @@ impl StreamNode for StreamMaterialize {
             table: None,
             // Pass staging table catalog if available for refreshable tables
             staging_table: staging_table_prost,
+            // Pass refresh progress table catalog if available for refreshable tables
+            refresh_progress_table: refresh_progress_table_prost,
 
             column_orders: self
                 .table()
@@ -593,7 +760,6 @@ impl StreamNode for StreamMaterialize {
                 .iter()
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
-            refresh_progress_table: None, /* TODO: Generate progress table catalog for refreshable tables */
         }))
     }
 }

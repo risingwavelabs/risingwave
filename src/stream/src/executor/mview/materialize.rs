@@ -47,6 +47,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
 use crate::common::table::test_utils::gen_pbtable;
 use crate::executor::monitor::MaterializeMetrics;
+use crate::executor::mview::{ProgressRefreshStage, RefreshProgressTable};
 use crate::executor::prelude::*;
 use crate::task::LocalBarrierManager;
 
@@ -105,6 +106,9 @@ pub struct RefreshableMaterializeArgs<S: StateStore, SD: ValueRowSerde> {
     /// After `LoadFinish`, we will do a `DELETE FROM main_table WHERE pk NOT IN (SELECT pk FROM staging_table)`, and then purge the staging table.
     pub staging_table: StateTableInner<S, SD>,
 
+    /// Progress table for tracking refresh state per VNode for fault tolerance
+    pub progress_table: RefreshProgressTable<S, SD>,
+
     /// Table ID for this refreshable materialized view
     pub table_id: TableId,
 }
@@ -115,6 +119,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
         store: S,
         table_catalog: &Table,
         staging_table_catalog: &Table,
+        progress_state_table: &Table,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
@@ -122,16 +127,23 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
         // staging table is pk-only, and we don't need to check value consistency
         let staging_table = StateTableInner::from_table_catalog_inconsistent_op(
             staging_table_catalog,
-            store,
-            vnodes,
+            store.clone(),
+            vnodes.clone(),
         )
         .await;
+
+        let progress_state_table =
+            StateTableInner::from_table_catalog(progress_state_table, store, vnodes).await;
+        let progress_table = RefreshProgressTable::new(progress_state_table);
+
+        debug_assert_eq!(staging_table.vnodes(), progress_table.vnodes());
 
         Self {
             table_catalog: table_catalog.clone(),
             staging_table_catalog: staging_table_catalog.clone(),
             is_refreshing: false,
             staging_table,
+            progress_table,
             table_id,
         }
     }
@@ -258,6 +270,22 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         // Initialize staging table for refreshable materialized views
         if let Some(ref mut refresh_args) = self.refresh_args {
             refresh_args.staging_table.init_epoch(first_epoch).await?;
+
+            // Initialize progress table and load existing progress for recovery
+            refresh_args.progress_table.recover(first_epoch).await?;
+
+            // Check if refresh is already in progress (recovery scenario)
+            let progress_stats = refresh_args.progress_table.get_progress_stats();
+            if progress_stats.total_vnodes > 0 && !progress_stats.is_complete() {
+                refresh_args.is_refreshing = true;
+                tracing::info!(
+                    total_vnodes = progress_stats.total_vnodes,
+                    completed_vnodes = progress_stats.completed_vnodes,
+                    progress_percentage = progress_stats.progress_percentage,
+                    "Recovered refresh in progress, resuming refresh operation"
+                );
+            }
+            // TODO: we need to decide which stage to start based on the recovery.
         }
 
         loop {
@@ -411,6 +439,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 }) if *refresh_table_id == refresh_args.table_id => {
                                     refresh_args.is_refreshing = true;
                                     tracing::info!(table_id = %refresh_table_id, "RefreshStart barrier received");
+
+                                    // Initialize progress tracking for all VNodes
+                                    Self::init_refresh_progress(
+                                        &self.state_table,
+                                        &mut refresh_args.progress_table,
+                                        b.epoch.curr,
+                                    )
+                                    .await?;
                                 }
                                 Some(Mutation::LoadFinish {
                                     associated_source_id: load_finish_source_id,
@@ -465,9 +501,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         let update_vnode_bitmap = b.as_update_vnode_bitmap(self.actor_context.id);
 
                         // Commit staging table for refreshable materialized views
-                        let staging_post_commit =
+                        let refresh_post_commit =
                             if let Some(ref mut refresh_args) = self.refresh_args {
-                                Some(refresh_args.staging_table.commit(b.epoch).await?)
+                                // Commit progress table for fault tolerance
+
+                                Some((
+                                    refresh_args.staging_table.commit(b.epoch).await?,
+                                    refresh_args.progress_table.commit(b.epoch).await?,
+                                ))
                             } else {
                                 None
                             };
@@ -485,8 +526,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         }
 
                         // Handle staging table post commit
-                        if let Some(staging_post_commit) = staging_post_commit {
+                        if let Some((staging_post_commit, progress_post_commit)) =
+                            refresh_post_commit
+                        {
                             staging_post_commit
+                                .post_yield_barrier(update_vnode_bitmap.clone())
+                                .await?;
+                            progress_post_commit
                                 .post_yield_barrier(update_vnode_bitmap)
                                 .await?;
                         }
@@ -515,6 +561,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 debug_assert_eq!(
                     self.state_table.vnodes(),
                     refresh_args.staging_table.vnodes()
+                );
+                debug_assert_eq!(
+                    refresh_args.staging_table.vnodes(),
+                    refresh_args.progress_table.vnodes()
                 );
 
                 let mut pending_barrier: Option<Barrier> = None;
@@ -614,6 +664,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                 // Commit staging table for refreshable materialized views
                 let staging_post_commit = refresh_args.staging_table.commit(b.epoch).await?;
+                let progress_post_commit = refresh_args.progress_table.commit(b.epoch).await?;
 
                 let b_epoch = b.epoch;
                 yield Message::Barrier(b);
@@ -629,7 +680,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                 // Handle staging table post commit
                 staging_post_commit
-                    .post_yield_barrier(update_vnode_bitmap)
+                    .post_yield_barrier(update_vnode_bitmap.clone())
+                    .await?;
+                progress_post_commit
+                    .post_yield_barrier(update_vnode_bitmap.clone())
                     .await?;
 
                 self.metrics
@@ -699,6 +753,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             // Commit staging table for refreshable materialized views
                             let staging_post_commit =
                                 refresh_args.staging_table.commit(b.epoch).await?;
+                            let progress_post_commit =
+                                refresh_args.progress_table.commit(b.epoch).await?;
 
                             yield Message::Barrier(b);
 
@@ -713,6 +769,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                             // Handle staging table post commit
                             staging_post_commit
+                                .post_yield_barrier(update_vnode_bitmap.clone())
+                                .await?;
+                            progress_post_commit
                                 .post_yield_barrier(update_vnode_bitmap)
                                 .await?;
 
@@ -737,6 +796,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 }
             }
             tracing::info!("Materialize refresh finished!");
+
+            // Clean up progress table after successful refresh completion
+            if let Some(ref mut refresh_args) = self.refresh_args {
+                refresh_args.progress_table.clear_all_progress()?;
+                tracing::info!("Cleared refresh progress table after successful completion");
+            }
+
             // stage 2 finished, go back to stage 1
         }
     }
@@ -779,6 +845,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 let main_key = main_kv.key();
 
                 // Advance staging iterator until we find a key >= main_key
+                // TODO: update refresh progress here!
                 let mut should_delete = false;
                 while let Some(staging_kv) = &staging_item {
                     let staging_key = staging_kv.key();
@@ -851,6 +918,34 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 }
             }
         }
+    }
+
+    /// Initialize refresh progress tracking for all VNodes
+    async fn init_refresh_progress(
+        state_table: &StateTableInner<S, SD>,
+        progress_table: &mut RefreshProgressTable<S, SD>,
+        epoch: u64,
+    ) -> StreamExecutorResult<()> {
+        debug_assert_eq!(state_table.vnodes(), progress_table.vnodes());
+
+        // Initialize progress for all VNodes in the current bitmap
+        for vnode in state_table.vnodes().iter_vnodes() {
+            progress_table.set_progress(
+                vnode,
+                ProgressRefreshStage::Refreshing,
+                epoch,
+                epoch,
+                0,     // initial processed rows
+                false, // not completed yet
+            )?;
+        }
+
+        tracing::info!(
+            vnodes_count = state_table.vnodes().count_ones(),
+            "Initialized refresh progress tracking for all VNodes"
+        );
+
+        Ok(())
     }
 }
 
