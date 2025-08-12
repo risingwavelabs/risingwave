@@ -220,6 +220,7 @@ impl TableCatalogBuilder {
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None, // TODO: fill this field
             refreshable: false,                // Internal tables are not refreshable
+            vector_index_info: None,
         }
     }
 
