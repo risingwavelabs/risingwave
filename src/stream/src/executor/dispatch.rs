@@ -57,7 +57,7 @@ pub struct DispatchExecutor {
 
 struct DispatcherWithMetrics {
     dispatcher: DispatcherImpl,
-    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
+    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
 }
 
 impl DispatcherWithMetrics {
@@ -179,17 +179,33 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher
-                            .dispatch_barriers(
-                                barrier_batch
-                                    .iter()
-                                    .cloned()
-                                    .map(|b| b.into_dispatcher())
-                                    .collect(),
-                            )
-                            .await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
+                        let metrics = dispatcher.actor_output_buffer_blocking_duration_ns.clone();
+                        let mut start_time = Instant::now();
+                        let mut interval = tokio::time::interval(Duration::from_secs(15));
+                        interval.tick().now_or_never().expect("interval tick should immediately resolve");
+                        let fut = dispatcher.dispatch_barriers(
+                            barrier_batch
+                                .iter()
+                                .cloned()
+                                .map(|b| b.into_dispatcher())
+                                .collect(),
+                        );
+                        tokio::pin!(fut);
+                        loop {
+                            tokio::select! {
+                                biased;
+                                res = &mut fut => {
+                                    res?;
+                                    let ns = start_time.elapsed().as_nanos() as u64;
+                                    metrics.inc_by(ns);
+                                    break;
+                                }
+                                _ = interval.tick() => {
+                                    start_time = Instant::now();
+                                    metrics.inc_by(Duration::from_secs(15).as_nanos() as u64);
+                                }
+                            };
+                        }
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -199,9 +215,27 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher.dispatch_watermark(watermark.clone()).await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
+                        let metrics = dispatcher.actor_output_buffer_blocking_duration_ns.clone();
+                        let mut start_time = Instant::now();
+                        let mut interval = tokio::time::interval(Duration::from_secs(15));
+                        interval.tick().now_or_never().expect("interval tick should immediately resolve");
+                        let fut = dispatcher.dispatch_watermark(watermark.clone());
+                        tokio::pin!(fut);
+                        loop {
+                            tokio::select! {
+                                biased;
+                                res = &mut fut => {
+                                    res?;
+                                    let ns = start_time.elapsed().as_nanos() as u64;
+                                    metrics.inc_by(ns);
+                                    break;
+                                }
+                                _ = interval.tick() => {
+                                    start_time = Instant::now();
+                                    metrics.inc_by(Duration::from_secs(15).as_nanos() as u64);
+                                }
+                            };
+                        }
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -210,9 +244,27 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher.dispatch_data(chunk.clone()).await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
+                        let metrics = dispatcher.actor_output_buffer_blocking_duration_ns.clone();
+                        let mut start_time = Instant::now();
+                        let mut interval = tokio::time::interval(Duration::from_secs(15));
+                        interval.tick().now_or_never().expect("interval tick should immediately resolve");
+                        let fut = dispatcher.dispatch_data(chunk.clone());
+                        tokio::pin!(fut);
+                        loop {
+                            tokio::select! {
+                                biased;
+                                res = &mut fut => {
+                                    res?;
+                                    let ns = start_time.elapsed().as_nanos() as u64;
+                                    metrics.inc_by(ns);
+                                    break;
+                                }
+                                _ = interval.tick() => {
+                                    start_time = Instant::now();
+                                    metrics.inc_by(Duration::from_secs(15).as_nanos() as u64);
+                                }
+                            };
+                        }
                         StreamResult::Ok(())
                     })
                     .await?;
@@ -633,6 +685,7 @@ pub enum DispatcherImpl {
 
 impl DispatcherImpl {
     pub fn new(outputs: Vec<Output>, dispatcher: &PbDispatcher) -> StreamResult<Self> {
+        tracing::debug!("outputs: {:?}", outputs);
         let output_mapping =
             DispatchOutputMapping::from_protobuf(dispatcher.output_mapping.clone().unwrap());
 
