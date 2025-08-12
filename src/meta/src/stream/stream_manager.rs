@@ -25,7 +25,7 @@ use risingwave_common::bail;
 
 use risingwave_common::catalog::{DatabaseId, Field, TableId};
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_meta_model::{ObjectId, StreamingParallelism};
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
@@ -39,8 +39,8 @@ use tracing::Instrument;
 
 use super::{
     FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates,
-    JobRescheduleTarget, JobResourceGroupTarget, Locations, RescheduleOptions,
-    RescheduleTarget, ScaleControllerRef,
+    JobRescheduleTarget, JobResourceGroupTarget, Locations, RescheduleOptions, RescheduleTarget,
+    ScaleControllerRef,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -873,15 +873,7 @@ impl GlobalStreamManager {
         let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
         let command = self
             .scale_controller
-            .reschedule_x(
-                HashMap::from([(
-                    job_id.table_id as _,
-                    RescheduleTarget::Parallelism(crate::stream::scale::ParallelismTarget {
-                        parallelism: StreamingParallelism::Fixed(1),
-                    }),
-                )]),
-                workers,
-            )
+            .reschedule_x(HashMap::from([(job_id.table_id as _, target)]), workers)
             .await?;
 
         self.barrier_scheduler

@@ -310,15 +310,11 @@ impl CommandContext {
                     .apply_source_change(source_change)
                     .await;
             }
-            Command::RescheduleFragment {
-                reschedules,
-                post_updates,
-                ..
-            } => {
-                barrier_manager_context
-                    .scale_controller
-                    .post_apply_reschedule(reschedules, post_updates)
-                    .await?;
+            Command::RescheduleFragment { reschedules, .. } => {
+                // barrier_manager_context
+                //     .scale_controller
+                //     .post_apply_reschedule(reschedules, post_updates)
+                //     .await?;
             }
 
             Command::ReplaceStreamJob(

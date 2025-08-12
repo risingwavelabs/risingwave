@@ -684,9 +684,7 @@ where
 {
     let mut query = StreamingJob::find()
         .select_only()
-        .column(streaming_job::Column::JobId)
-        .column(streaming_job::Column::Parallelism)
-        .column(streaming_job::Column::SpecificResourceGroup);
+        .column(streaming_job::Column::JobId);
 
     if let Some(database_id) = database_id {
         query = query
@@ -694,25 +692,13 @@ where
             .filter(object::Column::DatabaseId.eq(database_id));
     }
 
-    let jobs: Vec<(ObjectId, StreamingParallelism, Option<String>)> =
-        query.into_tuple().all(txn).await?;
+    let jobs: Vec<ObjectId> = query.into_tuple().all(txn).await?;
 
     if jobs.is_empty() {
         return Ok(HashMap::new());
     }
 
-    let jobs = jobs
-        .into_iter()
-        .map(|(job_id, parallelism, resource_group)| {
-            (
-                job_id,
-                TargetResourcePolicy {
-                    resource_group,
-                    parallelism,
-                },
-            )
-        })
-        .collect::<HashMap<_, _>>();
+    let jobs: HashSet<ObjectId> = jobs.into_iter().collect();
 
     let available_workers: BTreeMap<_, _> = worker_nodes
         .current()
@@ -753,7 +739,7 @@ pub struct RenderedJobContext {
 
 pub async fn render_jobs<C>(
     txn: &C,
-    jobs: HashMap<ObjectId, TargetResourcePolicy>,
+    job_ids: HashSet<ObjectId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
 ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
 where
@@ -761,9 +747,18 @@ where
 {
     println!("reander jobs");
 
-    println!("jobs {:?}", jobs);
+    println!("jobs {:?}", job_ids);
     println!("workers {:?}", workers);
-    let job_ids: Vec<ObjectId> = jobs.keys().cloned().collect();
+
+    let jobs = StreamingJob::find()
+        .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
+        .all(txn)
+        .await?;
+
+    let jobs = jobs
+        .into_iter()
+        .map(|job| (job.job_id, job))
+        .collect::<HashMap<_, _>>();
 
     let excluded_fragments_query = FragmentRelation::find()
         .select_only()
@@ -802,15 +797,6 @@ where
 
     let mut fragment_map: HashMap<_, _> =
         fragments.into_iter().map(|f| (f.fragment_id, f)).collect();
-
-    let streaming_jobs = StreamingJob::find()
-        .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
-        .all(txn)
-        .await?;
-    let streaming_jobs = streaming_jobs
-        .into_iter()
-        .map(|job| (job.job_id, job))
-        .collect::<HashMap<_, _>>();
 
     println!("333333");
 
@@ -862,12 +848,9 @@ where
             .exactly_one()
             .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
 
-        let TargetResourcePolicy {
-            resource_group,
-            parallelism,
-        } = jobs.get(&job_id).unwrap();
+        let job = jobs.get(&job_id).unwrap();
 
-        let resource_group = match resource_group {
+        let resource_group = match &job.specific_resource_group {
             None => {
                 let database = streaming_job_databases
                     .get(&job_id)
@@ -896,15 +879,13 @@ where
 
         let total_parallelism = workers.values().map(|w| w.get()).sum::<usize>();
 
-        let streaming_job = streaming_jobs.get(&job_id).unwrap();
-
-        let fact_parallelism = match parallelism {
+        let fact_parallelism = match job.parallelism {
             StreamingParallelism::Adaptive => total_parallelism,
-            StreamingParallelism::Fixed(n) => *n,
+            StreamingParallelism::Fixed(n) => n,
             StreamingParallelism::Custom => unreachable!(),
         }
         .min(total_parallelism) // limit fixed
-        .min(streaming_job.max_parallelism as usize) // limit max parallelism
+        .min(job.max_parallelism as usize) // limit max parallelism
         .min(vnode_count);
 
         let assigner = AssignerBuilder::new(job_id).build();
