@@ -480,7 +480,7 @@ impl InflightDatabaseInfo {
         command: Option<&Command>,
         control_stream_manager: &ControlStreamManager,
     ) -> Option<FragmentEdgeBuildResult> {
-        let (info, replace_job) = match command {
+        let (info, replace_job, new_upstream_sink) = match command {
             None => {
                 return None;
             }
@@ -502,14 +502,17 @@ impl InflightDatabaseInfo {
                     return None;
                 }
                 Command::CreateStreamingJob { info, job_type, .. } => {
-                    let replace_job = match job_type {
-                        CreateStreamingJobType::Normal
-                        | CreateStreamingJobType::SnapshotBackfill(_) => None,
-                        CreateStreamingJobType::SinkIntoTable(replace_job) => Some(replace_job),
+                    let new_upstream_sink = if let CreateStreamingJobType::SinkIntoTable(
+                        new_upstream_sink,
+                    ) = job_type
+                    {
+                        Some(new_upstream_sink)
+                    } else {
+                        None
                     };
-                    (Some(info), replace_job)
+                    (Some(info), None, new_upstream_sink)
                 }
-                Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job)),
+                Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job), None),
             },
         };
         // `existing_fragment_ids` consists of
@@ -535,6 +538,11 @@ impl InflightDatabaseInfo {
                     })
                     .chain(replace_job.replace_upstream.keys())
             }))
+            .chain(
+                new_upstream_sink
+                    .into_iter()
+                    .map(|ctx| &ctx.new_sink_downstream.downstream_fragment_id),
+            )
             .cloned();
         let new_fragment_infos = info
             .into_iter()
@@ -566,6 +574,11 @@ impl InflightDatabaseInfo {
         if let Some(replace_job) = replace_job {
             builder.add_relations(&replace_job.upstream_fragment_downstreams);
             builder.add_relations(&replace_job.new_fragments.downstreams);
+        }
+        if let Some(new_upstream_sink) = new_upstream_sink {
+            let sink_fragment_id = new_upstream_sink.sink_fragment_id;
+            let new_sink_downstream = &new_upstream_sink.new_sink_downstream;
+            builder.add_edge(sink_fragment_id, new_sink_downstream);
         }
         if let Some(replace_job) = replace_job {
             for (fragment_id, fragment_replacement) in &replace_job.replace_upstream {

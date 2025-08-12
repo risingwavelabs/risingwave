@@ -17,7 +17,17 @@ message Dispatchers {
   repeated Dispatcher dispatchers = 1;
 }
 
+message UpstreamSinkInfo {
+  uint32 upstream_fragment_id = 1;
+  repeated plan_common.Field sink_output_schema = 2;
+  repeated expr.ExprNode project_exprs = 3;
+}
+
 message AddMutation {
+  message NewUpstreamSink {
+    UpstreamSinkInfo info = 1;
+    repeated common.ActorInfo upstream_actors = 2;
+  }
   // New dispatchers for each actor.
   map<uint32, Dispatchers> actor_dispatchers = 1;
   // All actors to be added (to the main connected component of the graph) in this update.
@@ -34,10 +44,14 @@ message AddMutation {
   repeated uint32 backfill_nodes_to_pause = 6;
   // CDC table snapshot splits
   map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
+  // Use actor_id as keys.
+  map<uint32, NewUpstreamSink> new_upstream_sinks = 8;
 }
 
 message StopMutation {
   repeated uint32 actors = 1;
+  // Use actor_id as keys.
+  map<uint32, common.Uint32Vector> dropped_upstream_sinks = 2;
 }
 
 message UpdateMutation {
@@ -938,6 +952,11 @@ message MaterializedExprsNode {
   optional uint32 state_clean_col_idx = 3;
 }
 
+// This is just for creating. Upstreams may be added and removed dynamically at runtime.
+message UpstreamSinkUnionNode {
+  repeated UpstreamSinkInfo init_upstreams = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -989,6 +1008,7 @@ message StreamNode {
     AsOfJoinNode as_of_join = 147;
     SyncLogStoreNode sync_log_store = 148;
     MaterializedExprsNode materialized_exprs = 149;
+    UpstreamSinkUnionNode upstream_sink_union = 150;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

@@ -506,6 +506,7 @@ impl ControlStreamManager {
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan
             backfill_nodes_to_pause: Default::default(),
+            new_upstream_sinks: Default::default(),
         });
 
         fn resolve_jobs_committed_epoch(
@@ -784,7 +785,8 @@ impl ControlStreamManager {
         applied_graph_info: &InflightDatabaseInfo,
         edges: &mut Option<FragmentEdgeBuildResult>,
     ) -> MetaResult<NodeToCollect> {
-        let mutation = command.and_then(|c| c.to_mutation(is_paused, edges, self));
+        let mutation =
+            command.and_then(|c| c.to_mutation(is_paused, edges, pre_applied_graph_info, self));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {

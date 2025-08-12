@@ -33,6 +33,7 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
+use crate::model::FragmentDownstreamRelation;
 use crate::stream::SourceChange;
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
@@ -218,35 +219,7 @@ impl CommandContext {
                 cross_db_snapshot_backfill_info,
             } => {
                 match job_type {
-                    CreateStreamingJobType::SinkIntoTable(
-                        replace_plan @ ReplaceStreamJobPlan {
-                            old_fragments,
-                            new_fragments,
-                            upstream_fragment_downstreams,
-                            init_split_assignment,
-                            ..
-                        },
-                    ) => {
-                        barrier_manager_context
-                            .metadata_manager
-                            .catalog_controller
-                            .post_collect_job_fragments(
-                                new_fragments.stream_job_id.table_id as _,
-                                new_fragments.actor_ids(),
-                                upstream_fragment_downstreams,
-                                init_split_assignment,
-                            )
-                            .await?;
-                        barrier_manager_context
-                            .source_manager
-                            .handle_replace_job(
-                                old_fragments,
-                                new_fragments.stream_source_fragments(),
-                                init_split_assignment.clone(),
-                                replace_plan,
-                            )
-                            .await;
-                    }
+                    CreateStreamingJobType::SinkIntoTable(_) => {}
                     CreateStreamingJobType::Normal => {
                         barrier_manager_context
                             .metadata_manager
@@ -300,6 +273,22 @@ impl CommandContext {
                     init_split_assignment,
                     ..
                 } = info;
+                let sink_update_ctx = if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
+                    let target_table_id = info
+                        .streaming_job
+                        .try_as_sink_ref()
+                        .unwrap()
+                        .get_target_table()
+                        .unwrap();
+                    let new_downstreams = ctx.new_sink_downstream.clone();
+                    let new_downstreams = FragmentDownstreamRelation::from([(
+                        ctx.sink_fragment_id,
+                        vec![new_downstreams],
+                    )]);
+                    Some((*target_table_id as i32, new_downstreams))
+                } else {
+                    None
+                };
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
@@ -308,6 +297,7 @@ impl CommandContext {
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
+                        sink_update_ctx,
                     )
                     .await?;
 

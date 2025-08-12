@@ -172,11 +172,13 @@ impl MergeExecutor {
         local_barrier_manager: crate::task::LocalBarrierManager,
         schema: Schema,
         chunk_size: usize,
+        barrier_rx: Option<mpsc::UnboundedReceiver<Barrier>>,
     ) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::ActorInput;
 
-        let barrier_rx = local_barrier_manager.subscribe_barrier(actor_id);
+        let barrier_rx =
+            barrier_rx.unwrap_or_else(|| local_barrier_manager.subscribe_barrier(actor_id));
 
         let metrics = StreamingMetrics::unused();
         let actor_ctx = ActorContext::for_test(actor_id);
@@ -244,7 +246,8 @@ impl MergeExecutor {
             metrics
                 .actor_input_buffer_blocking_duration_ns
                 .inc_by(start_time.elapsed().as_nanos() as u64);
-            let msg: DispatcherMessage = msg?;
+            let msg: DispatcherMessage =
+                msg.map_err(|e| anyhow::anyhow!("MergeExecutor pull upstream failed: {}", e))?;
             let mut msg: Message = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
 
             match &mut msg {
@@ -429,8 +432,8 @@ where
                 }
 
                 Poll::Ready(None) => {
-                    // See also the comments in `SelectReceivers::poll_next`.
-                    unreachable!("SelectReceivers should never return None");
+                    // See also the comments in `DynamicReceivers::poll_next`.
+                    unreachable!("Merge should always have upstream inputs");
                 }
             }
         }
@@ -595,8 +598,12 @@ mod tests {
                 (*epoch, barrier)
             })
             .collect();
-        let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch)
-            .with_mutation(Mutation::Stop(HashSet::default()));
+        let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch).with_mutation(
+            Mutation::Stop(StopMutation {
+                dropped_actors: Default::default(),
+                dropped_upstream_sinks: Default::default(),
+            }),
+        );
         barrier_test_env.inject_barrier(&b2, [actor_id]);
         barrier_test_env.flush_all_events().await;
 
@@ -640,6 +647,7 @@ mod tests {
             barrier_test_env.local_barrier_manager.clone(),
             Schema::new(vec![]),
             100,
+            None,
         );
         let mut merger = merger.boxed().execute();
         for (idx, epoch) in epochs {

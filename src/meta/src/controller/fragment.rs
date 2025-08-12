@@ -70,7 +70,7 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings, get_job_fragments_by_id, resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
@@ -591,30 +591,7 @@ impl CatalogController {
         job_id: ObjectId,
     ) -> MetaResult<StreamJobFragments> {
         let inner = self.inner.read().await;
-        let fragment_actors = FragmentModel::find()
-            .find_with_related(Actor)
-            .filter(fragment::Column::JobId.eq(job_id))
-            .all(&inner.db)
-            .await?;
-
-        let job_info = StreamingJob::find_by_id(job_id)
-            .one(&inner.db)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
-
-        let job_definition = resolve_streaming_job_definition(&inner.db, &HashSet::from([job_id]))
-            .await?
-            .remove(&job_id);
-
-        Self::compose_table_fragments(
-            job_id as _,
-            job_info.job_status.into(),
-            job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
-            fragment_actors,
-            job_info.parallelism.clone(),
-            job_info.max_parallelism as _,
-            job_definition,
-        )
+        get_job_fragments_by_id(&inner.db, job_id).await
     }
 
     pub async fn get_fragment_actor_dispatchers(

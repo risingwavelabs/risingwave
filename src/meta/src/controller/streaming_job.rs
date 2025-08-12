@@ -67,14 +67,14 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
-use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
+use crate::barrier::Reschedule;
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_internal_tables_by_id, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_user_info_by_ids,
+    get_internal_tables_by_id, get_job_fragments_by_id, get_table_columns,
+    grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -82,7 +82,8 @@ use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
-use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
+use crate::rpc::ddl_controller::build_upstream_sink_info;
+use crate::stream::{JobReschedulePostUpdates, SplitAssignment, UpstreamSinkInfo};
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -200,7 +201,7 @@ impl CatalogController {
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
             }
-            StreamingJob::Sink(sink, _) => {
+            StreamingJob::Sink(sink) => {
                 if let Some(target_table_id) = sink.target_table
                     && check_sink_into_table_cycle(
                         target_table_id as ObjectId,
@@ -402,7 +403,7 @@ impl CatalogController {
     ) -> MetaResult<()> {
         let need_notify = streaming_job.should_notify_creating();
         let (sink, table) = match streaming_job {
-            StreamingJob::Sink(sink, _) => (Some(sink), None),
+            StreamingJob::Sink(sink) => (Some(sink), None),
             StreamingJob::Table(_, table, _) => (None, Some(table)),
             StreamingJob::Index(_, _)
             | StreamingJob::Source(_)
@@ -713,6 +714,7 @@ impl CatalogController {
             actor_ids,
             upstream_fragment_new_downstreams,
             split_assignment,
+            None,
         )
         .await
     }
@@ -723,6 +725,7 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         split_assignment: &SplitAssignment,
+        sink_update_ctx: Option<(TableId, FragmentDownstreamRelation)>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -755,6 +758,40 @@ impl CatalogController {
 
         insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;
 
+        let mut objects = vec![];
+        if let Some((target_table_id, downstreams)) = sink_update_ctx {
+            insert_fragment_relations(&txn, &downstreams).await?;
+
+            let table = Table::find_by_id(target_table_id as ObjectId)
+                .one(&txn)
+                .await?
+                .ok_or(MetaError::catalog_id_not_found("table", target_table_id))?;
+
+            let mut incoming_sinks = table.incoming_sinks.inner_ref().clone();
+
+            let sink_id = job_id;
+
+            assert!(!incoming_sinks.contains(&sink_id));
+            incoming_sinks.push(sink_id);
+
+            Table::update(table::ActiveModel {
+                table_id: Set(target_table_id as ObjectId),
+                incoming_sinks: Set(incoming_sinks.into()),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+            let (table, table_obj) = Table::find_by_id(target_table_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", target_table_id))?;
+            let pb_table = ObjectModel(table, table_obj.unwrap()).into();
+            objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Table(pb_table)),
+            });
+        }
+
         // Mark job as CREATING.
         streaming_job::ActiveModel {
             job_id: Set(job_id),
@@ -765,6 +802,14 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
+
+        if !objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+            )
+            .await;
+        }
 
         Ok(())
     }
@@ -866,11 +911,7 @@ impl CatalogController {
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
-    pub async fn finish_streaming_job(
-        &self,
-        job_id: ObjectId,
-        replace_stream_job_info: Option<ReplaceStreamJobPlan>,
-    ) -> MetaResult<()> {
+    pub async fn finish_streaming_job(&self, job_id: ObjectId) -> MetaResult<()> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -1057,35 +1098,6 @@ impl CatalogController {
             _ => unreachable!("invalid job type: {:?}", job_type),
         }
 
-        let replace_table_mapping_update = match replace_stream_job_info {
-            Some(ReplaceStreamJobPlan {
-                streaming_job,
-                replace_upstream,
-                tmp_id,
-                ..
-            }) => {
-                let incoming_sink_id = job_id;
-
-                let (relations, _) = Self::finish_replace_streaming_job_inner(
-                    tmp_id as ObjectId,
-                    replace_upstream,
-                    SinkIntoTableContext {
-                        creating_sink_id: Some(incoming_sink_id as _),
-                        dropping_sink_id: None,
-                        updated_sink_catalogs: vec![],
-                    },
-                    &txn,
-                    streaming_job,
-                    None, // will not drop table connector when creating a streaming job
-                    None, // no auto schema refresh sinks when create table
-                )
-                .await?;
-
-                Some(relations)
-            }
-            None => None,
-        };
-
         if job_type != ObjectType::Index {
             updated_user_info = grant_default_privileges_automatically(&txn, job_id).await?;
         }
@@ -1103,14 +1115,6 @@ impl CatalogController {
             version = self.notify_users_update(updated_user_info).await;
         }
 
-        if let Some(objects) = replace_table_mapping_update {
-            version = self
-                .notify_frontend(
-                    NotificationOperation::Update,
-                    NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
-                )
-                .await;
-        }
         inner
             .creating_table_finish_notifier
             .values_mut()
@@ -2458,6 +2462,35 @@ impl CatalogController {
         }
 
         Ok(rate_limits)
+    }
+
+    pub async fn get_all_upstream_sinks(
+        &self,
+        target_table: &PbTable,
+        target_table_fragments: &mut StreamJobFragments,
+    ) -> MetaResult<Vec<UpstreamSinkInfo>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let mut upstream_sinks = Vec::with_capacity(target_table.get_incoming_sinks().len());
+        for sink_id in target_table.get_incoming_sinks() {
+            let (sink, sink_obj) = Sink::find_by_id(*sink_id as ObjectId)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", *sink_id))?;
+            let pb_sink = ObjectModel(sink, sink_obj.unwrap()).into();
+            let sink_fragments = get_job_fragments_by_id(&txn, *sink_id as _).await?;
+            let upstream_info = build_upstream_sink_info(
+                &pb_sink,
+                &sink_fragments,
+                target_table,
+                target_table_fragments,
+            )?;
+            upstream_sinks.push(upstream_info);
+        }
+
+        Ok(upstream_sinks)
     }
 }
 

@@ -272,6 +272,39 @@ impl CatalogController {
         let (removed_source_fragments, removed_actors, removed_fragments) =
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
+        let mut removed_sink_with_existing_table = HashMap::new();
+        for obj in removed_objects.values() {
+            if obj.obj_type != ObjectType::Sink {
+                continue;
+            }
+            let sink = Sink::find_by_id(obj.oid)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
+            if let Some(target_table_id) = sink.target_table
+                && !removed_streaming_job_ids.contains(&target_table_id)
+            {
+                removed_sink_with_existing_table.insert(sink.sink_id, target_table_id);
+            }
+        }
+
+        let mut removed_upstream_fragments: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+        for (sink_id, _) in removed_sink_with_existing_table {
+            let sink_fragment_id = get_sink_fragment_by_id(&txn, sink_id).await?;
+            let target_fragments = fetch_target_fragments(&txn, sink_fragment_id).await?;
+            assert_eq!(
+                target_fragments.len(),
+                1,
+                "expect only one target fragment for sink {sink_id}"
+            );
+
+            let table_fragment_id = target_fragments[0];
+            removed_upstream_fragments
+                .entry(table_fragment_id)
+                .or_default()
+                .push(sink_fragment_id);
+        }
+
         // Find affect users with privileges on all this objects.
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
@@ -361,6 +394,7 @@ impl CatalogController {
                 removed_source_fragments,
                 removed_actors,
                 removed_fragments,
+                removed_upstream_fragments,
             },
             version,
         ))

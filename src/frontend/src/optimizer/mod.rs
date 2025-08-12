@@ -80,7 +80,8 @@ use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker, PlanTreeNode, Stream,
-    StreamExchange, StreamPlanRef, StreamUnion, ToStream, VisitExprsRecursive,
+    StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion, ToStream,
+    VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
@@ -792,7 +793,7 @@ impl LogicalPlanRoot {
         };
 
         let with_external_source = source_catalog.is_some();
-        let union_inputs = if with_external_source {
+        let mut union_inputs = if with_external_source {
             let mut external_source_node = stream_plan.plan;
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
@@ -823,7 +824,7 @@ impl LogicalPlanRoot {
                 dummy_source_node,
                 &pk_column_indices,
                 kind,
-                column_descs,
+                column_descs.clone(),
             )?;
 
             vec![external_source_node, dml_node]
@@ -834,7 +835,7 @@ impl LogicalPlanRoot {
                 stream_plan.plan,
                 &pk_column_indices,
                 kind,
-                column_descs,
+                column_descs.clone(),
             )?;
 
             vec![dml_node]
@@ -856,6 +857,13 @@ impl LogicalPlanRoot {
                 unreachable!()
             }
         };
+
+        let upstream_sink_union = StreamUpstreamSinkUnion::new(
+            context.clone(),
+            union_inputs[0].schema().clone(),
+            append_only,
+        );
+        union_inputs.push(upstream_sink_union.into());
 
         let mut stream_plan = StreamUnion::new_with_dist(
             Union {

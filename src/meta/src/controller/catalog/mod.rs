@@ -135,6 +135,9 @@ pub struct ReleaseContext {
 
     pub(crate) removed_actors: HashSet<ActorId>,
     pub(crate) removed_fragments: HashSet<FragmentId>,
+
+    /// Removed upstream sink fragments for existing table.
+    pub(crate) removed_upstream_fragments: HashMap<FragmentId, Vec<FragmentId>>,
 }
 
 impl CatalogController {

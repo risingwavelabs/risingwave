@@ -52,6 +52,7 @@ mod stream_scan;
 mod temporal_join;
 mod top_n;
 mod union;
+mod upstream_sink_union;
 mod values;
 mod watermark_filter;
 
@@ -107,6 +108,7 @@ use self::sync_log_store::*;
 use self::temporal_join::*;
 use self::top_n::*;
 use self::union::*;
+use self::upstream_sink_union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Execute, Executor, ExecutorInfo};
@@ -195,5 +197,6 @@ pub async fn create_executor(
         NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
         NodeBody::SyncLogStore => SyncLogStoreExecutorBuilder,
         NodeBody::MaterializedExprs => MaterializedExprsExecutorBuilder,
+        NodeBody::UpstreamSinkUnion => UpstreamSinkUnionExecutorBuilder,
     }
 }

@@ -35,6 +35,7 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
@@ -277,7 +278,6 @@ impl GlobalBarrierWorkerContextImpl {
                                     .catalog_controller
                                     .finish_streaming_job(
                                         stream_job_fragments.stream_job_id().table_id as _,
-                                        None,
                                     )
                                     .await?;
                             } else {
@@ -419,7 +419,7 @@ impl GlobalBarrierWorkerContextImpl {
                         )
                         .await?;
 
-                    let background_jobs = {
+                    let mut background_jobs = {
                         let jobs = self
                             .list_background_job_progress()
                             .await
@@ -435,6 +435,28 @@ impl GlobalBarrierWorkerContextImpl {
                         }
                         background_jobs
                     };
+
+                    {
+                        let job_ids = background_jobs
+                            .keys()
+                            .map(|job_id| job_id.table_id as _)
+                            .collect_vec();
+                        // Only `Table` will be returned here, ignoring other catalog objects.
+                        let tables = self
+                            .metadata_manager
+                            .get_table_catalog_by_ids(job_ids)
+                            .await?;
+                        for table in tables {
+                            let table_fragments =
+                                &mut background_jobs.get_mut(&TableId::new(table.id)).unwrap().1;
+                            let upstream_infos = self
+                                .metadata_manager
+                                .catalog_controller
+                                .get_all_upstream_sinks(&table, table_fragments)
+                                .await?;
+                            refill_upstream_sink_union_in_table(table_fragments, &upstream_infos);
+                        }
+                    }
 
                     let database_infos = self
                         .metadata_manager
@@ -512,7 +534,7 @@ impl GlobalBarrierWorkerContextImpl {
             return Ok(None);
         };
 
-        let background_jobs = {
+        let mut background_jobs = {
             let jobs = background_jobs;
             let mut background_jobs = HashMap::new();
             for (definition, stream_job_fragments) in jobs {
@@ -526,10 +548,7 @@ impl GlobalBarrierWorkerContextImpl {
                     // If there's no tracking actor in the job, we can finish the job directly.
                     self.metadata_manager
                         .catalog_controller
-                        .finish_streaming_job(
-                            stream_job_fragments.stream_job_id().table_id as _,
-                            None,
-                        )
+                        .finish_streaming_job(stream_job_fragments.stream_job_id().table_id as _)
                         .await?;
                 } else {
                     background_jobs
@@ -542,6 +561,28 @@ impl GlobalBarrierWorkerContextImpl {
             }
             background_jobs
         };
+
+        {
+            let job_ids = background_jobs
+                .keys()
+                .map(|job_id| job_id.table_id as _)
+                .collect_vec();
+            // Only `Table` will be returned here, ignoring other catalog objects.
+            let tables = self
+                .metadata_manager
+                .get_table_catalog_by_ids(job_ids)
+                .await?;
+            for table in tables {
+                let table_fragments =
+                    &mut background_jobs.get_mut(&TableId::new(table.id)).unwrap().1;
+                let upstream_infos = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_all_upstream_sinks(&table, table_fragments)
+                    .await?;
+                refill_upstream_sink_union_in_table(table_fragments, &upstream_infos);
+            }
+        }
 
         let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager

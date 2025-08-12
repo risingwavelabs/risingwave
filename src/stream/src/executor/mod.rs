@@ -40,8 +40,10 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::{Expression, NonStrictExpression};
+use risingwave_pb::common::PbUint32Vector;
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
+use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
@@ -49,8 +51,8 @@ use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate}
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
-    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    PbDispatcher, PbStopMutation, PbStreamMessageBatch, PbUpdateMutation, PbWatermark,
+    ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation,
     SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
@@ -166,7 +168,7 @@ pub use top_n::{
 };
 pub use troublemaker::TroublemakerExecutor;
 pub use union::UnionExecutor;
-pub use upstream_sink_union::UpstreamSinkUnionExecutor;
+pub use upstream_sink_union::{UpstreamFragmentInfo, UpstreamSinkUnionExecutor};
 pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
@@ -322,12 +324,19 @@ pub struct AddMutation {
     /// nodes which should start backfill
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignment,
+    pub new_upstream_sinks: HashMap<ActorId, PbNewUpstreamSink>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopMutation {
+    pub dropped_actors: HashSet<ActorId>,
+    pub dropped_upstream_sinks: HashMap<ActorId, Vec<FragmentId>>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
-    Stop(HashSet<ActorId>),
+    Stop(StopMutation),
     Update(UpdateMutation),
     Add(AddMutation),
     SourceChangeSplit(SplitAssignments),
@@ -418,7 +427,10 @@ impl Barrier {
 
     #[must_use]
     pub fn with_stop(self) -> Self {
-        self.with_mutation(Mutation::Stop(HashSet::default()))
+        self.with_mutation(Mutation::Stop(StopMutation {
+            dropped_actors: Default::default(),
+            dropped_upstream_sinks: Default::default(),
+        }))
     }
 
     /// Whether this barrier carries stop mutation.
@@ -484,7 +496,7 @@ impl Barrier {
     /// Get all actors that to be stopped (dropped) by this barrier.
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
         match self.mutation.as_deref() {
-            Some(Mutation::Stop(actors)) => Some(actors),
+            Some(Mutation::Stop(StopMutation { dropped_actors, .. })) => Some(dropped_actors),
             Some(Mutation::Update(UpdateMutation { dropped_actors, .. }))
             | Some(Mutation::AddAndUpdate(_, UpdateMutation { dropped_actors, .. })) => {
                 Some(dropped_actors)
@@ -615,7 +627,29 @@ impl Barrier {
                 | Mutation::AddAndUpdate(_, UpdateMutation { merges, .. }) => {
                     merges.get(&(actor_id, upstream_fragment_id))
                 }
+                _ => None,
+            })
+    }
 
+    pub fn as_new_upstream_sink(&self, actor_id: ActorId) -> Option<&PbNewUpstreamSink> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Add(AddMutation {
+                    new_upstream_sinks, ..
+                }) => new_upstream_sinks.get(&actor_id),
+                _ => None,
+            })
+    }
+
+    pub fn as_dropped_upstream_sinks(&self, actor_id: ActorId) -> Option<&Vec<FragmentId>> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Stop(StopMutation {
+                    dropped_upstream_sinks,
+                    ..
+                }) => dropped_upstream_sinks.get(&actor_id),
                 _ => None,
             })
     }
@@ -703,8 +737,22 @@ impl Mutation {
         };
 
         match self {
-            Mutation::Stop(actors) => PbMutation::Stop(StopMutation {
-                actors: actors.iter().copied().collect::<Vec<_>>(),
+            Mutation::Stop(StopMutation {
+                dropped_actors,
+                dropped_upstream_sinks,
+            }) => PbMutation::Stop(PbStopMutation {
+                actors: dropped_actors.iter().cloned().collect(),
+                dropped_upstream_sinks: dropped_upstream_sinks
+                    .iter()
+                    .map(|(actor_id, fragment_ids)| {
+                        (
+                            *actor_id,
+                            PbUint32Vector {
+                                data: fragment_ids.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
             }),
             Mutation::Update(UpdateMutation {
                 dispatchers,
@@ -746,6 +794,7 @@ impl Mutation {
                 subscriptions_to_add,
                 backfill_nodes_to_pause,
                 actor_cdc_table_snapshot_splits,
+                new_upstream_sinks,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -772,6 +821,10 @@ impl Mutation {
                 actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
                     actor_cdc_table_snapshot_splits.clone(),
                 ),
+                new_upstream_sinks: new_upstream_sinks
+                    .iter()
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect(),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -858,9 +911,14 @@ impl Mutation {
 
     fn from_protobuf(prost: &PbMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
-            PbMutation::Stop(stop) => {
-                Mutation::Stop(HashSet::from_iter(stop.actors.iter().cloned()))
-            }
+            PbMutation::Stop(stop) => Mutation::Stop(StopMutation {
+                dropped_actors: stop.actors.iter().copied().collect(),
+                dropped_upstream_sinks: stop
+                    .dropped_upstream_sinks
+                    .iter()
+                    .map(|(actor_id, fragment_ids)| (*actor_id, fragment_ids.data.clone()))
+                    .collect(),
+            }),
 
             PbMutation::Update(update) => Mutation::Update(UpdateMutation {
                 dispatchers: update
@@ -943,6 +1001,11 @@ impl Mutation {
                 actor_cdc_table_snapshot_splits: build_actor_cdc_table_snapshot_splits(
                     add.actor_cdc_table_snapshot_splits.clone(),
                 ),
+                new_upstream_sinks: add
+                    .new_upstream_sinks
+                    .iter()
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect(),
             }),
 
             PbMutation::Splits(s) => {
@@ -1374,6 +1437,8 @@ type BoxedMessageInput<InputId, M> = BoxedInput<InputId, MessageStreamItemInner<
 pub struct DynamicReceivers<InputId, M> {
     /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
     barrier: Option<BarrierInner<M>>,
+    /// The start timestamp of the current barrier. Used for measuring the alignment duration.
+    start_ts: Option<Instant>,
     /// The upstreams that're blocked by the `barrier`.
     blocked: Vec<BoxedMessageInput<InputId, M>>,
     /// The upstreams that're not blocked and can be polled.
@@ -1401,7 +1466,6 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
             return Poll::Ready(None);
         }
 
-        let mut start = None;
         loop {
             match futures::ready!(self.active.poll_next_unpin(cx)) {
                 // Directly forward the error.
@@ -1427,7 +1491,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
                         MessageInner::Barrier(barrier) => {
                             // Block this upstream by pushing it to `blocked`.
                             if self.blocked.is_empty() {
-                                start = Some(Instant::now());
+                                self.start_ts = Some(Instant::now());
                             }
                             self.blocked.push(remaining);
                             if let Some(current_barrier) = self.barrier.as_ref() {
@@ -1460,15 +1524,16 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
                 }
                 // There's no active upstreams. Process the barrier and resume the blocked ones.
                 None => {
-                    if let Some(start) = start {
+                    if !self.blocked.is_empty() {
+                        let start_ts = self.start_ts.take().unwrap();
                         if let Some(barrier_align_duration) = &self.barrier_align_duration {
-                            barrier_align_duration.inc_by(start.elapsed().as_nanos() as u64);
+                            barrier_align_duration.inc_by(start_ts.elapsed().as_nanos() as u64);
                         }
                         if let Some(merge_barrier_align_duration) =
                             &self.merge_barrier_align_duration
                         {
                             // Observe did a few atomic operation inside, we want to avoid the overhead.
-                            merge_barrier_align_duration.observe(start.elapsed().as_secs_f64())
+                            merge_barrier_align_duration.observe(start_ts.elapsed().as_secs_f64())
                         }
                     }
 
@@ -1478,6 +1543,12 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
         }
 
         assert!(self.active.is_terminated());
+
+        if self.blocked.is_empty() {
+            // No blocked upstreams, return None.
+            return Poll::Ready(None);
+        }
+
         let barrier = self.barrier.take().unwrap();
 
         let upstreams = std::mem::take(&mut self.blocked);
@@ -1494,9 +1565,9 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
         barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
         merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
     ) -> Self {
-        assert!(!upstreams.is_empty());
         let mut this = Self {
             barrier: None,
+            start_ts: None,
             blocked: Vec::with_capacity(upstreams.len()),
             active: Default::default(),
             buffered_watermarks: Default::default(),
@@ -1581,5 +1652,9 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
             .iter()
             .map(|s| s.id())
             .chain(self.active.iter().map(|s| s.get_ref().unwrap().id()))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.blocked.is_empty() && self.active.is_empty()
     }
 }

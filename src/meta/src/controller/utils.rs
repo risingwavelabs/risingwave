@@ -21,6 +21,8 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::types::Datum;
+use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::actor::ActorStatus;
@@ -31,10 +33,10 @@ use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array,
-    JobStatus, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId,
-    UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment, fragment_relation,
-    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
-    subscription, table, user, user_default_privilege, user_privilege, view,
+    JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
+    TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment,
+    fragment_relation, function, index, object, object_dependency, schema, secret, sink, source,
+    streaming_job, subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -42,12 +44,17 @@ use risingwave_pb::catalog::{
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::expr::{PbExprNode, expr_node};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
 };
-use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
+use risingwave_pb::stream_plan::{
+    PbDispatchOutputMapping, PbDispatcher, PbDispatcherType, PbStreamContext,
+};
 use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject as PbGrantObject};
 use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
 use risingwave_sqlparser::ast::Statement as SqlStatement;
@@ -65,7 +72,9 @@ use thiserror_ext::AsReport;
 
 use crate::barrier::SharedFragmentInfo;
 use crate::controller::ObjectModel;
-use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
+use crate::controller::catalog::CatalogController;
+use crate::controller::scale::resolve_streaming_job_definition;
+use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation, StreamJobFragments};
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -2156,6 +2165,137 @@ where
     }
 
     Ok(())
+}
+
+pub async fn get_sink_fragment_by_id<C>(txn: &C, sink_id: SinkId) -> MetaResult<FragmentId>
+where
+    C: ConnectionTrait,
+{
+    let fragments: Vec<(FragmentId, i32)> = Fragment::find()
+        .select_only()
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::FragmentTypeMask,
+        ])
+        .filter(fragment::Column::JobId.eq(sink_id as ObjectId))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let fragment_id = fragments
+        .into_iter()
+        .find(|(_, mask)| FragmentTypeMask::from(*mask).contains(FragmentTypeFlag::Sink))
+        .map(|(id, _)| id)
+        .ok_or_else(|| {
+            MetaError::from(anyhow!("No sink fragment found for sink id: {}", sink_id))
+        })?;
+
+    Ok(fragment_id)
+}
+
+pub async fn fetch_target_fragments<C>(
+    txn: &C,
+    src_fragment_id: FragmentId,
+) -> MetaResult<Vec<FragmentId>>
+where
+    C: ConnectionTrait,
+{
+    let target_fragments = FragmentRelation::find()
+        .select_only()
+        .column(fragment_relation::Column::TargetFragmentId)
+        .filter(fragment_relation::Column::SourceFragmentId.eq(src_fragment_id))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    Ok(target_fragments)
+}
+
+pub async fn get_job_fragments_by_id<C>(txn: &C, job_id: ObjectId) -> MetaResult<StreamJobFragments>
+where
+    C: ConnectionTrait,
+{
+    let fragment_actors = Fragment::find()
+        .find_with_related(Actor)
+        .filter(fragment::Column::JobId.eq(job_id))
+        .all(txn)
+        .await?;
+
+    let job_info = StreamingJob::find_by_id(job_id)
+        .one(txn)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
+
+    let job_definition = resolve_streaming_job_definition(txn, &HashSet::from([job_id]))
+        .await?
+        .remove(&job_id);
+
+    CatalogController::compose_table_fragments(
+        job_id as _,
+        job_info.job_status.into(),
+        job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
+        fragment_actors,
+        job_info.parallelism.clone(),
+        job_info.max_parallelism as _,
+        job_definition,
+    )
+}
+
+pub fn build_select_node_list(
+    from: &[ColumnCatalog],
+    to: &[ColumnCatalog],
+) -> MetaResult<Vec<PbExprNode>> {
+    let mut exprs = Vec::with_capacity(to.len());
+    let idx_by_col_id = from
+        .iter()
+        .enumerate()
+        .map(|(idx, col)| (col.column_desc.as_ref().unwrap().column_id, idx))
+        .collect::<HashMap<_, _>>();
+
+    for to_col in to {
+        let to_col = to_col.column_desc.as_ref().unwrap();
+        let to_col_type = to_col.column_type.clone();
+        if let Some(from_idx) = idx_by_col_id.get(&to_col.column_id) {
+            let from_col_type = from[*from_idx]
+                .column_desc
+                .as_ref()
+                .unwrap()
+                .column_type
+                .clone();
+            if to_col_type != from_col_type {
+                return Err(anyhow!(
+                    "Column type mismatch: {:?} != {:?}",
+                    from_col_type,
+                    to_col_type
+                )
+                .into());
+            }
+            exprs.push(PbExprNode {
+                function_type: expr_node::Type::Unspecified.into(),
+                return_type: to_col_type,
+                rex_node: Some(expr_node::RexNode::InputRef(*from_idx as _)),
+            });
+        } else {
+            let to_default_node =
+                if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                    expr,
+                    ..
+                })) = &to_col.generated_or_default_column
+                {
+                    expr.clone().unwrap()
+                } else {
+                    let null = Datum::None.to_protobuf();
+                    PbExprNode {
+                        function_type: expr_node::Type::Unspecified.into(),
+                        return_type: to_col_type,
+                        rex_node: Some(expr_node::RexNode::Constant(null)),
+                    }
+                };
+            exprs.push(to_default_node);
+        }
+    }
+
+    Ok(exprs)
 }
 
 #[cfg(test)]
