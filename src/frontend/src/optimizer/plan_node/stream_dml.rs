@@ -41,7 +41,9 @@ impl StreamDml {
             input.stream_kind().merge(if append_only {
                 StreamKind::AppendOnly
             } else {
-                StreamKind::Retract
+                // We cannot guarantee that there's no conflict on stream key between upstream
+                // source and DML input, so we must treat it as upsert here.
+                StreamKind::Upsert
             }),
             false,                   // TODO(rc): decide EOWC property
             WatermarkColumns::new(), // no watermark if dml is allowed
