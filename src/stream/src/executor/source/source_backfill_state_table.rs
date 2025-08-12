@@ -24,7 +24,7 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_storage::StateStore;
 
 use super::source_backfill_executor::{BackfillStateWithProgress, BackfillStates};
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTableBuilder};
 use crate::executor::StreamExecutorResult;
 
 pub struct BackfillStateTableHandler<S: StateStore> {
@@ -35,7 +35,10 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
     /// See also [`super::SourceStateTableHandler::from_table_catalog`] for how the state table looks like.
     pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
         Self {
-            state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
+            state_store: StateTableBuilder::new(table_catalog, store, None)
+                .preload_all_rows(false)
+                .build()
+                .await,
         }
     }
 
