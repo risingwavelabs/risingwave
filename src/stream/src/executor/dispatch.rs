@@ -60,13 +60,6 @@ struct DispatcherWithMetrics {
     pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
 }
 
-impl DispatcherWithMetrics {
-    pub fn record_output_buffer_blocking_duration(&self, duration: Duration) {
-        let ns = duration.as_nanos() as u64;
-        self.actor_output_buffer_blocking_duration_ns.inc_by(ns);
-    }
-}
-
 impl Debug for DispatcherWithMetrics {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.dispatcher.fmt(f)
@@ -179,11 +172,15 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let metrics = dispatcher.actor_output_buffer_blocking_duration_ns.clone();
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
                         let mut start_time = Instant::now();
                         let mut interval = tokio::time::interval(Duration::from_secs(15));
-                        interval.tick().now_or_never().expect("interval tick should immediately resolve");
-                        let fut = dispatcher.dispatch_barriers(
+                        interval
+                            .tick()
+                            .now_or_never()
+                            .expect("interval tick should immediately resolve");
+                        let fut = dispatcher_output.dispatch_barriers(
                             barrier_batch
                                 .iter()
                                 .cloned()
@@ -215,11 +212,15 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let metrics = dispatcher.actor_output_buffer_blocking_duration_ns.clone();
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
                         let mut start_time = Instant::now();
                         let mut interval = tokio::time::interval(Duration::from_secs(15));
-                        interval.tick().now_or_never().expect("interval tick should immediately resolve");
-                        let fut = dispatcher.dispatch_watermark(watermark.clone());
+                        interval
+                            .tick()
+                            .now_or_never()
+                            .expect("interval tick should immediately resolve");
+                        let fut = dispatcher_output.dispatch_watermark(watermark.clone());
                         tokio::pin!(fut);
                         loop {
                             tokio::select! {
@@ -244,11 +245,15 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let metrics = dispatcher.actor_output_buffer_blocking_duration_ns.clone();
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
                         let mut start_time = Instant::now();
                         let mut interval = tokio::time::interval(Duration::from_secs(15));
-                        interval.tick().now_or_never().expect("interval tick should immediately resolve");
-                        let fut = dispatcher.dispatch_data(chunk.clone());
+                        interval
+                            .tick()
+                            .now_or_never()
+                            .expect("interval tick should immediately resolve");
+                        let fut = dispatcher_output.dispatch_data(chunk.clone());
                         tokio::pin!(fut);
                         loop {
                             tokio::select! {
