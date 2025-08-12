@@ -60,7 +60,7 @@ impl StreamHopWindow {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             internal_watermark_columns.map_clone(&internal2output),
             MonotonicityMap::new(), /* hop window start/end jumps, so monotonicity is not propagated */

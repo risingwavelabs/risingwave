@@ -54,7 +54,7 @@ impl StreamGlobalApproxPercentile {
             Some(vec![]),
             functional_dependency,
             Distribution::Single,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             watermark_columns,
             input.columns_monotonicity().clone(),

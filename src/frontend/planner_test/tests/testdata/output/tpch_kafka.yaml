@@ -1152,7 +1152,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [(sum(sum(l_extendedprice)) / 7.0:Decimal) as $expr2] }
-      └─StreamSimpleAgg { aggs: [sum(sum(l_extendedprice)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(l_extendedprice)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(l_extendedprice)] }
             └─StreamProject { exprs: [l_extendedprice, _row_id, _row_id, l_partkey, p_partkey, l_partkey] }

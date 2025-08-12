@@ -44,7 +44,8 @@ impl StreamOverWindow {
         let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
-            false, // general over window cannot be append-only
+            // TODO(kind): reject upsert input
+            StreamKind::Retract, // general over window cannot be append-only
             false,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
@@ -118,6 +119,7 @@ impl StreamNode for StreamOverWindow {
             .core
             .order_key()
             .iter()
+            .copied()
             .map(ColumnOrder::to_protobuf)
             .collect();
         let state_table = self

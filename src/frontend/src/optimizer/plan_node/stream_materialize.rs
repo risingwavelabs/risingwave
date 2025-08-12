@@ -62,7 +62,9 @@ impl StreamMaterialize {
             Some(table.stream_key.clone()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.append_only(),
+            // TODO(kind): if conflict handling is enabled, the output can be retract even if input is upsert;
+            // if not, we should reject upsert input.
+            input.stream_kind(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
@@ -417,6 +419,7 @@ impl StreamNode for StreamMaterialize {
                 .table()
                 .pk()
                 .iter()
+                .copied()
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
         }))

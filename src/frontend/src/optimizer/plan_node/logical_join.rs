@@ -339,20 +339,19 @@ impl LogicalJoin {
         } else {
             return Ok(None);
         };
-        let table_desc = logical_scan.table_desc().clone();
+        let table = logical_scan.table();
         let output_column_ids = logical_scan.output_column_ids();
 
         // Verify that the right join key columns are the the prefix of the primary key and
         // also contain the distribution key.
-        let order_col_ids = table_desc.order_column_ids();
-        let order_key = table_desc.order_column_indices();
-        let dist_key = table_desc.distribution_key.clone();
+        let order_col_ids = table.order_column_ids();
+        let dist_key = table.distribution_key.clone();
         // The at least prefix of order key that contains distribution key.
         let mut dist_key_in_order_key_pos = vec![];
         for d in dist_key {
-            let pos = order_key
-                .iter()
-                .position(|&x| x == d)
+            let pos = table
+                .order_column_indices()
+                .position(|x| x == d)
                 .expect("dist_key must in order_key");
             dist_key_in_order_key_pos.push(pos);
         }
@@ -473,7 +472,7 @@ impl LogicalJoin {
         Ok(Some(BatchLookupJoin::new(
             new_logical_join,
             new_predicate,
-            table_desc,
+            table.clone(),
             new_scan_output_column_ids,
             lookup_prefix_len,
             false,
@@ -1154,20 +1153,19 @@ impl LogicalJoin {
 
         let logical_scan = Self::check_temporal_rhs(&right)?;
 
-        let table_desc = logical_scan.table_desc();
+        let table = logical_scan.table();
         let output_column_ids = logical_scan.output_column_ids();
 
         // Verify that the right join key columns are the the prefix of the primary key and
         // also contain the distribution key.
-        let order_col_ids = table_desc.order_column_ids();
-        let order_key = table_desc.order_column_indices();
-        let dist_key = table_desc.distribution_key.clone();
+        let order_col_ids = table.order_column_ids();
+        let dist_key = table.distribution_key.clone();
 
         let mut dist_key_in_order_key_pos = vec![];
         for d in dist_key {
-            let pos = order_key
-                .iter()
-                .position(|&x| x == d)
+            let pos = table
+                .order_column_indices()
+                .position(|x| x == d)
                 .expect("dist_key must in order_key");
             dist_key_in_order_key_pos.push(pos);
         }
@@ -1362,7 +1360,7 @@ impl LogicalJoin {
             return Ok(None);
         }
 
-        let left = self.left().to_stream(ctx)?;
+        let left = self.left().to_stream(ctx)?.enforce_concrete_distribution();
         let right = self.right().to_stream_with_dist_required(
             &RequiredDist::PhysicalDist(Distribution::Broadcast),
             ctx,

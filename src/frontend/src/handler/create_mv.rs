@@ -294,9 +294,7 @@ pub(crate) async fn gen_create_mv_graph(
     let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
     if resource_group.is_some() {
-        risingwave_common::license::Feature::ResourceGroup
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
+        risingwave_common::license::Feature::ResourceGroup.check_available()?;
     }
 
     let is_serverless_backfill = with_options
