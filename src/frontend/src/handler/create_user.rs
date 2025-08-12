@@ -233,7 +233,7 @@ mod tests {
         let session = frontend.session_ref();
         let user_info_reader = session.env().user_info_reader();
 
-        // Create admin user
+        // Create admin user with conflicting options - last option should win
         frontend.run_sql("CREATE USER admin_user WITH ADMIN NOADMIN").await.unwrap();
         
         let admin_user = user_info_reader
@@ -242,11 +242,11 @@ mod tests {
             .cloned()
             .unwrap();
         
-        // Should not be admin because NOADMIN overrides ADMIN
+        // Should not be admin because NOADMIN comes last and overrides ADMIN
         assert!(!admin_user.is_admin);
         
-        // Create another admin user
-        frontend.run_sql("CREATE USER admin_user2 WITH ADMIN").await.unwrap();
+        // Create another admin user with reverse order
+        frontend.run_sql("CREATE USER admin_user2 WITH NOADMIN ADMIN").await.unwrap();
         
         let admin_user2 = user_info_reader
             .read_guard()
@@ -254,7 +254,19 @@ mod tests {
             .cloned()
             .unwrap();
         
-        // Should be admin
+        // Should be admin because ADMIN comes last and overrides NOADMIN
         assert!(admin_user2.is_admin);
+        
+        // Create admin user with only ADMIN
+        frontend.run_sql("CREATE USER admin_user3 WITH ADMIN").await.unwrap();
+        
+        let admin_user3 = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user3")
+            .cloned()
+            .unwrap();
+        
+        // Should be admin
+        assert!(admin_user3.is_admin);
     }
 }
