@@ -337,7 +337,7 @@ pub enum Command {
         // Should contain the actor ids in upstream and downstream fragment of `reschedules`
         fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
         // Used for updating additional metadata after the barrier ends
-        post_updates: JobReschedulePostUpdates,
+        // post_updates: JobReschedulePostUpdates,
     },
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `replace_upstream`. This is
