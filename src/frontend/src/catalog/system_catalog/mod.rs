@@ -233,7 +233,7 @@ fn get_acl_items(
     let mut res = vec![];
     let super_privilege = available_prost_privilege(*object, for_dml_table);
     for user in users {
-        let privileges = if user.is_super {
+        let privileges = if user.is_super || user.is_admin {
             vec![&super_privilege]
         } else {
             user.grant_privileges

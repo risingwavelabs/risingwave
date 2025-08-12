@@ -40,7 +40,7 @@ fn read_rw_user_secrets_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUser
             .into());
         }
         Some(user) => {
-            if !user.is_super {
+            if !user.is_super && !user.is_admin {
                 return Err(ErrorCode::PermissionDenied(
                     "permission denied for table \"rw_catalog.rw_user_secrets\"".to_owned(),
                 )

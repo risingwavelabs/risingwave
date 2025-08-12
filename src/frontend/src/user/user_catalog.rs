@@ -177,7 +177,7 @@ impl UserCatalog {
         object: &GrantObject,
         actions: &Vec<(PbAction, bool)>,
     ) -> bool {
-        if self.is_super {
+        if self.is_super || self.is_admin {
             return true;
         }
         let mut action_map: HashMap<_, _> = actions.iter().map(|action| (action, false)).collect();
@@ -202,7 +202,7 @@ impl UserCatalog {
     }
 
     pub fn check_object_visibility(&self, obj_id: u32) -> bool {
-        if self.is_super {
+        if self.is_super || self.is_admin {
             return true;
         }
 
