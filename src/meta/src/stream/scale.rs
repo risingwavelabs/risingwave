@@ -39,6 +39,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::meta::table_fragments::{self, State};
 use risingwave_pb::stream_plan::{Dispatcher, PbDispatcher, PbDispatcherType, StreamNode};
+use sea_orm::ActiveModelTrait;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
@@ -46,9 +47,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
-use crate::controller::scale::{
-    RescheduleWorkingSet, TargetResourcePolicy, WorkerInfo, render_jobs,
-};
+use crate::controller::scale::{RescheduleWorkingSet, WorkerInfo, render_jobs};
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
     ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, TableParallelism,
@@ -91,10 +90,11 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_meta_model::prelude::FragmentRelation;
+use risingwave_meta_model::prelude::{FragmentRelation, StreamingJob};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, EntityTrait, QueryFilter, QuerySelect, QueryTrait,
+    ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect, QueryTrait,
     TransactionTrait,
 };
 
@@ -528,6 +528,8 @@ impl ScaleController {
             .map(|(fragment_id, _)| *fragment_id)
             .collect();
 
+        let newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)> =
+            Default::default();
         let reschedule = Reschedule {
             added_actors,
             removed_actors,
@@ -536,7 +538,7 @@ impl ScaleController {
             upstream_dispatcher_mapping,
             downstream_fragment_ids,
             actor_splits: Default::default(),
-            newly_created_actors: Default::default(),
+            newly_created_actors: newly_created_actors,
             cdc_table_snapshot_split_assignment: Default::default(),
         };
 
@@ -2268,20 +2270,32 @@ impl ScaleController {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        // update
+        for (table_id, target) in &policy {
+            let mut streaming_job = StreamingJob::find_by_id(*table_id)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?
+                .into_active_model();
 
-        let jobs = policy
-            .into_iter()
-            .map(|(job_id, target)| {
-                (
-                    job_id as ObjectId,
-                    TargetResourcePolicy {
-                        resource_group: None,
-                        parallelism: StreamingParallelism::Fixed(1),
-                    },
-                )
-            })
-            .collect();
+            match &target {
+                RescheduleTarget::Parallelism(p) | RescheduleTarget::Both(p, _) => {
+                    streaming_job.parallelism = Set(p.parallelism.clone());
+                }
+                _ => {}
+            }
+
+            match &target {
+                RescheduleTarget::ResourceGroup(r) | RescheduleTarget::Both(_, r) => {
+                    streaming_job.specific_resource_group = Set(r.resource_group.clone());
+                }
+                _ => {}
+            }
+
+            streaming_job.update(&txn).await?;
+        }
+
+        // update
+        let jobs = policy.keys().copied().collect();
 
         let workers = workers
             .into_iter()
@@ -2402,13 +2416,11 @@ impl ScaleController {
             reschedules.insert(fragment_id, reschedule);
         }
 
+        txn.commit().await?;
+
         let command = Command::RescheduleFragment {
             reschedules,
             fragment_actors: all_fragment_actors,
-            post_updates: JobReschedulePostUpdates {
-                parallelism_updates: Default::default(),
-                resource_group_updates: Default::default(),
-            },
         };
 
         Ok(command)
@@ -2795,7 +2807,7 @@ impl GlobalStreamManager {
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
             fragment_actors,
-            post_updates,
+            //            post_updates,
         };
 
         let _guard = self.source_manager.pause_tick().await;
