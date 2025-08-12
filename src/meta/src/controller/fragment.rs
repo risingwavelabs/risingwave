@@ -40,6 +40,7 @@ use risingwave_meta_model::{
     streaming_job, table,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
@@ -66,6 +67,7 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::barrier::SnapshotBackfillInfo;
+use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
@@ -77,7 +79,8 @@ use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
-use crate::stream::{SplitAssignment, build_actor_split_impls};
+use crate::rpc::ddl_controller::build_upstream_sink_info;
+use crate::stream::{SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
 use crate::{MetaError, MetaResult};
 
 /// Some information of running (inflight) actors.
@@ -94,6 +97,18 @@ pub struct InflightFragmentInfo {
     pub nodes: PbStreamNode,
     pub actors: HashMap<crate::model::ActorId, InflightActorInfo>,
     pub state_table_ids: HashSet<risingwave_common::catalog::TableId>,
+}
+
+impl InflightFragmentInfo {
+    pub fn has_union_node(&self) -> bool {
+        let mut has_union = false;
+        visit_stream_node_body(&self.nodes, |body| {
+            if let NodeBody::Union(_) = body {
+                has_union = true;
+            }
+        });
+        has_union
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1742,6 +1757,38 @@ impl CatalogController {
             .ok()
             .flatten()
             .map(|(_, _, count)| count as usize))
+    }
+
+    pub async fn get_all_upstream_sinks(
+        &self,
+        target_table: &PbTable,
+        target_fragment_id: FragmentId,
+    ) -> MetaResult<Vec<UpstreamSinkInfo>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let mut upstream_sinks = Vec::with_capacity(target_table.get_incoming_sinks().len());
+        for sink_id in target_table.get_incoming_sinks() {
+            let (sink, sink_obj) = Sink::find_by_id(*sink_id as ObjectId)
+                .find_also_related(object::Entity)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", *sink_id))?;
+            let pb_sink = ObjectModel(sink, sink_obj.unwrap()).into();
+            let sink_fragments = get_job_fragments_by_id(&txn, *sink_id as _).await?;
+            let sink_fragment = sink_fragments
+                .sink_fragment()
+                .ok_or_else(|| anyhow::anyhow!("sink fragment not found for sink {}", sink_id))?;
+            let upstream_info = build_upstream_sink_info(
+                &pb_sink,
+                &sink_fragment,
+                target_table,
+                target_fragment_id,
+            )?;
+            upstream_sinks.push(upstream_info);
+        }
+
+        Ok(upstream_sinks)
     }
 }
 

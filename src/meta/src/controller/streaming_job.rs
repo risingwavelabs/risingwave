@@ -73,8 +73,8 @@ use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_internal_tables_by_id, get_job_fragments_by_id, get_table_columns,
-    grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
+    get_internal_tables_by_id, get_table_columns, grant_default_privileges_automatically,
+    insert_fragment_relations, list_user_info_by_ids,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -82,8 +82,7 @@ use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
-use crate::rpc::ddl_controller::build_upstream_sink_info;
-use crate::stream::{JobReschedulePostUpdates, SplitAssignment, UpstreamSinkInfo};
+use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -2462,35 +2461,6 @@ impl CatalogController {
         }
 
         Ok(rate_limits)
-    }
-
-    pub async fn get_all_upstream_sinks(
-        &self,
-        target_table: &PbTable,
-        target_table_fragments: &mut StreamJobFragments,
-    ) -> MetaResult<Vec<UpstreamSinkInfo>> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-
-        let mut upstream_sinks = Vec::with_capacity(target_table.get_incoming_sinks().len());
-        for sink_id in target_table.get_incoming_sinks() {
-            let (sink, sink_obj) = Sink::find_by_id(*sink_id as ObjectId)
-                .find_also_related(Object)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("sink", *sink_id))?;
-            let pb_sink = ObjectModel(sink, sink_obj.unwrap()).into();
-            let sink_fragments = get_job_fragments_by_id(&txn, *sink_id as _).await?;
-            let upstream_info = build_upstream_sink_info(
-                &pb_sink,
-                &sink_fragments,
-                target_table,
-                target_table_fragments,
-            )?;
-            upstream_sinks.push(upstream_info);
-        }
-
-        Ok(upstream_sinks)
     }
 }
 

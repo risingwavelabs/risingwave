@@ -39,8 +39,8 @@ use risingwave_connector::source::{
 use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
-    ConnectionId, DatabaseId, DispatcherType, FunctionId, IndexId, ObjectId, SchemaId, SecretId,
-    SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId, WorkerId,
+    ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, ObjectId, SchemaId,
+    SecretId, SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId, WorkerId,
 };
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
@@ -56,7 +56,7 @@ use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchOutputMapping, PbStreamFragmentGraph, PbUpstreamSinkInfo,
+    PbDispatchOutputMapping, PbStreamFragmentGraph, PbStreamNode, PbUpstreamSinkInfo,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
@@ -1406,16 +1406,13 @@ impl DdlController {
 
             // Handle table that has incoming sinks.
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
+                let union_fragment = stream_job_fragments.inner.union_fragment_for_table();
                 let upstream_infos = self
                     .metadata_manager
                     .catalog_controller
-                    .get_all_upstream_sinks(table, &mut stream_job_fragments.inner)
+                    .get_all_upstream_sinks(table, union_fragment.fragment_id as _)
                     .await?;
-
-                refill_upstream_sink_union_in_table(
-                    &mut stream_job_fragments.inner,
-                    &upstream_infos,
-                );
+                refill_upstream_sink_union_in_table(&mut union_fragment.nodes, &upstream_infos);
 
                 for upstream_info in &upstream_infos {
                     let upstream_fragment_id = upstream_info.sink_fragment_id;
@@ -1764,7 +1761,7 @@ impl DdlController {
         {
             let tables = self
                 .metadata_manager
-                .get_table_catalog_by_ids(vec![*table_id as _])
+                .get_table_catalog_by_ids(&vec![*table_id as _])
                 .await?;
             let target_table = tables
                 .first()
@@ -1773,11 +1770,15 @@ impl DdlController {
                 .metadata_manager
                 .get_job_fragments_by_id(&(*table_id).into())
                 .await?;
+            let sink_fragment = stream_job_fragments
+                .sink_fragment()
+                .ok_or_else(|| anyhow::anyhow!("sink fragment not found for sink {}", sink.id))?;
+            let union_fragment = table_fragments.union_fragment_for_table();
             let upstream_sink_info = build_upstream_sink_info(
                 sink,
-                &stream_job_fragments,
+                &sink_fragment,
                 target_table,
-                &mut table_fragments,
+                union_fragment.fragment_id as _,
             )?;
             Some(upstream_sink_info)
         } else {
@@ -1885,7 +1886,7 @@ impl DdlController {
             // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?
             let old_internal_tables = self
                 .metadata_manager
-                .get_table_catalog_by_ids(old_internal_table_ids)
+                .get_table_catalog_by_ids(&old_internal_table_ids)
                 .await?;
             fragment_graph.fit_internal_tables_trivial(old_internal_tables)?;
         }
@@ -2235,13 +2236,10 @@ async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> Met
 
 pub fn build_upstream_sink_info(
     sink: &PbSink,
-    sink_fragments: &StreamJobFragments,
+    sink_fragment: &Fragment,
     target_table: &PbTable,
-    target_table_fragments: &mut StreamJobFragments,
+    target_fragment_id: FragmentId,
 ) -> MetaResult<UpstreamSinkInfo> {
-    let sink_fragment = sink_fragments
-        .sink_fragment()
-        .ok_or_else(|| anyhow::anyhow!("sink fragment not found for sink {}", sink.id))?;
     let sink_fragment_id = sink_fragment.fragment_id;
     let sink_output_fields = sink_fragment.nodes.get_fields();
     let output_indices = (0..sink_output_fields.len())
@@ -2253,9 +2251,7 @@ pub fn build_upstream_sink_info(
         .iter()
         .map(|i| *i as _)
         .collect_vec();
-    let downstream_fragment_id = target_table_fragments
-        .union_fragment_for_table()
-        .fragment_id;
+    let downstream_fragment_id = target_fragment_id as _;
     let new_downstream_relation = DownstreamFragmentRelation {
         downstream_fragment_id,
         dispatcher_type: DispatcherType::Hash,
@@ -2283,11 +2279,10 @@ pub fn build_upstream_sink_info(
 }
 
 pub fn refill_upstream_sink_union_in_table(
-    target_table_fragments: &mut StreamJobFragments,
+    union_fragment_root: &mut PbStreamNode,
     upstream_sink_infos: &Vec<UpstreamSinkInfo>,
 ) {
-    let union_fragment = target_table_fragments.union_fragment_for_table();
-    visit_stream_node_cont_mut(&mut union_fragment.nodes, |node| {
+    visit_stream_node_cont_mut(union_fragment_root, |node| {
         if let Some(NodeBody::UpstreamSinkUnion(upstream_sink_union)) = &mut node.node_body {
             let init_upstreams = upstream_sink_infos
                 .iter()
@@ -2298,6 +2293,10 @@ pub fn refill_upstream_sink_union_in_table(
                 })
                 .collect();
             upstream_sink_union.init_upstreams = init_upstreams;
+            tracing::debug!(
+                "xx Initialized upstreams: {:?}",
+                upstream_sink_union.init_upstreams
+            );
             false
         } else {
             true

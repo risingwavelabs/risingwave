@@ -250,6 +250,56 @@ impl GlobalBarrierWorkerContextImpl {
         Ok((table_committed_epoch, log_epochs))
     }
 
+    async fn recovery_table_with_upstream_sinks(
+        &self,
+        inflight_jobs: &mut HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
+    ) -> MetaResult<()> {
+        let mut jobs = inflight_jobs.values_mut().try_fold(
+            HashMap::new(),
+            |mut acc, table_map| -> MetaResult<_> {
+                for (tid, job) in table_map {
+                    if acc.insert(tid.table_id, job).is_some() {
+                        return Err(anyhow::anyhow!("Duplicate table id found: {:?}", tid).into());
+                    }
+                }
+                Ok(acc)
+            },
+        )?;
+        let job_ids = jobs.keys().cloned().collect_vec();
+        // Only `Table` will be returned here, ignoring other catalog objects.
+        let tables = self
+            .metadata_manager
+            .get_table_catalog_by_ids(&job_ids)
+            .await?;
+        for table in tables {
+            let fragments = jobs.get_mut(&table.id).unwrap();
+            let mut union_fragment_id = None;
+            for fragment in fragments.fragment_infos.values_mut() {
+                if fragment.has_union_node() {
+                    // Each table should have only one union-fragment.
+                    if let Some(ref union_fragment_id) = union_fragment_id {
+                        assert_eq!(*union_fragment_id, fragment.fragment_id);
+                    } else {
+                        union_fragment_id = Some(fragment.fragment_id);
+                    }
+                }
+            }
+            let union_fragment_id = union_fragment_id.expect("No union fragment found");
+            let union_fragment = fragments
+                .fragment_infos
+                .get_mut(&union_fragment_id)
+                .unwrap();
+            let upstream_infos = self
+                .metadata_manager
+                .catalog_controller
+                .get_all_upstream_sinks(&table, union_fragment_id as _)
+                .await?;
+            refill_upstream_sink_union_in_table(&mut union_fragment.nodes, &upstream_infos);
+        }
+
+        Ok(())
+    }
+
     pub(super) async fn reload_runtime_info_impl(
         &self,
     ) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
@@ -368,6 +418,8 @@ impl GlobalBarrierWorkerContextImpl {
                         })?
                     }
 
+                    self.recovery_table_with_upstream_sinks(&mut info).await?;
+
                     let info = info;
 
                     self.purge_state_table_from_hummock(
@@ -419,7 +471,7 @@ impl GlobalBarrierWorkerContextImpl {
                         )
                         .await?;
 
-                    let mut background_jobs = {
+                    let background_jobs = {
                         let jobs = self
                             .list_background_job_progress()
                             .await
@@ -435,28 +487,6 @@ impl GlobalBarrierWorkerContextImpl {
                         }
                         background_jobs
                     };
-
-                    {
-                        let job_ids = background_jobs
-                            .keys()
-                            .map(|job_id| job_id.table_id as _)
-                            .collect_vec();
-                        // Only `Table` will be returned here, ignoring other catalog objects.
-                        let tables = self
-                            .metadata_manager
-                            .get_table_catalog_by_ids(job_ids)
-                            .await?;
-                        for table in tables {
-                            let table_fragments =
-                                &mut background_jobs.get_mut(&TableId::new(table.id)).unwrap().1;
-                            let upstream_infos = self
-                                .metadata_manager
-                                .catalog_controller
-                                .get_all_upstream_sinks(&table, table_fragments)
-                                .await?;
-                            refill_upstream_sink_union_in_table(table_fragments, &upstream_infos);
-                        }
-                    }
 
                     let database_infos = self
                         .metadata_manager
@@ -520,12 +550,15 @@ impl GlobalBarrierWorkerContextImpl {
             .scheduled_barriers
             .pre_apply_drop_cancel(Some(database_id));
 
-        let info = self
+        let mut info = self
             .resolve_graph_info(Some(database_id))
             .await
             .inspect_err(|err| {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
+
+        self.recovery_table_with_upstream_sinks(&mut info).await?;
+
         assert!(info.len() <= 1);
         let Some(info) = info.into_iter().next().map(|(loaded_database_id, info)| {
             assert_eq!(loaded_database_id, database_id);
@@ -534,7 +567,7 @@ impl GlobalBarrierWorkerContextImpl {
             return Ok(None);
         };
 
-        let mut background_jobs = {
+        let background_jobs = {
             let jobs = background_jobs;
             let mut background_jobs = HashMap::new();
             for (definition, stream_job_fragments) in jobs {
@@ -561,28 +594,6 @@ impl GlobalBarrierWorkerContextImpl {
             }
             background_jobs
         };
-
-        {
-            let job_ids = background_jobs
-                .keys()
-                .map(|job_id| job_id.table_id as _)
-                .collect_vec();
-            // Only `Table` will be returned here, ignoring other catalog objects.
-            let tables = self
-                .metadata_manager
-                .get_table_catalog_by_ids(job_ids)
-                .await?;
-            for table in tables {
-                let table_fragments =
-                    &mut background_jobs.get_mut(&TableId::new(table.id)).unwrap().1;
-                let upstream_infos = self
-                    .metadata_manager
-                    .catalog_controller
-                    .get_all_upstream_sinks(&table, table_fragments)
-                    .await?;
-                refill_upstream_sink_union_in_table(table_fragments, &upstream_infos);
-            }
-        }
 
         let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager
