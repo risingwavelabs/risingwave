@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use pin_project::pin_project;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::catalog::Field;
@@ -399,7 +400,7 @@ impl UpstreamSinkUnionExecutor {
                 biased;
 
                 Some(msg) = upstreams.next() => {
-                    let msg = msg.map_err(|e| anyhow::anyhow!("UpstreamSinkUnionExecutor pull upstream failed: {}", e))?;
+                    let msg = msg.context("UpstreamSinkUnionExecutor pull upstream failed")?;
                     if let Message::Barrier(barrier) = &msg {
                         let current_barrier = current_barrier.take().unwrap();
                         assert_equal_dispatcher_barrier(&current_barrier, barrier);
