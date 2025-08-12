@@ -766,8 +766,14 @@ pub(super) mod handlers {
             );
             let channel_backpressure_query = format!(
                 "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[{}s])) by (fragment_id, downstream_fragment_id) \
-                 / ignoring (downstream_fragment_id) group_left sum(stream_actor_count) by (fragment_id)",
-                srv.prometheus_selector, params.time_offset
+                 / ignoring (downstream_fragment_id) group_left sum(stream_actor_count{{{}}}) by (fragment_id)
+                 / ignoring (fragment_id) group_left \
+                     label_replace( \
+                         sum(stream_actor_count{{{}}}) by (fragment_id), \
+                         'downstream_fragment_id', '$1', 'fragment_id', '(.*)' \
+                     ) \
+                 ",
+                srv.prometheus_selector, params.time_offset, srv.prometheus_selector, srv.prometheus_selector
             );
 
             // Execute all queries concurrently with optional time parameter

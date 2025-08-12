@@ -185,13 +185,54 @@ def _(outer_panels: Panels):
                 "on average. Then we divide this duration by 1 second and show it as a percentage.",
                 [
                     # The metrics might be pre-aggregated locally on each compute node when `actor_id` is masked due to metrics level settings.
-                    # Thus to calculate the average, we need to manually divide the actor count.
                     #
-                    # Note: actor_count is equal to the number of dispatchers for a given downstream fragment,
-                    # this holds true as long as we don't support multiple edges between two fragments.
+                    # First, we find the total backpressure rate for each fragment-downstream_fragment edge:
+                    # ```promql
+                    # sum(rate(stream_actor_output_buffer_blocking_duration_ns)) by (fragment_id, downstream_fragment_id)
+                    # ```
+                    # We do sum(rate(...)) as recommended by the docs, since there's an aggregation + rate calculation.
+                    # See: https://prometheus.io/docs/prometheus/latest/querying/functions/#rate
+                    #
+                    # Next, all dispatchers for the upstream fragment will output to actors in the downstream fragment.
+                    # Each actor has a single dispatcher for each downstream fragment.
+                    # Let's say we have N actors in the fragment, and M actors in the downstream fragment.
+                    # Then, the total number of dispatcher output channels is N * M.
+                    #
+                    # For barriers, they are outputted to all downstream actors (N x M).
+                    # For chunks, they are shuffled according to consistent hashing to the downstream actors (also N x M).
+                    # So the averaged rate is:
+                    # ```promql
+                    # total backpressure rate / (N * M)
+                    # ```
+                    #
+                    # From the first query, we have metrics of the form:
+                    # ```
+                    # stream_actor_output_buffer_blocking_duration_ns{fragment_id="15", downstream_fragment_id="13", job="risingwave-compute-node", instance="127.0.0.1:1261"} 1000000000
+                    # ```
+                    #
+                    # We want to divide by N first. This is just:
+                    # ```promql
+                    # / ignoring (downstream_fragment_id) group_left sum({metric('stream_actor_count')}) by (fragment_id) \
+                    # ```
+                    #
+                    # Next, we divide by M. This is just:
+                    # ```promql
+                    # / ignoring (fragment_id) group_left \
+                    #     label_replace( \
+                    #         sum(stream_actor_count{job=~"$job",instance=~"$node"}) by (fragment_id), \
+                    #         'downstream_fragment_id', '$1', 'fragment_id', '(.*)' \
+                    #     ) \
+                    # ```
+                    # label_replace is used to relabel the `fragment_id` to `downstream_fragment_id`, so that when applying the division,
+                    # we can join on `downstream_fragment_id`.
                     panels.target(
                         f"sum(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) \
                             / ignoring (downstream_fragment_id) group_left sum({metric('stream_actor_count')}) by (fragment_id) \
+                            / ignoring (fragment_id) group_left \
+                                label_replace( \
+                                    sum({metric('stream_actor_count')}) by (fragment_id), \
+                                    'downstream_fragment_id', '$1', 'fragment_id', '(.*)' \
+                                ) \
                             / 1000000000",
                         "fragment {{fragment_id}}->{{downstream_fragment_id}}",
                     ),
