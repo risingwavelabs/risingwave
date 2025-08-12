@@ -1227,7 +1227,7 @@ impl HummockVersionReader {
                 );
                 let (items, _stats) = nearest::<O, M>(
                     &vector_store,
-                    &graph,
+                    &*graph,
                     target.to_ref(),
                     on_nearest_item_fn,
                     options.hnsw_ef_search,

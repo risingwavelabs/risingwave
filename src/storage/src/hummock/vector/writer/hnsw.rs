@@ -122,7 +122,7 @@ impl HnswFlatIndexWriter {
     ) -> HummockResult<Self> {
         let graph_builder = if let Some(graph_file) = &index.graph_file {
             Some(HnswGraphBuilder::from_protobuf(
-                &sstable_store.get_hnsw_graph(graph_file).await?,
+                &*sstable_store.get_hnsw_graph(graph_file).await?,
             ))
         } else {
             None
@@ -200,6 +200,8 @@ impl HnswFlatIndexWriter {
                 .store()
                 .upload(&path, encoded_graph)
                 .await?;
+            self.sstable_store
+                .insert_hnsw_graph_cache(object_id, pb_graph);
             self.flushed_graph_file = Some(HnswGraphFileInfo {
                 object_id,
                 file_size: size as _,
