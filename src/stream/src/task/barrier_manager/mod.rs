@@ -44,15 +44,11 @@ pub(super) enum LocalBarrierEvent {
         table_id: u32,
         associated_source_id: u32,
     },
-    ReportTruncateTable {
+    RefreshFinished {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: u32,
-    },
-    ReportRefreshFinished {
-        epoch: EpochPair,
-        actor_id: ActorId,
-        table_id: u32,
+        staging_table_id: u32,
     },
     RegisterBarrierSender {
         actor_id: ActorId,
@@ -174,19 +170,18 @@ impl LocalBarrierManager {
         });
     }
 
-    pub fn report_truncate_table(&self, epoch: EpochPair, actor_id: ActorId, table_id: u32) {
-        self.send_event(LocalBarrierEvent::ReportTruncateTable {
+    pub fn report_refresh_finished(
+        &self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+        staging_table_id: u32,
+    ) {
+        self.send_event(LocalBarrierEvent::RefreshFinished {
             epoch,
             actor_id,
             table_id,
-        });
-    }
-
-    pub fn report_refresh_finished(&self, epoch: EpochPair, actor_id: ActorId, table_id: u32) {
-        self.send_event(LocalBarrierEvent::ReportRefreshFinished {
-            epoch,
-            actor_id,
-            table_id,
+            staging_table_id,
         });
     }
 }

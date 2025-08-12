@@ -261,7 +261,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         }
 
         loop {
-            let mut yielded_epoch = first_epoch;
             let mut goto_stage2 = false;
 
             #[for_await]
@@ -475,7 +474,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                         let b_epoch = b.epoch;
                         yield Message::Barrier(b);
-                        yielded_epoch = b_epoch;
 
                         // Update the vnode bitmap for the state table if asked.
                         if let Some((_, cache_may_stale)) = post_commit
@@ -539,7 +537,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         });
 
                     #[for_await]
-                    for either in &mut merge_stream {
+                    'merge_stream: for either in &mut merge_stream {
                         match either {
                             Either::Left(msg) => {
                                 let msg = msg?;
@@ -550,7 +548,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     }
                                     Message::Barrier(b) => {
                                         pending_barrier = Some(b);
-                                        break;
+                                        break 'merge_stream;
                                     }
                                 }
                             }
@@ -619,7 +617,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                 let b_epoch = b.epoch;
                 yield Message::Barrier(b);
-                yielded_epoch = b_epoch;
 
                 // Update the vnode bitmap for the state table if asked.
                 if let Some((_, cache_may_stale)) = post_commit
@@ -645,35 +642,49 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             // stage2 cleanup
             {
                 let refresh_args = self.refresh_args.as_mut().unwrap();
-                // Report staging table truncation through barrier system
-                self.local_barrier_manager.report_truncate_table(
-                    yielded_epoch,
-                    self.actor_context.id,
-                    refresh_args.staging_table.table_id(),
-                );
-                tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
 
-                // Wait for staing table truncation to complete
-                let staging_store = refresh_args.staging_table.state_store().clone();
-                let staging_table_id = refresh_args.staging_table.table_id();
-                staging_store
-                    .try_wait_epoch(
-                        HummockReadEpoch::Committed(yielded_epoch.prev),
-                        TryWaitEpochOptions {
-                            table_id: staging_table_id.into(),
-                        },
-                    )
-                    .await?;
+                // wait for barrier
+                #[for_await]
+                for msg in input.by_ref() {
+                    let msg = msg?;
+                    match msg {
+                        Message::Watermark(w) => yield Message::Watermark(w),
+                        Message::Chunk(chunk) => {
+                            tracing::warn!(chunk = %chunk.to_pretty(), "chunk is ignored during merge phase");
+                        }
+                        Message::Barrier(b) if !b.is_checkpoint() => {
+                            yield Message::Barrier(b);
+                        }
+                        Message::Barrier(b) => {
+                            let staging_table_id = refresh_args.staging_table.table_id();
 
-                // Report that the materialize refresh is finished
-                let refresh_args = self.refresh_args.as_ref().unwrap();
-                self.local_barrier_manager.report_refresh_finished(
-                    yielded_epoch,
-                    self.actor_context.id,
-                    refresh_args.table_id.into(),
-                );
-                tracing::info!(table_id = %refresh_args.table_id, "Materialize refresh finished - reported to barrier manager");
+                            let epoch = b.epoch;
+
+                            self.local_barrier_manager.report_refresh_finished(
+                                epoch,
+                                self.actor_context.id,
+                                refresh_args.table_id.into(),
+                                staging_table_id,
+                            );
+                            tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
+                            yield Message::Barrier(b);
+                            // Wait for staging table truncation to complete
+                            let staging_store = refresh_args.staging_table.state_store().clone();
+                            staging_store
+                                .try_wait_epoch(
+                                    HummockReadEpoch::Committed(epoch.prev),
+                                    TryWaitEpochOptions {
+                                        table_id: staging_table_id.into(),
+                                    },
+                                )
+                                .await?;
+
+                            break;
+                        }
+                    }
+                }
             }
+            tracing::info!("Materialize refresh finished!");
             // stage 2 finished, go back to stage 1
         }
     }

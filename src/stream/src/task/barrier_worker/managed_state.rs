@@ -974,19 +974,13 @@ impl DatabaseManagedBarrierState {
                         associated_source_id,
                     );
                 }
-                LocalBarrierEvent::ReportTruncateTable {
+                LocalBarrierEvent::RefreshFinished {
                     epoch,
                     actor_id,
                     table_id,
+                    staging_table_id,
                 } => {
-                    self.report_truncate_table(epoch, actor_id, table_id);
-                }
-                LocalBarrierEvent::ReportRefreshFinished {
-                    epoch,
-                    actor_id,
-                    table_id,
-                } => {
-                    self.report_refresh_finished(epoch, actor_id, table_id);
+                    self.report_refresh_finished(epoch, actor_id, table_id, staging_table_id);
                 }
                 LocalBarrierEvent::RegisterBarrierSender {
                     actor_id,
@@ -1115,48 +1109,50 @@ impl DatabaseManagedBarrierState {
         }
     }
 
-    /// Report that a table should be truncated for a specific epoch
-    pub(super) fn report_truncate_table(
-        &mut self,
-        epoch: EpochPair,
-        actor_id: ActorId,
-        table_id: u32,
-    ) {
-        // Find the correct partial graph state by matching the actor's partial graph id
-        if let Some(actor_state) = self.actor_states.get(&actor_id)
-            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
-            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
-        {
-            graph_state
-                .truncate_tables
-                .entry(epoch.curr)
-                .or_default()
-                .insert(table_id);
-        } else {
-            warn!(?epoch, actor_id, table_id, "ignore truncate table");
-        }
-    }
-
     /// Report that a table has finished refreshing for a specific epoch
     pub(super) fn report_refresh_finished(
         &mut self,
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: u32,
+        staging_table_id: u32,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
-        if let Some(actor_state) = self.actor_states.get(&actor_id)
-            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
-            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
-        {
-            graph_state
-                .refresh_finished_tables
-                .entry(epoch.curr)
-                .or_default()
-                .insert(table_id);
-        } else {
-            warn!(?epoch, actor_id, table_id, "ignore refresh finished table");
-        }
+        let Some(actor_state) = self.actor_states.get(&actor_id) else {
+            warn!(
+                ?epoch,
+                actor_id, table_id, "ignore refresh finished table: actor_state not found"
+            );
+            return;
+        };
+        let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev) else {
+            let inflight_barriers = actor_state.inflight_barriers.keys().collect::<Vec<_>>();
+            warn!(
+                ?epoch,
+                actor_id,
+                table_id,
+                ?inflight_barriers,
+                "ignore refresh finished table: partial_graph_id not found in inflight_barriers"
+            );
+            return;
+        };
+        let Some(graph_state) = self.graph_states.get_mut(partial_graph_id) else {
+            warn!(
+                ?epoch,
+                actor_id, table_id, "ignore refresh finished table: graph_state not found"
+            );
+            return;
+        };
+        graph_state
+            .refresh_finished_tables
+            .entry(epoch.curr)
+            .or_default()
+            .insert(table_id);
+        graph_state
+            .truncate_tables
+            .entry(epoch.curr)
+            .or_default()
+            .insert(staging_table_id);
     }
 }
 
