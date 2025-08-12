@@ -28,6 +28,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use crate::TableCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::error::ErrorCode;
 use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::derive::{derive_columns, derive_pk};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -38,7 +39,7 @@ use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanNodeMeta, PlanTreeNodeUnary, Stream, StreamNode,
     StreamPlanRef as PlanRef, reorganize_elements_id,
 };
-use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist, StreamKind};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -50,19 +51,26 @@ pub struct StreamVectorIndexWrite {
 }
 
 impl StreamVectorIndexWrite {
-    fn new(input: PlanRef, table: TableCatalog) -> Self {
+    fn new(input: PlanRef, table: TableCatalog) -> crate::error::Result<Self> {
+        if input.stream_kind() != StreamKind::AppendOnly {
+            return Err(ErrorCode::NotSupported(
+                "cannot create vector index on non-append-only workflow".to_owned(),
+                "try create vector index on append only workflow".to_owned(),
+            )
+            .into());
+        }
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             Some(table.stream_key.clone()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.append_only(),
+            StreamKind::AppendOnly,
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
-        Self { base, input, table }
+        Ok(Self { base, input, table })
     }
 
     pub fn create(
@@ -109,7 +117,7 @@ impl StreamVectorIndexWrite {
             vector_index_info,
         )?;
 
-        Ok(Self::new(input, table))
+        Self::new(input, table)
     }
 
     #[expect(clippy::too_many_arguments)]
@@ -140,6 +148,8 @@ impl StreamVectorIndexWrite {
         // assert: `stream_key` is a subset of `table_pk`
 
         let read_prefix_len_hint = table_pk.len();
+        // We don't need to fill in table id for table in frontend. The id will be generated on
+        // meta catalog service.
         Ok(TableCatalog {
             id: TableId::placeholder(),
             schema_id,
@@ -224,7 +234,7 @@ impl PlanTreeNodeUnary<Stream> for StreamVectorIndexWrite {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let new = Self::new(input, self.table().clone());
+        let new = Self::new(input, self.table().clone()).unwrap();
         new.base
             .schema()
             .fields
@@ -246,12 +256,7 @@ impl StreamNode for StreamVectorIndexWrite {
 
         let table = self.table();
         PbNodeBody::VectorIndexWrite(Box::new(VectorIndexWriteNode {
-            // We don't need table id for materialize node in frontend. The id will be generated on
-            // meta catalog service.
-            table_id: 0,
             table: Some(table.to_prost()),
-            info_column_indices: (1..table.columns.len() as u32).collect(),
-            vector_column_idx: 0,
         }))
     }
 }
