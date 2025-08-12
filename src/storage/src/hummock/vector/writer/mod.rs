@@ -19,6 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::FutureExt;
 use hnsw::HnswFlatIndexWriter;
+pub(crate) use hnsw::HnswVectorStore;
 use risingwave_hummock_sdk::vector_index::{
     FlatIndex, FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl,
     VectorStoreInfoDelta,

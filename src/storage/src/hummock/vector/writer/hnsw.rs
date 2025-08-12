@@ -36,16 +36,26 @@ use crate::vector::hnsw::{
     HnswBuilderOptions, HnswGraphBuilder, VectorAccessor, VectorStore, insert_graph, new_node,
 };
 
-struct HnswVectorStore {
+pub(crate) struct HnswVectorStore {
     sstable_store: SstableStoreRef,
 
     flushed_vector_files: Vec<VectorFileInfo>,
     flushed_next_vector_id: usize,
-    building_vectors: VectorFileBuilder,
+    building_vectors: Option<VectorFileBuilder>,
 }
 
 impl HnswVectorStore {
-    fn new(
+    pub(crate) fn new_for_reader(index: &HnswFlatIndex, sstable_store: SstableStoreRef) -> Self {
+        let next_vector_id = index.vector_store_info.next_vector_id;
+        Self {
+            sstable_store,
+            flushed_vector_files: index.vector_store_info.vector_files.clone(),
+            flushed_next_vector_id: next_vector_id,
+            building_vectors: None,
+        }
+    }
+
+    fn new_for_writer(
         index: &HnswFlatIndex,
         dimension: usize,
         sstable_store: SstableStoreRef,
@@ -57,23 +67,24 @@ impl HnswVectorStore {
             sstable_store: sstable_store.clone(),
             flushed_vector_files: index.vector_store_info.vector_files.clone(),
             flushed_next_vector_id: next_vector_id,
-            building_vectors: new_vector_file_builder(
+            building_vectors: Some(new_vector_file_builder(
                 dimension,
                 next_vector_id,
                 sstable_store,
                 object_id_manager,
                 storage_opts,
-            ),
+            )),
         }
     }
 
     async fn flush(&mut self) -> HummockResult<usize> {
-        if let Some((vector_file, blocks, meta)) = self.building_vectors.finish().await? {
+        let building_vectors = self.building_vectors.as_mut().expect("for write");
+        if let Some((vector_file, blocks, meta)) = building_vectors.finish().await? {
             self.sstable_store
                 .insert_vector_cache(vector_file.object_id, meta, blocks);
             let file_size = vector_file.file_size as usize;
             self.flushed_vector_files.push(vector_file);
-            self.flushed_next_vector_id = self.building_vectors.next_vector_id();
+            self.flushed_next_vector_id = building_vectors.next_vector_id();
             Ok(file_size)
         } else {
             Ok(0)
@@ -88,12 +99,14 @@ impl VectorStore for HnswVectorStore {
         Self: 'a;
 
     async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>> {
-        if idx < self.flushed_next_vector_id {
+        if let Some(building_vectors) = self.building_vectors.as_ref()
+            && idx >= self.flushed_next_vector_id
+        {
+            Ok(building_vectors.get_vector(idx))
+        } else {
             Ok(EnumVectorAccessor::BlockHolder(
                 get_vector_block(&self.sstable_store, &self.flushed_vector_files, idx).await?,
             ))
-        } else {
-            Ok(self.building_vectors.get_vector(idx))
         }
     }
 }
@@ -134,7 +147,7 @@ impl HnswFlatIndexWriter {
                 ef_construction: index.config.ef_construction.try_into().unwrap(),
                 max_level: index.config.max_level.try_into().unwrap(),
             },
-            vector_store: HnswVectorStore::new(
+            vector_store: HnswVectorStore::new_for_writer(
                 index,
                 dimension,
                 sstable_store.clone(),
@@ -151,12 +164,21 @@ impl HnswFlatIndexWriter {
     }
 
     pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
-        self.vector_store.building_vectors.add(vec.to_ref(), &info);
+        self.vector_store
+            .building_vectors
+            .as_mut()
+            .expect("for write")
+            .add(vec.to_ref(), &info);
         Ok(())
     }
 
     pub(crate) fn seal_current_epoch(&mut self) -> Option<HnswFlatIndexAdd> {
-        assert!(self.vector_store.building_vectors.is_empty());
+        let building_vectors = self
+            .vector_store
+            .building_vectors
+            .as_mut()
+            .expect("for write");
+        assert!(building_vectors.is_empty());
         if self.vector_store.flushed_vector_files.is_empty() {
             assert_eq!(self.flushed_graph_file, None);
             return None;
@@ -168,7 +190,7 @@ impl HnswFlatIndexWriter {
             .expect("should have new graph info when having new data");
         Some(HnswFlatIndexAdd {
             vector_store_info_delta: VectorStoreInfoDelta {
-                next_vector_id: self.vector_store.building_vectors.next_vector_id(),
+                next_vector_id: building_vectors.next_vector_id(),
                 added_vector_files: flushed_vector_files,
             },
             graph_file: new_graph_info,
@@ -211,12 +233,22 @@ impl HnswFlatIndexWriter {
     }
 
     pub(crate) async fn try_flush(&mut self) -> HummockResult<()> {
-        self.vector_store.building_vectors.try_flush().await?;
+        self.vector_store
+            .building_vectors
+            .as_mut()
+            .expect("for write")
+            .try_flush()
+            .await?;
         self.add_pending_vectors_to_graph().await
     }
 
     async fn add_pending_vectors_to_graph(&mut self) -> HummockResult<()> {
-        for i in self.next_pending_vector_id..self.vector_store.building_vectors.next_vector_id() {
+        let building_vectors = self
+            .vector_store
+            .building_vectors
+            .as_ref()
+            .expect("for write");
+        for i in self.next_pending_vector_id..building_vectors.next_vector_id() {
             let node = new_node(&self.options, &mut self.rng);
             if let Some(graph_builder) = &mut self.graph_builder {
                 dispatch_measurement!(&self.measure, M, {
@@ -224,7 +256,7 @@ impl HnswFlatIndexWriter {
                         &self.vector_store,
                         graph_builder,
                         node,
-                        self.vector_store.building_vectors.get_vector(i).vec_ref(),
+                        building_vectors.get_vector(i).vec_ref(),
                         self.options.ef_construction,
                     )
                     .await?;
@@ -233,7 +265,7 @@ impl HnswFlatIndexWriter {
                 self.graph_builder = Some(HnswGraphBuilder::first(node));
             }
         }
-        self.next_pending_vector_id = self.vector_store.building_vectors.next_vector_id();
+        self.next_pending_vector_id = building_vectors.next_vector_id();
         Ok(())
     }
 }

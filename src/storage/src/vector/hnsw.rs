@@ -72,14 +72,14 @@ impl VectorHnswNode {
     }
 }
 
-struct VectorStoreImpl {
+struct InMemoryVectorStore {
     vector_len: usize,
     vector_payload: Vec<VectorItem>,
     info_payload: Vec<u8>,
     info_offsets: Vec<usize>,
 }
 
-impl VectorStoreImpl {
+impl InMemoryVectorStore {
     fn new(vector_len: usize) -> Self {
         Self {
             vector_len,
@@ -133,12 +133,12 @@ pub trait VectorStore: 'static {
     async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>>;
 }
 
-pub struct VectorStoreImplAccessor<'a> {
-    vector_store_impl: &'a VectorStoreImpl,
+pub struct InMemoryVectorStoreAccessor<'a> {
+    vector_store_impl: &'a InMemoryVectorStore,
     idx: usize,
 }
 
-impl VectorAccessor for VectorStoreImplAccessor<'_> {
+impl VectorAccessor for InMemoryVectorStoreAccessor<'_> {
     fn vec_ref(&self) -> VectorRef<'_> {
         self.vector_store_impl.vec_ref(self.idx)
     }
@@ -148,11 +148,11 @@ impl VectorAccessor for VectorStoreImplAccessor<'_> {
     }
 }
 
-impl VectorStore for VectorStoreImpl {
-    type Accessor<'a> = VectorStoreImplAccessor<'a>;
+impl VectorStore for InMemoryVectorStore {
+    type Accessor<'a> = InMemoryVectorStoreAccessor<'a>;
 
     async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>> {
-        Ok(VectorStoreImplAccessor {
+        Ok(InMemoryVectorStoreAccessor {
             vector_store_impl: self,
             idx,
         })
@@ -329,12 +329,12 @@ impl VecSet {
     }
 }
 
-impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphBuilder, M, R> {
+impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<InMemoryVectorStore, HnswGraphBuilder, M, R> {
     pub fn new(vector_len: usize, rng: R, options: HnswBuilderOptions) -> Self {
         Self {
             options,
             graph: None,
-            vector_store: VectorStoreImpl::new(vector_len),
+            vector_store: InMemoryVectorStore::new(vector_len),
             rng,
             _measure: Default::default(),
         }
