@@ -38,7 +38,9 @@ use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
+use crate::common::table::state_table::{
+    StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
+};
 use crate::common::table::test_utils::gen_pbtable;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::prelude::*;
@@ -167,13 +169,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             &depended_subscription_ids,
         );
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
-        let state_table = StateTableInner::from_table_catalog_with_consistency_level(
-            table_catalog,
-            store,
-            vnodes,
-            op_consistency_level,
-        )
-        .await;
+        let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
+            .with_op_consistency_level(op_consistency_level)
+            .build()
+            .await;
 
         let mv_metrics = metrics.new_materialize_metrics(
             TableId::new(table_catalog.id),
