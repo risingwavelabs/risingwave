@@ -154,6 +154,31 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
+        macro_rules! await_with_metrics {
+            ($fut:expr, $metrics:expr, $interval:expr, $start_time:expr) => {{
+                $interval
+                    .tick()
+                    .now_or_never()
+                    .expect("interval tick should immediately resolve");
+
+                loop {
+                    tokio::select! {
+                        biased;
+                        res = &mut $fut => {
+                            res?;
+                            let ns = $start_time.elapsed().as_nanos() as u64;
+                            $metrics.inc_by(ns);
+                            break;
+                        }
+                        _ = $interval.tick() => {
+                            $start_time = Instant::now();
+                            $metrics.inc_by(Duration::from_secs(15).as_nanos() as u64);
+                        }
+                    };
+                }
+            }};
+        }
+
         let limit = self
             .local_barrier_manager
             .env
@@ -172,14 +197,10 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
-                        let dispatcher_output = &mut dispatcher.dispatcher;
                         let mut start_time = Instant::now();
                         let mut interval = tokio::time::interval(Duration::from_secs(15));
-                        interval
-                            .tick()
-                            .now_or_never()
-                            .expect("interval tick should immediately resolve");
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_barriers(
                             barrier_batch
                                 .iter()
@@ -188,21 +209,7 @@ impl DispatchExecutorInner {
                                 .collect(),
                         );
                         tokio::pin!(fut);
-                        loop {
-                            tokio::select! {
-                                biased;
-                                res = &mut fut => {
-                                    res?;
-                                    let ns = start_time.elapsed().as_nanos() as u64;
-                                    metrics.inc_by(ns);
-                                    break;
-                                }
-                                _ = interval.tick() => {
-                                    start_time = Instant::now();
-                                    metrics.inc_by(Duration::from_secs(15).as_nanos() as u64);
-                                }
-                            };
-                        }
+                        await_with_metrics!(fut, metrics, interval, start_time);
                         StreamResult::Ok(())
                     })
                     .await?;
