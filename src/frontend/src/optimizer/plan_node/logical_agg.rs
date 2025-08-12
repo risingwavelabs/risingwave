@@ -158,7 +158,7 @@ impl LogicalAgg {
         let local_agg = new_stream_hash_agg(
             Agg::new(core.agg_calls.to_vec(), local_group_key, project.into()),
             Some(vnode_col_idx),
-        );
+        )?;
         // Global group key excludes vnode.
         let local_agg_group_key_cardinality = local_agg.group_key().len();
         let local_group_key_without_vnode =
@@ -210,7 +210,7 @@ impl LogicalAgg {
                     exchange,
                 ),
                 None,
-            );
+            )?;
             global_agg.into()
         };
         Self::add_row_merge_if_needed(
@@ -232,7 +232,7 @@ impl LogicalAgg {
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
                 .streaming_enforce_if_not_satisfies(stream_input)?;
         let core = self.core.clone_with_input(input);
-        Ok(new_stream_hash_agg(core, None).into())
+        Ok(new_stream_hash_agg(core, None)?.into())
     }
 
     /// Generates distributed stream plan.
@@ -1348,7 +1348,10 @@ fn new_stream_simple_agg(
     StreamSimpleAgg::new(logical, row_count_idx, must_output_per_barrier)
 }
 
-fn new_stream_hash_agg(core: Agg<StreamPlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
+fn new_stream_hash_agg(
+    core: Agg<StreamPlanRef>,
+    vnode_col_idx: Option<usize>,
+) -> Result<StreamHashAgg> {
     let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }
