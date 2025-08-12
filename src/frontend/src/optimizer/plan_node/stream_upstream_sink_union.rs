@@ -65,9 +65,9 @@ impl_plan_tree_node_for_leaf! { Stream, StreamUpstreamSinkUnion }
 
 impl StreamNode for StreamUpstreamSinkUnion {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::UpstreamSinkUnion(UpstreamSinkUnionNode {
+        PbNodeBody::UpstreamSinkUnion(Box::new(UpstreamSinkUnionNode {
             init_upstreams: vec![],
-        })
+        }))
     }
 }
 
