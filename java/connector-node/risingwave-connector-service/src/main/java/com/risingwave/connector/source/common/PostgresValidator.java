@@ -49,6 +49,18 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     private final boolean isCdcSourceJob;
     private final int pgVersion;
 
+    private static class ColumnInfo {
+        String dataType;
+        Long charMaxLength;
+        String udtName;
+
+        ColumnInfo(String dataType, Long charMaxLength, String udtName) {
+            this.dataType = dataType;
+            this.charMaxLength = charMaxLength;
+            this.udtName = udtName;
+        }
+    }
+
     public PostgresValidator(
             Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
             throws SQLException {
@@ -211,18 +223,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(2, this.tableName);
             var res = stmt.executeQuery();
 
-            class ColumnInfo {
-                String dataType;
-                Long charMaxLength;
-                String udtName;
-
-                ColumnInfo(String dataType, Long charMaxLength, String udtName) {
-                    this.dataType = dataType;
-                    this.charMaxLength = charMaxLength;
-                    this.udtName = udtName;
-                }
-            }
-
             Map<String, ColumnInfo> schema = new HashMap<>();
             while (res.next()) {
                 var field = res.getString(1);
@@ -230,7 +230,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 Long charMaxLength =
                         res.getObject(3) == null ? null : ((Number) res.getObject(3)).longValue();
                 var udtName = res.getString(4);
-                schema.put(field.toLowerCase(), new ColumnInfo(dataType, charMaxLength, udtName));
+                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName));
             }
 
             for (var e : tableSchema.getColumnTypes().entrySet()) {
@@ -238,13 +238,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var colInfo = schema.get(e.getKey().toLowerCase());
+                var colInfo = schema.get(e.getKey());
                 if (colInfo == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(
-                        colInfo.dataType, e.getValue(), colInfo.charMaxLength, colInfo.udtName)) {
+                if (!isDataTypeCompatible(colInfo, e.getValue())) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + e.getKey());
                 }
@@ -666,19 +665,16 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    private boolean isDataTypeCompatible(
-            String pgDataType,
-            Data.DataType.TypeName typeName,
-            Long charMaxLength,
-            String udtName) {
+    private boolean isDataTypeCompatible(ColumnInfo colInfo, Data.DataType.TypeName typeName) {
         int val = typeName.getNumber();
-        switch (pgDataType) {
+
+        switch (colInfo.dataType) {
             case "boolean":
                 // BOOLEAN -> BOOLEAN
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE;
             case "bit":
                 // The bit type needs to be judged together with character_maximum_length
-                if (charMaxLength == null || charMaxLength == 1) {
+                if (colInfo.charMaxLength == null || colInfo.charMaxLength == 1) {
                     // bit(1) -> BOOLEAN
                     return val == Data.DataType.TypeName.BOOLEAN_VALUE;
                 } else {
@@ -786,8 +782,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 return val == Data.DataType.TypeName.LIST_VALUE;
             case "USER-DEFINED":
                 // Handle user-defined types like enum, citext, etc.
-                if (udtName != null) {
-                    switch (udtName.toLowerCase()) {
+                if (colInfo.udtName != null) {
+                    switch (colInfo.udtName.toLowerCase()) {
                         case "citext":
                             // CITEXT -> CHARACTER VARYING
                             return val == Data.DataType.TypeName.VARCHAR_VALUE;
@@ -796,9 +792,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         case "hstore":
                             return false;
                         default:
-                            // For other user-defined types, assume they are enum types and pass
-                            // validation
-                            return true;
+                            // For other user-defined types, assume they are enum types and check
+                            // if they are compatible with VARCHAR
+                            return val == Data.DataType.TypeName.VARCHAR_VALUE;
                     }
                 }
                 return false;
