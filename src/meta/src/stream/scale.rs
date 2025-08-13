@@ -97,7 +97,7 @@ use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryTrait, TransactionTrait,
+    ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
 };
 
 use super::SourceChange;
@@ -2449,9 +2449,26 @@ impl ScaleController {
             let mut all_actor_dispatchers: HashMap<_, Vec<_>> = HashMap::new();
 
             for (downstream_fragment_id, dispatcher_type) in &downstream_fragments {
-                // todo
-                let downstream_fragment =
-                    all_fragments.get(&(*downstream_fragment_id as _)).unwrap();
+                let target_fragment_actors =
+                    match all_fragments.get(&(*downstream_fragment_id as _)) {
+                        None => {
+                            let external_fragment =
+                                read_gurad.get_fragment(*fragment_id as FragmentId).unwrap();
+
+                            external_fragment
+                                .actors
+                                .iter()
+                                .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
+                                .collect()
+                        }
+                        Some(downstream_rendered) => downstream_rendered
+                            .actors
+                            .iter()
+                            .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
+                            .collect(),
+                    };
+
+                let target_fragment_distribution = *distribution_type;
 
                 let fragment_relation::Model {
                     source_fragment_id,
@@ -2464,12 +2481,6 @@ impl ScaleController {
                     .remove(&(*fragment_id as _, *downstream_fragment_id as _))
                     .expect("downstream relation should exist");
 
-                let target_fragment_actors = downstream_fragment
-                    .actors
-                    .iter()
-                    .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-                    .collect();
-
                 // let xx = output_type_mapping.map(|x| x.to_protobuf());
                 //
                 // let xxxx = PbDispatchOutputMapping{
@@ -2480,11 +2491,12 @@ impl ScaleController {
                     indices: output_indices.into_u32_array(),
                     types: output_type_mapping.unwrap_or_default().to_protobuf(),
                 };
+
                 let dispatchers = compose_dispatchers(
                     *distribution_type,
                     &source_fragment_actors,
                     *downstream_fragment_id,
-                    downstream_fragment.distribution_type,
+                    target_fragment_distribution,
                     &target_fragment_actors,
                     dispatcher_type,
                     dist_key_indices.into_u32_array(),
