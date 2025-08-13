@@ -49,6 +49,7 @@ WITH
     server_url = 'nats-server:4222',
     subject = 'subject1',
     stream = 'my_stream',
+    allow_create_stream = 'true',
     connect_mode = 'plain'
   ) FORMAT PLAIN ENCODE JSON;
 ```
