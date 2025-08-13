@@ -82,8 +82,13 @@ fn alter_prost_user_info(
                 update_fields.insert(UpdateField::Super);
             }
             UserOption::NoSuperUser => {
-                user_info.is_super = false;
-                update_fields.insert(UpdateField::Super);
+                if user_info.is_admin {
+                    // Admin users cannot have superuser status removed - show notice but ignore
+                    notices.push("admin users must remain superusers, ignoring NOSUPERUSER".to_owned());
+                } else {
+                    user_info.is_super = false;
+                    update_fields.insert(UpdateField::Super);
+                }
             }
             UserOption::CreateDB => {
                 user_info.can_create_db = true;

@@ -33,7 +33,7 @@ message UserInfo {
 
   /// Granted privileges will be only updated through the command of GRANT/REVOKE.
   repeated GrantPrivilege grant_privileges = 8;
-  
+
   bool is_admin = 9;
 }
 
