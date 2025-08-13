@@ -377,12 +377,10 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
             // by nearly 4x. May investigate it later.
             for r in formatter.format_chunk(&chunk) {
                 let (key, value) = r?;
-                payload_writer
-                    .write_inner(
-                        key.map(SerTo::ser_to).transpose()?,
-                        value.map(SerTo::ser_to).transpose()?,
-                    )
-                    .await?;
+
+                let k = key.map(SerTo::ser_to).transpose()?;
+                let v = value.map(SerTo::ser_to).transpose()?;
+                Box::pin(payload_writer.write_inner(k, v)).await?;
             }
             Ok(())
         })
