@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::array::Op;
+use risingwave_common::array::{ChunkType, Op};
 use risingwave_common::row;
 use risingwave_common::types::{DefaultOrdered, Interval, Timestamptz, ToDatumRef};
 use risingwave_expr::capture_context;
@@ -54,7 +54,7 @@ pub enum NowMode {
 enum ModeVars {
     UpdateCurrent,
     GenerateSeries {
-        chunk_builder: StreamChunkBuilder,
+        chunk_builder: StreamChunkBuilder<{ ChunkType::Column }>,
         add_interval_expr: NonStrictExpression,
     },
 }
@@ -100,7 +100,10 @@ impl<S: StateStore> NowExecutor<S> {
             NowMode::UpdateCurrent => ModeVars::UpdateCurrent,
             NowMode::GenerateSeries { interval, .. } => {
                 // in most cases there won't be more than one row except for the first time
-                let chunk_builder = StreamChunkBuilder::unlimited(data_types.clone(), Some(1));
+                let chunk_builder = StreamChunkBuilder::<{ ChunkType::Column }>::unlimited(
+                    data_types.clone(),
+                    Some(1),
+                );
                 let add_interval_expr =
                     build_add_interval_expr_captured(*interval, eval_error_report)?;
                 ModeVars::GenerateSeries {

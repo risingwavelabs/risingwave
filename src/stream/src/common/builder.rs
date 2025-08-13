@@ -14,7 +14,7 @@
 
 // Re-export `StreamChunkBuilder`.
 pub use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ChunkType, Op, StreamChunk};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 
@@ -22,7 +22,7 @@ type IndexMappings = Vec<(usize, usize)>;
 
 /// Build stream chunks with fixed chunk size from joined two sides of rows.
 pub struct JoinStreamChunkBuilder {
-    builder: StreamChunkBuilder,
+    builder: StreamChunkBuilder<{ ChunkType::Column }>,
 
     /// The column index mapping from update side to output.
     update_to_output: IndexMappings,
@@ -39,7 +39,7 @@ impl JoinStreamChunkBuilder {
         matched_to_output: IndexMappings,
     ) -> Self {
         Self {
-            builder: StreamChunkBuilder::new(chunk_size, data_types),
+            builder: StreamChunkBuilder::<{ ChunkType::Column }>::new(chunk_size, data_types),
             update_to_output,
             matched_to_output,
         }

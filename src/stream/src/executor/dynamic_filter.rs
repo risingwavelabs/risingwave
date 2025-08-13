@@ -15,7 +15,7 @@
 use std::ops::Bound::{self, *};
 
 use futures::stream;
-use risingwave_common::array::{Array, ArrayImpl, Op};
+use risingwave_common::array::{Array, ArrayImpl, ChunkType, Op};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::once;
@@ -318,8 +318,10 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         let mut committed_rhs_row = recovered_rhs.clone();
         let mut staging_rhs_row = recovered_rhs;
 
-        let mut stream_chunk_builder =
-            StreamChunkBuilder::new(self.chunk_size, self.schema.data_types());
+        let mut stream_chunk_builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(
+            self.chunk_size,
+            self.schema.data_types(),
+        );
 
         let mut staging_state_watermark = None;
         let mut watermark_to_propagate = None;

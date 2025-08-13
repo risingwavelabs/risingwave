@@ -17,6 +17,7 @@ use std::mem;
 
 use either::Either;
 use futures::TryStreamExt;
+use risingwave_common::array::ChunkType;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
@@ -139,7 +140,7 @@ impl DmlExecutor {
         // A batch group of small chunks.
         let mut batch_group: Vec<StreamChunk> = vec![];
 
-        let mut builder = StreamChunkBuilder::new(
+        let mut builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(
             self.chunk_size,
             self.column_descs
                 .iter()

@@ -22,7 +22,7 @@ use futures::stream::{self, PollNext};
 use itertools::Itertools;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
-use risingwave_common::array::Op;
+use risingwave_common::array::{ChunkType, Op};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::RowExt;
@@ -314,8 +314,8 @@ pub(super) mod phase1 {
 
     use futures::{StreamExt, pin_mut};
     use futures_async_stream::try_stream;
-    use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-    use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::array::stream_chunk_builder::{ChunkTypePrimitive, StreamChunkBuilder};
+    use risingwave_common::array::{ChunkType, Op, StreamChunk};
     use risingwave_common::hash::{HashKey, NullBitmap};
     use risingwave_common::row::{self, OwnedRow, Row, RowExt};
     use risingwave_common::types::{DataType, DatumRef};
@@ -332,7 +332,7 @@ pub(super) mod phase1 {
         #[must_use = "consume chunk if produced"]
         fn append_matched_row(
             op: Op,
-            builder: &mut StreamChunkBuilder,
+            builder: &mut StreamChunkBuilder<{ ChunkType::Column }>,
             left_row: impl Row,
             right_row: impl Row,
         ) -> Option<StreamChunk>;
@@ -340,7 +340,7 @@ pub(super) mod phase1 {
         /// Called when all matched rows of a join key are appended.
         #[must_use = "consume chunk if produced"]
         fn match_end(
-            builder: &mut StreamChunkBuilder,
+            builder: &mut StreamChunkBuilder<{ ChunkType::Column }>,
             op: Op,
             left_row: impl Row,
             right_size: usize,
@@ -355,7 +355,7 @@ pub(super) mod phase1 {
     impl Phase1Evaluation for Inner {
         fn append_matched_row(
             op: Op,
-            builder: &mut StreamChunkBuilder,
+            builder: &mut StreamChunkBuilder<{ ChunkType::Column }>,
             left_row: impl Row,
             right_row: impl Row,
         ) -> Option<StreamChunk> {
@@ -363,7 +363,7 @@ pub(super) mod phase1 {
         }
 
         fn match_end(
-            _builder: &mut StreamChunkBuilder,
+            _builder: &mut StreamChunkBuilder<{ ChunkType::Column }>,
             _op: Op,
             _left_row: impl Row,
             _right_size: usize,
@@ -376,7 +376,7 @@ pub(super) mod phase1 {
     impl Phase1Evaluation for LeftOuter {
         fn append_matched_row(
             op: Op,
-            builder: &mut StreamChunkBuilder,
+            builder: &mut StreamChunkBuilder<{ ChunkType::Column }>,
             left_row: impl Row,
             right_row: impl Row,
         ) -> Option<StreamChunk> {
@@ -384,7 +384,7 @@ pub(super) mod phase1 {
         }
 
         fn match_end(
-            builder: &mut StreamChunkBuilder,
+            builder: &mut StreamChunkBuilder<{ ChunkType::Column }>,
             op: Op,
             left_row: impl Row,
             right_size: usize,
@@ -405,7 +405,7 @@ pub(super) mod phase1 {
     impl Phase1Evaluation for LeftOuterWithCond {
         fn append_matched_row(
             op: Op,
-            builder: &mut StreamChunkBuilder,
+            builder: &mut StreamChunkBuilder<{ ChunkType::Column }>,
             left_row: impl Row,
             right_row: impl Row,
         ) -> Option<StreamChunk> {
@@ -413,7 +413,7 @@ pub(super) mod phase1 {
         }
 
         fn match_end(
-            builder: &mut StreamChunkBuilder,
+            builder: &mut StreamChunkBuilder<{ ChunkType::Column }>,
             op: Op,
             left_row: impl Row,
             right_size: usize,
@@ -449,7 +449,7 @@ pub(super) mod phase1 {
         chunk: StreamChunk,
         metrics: &'a TemporalJoinMetrics,
     ) {
-        let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
+        let mut builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(chunk_size, full_schema);
         let keys = K::build_many(left_join_keys, chunk.data_chunk());
         let to_fetch_keys = chunk
             .visibility()

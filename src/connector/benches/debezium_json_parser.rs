@@ -60,7 +60,7 @@ macro_rules! create_debezium_bench_helpers {
                         || (block_on(DebeziumParser::new_for_test(get_descs())).unwrap(), records.clone()) ,
                         | (mut parser, records) | async move {
                             let mut builder =
-                                SourceStreamChunkBuilder::new(get_descs(), SourceCtrlOpts {
+                                SourceStreamChunkBuilder::<{ChunkType::Column}>::new(get_descs(), SourceCtrlOpts {
                                     chunk_size: NUM_RECORDS,
                                     split_txn: false,
                                 });

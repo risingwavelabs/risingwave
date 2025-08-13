@@ -14,7 +14,7 @@
 
 use either::Either;
 use multimap::MultiMap;
-use risingwave_common::array::{ArrayRef, DataChunk, Op};
+use risingwave_common::array::{ArrayRef, ChunkType, DataChunk, Op};
 use risingwave_common::bail;
 use risingwave_common::row::RowExt;
 use risingwave_common::types::ToOwnedDatum;
@@ -105,7 +105,8 @@ impl Inner {
             .collect();
         // a temporary row buffer
         let mut row = vec![DatumRef::None; data_types.len()];
-        let mut builder = StreamChunkBuilder::new(self.chunk_size, data_types);
+        let mut builder =
+            StreamChunkBuilder::<{ ChunkType::Column }>::new(self.chunk_size, data_types);
 
         let mut last_nondec_expr_values = vec![None; self.nondecreasing_expr_indices.len()];
 

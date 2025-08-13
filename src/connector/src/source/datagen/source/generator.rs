@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ChunkType, Op, StreamChunk};
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -166,8 +166,10 @@ impl DatagenEventGenerator {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
             let mut rows_generated_this_second = 0;
-            let mut chunk_builder =
-                StreamChunkBuilder::new(MAX_ROWS_PER_YIELD as usize, self.data_types.clone());
+            let mut chunk_builder = StreamChunkBuilder::<{ ChunkType::Column }>::new(
+                MAX_ROWS_PER_YIELD as usize,
+                self.data_types.clone(),
+            );
             while rows_generated_this_second < self.partition_rows_per_second {
                 let num_rows_to_generate = std::cmp::min(
                     MAX_ROWS_PER_YIELD,

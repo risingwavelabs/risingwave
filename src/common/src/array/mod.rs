@@ -48,7 +48,7 @@ pub use chrono_array::{
     DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray,
     TimestampArrayBuilder, TimestamptzArray, TimestamptzArrayBuilder,
 };
-pub use data_chunk::{DataChunk, DataChunkTestExt};
+pub use data_chunk::{ColumnChunk, DataChunk, DataChunkTestExt, RowChunk};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
@@ -61,7 +61,8 @@ pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayI
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbArray;
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
-pub use stream_chunk_builder::StreamChunkBuilder;
+pub use stream_chunk_builder::ChunkType::{Column, Row};
+pub use stream_chunk_builder::{ChunkType, StreamChunkBuilder};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 pub use vector_array::{Finite32, VectorArray, VectorArrayBuilder, VectorRef, VectorVal};
