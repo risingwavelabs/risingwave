@@ -206,16 +206,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .await
             .expect("Retry create cdc table reader until success.")
         });
-        let timestamptz_handling: Option<TimestamptzHandling> = if self
+        let timestamptz_handling: Option<TimestamptzHandling> = self
             .properties
             .get("debezium.time.precision.mode")
             .map(|v| v == "connect")
             .unwrap_or(false)
-        {
-            Some(TimestamptzHandling::Milli)
-        } else {
-            None
-        };
+            .then_some(TimestamptzHandling::Milli);
         // Make sure to use mapping_message after transform_upstream.
         let mut upstream =
             transform_upstream(upstream, self.output_columns.clone(), timestamptz_handling).boxed();
