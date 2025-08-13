@@ -764,6 +764,6 @@ mod tests {
                 }]
             );
         }
-        frontend.run_sql("DROP USER user1").await.unwrap();
+        Box::pin(frontend.run_sql("DROP USER user1")).await.unwrap();
     }
 }
