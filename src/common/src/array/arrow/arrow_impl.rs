@@ -118,7 +118,7 @@ pub trait ToArrow {
             ArrayImpl::List(array) => self.list_to_arrow(data_type, array),
             ArrayImpl::Struct(array) => self.struct_to_arrow(data_type, array),
             ArrayImpl::Map(array) => self.map_to_arrow(data_type, array),
-            ArrayImpl::Vector(inner) => self.list_to_arrow(data_type, inner.inner()),
+            ArrayImpl::Vector(inner) => self.vector_to_arrow(data_type, inner),
         }?;
         if arrow_array.data_type() != data_type {
             arrow_cast::cast(&arrow_array, data_type).map_err(ArrayError::to_arrow)
@@ -243,6 +243,31 @@ pub trait ToArrow {
             return Err(ArrayError::to_arrow("Invalid list type"));
         };
         let values = self.to_array(field.data_type(), array.values())?;
+        let offsets = OffsetBuffer::new(array.offsets().iter().map(|&o| o as i32).collect());
+        let nulls = (!array.null_bitmap().all()).then(|| array.null_bitmap().into());
+        Ok(Arc::new(arrow_array::ListArray::new(
+            field.clone(),
+            offsets,
+            values,
+            nulls,
+        )))
+    }
+
+    #[inline]
+    fn vector_to_arrow(
+        &self,
+        data_type: &arrow_schema::DataType,
+        array: &VectorArray,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        let arrow_schema::DataType::List(field) = data_type else {
+            return Err(ArrayError::to_arrow("Invalid list type"));
+        };
+        if field.data_type() != &arrow_schema::DataType::Float32 {
+            return Err(ArrayError::to_arrow("Invalid list inner type for vector"));
+        }
+        let values = Arc::new(arrow_array::Float32Array::from(
+            array.as_raw_slice().to_vec(),
+        ));
         let offsets = OffsetBuffer::new(array.offsets().iter().map(|&o| o as i32).collect());
         let nulls = (!array.null_bitmap().all()).then(|| array.null_bitmap().into());
         Ok(Arc::new(arrow_array::ListArray::new(

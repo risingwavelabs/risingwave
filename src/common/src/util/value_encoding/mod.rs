@@ -21,7 +21,7 @@ use either::{Either, for_both};
 use enum_as_inner::EnumAsInner;
 use risingwave_pb::data::PbDatum;
 
-use crate::array::ArrayImpl;
+use crate::array::{ArrayImpl, Finite32};
 use crate::row::Row;
 use crate::types::*;
 
@@ -230,7 +230,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
         ScalarRefImpl::Map(m) => serialize_list(m.into_inner(), buf),
-        ScalarRefImpl::Vector(v) => serialize_list(v.into_inner(), buf),
+        ScalarRefImpl::Vector(v) => serialize_vector(v, buf),
     }
 }
 
@@ -257,7 +257,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
         ScalarRefImpl::Map(v) => estimate_serialize_list_size(v.into_inner()),
-        ScalarRefImpl::Vector(v) => estimate_serialize_list_size(v.into_inner()),
+        ScalarRefImpl::Vector(v) => estimate_serialize_vector_size(v),
     }
 }
 
@@ -280,6 +280,17 @@ fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
 }
 fn estimate_serialize_list_size(list: ListRef<'_>) -> usize {
     4 + list.estimate_serialize_size_inner()
+}
+
+fn serialize_vector(value: VectorRef<'_>, buf: &mut impl BufMut) {
+    let elems = value.into_slice();
+    elems.iter().for_each(|v| {
+        // follow the `put_f32_le` in `serialize_scalar`
+        buf.put_f32_le(*v);
+    });
+}
+fn estimate_serialize_vector_size(v: VectorRef<'_>) -> usize {
+    size_of_val(v.into_slice())
 }
 
 fn serialize_str(bytes: &[u8], buf: &mut impl BufMut) {
@@ -360,13 +371,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
-        DataType::Vector(size) => {
-            let inner = deserialize_list(&DataType::Float32, data)?.into_list();
-            assert_eq!(inner.len(), *size);
-            VectorVal::from_inner(inner)
-                .map_err(ValueEncodingError::InvalidListEncoding)?
-                .into()
-        }
+        DataType::Vector(dimension) => deserialize_vector(*dimension, data)?,
         DataType::List(item_type) => deserialize_list(item_type, data)?,
         DataType::Map(map_type) => {
             // FIXME: clone type everytime here is inefficient
@@ -392,6 +397,16 @@ fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarI
         builder.append(inner_deserialize_datum(data, item_type)?);
     }
     Ok(ScalarImpl::List(ListValue::new(builder.finish())))
+}
+
+fn deserialize_vector(dimension: usize, data: &mut impl Buf) -> Result<ScalarImpl> {
+    let mut value = Vec::with_capacity(dimension);
+    for _ in 0..dimension {
+        // follow the `get_f32_le` in `deserialize_value`
+        let i = data.get_f32_le();
+        value.push(Finite32::try_from(i).map_err(|e| ValueEncodingError::InvalidVectorItem(i, e))?)
+    }
+    Ok(VectorVal::from(value).to_scalar_value())
 }
 
 fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
