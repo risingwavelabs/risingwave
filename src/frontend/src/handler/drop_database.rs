@@ -87,14 +87,13 @@ mod tests {
                 .unwrap()
                 .id
         };
-        let res = frontend
-            .run_user_sql(
-                "DROP DATABASE database",
-                "dev".to_owned(),
-                "user".to_owned(),
-                user_id,
-            )
-            .await;
+        let res = Box::pin(frontend.run_user_sql(
+            "DROP DATABASE database",
+            "dev".to_owned(),
+            "user".to_owned(),
+            user_id,
+        ))
+        .await;
         assert!(res.is_err());
 
         frontend.run_sql("DROP DATABASE database").await.unwrap();
