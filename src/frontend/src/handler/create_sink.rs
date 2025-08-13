@@ -569,7 +569,7 @@ pub async fn handle_create_sink(
     };
 
     if let Some(table_catalog) = target_table_catalog {
-        sink.original_target_columns = table_catalog.columns.clone();
+        sink.original_target_columns = table_catalog.columns_without_rw_timestamp();
     }
 
     let _job_guard =
