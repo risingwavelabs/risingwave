@@ -501,8 +501,8 @@ impl StreamMaterialize {
     }
 
     /// The refresh progress table is used to track refresh operation progress.
-    /// Simplified Schema: vnode (i32), current_pos... (variable PK from upstream),
-    /// is_completed (bool), processed_rows (i64)
+    /// Simplified Schema: vnode (i32), `current_pos`... (variable PK from upstream),
+    /// `is_completed` (bool), `processed_rows` (i64)
     fn derive_refresh_progress_table_catalog(table: TableCatalog) -> TableCatalog {
         tracing::info!(
             table_name = %table.name,
@@ -522,11 +522,11 @@ impl StreamMaterialize {
 
         // Add current_pos columns (mirror upstream table's primary key)
         let mut col_index = 1;
-        for (_pk_index, pk_col) in table.pk.iter().enumerate() {
+        for pk_col in &table.pk {
             let upstream_col = &table.columns[pk_col.column_index];
             columns.push(ColumnCatalog {
                 column_desc: risingwave_common::catalog::ColumnDesc::named(
-                    &format!("pos_{}", upstream_col.name()),
+                    format!("pos_{}", upstream_col.name()),
                     col_index.into(),
                     upstream_col.data_type().clone(),
                 ),
@@ -586,12 +586,12 @@ impl StreamMaterialize {
             version: table.version.clone(),
             watermark_columns: FixedBitSet::new(),
             dist_key_in_pk: vec![0],
-            cardinality: table.cardinality.clone(),
+            cardinality: table.cardinality,
             created_at_epoch: table.created_at_epoch,
             initialized_at_epoch: table.initialized_at_epoch,
             cleaned_by_watermark: false,
-            create_type: table.create_type.clone(),
-            stream_job_status: table.stream_job_status.clone(),
+            create_type: table.create_type,
+            stream_job_status: table.stream_job_status,
             description: table.description.clone(),
             incoming_sinks: vec![],
             created_at_cluster_version: table.created_at_cluster_version.clone(),

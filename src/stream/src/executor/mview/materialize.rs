@@ -106,7 +106,7 @@ pub struct RefreshableMaterializeArgs<S: StateStore, SD: ValueRowSerde> {
     /// After `LoadFinish`, we will do a `DELETE FROM main_table WHERE pk NOT IN (SELECT pk FROM staging_table)`, and then purge the staging table.
     pub staging_table: StateTableInner<S, SD>,
 
-    /// Progress table for tracking refresh state per VNode for fault tolerance
+    /// Progress table for tracking refresh state per `VNode` for fault tolerance
     pub progress_table: RefreshProgressTable<S, SD>,
 
     /// Table ID for this refreshable materialized view
@@ -319,21 +319,21 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         // Check if we need to skip stage1 and go directly to stage2 (for recovery)
         let mut skip_to_stage2 = false;
-        if let Some(ref refresh_args) = self.refresh_args {
-            if refresh_args.is_refreshing {
-                // Since stage info is no longer in progress table,
-                // use the executor's internal state to determine recovery stage
-                let incomplete_vnodes: Vec<_> = refresh_args
-                    .progress_table
-                    .get_all_progress()
-                    .iter()
-                    .filter(|(_, entry)| !entry.is_completed)
-                    .map(|(&vnode, _)| vnode)
-                    .collect();
-                if !incomplete_vnodes.is_empty() {
-                    // For simplicity, assume all incomplete VNodes need stage2 (merge)
-                    skip_to_stage2 = true;
-                }
+        if let Some(ref refresh_args) = self.refresh_args
+            && refresh_args.is_refreshing
+        {
+            // Since stage info is no longer in progress table,
+            // use the executor's internal state to determine recovery stage
+            let incomplete_vnodes: Vec<_> = refresh_args
+                .progress_table
+                .get_all_progress()
+                .iter()
+                .filter(|(_, entry)| !entry.is_completed)
+                .map(|(&vnode, _)| vnode)
+                .collect();
+            if !incomplete_vnodes.is_empty() {
+                // For simplicity, assume all incomplete VNodes need stage2 (merge)
+                skip_to_stage2 = true;
             }
         }
 
@@ -499,8 +499,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         &self.state_table,
                                         &mut refresh_args.progress_table,
                                         b.epoch.curr,
-                                    )
-                                    .await?;
+                                    )?;
                                 }
                                 Some(Mutation::LoadFinish {
                                     associated_source_id: load_finish_source_id,
@@ -1019,8 +1018,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         }
     }
 
-    /// Initialize refresh progress tracking for all VNodes
-    async fn init_refresh_progress(
+    /// Initialize refresh progress tracking for all `VNodes`
+    fn init_refresh_progress(
         state_table: &StateTableInner<S, SD>,
         progress_table: &mut RefreshProgressTable<S, SD>,
         _epoch: u64,

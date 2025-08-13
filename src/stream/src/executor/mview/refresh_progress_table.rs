@@ -55,7 +55,7 @@ pub struct RefreshProgressEntry {
     pub processed_rows: u64,
 }
 
-/// Refresh stages are now tracked by MaterializeExecutor in memory
+/// Refresh stages are now tracked by `MaterializeExecutor` in memory
 /// This enum is kept for compatibility but no longer stored in progress table
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
@@ -219,7 +219,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     }
 
     /// Convert `RefreshProgressEntry` to `OwnedRow` for storage
-    /// New schema: | vnode | current_pos... | is_completed | processed_rows |
+    /// New schema: | vnode | `current_pos`... | `is_completed` | `processed_rows` |
     fn entry_to_row(&self, entry: &RefreshProgressEntry, pk_len: usize) -> OwnedRow {
         let mut row_data = vec![entry.vnode.to_datum()];
 
@@ -241,7 +241,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     }
 
     /// Parse `OwnedRow` from storage to `RefreshProgressEntry`
-    /// New schema: | vnode | current_pos... | is_completed | processed_rows |
+    /// New schema: | vnode | `current_pos`... | `is_completed` | `processed_rows` |
     /// Note: The length depends on the primary key length of upstream table
     #[allow(dead_code)]
     fn parse_row_to_entry(&self, row: &impl Row, pk_len: usize) -> Option<RefreshProgressEntry> {
@@ -301,7 +301,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     }
 
     /// Get the expected schema for the progress table
-    /// Schema: | vnode | current_pos... | is_completed | processed_rows |
+    /// Schema: | vnode | `current_pos`... | `is_completed` | `processed_rows` |
     pub fn expected_schema(pk_data_types: &[DataType]) -> Vec<DataType> {
         let mut schema = vec![DataType::Int32]; // vnode
         schema.extend(pk_data_types.iter().cloned()); // current_pos fields
@@ -311,19 +311,19 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     }
 
     /// Get column names for the progress table schema
-    /// Schema: | vnode | current_pos... | is_completed | processed_rows |
+    /// Schema: | vnode | `current_pos`... | `is_completed` | `processed_rows` |
     pub fn column_names(pk_column_names: &[&str]) -> Vec<String> {
-        let mut names = vec!["vnode".to_string()];
-        for (_i, pk_name) in pk_column_names.iter().enumerate() {
+        let mut names = vec!["vnode".to_owned()];
+        for pk_name in pk_column_names {
             names.push(format!("pos_{}", pk_name));
         }
-        names.push("is_completed".to_string());
-        names.push("processed_rows".to_string());
+        names.push("is_completed".to_owned());
+        names.push("processed_rows".to_owned());
         names
     }
 
     pub fn vnodes(&self) -> &Arc<Bitmap> {
-        &self.state_table.vnodes()
+        self.state_table.vnodes()
     }
 }
 

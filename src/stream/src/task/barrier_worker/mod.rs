@@ -634,6 +634,7 @@ mod await_epoch_completed_future {
         + 'static;
 
     #[define_opaque(AwaitEpochCompletedFuture)]
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn instrument_complete_barrier_future(
         partial_graph_id: PartialGraphId,
         complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
