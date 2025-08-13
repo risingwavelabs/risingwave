@@ -68,11 +68,7 @@ impl StreamAsOfJoin {
 
         assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
 
-        // Inner join won't change the append-only behavior of the stream. The rest might.
-        let append_only = match core.join_type {
-            JoinType::Inner => core.left.append_only() && core.right.append_only(),
-            _ => false,
-        };
+        let stream_kind = core.stream_kind();
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),
@@ -87,7 +83,7 @@ impl StreamAsOfJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            stream_kind,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
@@ -97,7 +93,7 @@ impl StreamAsOfJoin {
             base,
             core,
             eq_join_predicate,
-            is_append_only: append_only,
+            is_append_only: stream_kind.is_append_only(),
             inequality_desc,
             join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
         }

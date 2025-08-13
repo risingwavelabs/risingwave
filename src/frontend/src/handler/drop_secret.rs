@@ -31,9 +31,7 @@ pub async fn handle_drop_secret(
     secret_name: ObjectName,
     if_exists: bool,
 ) -> Result<RwPgResponse> {
-    Feature::SecretManagement
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
+    Feature::SecretManagement.check_available()?;
 
     let session = handler_args.session;
 

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
@@ -145,14 +145,8 @@ impl LogicalScan {
         self.core.table_catalog.cardinality
     }
 
-    // FIXME(kwannoel): Fetch from `table_catalog` + lazily instantiate?
-    /// Get a reference to the logical scan's table desc.
-    pub fn table_desc(&self) -> &TableDesc {
-        self.core.table_desc.as_ref()
-    }
-
-    pub fn table_catalog(&self) -> Arc<TableCatalog> {
-        self.core.table_catalog.clone()
+    pub fn table(&self) -> &Arc<TableCatalog> {
+        &self.core.table_catalog
     }
 
     /// Get the descs of the output columns.
@@ -289,7 +283,11 @@ impl LogicalScan {
             .iter()
             .enumerate()
             .map(|(i, &col_idx)| {
-                InputRef::new(i, self.table_desc().columns[col_idx].data_type.clone()).into()
+                InputRef::new(
+                    i,
+                    self.table().columns[col_idx].column_desc.data_type.clone(),
+                )
+                .into()
             })
             .collect_vec()
     }
@@ -304,7 +302,7 @@ impl LogicalScan {
         let mut inverse_mapping = {
             let mapping = ColIndexMapping::new(
                 self.required_col_idx().iter().map(|i| Some(*i)).collect(),
-                self.table_desc().columns.len(),
+                self.table().columns.len(),
             );
             // Since `required_col_idx` mapping is not invertible, we need to inverse manually.
             let mut inverse_map = vec![None; mapping.target_size()];
@@ -335,7 +333,7 @@ impl LogicalScan {
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::TableScan::new_inner(
             self.output_col_idx().to_vec(),
-            self.table_catalog(),
+            self.table().clone(),
             self.table_indexes().to_vec(),
             self.base.ctx().clone(),
             predicate,
@@ -387,7 +385,7 @@ impl Distill for LogicalScan {
                     self.required_col_idx()
                         .iter()
                         .map(|i| {
-                            let col_name = &self.table_desc().columns[*i].name;
+                            let col_name = &self.table().columns[*i].name;
                             Pretty::from(if verbose {
                                 format!("{}.{}", self.table_name(), col_name)
                             } else {
@@ -486,7 +484,7 @@ impl PredicatePushdown for LogicalScan {
             .collect();
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
-            self.table_desc().columns.len(),
+            self.table().columns.len(),
         ));
         if non_pushable_predicate.is_empty() {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))
@@ -510,7 +508,7 @@ impl LogicalScan {
                 .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![], None).into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
-                self.core.table_desc.clone(),
+                self.table(),
                 self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
             )?;
             let mut scan = self.clone();
@@ -631,14 +629,14 @@ impl ToStream for LogicalScan {
                 let mut col_ids = HashSet::new();
 
                 for &idx in self.output_col_idx() {
-                    col_ids.insert(self.table_desc().columns[idx].column_id);
+                    col_ids.insert(self.table().columns[idx].column_id);
                 }
                 let col_need_to_add = self
-                    .table_desc()
+                    .table()
                     .pk
                     .iter()
                     .filter_map(|c| {
-                        if !col_ids.contains(&self.table_desc().columns[c.column_index].column_id) {
+                        if !col_ids.contains(&self.table().columns[c.column_index].column_id) {
                             Some(c.column_index)
                         } else {
                             None

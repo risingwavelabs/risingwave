@@ -40,7 +40,7 @@ impl StreamFilter {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),

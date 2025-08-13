@@ -60,7 +60,7 @@ impl StreamSimpleAgg {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            false,
+            StreamKind::Retract, // TODO(kind): reject upsert input
             false,
             watermark_columns,
             MonotonicityMap::new(),
@@ -117,13 +117,6 @@ impl StreamNode for StreamSimpleAgg {
                 .agg_calls()
                 .iter()
                 .map(PlanAggCall::to_protobuf)
-                .collect(),
-            distribution_key: self
-                .base
-                .distribution()
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
                 .collect(),
             is_append_only: self.input().append_only(),
             agg_call_states: agg_states

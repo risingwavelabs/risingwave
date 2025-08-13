@@ -34,7 +34,6 @@ mod m20241202_071413_resource_group;
 mod m20241226_074013_clean_watermark_index_in_pk;
 mod m20250106_072104_fragment_relation;
 mod m20250121_085800_change_wasm_udf_identifier;
-mod m20250130_000000_add_user_admin_field;
 mod m20250210_170743_function_options;
 mod m20250319_062702_mysql_utf8mb4;
 mod m20250325_061743_exactly_once_iceberg_sink_metadata;
@@ -47,6 +46,8 @@ mod m20250603_084830_default_privilege;
 mod m20250702_062029_cdc_table_snapshot_splits;
 mod m20250710_065220_sink_auto_refresh_schema;
 mod m20250722_155040_table_refreshable;
+mod m20250729_174630_add_vector_index_info;
+mod m20250810_000000_add_user_admin_field;
 mod utils;
 
 pub struct Migrator;
@@ -131,7 +132,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250702_062029_cdc_table_snapshot_splits::Migration),
             Box::new(m20250710_065220_sink_auto_refresh_schema::Migration),
             Box::new(m20250722_155040_table_refreshable::Migration),
-            Box::new(m20250130_000000_add_user_admin_field::Migration),
+            Box::new(m20250729_174630_add_vector_index_info::Migration),
+            Box::new(m20250810_000000_add_user_admin_field::Migration),
         ]
     }
 }

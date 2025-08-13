@@ -123,7 +123,7 @@ redis = { workspace = true, features = [
     "geospatial",
 ] }
 regex = { workspace = true }
-reqwest = { version = "0.12.2", features = ["json", "stream"] }
+reqwest = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }

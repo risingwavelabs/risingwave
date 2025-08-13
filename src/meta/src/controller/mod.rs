@@ -267,6 +267,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
             refreshable: value.0.refreshable,
+            vector_index_info: value.0.vector_index_info.map(|index| index.to_protobuf()),
         }
     }
 }

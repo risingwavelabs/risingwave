@@ -1761,9 +1761,7 @@ pub async fn create_iceberg_engine_table(
     if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
         match enable_compaction.to_lowercase().as_str() {
             "true" => {
-                risingwave_common::license::Feature::IcebergCompaction
-                    .check_available()
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                risingwave_common::license::Feature::IcebergCompaction.check_available()?;
 
                 sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
             }
@@ -1818,9 +1816,7 @@ pub async fn create_iceberg_engine_table(
     {
         match enable_snapshot_expiration.to_lowercase().as_str() {
             "true" => {
-                risingwave_common::license::Feature::IcebergCompaction
-                    .check_available()
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                risingwave_common::license::Feature::IcebergCompaction.check_available()?;
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
             }
             "false" => {
@@ -1859,9 +1855,7 @@ pub async fn create_iceberg_engine_table(
             }
 
             ICEBERG_WRITE_MODE_COPY_ON_WRITE => {
-                risingwave_common::license::Feature::IcebergCompaction
-                    .check_available()
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                risingwave_common::license::Feature::IcebergCompaction.check_available()?;
 
                 if table.append_only {
                     return Err(ErrorCode::NotSupported(

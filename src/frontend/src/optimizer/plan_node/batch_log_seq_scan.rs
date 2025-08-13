@@ -67,10 +67,7 @@ impl BatchLogSeqScan {
                     if distribution_key.is_empty() {
                         Distribution::Single
                     } else {
-                        Distribution::UpstreamHashShard(
-                            distribution_key,
-                            self.core.table_desc.table_id,
-                        )
+                        Distribution::UpstreamHashShard(distribution_key, self.core.table.id)
                     }
                 }
             },
@@ -131,7 +128,7 @@ impl ToDistributedBatch for BatchLogSeqScan {
 impl TryToBatchPb for BatchLogSeqScan {
     fn try_to_batch_prost_body(&self) -> SchedulerResult<NodeBody> {
         Ok(NodeBody::LogRowSeqScan(LogRowSeqScanNode {
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            table_desc: Some(self.core.table.table_desc().try_to_protobuf()?),
             column_ids: self
                 .core
                 .output_column_ids()
@@ -170,7 +167,7 @@ impl ToLocalBatch for BatchLogSeqScan {
         let dist = if let Some(distribution_key) = self.core.distribution_key()
             && !distribution_key.is_empty()
         {
-            Distribution::UpstreamHashShard(distribution_key, self.core.table_desc.table_id)
+            Distribution::UpstreamHashShard(distribution_key, self.core.table.id)
         } else {
             Distribution::SomeShard
         };

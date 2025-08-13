@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
+
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
@@ -37,16 +39,13 @@ impl StreamTopN {
         assert!(core.group_key.is_empty());
         assert!(core.limit_attr.limit() > 0);
         let input = &core.input;
-        let dist = match input.distribution() {
-            Distribution::Single => Distribution::Single,
-            _ => panic!(),
-        };
+        assert_matches!(input.distribution(), Distribution::Single);
         let watermark_columns = WatermarkColumns::new();
 
         let base = PlanBase::new_stream_with_core(
             &core,
-            dist,
-            false,
+            Distribution::Single,
+            StreamKind::Retract, // TODO(kind): reject upsert input
             false,
             watermark_columns,
             MonotonicityMap::new(),

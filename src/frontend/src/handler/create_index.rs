@@ -14,14 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{IndexId, TableDesc, TableId};
+use risingwave_common::catalog::{IndexId, TableId};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbStreamJobStatus};
 use risingwave_sqlparser::ast;
@@ -148,8 +147,6 @@ pub(crate) fn gen_create_index_plan(
         distributed_columns_expr.push(expr_impl);
     }
 
-    let table_desc = Rc::new(table.table_desc());
-
     // Remove duplicate column of index columns
     let mut set = HashSet::new();
     index_columns_ordered_expr = index_columns_ordered_expr
@@ -233,7 +230,7 @@ pub(crate) fn gen_create_index_plan(
     let index_item = build_index_item(
         &index_table,
         table.name(),
-        table_desc,
+        &table,
         index_columns_ordered_expr,
     );
 
@@ -269,10 +266,10 @@ pub(crate) fn gen_create_index_plan(
 fn build_index_item(
     index_table: &TableCatalog,
     primary_table_name: &str,
-    primary_table_desc: Rc<TableDesc>,
+    primary_table: &TableCatalog,
     index_columns: Vec<(ExprImpl, OrderType)>,
 ) -> Vec<risingwave_pb::expr::ExprNode> {
-    let primary_table_desc_map = primary_table_desc
+    let primary_table_desc_map = primary_table
         .columns
         .iter()
         .enumerate()
@@ -301,7 +298,7 @@ fn build_index_item(
                     let column_index = *primary_table_desc_map.get(&name).unwrap();
                     InputRef {
                         index: column_index,
-                        data_type: primary_table_desc
+                        data_type: primary_table
                             .columns
                             .get(column_index)
                             .unwrap()
