@@ -22,6 +22,8 @@ use std::time::Duration;
 use anyhow::{Context, anyhow};
 use await_tree::{InstrumentAwait, span};
 use either::Either;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog, ColumnId, FragmentTypeFlag};
 use risingwave_common::config::DefaultParallelism;
@@ -374,91 +376,134 @@ impl DdlController {
         let await_tree_span = await_tree::span!("{command}({})", command.object());
 
         let ctrl = self.clone();
-        let fut = async move {
-            match command {
-                DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
-                DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
-                DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).await,
-                DdlCommand::DropSchema(schema_id, drop_mode) => {
-                    ctrl.drop_schema(schema_id, drop_mode).await
-                }
-                DdlCommand::CreateNonSharedSource(source) => {
-                    ctrl.create_non_shared_source(source).await
-                }
-                DdlCommand::DropSource(source_id, drop_mode) => {
-                    ctrl.drop_source(source_id, drop_mode).await
-                }
-                DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
-                DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
-                DdlCommand::CreateView(view, dependencies) => {
-                    ctrl.create_view(view, dependencies).await
-                }
-                DdlCommand::DropView(view_id, drop_mode) => {
-                    ctrl.drop_view(view_id, drop_mode).await
-                }
-                DdlCommand::CreateStreamingJob {
+
+        let fut: BoxFuture<'static, _> = match command {
+            DdlCommand::CreateDatabase(database) => {
+                async move { ctrl.create_database(database).await }.boxed()
+            }
+
+            DdlCommand::DropDatabase(database_id) => {
+                async move { ctrl.drop_database(database_id).await }.boxed()
+            }
+
+            DdlCommand::CreateSchema(schema) => {
+                async move { ctrl.create_schema(schema).await }.boxed()
+            }
+
+            DdlCommand::DropSchema(schema_id, drop_mode) => {
+                async move { ctrl.drop_schema(schema_id, drop_mode).await }.boxed()
+            }
+
+            DdlCommand::CreateNonSharedSource(source) => {
+                async move { ctrl.create_non_shared_source(source).await }.boxed()
+            }
+
+            DdlCommand::DropSource(source_id, drop_mode) => {
+                async move { ctrl.drop_source(source_id, drop_mode).await }.boxed()
+            }
+
+            DdlCommand::CreateFunction(function) => {
+                async move { ctrl.create_function(function).await }.boxed()
+            }
+
+            DdlCommand::DropFunction(function_id) => {
+                async move { ctrl.drop_function(function_id).await }.boxed()
+            }
+
+            DdlCommand::CreateView(view, dependencies) => {
+                async move { ctrl.create_view(view, dependencies).await }.boxed()
+            }
+
+            DdlCommand::DropView(view_id, drop_mode) => {
+                async move { ctrl.drop_view(view_id, drop_mode).await }.boxed()
+            }
+
+            DdlCommand::CreateStreamingJob {
+                stream_job,
+                fragment_graph,
+                affected_table_replace_info,
+                dependencies,
+                specific_resource_group,
+                if_not_exists,
+            } => async move {
+                ctrl.create_streaming_job(
                     stream_job,
                     fragment_graph,
                     affected_table_replace_info,
                     dependencies,
                     specific_resource_group,
                     if_not_exists,
-                } => {
-                    ctrl.create_streaming_job(
-                        stream_job,
-                        fragment_graph,
-                        affected_table_replace_info,
-                        dependencies,
-                        specific_resource_group,
-                        if_not_exists,
-                    )
-                    .await
-                }
-                DdlCommand::DropStreamingJob {
-                    job_id,
-                    drop_mode,
-                    target_replace_info,
-                } => {
-                    ctrl.drop_streaming_job(job_id, drop_mode, target_replace_info)
-                        .await
-                }
-                DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
-                    streaming_job,
-                    fragment_graph,
-                }) => ctrl.replace_job(streaming_job, fragment_graph).await,
-                DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
-                DdlCommand::AlterObjectOwner(object, owner_id) => {
-                    ctrl.alter_owner(object, owner_id).await
-                }
-                DdlCommand::AlterSetSchema(object, new_schema_id) => {
-                    ctrl.alter_set_schema(object, new_schema_id).await
-                }
-                DdlCommand::CreateConnection(connection) => {
-                    ctrl.create_connection(connection).await
-                }
-                DdlCommand::DropConnection(connection_id, drop_mode) => {
-                    ctrl.drop_connection(connection_id, drop_mode).await
-                }
-                DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
-                DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
-                DdlCommand::AlterSecret(secret) => ctrl.alter_secret(secret).await,
-                DdlCommand::AlterNonSharedSource(source) => {
-                    ctrl.alter_non_shared_source(source).await
-                }
-                DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
-                DdlCommand::CreateSubscription(subscription) => {
-                    ctrl.create_subscription(subscription).await
-                }
-                DdlCommand::DropSubscription(subscription_id, drop_mode) => {
-                    ctrl.drop_subscription(subscription_id, drop_mode).await
-                }
-                DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
-                DdlCommand::AlterDatabaseParam(database_id, param) => {
-                    ctrl.alter_database_param(database_id, param).await
-                }
+                )
+                .await
             }
-        }
-        .in_current_span();
+            .boxed(),
+
+            DdlCommand::DropStreamingJob {
+                job_id,
+                drop_mode,
+                target_replace_info,
+            } => async move {
+                ctrl.drop_streaming_job(job_id, drop_mode, target_replace_info)
+                    .await
+            }
+            .boxed(),
+
+            DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
+                streaming_job,
+                fragment_graph,
+            }) => async move { ctrl.replace_job(streaming_job, fragment_graph).await }.boxed(),
+
+            DdlCommand::AlterName(relation, name) => async move {
+                // keeps `name` owned inside the future, borrowing it only for the call
+                ctrl.alter_name(relation, &name).await
+            }
+            .boxed(),
+
+            DdlCommand::AlterObjectOwner(object, owner_id) => {
+                async move { ctrl.alter_owner(object, owner_id).await }.boxed()
+            }
+
+            DdlCommand::AlterSetSchema(object, new_schema_id) => {
+                async move { ctrl.alter_set_schema(object, new_schema_id).await }.boxed()
+            }
+
+            DdlCommand::CreateConnection(connection) => {
+                async move { ctrl.create_connection(connection).await }.boxed()
+            }
+
+            DdlCommand::DropConnection(connection_id, drop_mode) => {
+                async move { ctrl.drop_connection(connection_id, drop_mode).await }.boxed()
+            }
+
+            DdlCommand::CreateSecret(secret) => {
+                async move { ctrl.create_secret(secret).await }.boxed()
+            }
+            DdlCommand::DropSecret(secret_id) => {
+                async move { ctrl.drop_secret(secret_id).await }.boxed()
+            }
+            DdlCommand::AlterSecret(secret) => {
+                async move { ctrl.alter_secret(secret).await }.boxed()
+            }
+            DdlCommand::AlterNonSharedSource(source) => {
+                async move { ctrl.alter_non_shared_source(source).await }.boxed()
+            }
+            DdlCommand::CommentOn(comment) => async move { ctrl.comment_on(comment).await }.boxed(),
+            DdlCommand::CreateSubscription(subscription) => {
+                async move { ctrl.create_subscription(subscription).await }.boxed()
+            }
+            DdlCommand::DropSubscription(subscription_id, drop_mode) => {
+                async move { ctrl.drop_subscription(subscription_id, drop_mode).await }.boxed()
+            }
+            DdlCommand::AlterSwapRename(objects) => {
+                async move { ctrl.alter_swap_rename(objects).await }.boxed()
+            }
+            DdlCommand::AlterDatabaseParam(database_id, param) => {
+                async move { ctrl.alter_database_param(database_id, param).await }.boxed()
+            }
+        };
+
+        let res = fut.in_current_span().await;
+
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
             .instrument(Box::pin(fut));

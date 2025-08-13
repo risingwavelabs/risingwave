@@ -334,7 +334,7 @@ large_enum_variant = "allow"
 result_large_err = "allow"
 
 # Warn on potential stack overflows
-large_future = "warn"
+large_futures = "warn"
 large_stack_arrays = "warn"
 large_stack_frames = "warn"
 large_types_passed_by_value = "warn"
