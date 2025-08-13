@@ -108,10 +108,7 @@ pub async fn handle_create_user(
                 UserOption::NoCreateUser => user_info.can_create_user = false,
                 UserOption::Login => user_info.can_login = true,
                 UserOption::NoLogin => user_info.can_login = false,
-                UserOption::Admin => {
-                    user_info.is_admin = true;
-                    user_info.is_super = true; // Admin users are always superusers
-                }
+                UserOption::Admin => user_info.is_admin = true,
                 UserOption::NoAdmin => user_info.is_admin = false,
                 UserOption::EncryptedPassword(password) => {
                     if !password.0.is_empty() {
@@ -144,6 +141,11 @@ pub async fn handle_create_user(
                 }
             }
         }
+
+        if user_info.is_admin {
+            // Admin users are always superusers
+            user_info.is_super = true;
+        }
     };
 
     let user_info_writer = session.user_info_writer()?;
@@ -160,7 +162,9 @@ pub async fn handle_create_user(
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
+    use risingwave_common::catalog::{
+        DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER_FOR_ADMIN, DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+    };
     use risingwave_pb::user::AuthInfo;
     use risingwave_pb::user::auth_info::EncryptionType;
 
@@ -237,62 +241,41 @@ mod tests {
         let session = frontend.session_ref();
         let user_info_reader = session.env().user_info_reader();
 
-        // Create admin user with conflicting options - last option should win
-        frontend.run_sql("CREATE USER admin_user WITH ADMIN NOADMIN").await.unwrap();
-        
+        frontend
+            .run_sql("CREATE USER no_admin_user WITH NOADMIN")
+            .await
+            .unwrap();
+
+        let no_admin_user = user_info_reader
+            .read_guard()
+            .get_user_by_name("no_admin_user")
+            .cloned()
+            .unwrap();
+        assert!(!no_admin_user.is_admin);
+
+        assert!(
+            frontend
+                .run_sql("CREATE USER admin_user WITH ADMIN")
+                .await
+                .is_err(),
+            "admin users can only be created by other admin users"
+        );
+
+        frontend
+            .run_user_sql(
+                "CREATE USER admin_user WITH NOSUPERUSER CREATEUSER ADMIN",
+                DEFAULT_DATABASE_NAME.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+            )
+            .await
+            .unwrap();
         let admin_user = user_info_reader
             .read_guard()
             .get_user_by_name("admin_user")
             .cloned()
             .unwrap();
-        
-        // Should not be admin because NOADMIN comes last and overrides ADMIN
-        assert!(!admin_user.is_admin);
-        
-        // Create another admin user with reverse order
-        frontend.run_sql("CREATE USER admin_user2 WITH NOADMIN ADMIN").await.unwrap();
-        
-        let admin_user2 = user_info_reader
-            .read_guard()
-            .get_user_by_name("admin_user2")
-            .cloned()
-            .unwrap();
-        
-        // Should be admin and also superuser because ADMIN comes last and overrides NOADMIN
-        assert!(admin_user2.is_admin);
-        assert!(admin_user2.is_super); // Admin users are always superusers
-        
-        // Create admin user with only ADMIN
-        frontend.run_sql("CREATE USER admin_user3 WITH ADMIN").await.unwrap();
-        
-        let admin_user3 = user_info_reader
-            .read_guard()
-            .get_user_by_name("admin_user3")
-            .cloned()
-            .unwrap();
-        
-        // Should be admin and superuser
-        assert!(admin_user3.is_admin);
-        assert!(admin_user3.is_super); // Admin users are always superusers
-        
-        // Test that non-admin users cannot create admin users
-        frontend.run_sql("CREATE USER normal_user WITH NOSUPERUSER CREATEUSER").await.unwrap();
-        let normal_user = user_info_reader
-            .read_guard()
-            .get_user_by_name("normal_user")
-            .cloned()
-            .unwrap();
-        
-        assert!(
-            frontend
-                .run_user_sql(
-                    "CREATE USER should_fail WITH ADMIN",
-                    "dev".to_owned(),
-                    "normal_user".to_owned(),
-                    normal_user.id
-                )
-                .await
-                .is_err()
-        );
+        assert!(admin_user.is_admin);
+        assert!(admin_user.is_super);
     }
 }

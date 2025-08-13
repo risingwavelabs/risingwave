@@ -26,8 +26,9 @@ use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     AlterDatabaseParam, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId,
-    PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME, TableId,
+    DEFAULT_SUPER_USER_FOR_ADMIN, DEFAULT_SUPER_USER_FOR_ADMIN_ID, DEFAULT_SUPER_USER_ID,
+    FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
@@ -1005,6 +1006,16 @@ impl MockUserInfoWriter {
             can_create_db: true,
             can_create_user: true,
             can_login: true,
+            ..Default::default()
+        });
+        user_info.write().create_user(UserInfo {
+            id: DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+            name: DEFAULT_SUPER_USER_FOR_ADMIN.to_owned(),
+            is_super: true,
+            can_create_db: true,
+            can_create_user: true,
+            can_login: true,
+            is_admin: true,
             ..Default::default()
         });
         Self {

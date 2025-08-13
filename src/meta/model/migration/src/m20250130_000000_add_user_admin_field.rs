@@ -21,14 +21,17 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Set is_admin = true for the rwadmin user if it exists
+        // Set is_admin = true and is_super = true for the rwadmin user if it exists
         // Note: rwadmin is already a superuser by default, but we ensure consistency
         let update_stmt = Query::update()
             .table(UserEnum::User)
-            .values([(UserEnum::IsAdmin, true.into())])
+            .values([
+                (UserEnum::IsAdmin, true.into()),
+                (UserEnum::IsSuper, true.into()),
+            ])
             .and_where(Expr::col(UserEnum::Name).eq("rwadmin"))
             .to_owned();
-        
+
         manager.exec_stmt(update_stmt).await?;
 
         Ok(())
@@ -53,4 +56,5 @@ enum UserEnum {
     User,
     Name,
     IsAdmin,
+    IsSuper,
 }
