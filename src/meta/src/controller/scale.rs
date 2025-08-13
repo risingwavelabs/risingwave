@@ -805,10 +805,12 @@ where
         .column(streaming_job::Column::JobId)
         .column(object::Column::DatabaseId)
         .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
-        .filter(streaming_job::Column::JobId.is_in(job_ids))
+        //.filter(streaming_job::Column::JobId.is_in(job_ids))
         .into_tuple()
         .all(txn)
         .await?;
+
+    println!("obj db {:#?}", object_databases);
 
     let streaming_job_databases = object_databases.into_iter().collect::<HashMap<_, _>>();
 
@@ -945,8 +947,14 @@ where
                     .collect(),
             };
 
+            println!("all {:#?} job id {}", streaming_job_databases, job_id);
+
+            let database_id = streaming_job_databases[&job_id];
+
+
+
             result
-                .entry(streaming_job_databases[&job_id])
+                .entry(database_id)
                 .or_default()
                 .entry(job_id)
                 .or_default()

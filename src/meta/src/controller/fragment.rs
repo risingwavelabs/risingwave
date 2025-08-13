@@ -59,7 +59,7 @@ use risingwave_pb::stream_plan::{
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType, ModelTrait,
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType,
     PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
