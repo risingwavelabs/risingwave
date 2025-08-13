@@ -687,12 +687,22 @@ pub(super) mod handlers {
         Ok(all.into())
     }
 
-    /// NOTE(kwannoel): Although we fetch the BP for the entire graph via this API,
-    /// the workload should be reasonable.
-    /// In most cases, we can safely assume each node has most 2 outgoing edges (e.g. join).
-    /// In such a scenario, the number of edges is linear to the number of nodes.
-    /// So the workload is proportional to the relation id graph we fetch in `get_relation_id_infos`.
+    #[derive(Debug, Deserialize)]
+    pub struct StreamingStatsPrometheusParams {
+        /// Unix timestamp in seconds for the evaluation time. If not set, defaults to current Prometheus server time.
+        #[serde(default)]
+        at: Option<i64>,
+        /// Time offset for throughput and backpressure rate calculation in seconds. If not set, defaults to 60s.
+        #[serde(default = "streaming_stats_default_time_offset")]
+        time_offset: i64,
+    }
+
+    fn streaming_stats_default_time_offset() -> i64 {
+        60
+    }
+
     pub async fn get_streaming_stats_from_prometheus(
+        Query(params): Query<StreamingStatsPrometheusParams>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<GetStreamingPrometheusStatsResponse>> {
         let mut all = GetStreamingPrometheusStatsResponse::default();
@@ -747,30 +757,43 @@ pub(super) mod handlers {
         if let Some(ref client) = srv.prometheus_client {
             // Query channel delta stats: throughput and backpressure rate
             let channel_input_throughput_query = format!(
-                "sum(rate(stream_actor_in_record_cnt{{{}}}[60s])) by (fragment_id, upstream_fragment_id)",
-                srv.prometheus_selector
+                "sum(rate(stream_actor_in_record_cnt{{{}}}[{}s])) by (fragment_id, upstream_fragment_id)",
+                srv.prometheus_selector, params.time_offset
             );
             let channel_output_throughput_query = format!(
-                "sum(rate(stream_actor_out_record_cnt{{{}}}[60s])) by (fragment_id, upstream_fragment_id)",
-                srv.prometheus_selector
+                "sum(rate(stream_actor_out_record_cnt{{{}}}[{}s])) by (fragment_id, upstream_fragment_id)",
+                srv.prometheus_selector, params.time_offset
             );
             let channel_backpressure_query = format!(
-                "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id) \
+                "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[{}s])) by (fragment_id, downstream_fragment_id) \
                  / ignoring (downstream_fragment_id) group_left sum(stream_actor_count) by (fragment_id)",
-                srv.prometheus_selector
+                srv.prometheus_selector, params.time_offset
             );
 
-            // Execute all queries concurrently
+            // Execute all queries concurrently with optional time parameter
             let (
                 channel_input_throughput_result,
                 channel_output_throughput_result,
                 channel_backpressure_result,
-            ) = tokio::try_join!(
-                client.query(channel_input_throughput_query).get(),
-                client.query(channel_output_throughput_query).get(),
-                client.query(channel_backpressure_query).get(),
-            )
-            .map_err(err)?;
+            ) = {
+                let mut input_query = client.query(channel_input_throughput_query);
+                let mut output_query = client.query(channel_output_throughput_query);
+                let mut backpressure_query = client.query(channel_backpressure_query);
+
+                // Set the evaluation time if provided
+                if let Some(at_time) = params.at {
+                    input_query = input_query.at(at_time);
+                    output_query = output_query.at(at_time);
+                    backpressure_query = backpressure_query.at(at_time);
+                }
+
+                tokio::try_join!(
+                    input_query.get(),
+                    output_query.get(),
+                    backpressure_query.get(),
+                )
+                .map_err(err)?
+            };
 
             // Process channel delta stats
             let mut channel_data = HashMap::new();
