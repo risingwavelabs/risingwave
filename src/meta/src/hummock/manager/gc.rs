@@ -473,7 +473,7 @@ impl HummockManager {
         mut objects_to_delete: Vec<HummockSstableObjectId>,
     ) -> Result<usize> {
         let total = objects_to_delete.len();
-        let mut batch_size = 1000usize;
+        let mut batch_size = std::env::var("RW_DELETE_BATCH_SIZE").unwrap_or("100".into()).parse().unwrap_or(100);
         while !objects_to_delete.is_empty() {
             if self.env.opts.vacuum_spin_interval_ms != 0 {
                 tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
