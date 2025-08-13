@@ -263,43 +263,57 @@ pub async fn handle(
     sql: Arc<str>,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
+    use futures::FutureExt;
+    use futures::future::BoxFuture;
+
     session.clear_cancel_query_flag();
     let _guard = session.txn_begin_implicit();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
 
     check_ban_ddl_for_iceberg_engine_table(handler_args.session.clone(), &stmt)?;
 
-    match stmt {
+    // Box each branch future to avoid a huge outer future.
+    let fut: BoxFuture<'_, Result<RwPgResponse>> = match stmt {
         Statement::Explain {
             statement,
             analyze,
             options,
-        } => explain::handle_explain(handler_args, *statement, options, analyze).await,
+        } => {
+            async move {
+                explain::handle_explain(handler_args, *statement, options, analyze).await
+            }
+            .boxed()
+        }
         Statement::ExplainAnalyzeStreamJob {
             target,
             duration_secs,
         } => {
-            explain_analyze_stream_job::handle_explain_analyze_stream_job(
-                handler_args,
-                target,
-                duration_secs,
-            )
-            .await
+            async move {
+                explain_analyze_stream_job::handle_explain_analyze_stream_job(
+                    handler_args,
+                    target,
+                    duration_secs,
+                )
+                .await
+            }
+            .boxed()
         }
         Statement::CreateSource { stmt } => {
-            create_source::handle_create_source(handler_args, stmt).await
+            async move { create_source::handle_create_source(handler_args, stmt).await }.boxed()
         }
         Statement::CreateSink { stmt } => {
-            create_sink::handle_create_sink(handler_args, stmt, false).await
+            async move { create_sink::handle_create_sink(handler_args, stmt, false).await }.boxed()
         }
         Statement::CreateSubscription { stmt } => {
-            create_subscription::handle_create_subscription(handler_args, stmt).await
+            async move { create_subscription::handle_create_subscription(handler_args, stmt).await }
+                .boxed()
         }
         Statement::CreateConnection { stmt } => {
-            create_connection::handle_create_connection(handler_args, stmt).await
+            async move { create_connection::handle_create_connection(handler_args, stmt).await }
+                .boxed()
         }
         Statement::CreateSecret { stmt } => {
-            create_secret::handle_create_secret(handler_args, stmt).await
+            async move { create_secret::handle_create_secret(handler_args, stmt).await }.boxed()
         }
         Statement::CreateFunction {
             or_replace,
@@ -311,41 +325,44 @@ pub async fn handle(
             params,
             with_options,
         } => {
-            // For general udf, `language` clause could be ignored
-            // refer: https://github.com/risingwavelabs/risingwave/pull/10608
-            if params.language.is_none()
-                || !params
-                    .language
-                    .as_ref()
-                    .unwrap()
-                    .real_value()
-                    .eq_ignore_ascii_case("sql")
-            {
-                create_function::handle_create_function(
-                    handler_args,
-                    or_replace,
-                    temporary,
-                    if_not_exists,
-                    name,
-                    args,
-                    returns,
-                    params,
-                    with_options,
-                )
-                .await
-            } else {
-                create_sql_function::handle_create_sql_function(
-                    handler_args,
-                    or_replace,
-                    temporary,
-                    if_not_exists,
-                    name,
-                    args,
-                    returns,
-                    params,
-                )
-                .await
+            async move {
+                // For general udf, `language` clause could be ignored
+                // refer: https://github.com/risingwavelabs/risingwave/pull/10608
+                if params.language.is_none()
+                    || !params
+                        .language
+                        .as_ref()
+                        .unwrap()
+                        .real_value()
+                        .eq_ignore_ascii_case("sql")
+                {
+                    create_function::handle_create_function(
+                        handler_args,
+                        or_replace,
+                        temporary,
+                        if_not_exists,
+                        name,
+                        args,
+                        returns,
+                        params,
+                        with_options,
+                    )
+                    .await
+                } else {
+                    create_sql_function::handle_create_sql_function(
+                        handler_args,
+                        or_replace,
+                        temporary,
+                        if_not_exists,
+                        name,
+                        args,
+                        returns,
+                        params,
+                    )
+                    .await
+                }
             }
+            .boxed()
         }
         Statement::CreateAggregate {
             or_replace,
@@ -356,16 +373,19 @@ pub async fn handle(
             params,
             ..
         } => {
-            create_aggregate::handle_create_aggregate(
-                handler_args,
-                or_replace,
-                if_not_exists,
-                name,
-                args,
-                returns,
-                params,
-            )
-            .await
+            async move {
+                create_aggregate::handle_create_aggregate(
+                    handler_args,
+                    or_replace,
+                    if_not_exists,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            }
+            .boxed()
         }
         Statement::CreateTable {
             name,
@@ -388,45 +408,48 @@ pub async fn handle(
             webhook_info,
             engine,
         } => {
-            if or_replace {
-                bail_not_implemented!("CREATE OR REPLACE TABLE");
-            }
-            if temporary {
-                bail_not_implemented!("CREATE TEMPORARY TABLE");
-            }
-            if let Some(query) = query {
-                return create_table_as::handle_create_as(
+            async move {
+                if or_replace {
+                    bail_not_implemented!("CREATE OR REPLACE TABLE");
+                }
+                if temporary {
+                    bail_not_implemented!("CREATE TEMPORARY TABLE");
+                }
+                if let Some(query) = query {
+                    return create_table_as::handle_create_as(
+                        handler_args,
+                        name,
+                        if_not_exists,
+                        query,
+                        columns,
+                        append_only,
+                        on_conflict,
+                        with_version_column.map(|x| x.real_value()),
+                        engine,
+                    )
+                    .await;
+                }
+                let format_encode = format_encode.map(|s| s.into_v2_with_warning());
+                create_table::handle_create_table(
                     handler_args,
                     name,
-                    if_not_exists,
-                    query,
                     columns,
+                    wildcard_idx,
+                    constraints,
+                    if_not_exists,
+                    format_encode,
+                    source_watermarks,
                     append_only,
                     on_conflict,
                     with_version_column.map(|x| x.real_value()),
+                    cdc_table_info,
+                    include_column_options,
+                    webhook_info,
                     engine,
                 )
-                .await;
+                .await
             }
-            let format_encode = format_encode.map(|s| s.into_v2_with_warning());
-            create_table::handle_create_table(
-                handler_args,
-                name,
-                columns,
-                wildcard_idx,
-                constraints,
-                if_not_exists,
-                format_encode,
-                source_watermarks,
-                append_only,
-                on_conflict,
-                with_version_column.map(|x| x.real_value()),
-                cdc_table_info,
-                include_column_options,
-                webhook_info,
-                engine,
-            )
-            .await
+            .boxed()
         }
         Statement::CreateDatabase {
             db_name,
@@ -436,61 +459,83 @@ pub async fn handle(
             barrier_interval_ms,
             checkpoint_frequency,
         } => {
-            create_database::handle_create_database(
-                handler_args,
-                db_name,
-                if_not_exists,
-                owner,
-                resource_group,
-                barrier_interval_ms,
-                checkpoint_frequency,
-            )
-            .await
+            async move {
+                create_database::handle_create_database(
+                    handler_args,
+                    db_name,
+                    if_not_exists,
+                    owner,
+                    resource_group,
+                    barrier_interval_ms,
+                    checkpoint_frequency,
+                )
+                .await
+            }
+            .boxed()
         }
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
             owner,
         } => {
-            create_schema::handle_create_schema(handler_args, schema_name, if_not_exists, owner)
-                .await
+            async move {
+                create_schema::handle_create_schema(handler_args, schema_name, if_not_exists, owner)
+                    .await
+            }
+            .boxed()
         }
-        Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
+        Statement::CreateUser(stmt) => {
+            async move { create_user::handle_create_user(handler_args, stmt).await }.boxed()
+        }
         Statement::DeclareCursor { stmt } => {
-            declare_cursor::handle_declare_cursor(handler_args, stmt).await
+            async move { declare_cursor::handle_declare_cursor(handler_args, stmt).await }.boxed()
         }
         Statement::FetchCursor { stmt } => {
-            fetch_cursor::handle_fetch_cursor(handler_args, stmt, &formats).await
+            async move { fetch_cursor::handle_fetch_cursor(handler_args, stmt, &formats).await }
+                .boxed()
         }
         Statement::CloseCursor { stmt } => {
-            close_cursor::handle_close_cursor(handler_args, stmt).await
+            async move { close_cursor::handle_close_cursor(handler_args, stmt).await }.boxed()
         }
-        Statement::AlterUser(stmt) => alter_user::handle_alter_user(handler_args, stmt).await,
+        Statement::AlterUser(stmt) => {
+            async move { alter_user::handle_alter_user(handler_args, stmt).await }.boxed()
+        }
         Statement::Grant { .. } => {
-            handle_privilege::handle_grant_privilege(handler_args, stmt).await
+            async move { handle_privilege::handle_grant_privilege(handler_args, stmt).await }.boxed()
         }
         Statement::Revoke { .. } => {
-            handle_privilege::handle_revoke_privilege(handler_args, stmt).await
+            async move { handle_privilege::handle_revoke_privilege(handler_args, stmt).await }
+                .boxed()
         }
-        Statement::Describe { name, kind } => match kind {
-            DescribeKind::Fragments => {
-                describe::handle_describe_fragments(handler_args, name).await
+        Statement::Describe { name, kind } => {
+            async move {
+                match kind {
+                    DescribeKind::Fragments => {
+                        describe::handle_describe_fragments(handler_args, name).await
+                    }
+                    DescribeKind::Plain => describe::handle_describe(handler_args, name),
+                }
             }
-            DescribeKind::Plain => describe::handle_describe(handler_args, name),
-        },
-        Statement::DescribeFragment { fragment_id } => {
-            describe::handle_describe_fragment(handler_args, fragment_id).await
+            .boxed()
         }
-        Statement::Discard(..) => discard::handle_discard(handler_args),
+        Statement::DescribeFragment { fragment_id } => {
+            async move { describe::handle_describe_fragment(handler_args, fragment_id).await }
+                .boxed()
+        }
+        Statement::Discard(..) => {
+            async move { discard::handle_discard(handler_args) }.boxed()
+        }
         Statement::ShowObjects {
             object: show_object,
             filter,
-        } => show::handle_show_object(handler_args, show_object, filter).await,
+        } => {
+            async move { show::handle_show_object(handler_args, show_object, filter).await }.boxed()
+        }
         Statement::ShowCreateObject { create_type, name } => {
-            show::handle_show_create_object(handler_args, create_type, name)
+            async move { show::handle_show_create_object(handler_args, create_type, name) }.boxed()
         }
         Statement::ShowTransactionIsolationLevel => {
-            transaction::handle_show_isolation_level(handler_args)
+            async move { transaction::handle_show_isolation_level(handler_args) }.boxed()
         }
         Statement::Drop(DropStatement {
             object_type,
@@ -498,78 +543,84 @@ pub async fn handle(
             if_exists,
             drop_mode,
         }) => {
-            let cascade = if let AstOption::Some(DropMode::Cascade) = drop_mode {
+            async move {
+                let cascade = if let AstOption::Some(DropMode::Cascade) = drop_mode {
+                    match object_type {
+                        ObjectType::MaterializedView
+                        | ObjectType::View
+                        | ObjectType::Sink
+                        | ObjectType::Source
+                        | ObjectType::Subscription
+                        | ObjectType::Index
+                        | ObjectType::Table
+                        | ObjectType::Schema
+                        | ObjectType::Connection => true,
+                        ObjectType::Database | ObjectType::User | ObjectType::Secret => {
+                            bail_not_implemented!("DROP CASCADE");
+                        }
+                    }
+                } else {
+                    false
+                };
                 match object_type {
-                    ObjectType::MaterializedView
-                    | ObjectType::View
-                    | ObjectType::Sink
-                    | ObjectType::Source
-                    | ObjectType::Subscription
-                    | ObjectType::Index
-                    | ObjectType::Table
-                    | ObjectType::Schema
-                    | ObjectType::Connection => true,
-                    ObjectType::Database | ObjectType::User | ObjectType::Secret => {
-                        bail_not_implemented!("DROP CASCADE");
+                    ObjectType::Table => {
+                        drop_table::handle_drop_table(handler_args, object_name, if_exists, cascade)
+                            .await
+                    }
+                    ObjectType::MaterializedView => {
+                        drop_mv::handle_drop_mv(handler_args, object_name, if_exists, cascade).await
+                    }
+                    ObjectType::Index => {
+                        drop_index::handle_drop_index(handler_args, object_name, if_exists, cascade)
+                            .await
+                    }
+                    ObjectType::Source => {
+                        drop_source::handle_drop_source(handler_args, object_name, if_exists, cascade)
+                            .await
+                    }
+                    ObjectType::Sink => {
+                        drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade)
+                            .await
+                    }
+                    ObjectType::Subscription => {
+                        drop_subscription::handle_drop_subscription(
+                            handler_args,
+                            object_name,
+                            if_exists,
+                            cascade,
+                        )
+                        .await
+                    }
+                    ObjectType::Database => {
+                        drop_database::handle_drop_database(handler_args, object_name, if_exists)
+                            .await
+                    }
+                    ObjectType::Schema => {
+                        drop_schema::handle_drop_schema(handler_args, object_name, if_exists, cascade)
+                            .await
+                    }
+                    ObjectType::User => {
+                        drop_user::handle_drop_user(handler_args, object_name, if_exists).await
+                    }
+                    ObjectType::View => {
+                        drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade)
+                            .await
+                    }
+                    ObjectType::Connection => {
+                        drop_connection::handle_drop_connection(
+                            handler_args,
+                            object_name,
+                            if_exists,
+                            cascade,
+                        )
+                        .await
+                    }
+                    ObjectType::Secret => {
+                        drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
                     }
                 }
-            } else {
-                false
-            };
-            match object_type {
-                ObjectType::Table => {
-                    drop_table::handle_drop_table(handler_args, object_name, if_exists, cascade)
-                        .await
-                }
-                ObjectType::MaterializedView => {
-                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists, cascade).await
-                }
-                ObjectType::Index => {
-                    drop_index::handle_drop_index(handler_args, object_name, if_exists, cascade)
-                        .await
-                }
-                ObjectType::Source => {
-                    drop_source::handle_drop_source(handler_args, object_name, if_exists, cascade)
-                        .await
-                }
-                ObjectType::Sink => {
-                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade).await
-                }
-                ObjectType::Subscription => {
-                    drop_subscription::handle_drop_subscription(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        cascade,
-                    )
-                    .await
-                }
-                ObjectType::Database => {
-                    drop_database::handle_drop_database(handler_args, object_name, if_exists).await
-                }
-                ObjectType::Schema => {
-                    drop_schema::handle_drop_schema(handler_args, object_name, if_exists, cascade)
-                        .await
-                }
-                ObjectType::User => {
-                    drop_user::handle_drop_user(handler_args, object_name, if_exists).await
-                }
-                ObjectType::View => {
-                    drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await
-                }
-                ObjectType::Connection => {
-                    drop_connection::handle_drop_connection(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        cascade,
-                    )
-                    .await
-                }
-                ObjectType::Secret => {
-                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
-                }
             }
+            .boxed()
         }
         // XXX: should we reuse Statement::Drop for DROP FUNCTION?
         Statement::DropFunction {
@@ -577,21 +628,43 @@ pub async fn handle(
             func_desc,
             option,
         } => {
-            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, false)
+            async move {
+                drop_function::handle_drop_function(
+                    handler_args,
+                    if_exists,
+                    func_desc,
+                    option,
+                    false,
+                )
                 .await
+            }
+            .boxed()
         }
         Statement::DropAggregate {
             if_exists,
             func_desc,
             option,
         } => {
-            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, true)
+            async move {
+                drop_function::handle_drop_function(
+                    handler_args,
+                    if_exists,
+                    func_desc,
+                    option,
+                    true,
+                )
                 .await
+            }
+            .boxed()
         }
-        Statement::Query(_)
+        // Group requiring ownership of `formats`
+        stmt @ (Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
+        | Statement::Update { .. }) => {
+            let formats = formats;
+            async move { query::handle_query(handler_args, stmt, formats).await }.boxed()
+        }
         Statement::CreateView {
             materialized,
             if_not_exists,
@@ -602,53 +675,73 @@ pub async fn handle(
             or_replace,      // not supported
             emit_mode,
         } => {
-            if or_replace {
-                bail_not_implemented!("CREATE OR REPLACE VIEW");
-            }
-            if materialized {
-                create_mv::handle_create_mv(
-                    handler_args,
-                    if_not_exists,
-                    name,
-                    *query,
-                    columns,
-                    emit_mode,
-                )
-                .await
-            } else {
-                create_view::handle_create_view(handler_args, if_not_exists, name, columns, *query)
+            async move {
+                if or_replace {
+                    bail_not_implemented!("CREATE OR REPLACE VIEW");
+                }
+                if materialized {
+                    create_mv::handle_create_mv(
+                        handler_args,
+                        if_not_exists,
+                        name,
+                        *query,
+                        columns,
+                        emit_mode,
+                    )
                     .await
+                } else {
+                    create_view::handle_create_view(
+                        handler_args,
+                        if_not_exists,
+                        name,
+                        columns,
+                        *query,
+                    )
+                    .await
+                }
             }
+            .boxed()
         }
-        Statement::Flush => flush::handle_flush(handler_args).await,
-        Statement::Wait => wait::handle_wait(handler_args).await,
-        Statement::Recover => recover::handle_recover(handler_args).await,
+        Statement::Flush => {
+            async move { flush::handle_flush(handler_args).await }.boxed()
+        }
+        Statement::Wait => {
+            async move { wait::handle_wait(handler_args).await }.boxed()
+        }
+        Statement::Recover => {
+            async move { recover::handle_recover(handler_args).await }.boxed()
+        }
         Statement::SetVariable {
             local: _,
             variable,
             value,
         } => {
-            // special handle for `use database`
-            if variable.real_value().eq_ignore_ascii_case("database") {
-                let x = variable::set_var_to_param_str(&value);
-                let res = use_db::handle_use_db(
-                    handler_args,
-                    ObjectName::from(vec![Ident::from_real_value(
-                        x.as_deref().unwrap_or("default"),
-                    )]),
-                )?;
-                let mut builder = RwPgResponse::builder(StatementType::SET_VARIABLE);
-                for notice in res.notices() {
-                    builder = builder.notice(notice);
+            async move {
+                // special handle for `use database`
+                if variable.real_value().eq_ignore_ascii_case("database") {
+                    let x = variable::set_var_to_param_str(&value);
+                    let res = use_db::handle_use_db(
+                        handler_args,
+                        ObjectName::from(vec![Ident::from_real_value(
+                            x.as_deref().unwrap_or("default"),
+                        )]),
+                    )?;
+                    let mut builder = RwPgResponse::builder(StatementType::SET_VARIABLE);
+                    for notice in res.notices() {
+                        builder = builder.notice(notice);
+                    }
+                    return Ok(builder.into());
                 }
-                return Ok(builder.into());
+                variable::handle_set(handler_args, variable, value)
             }
-            variable::handle_set(handler_args, variable, value)
+            .boxed()
         }
         Statement::SetTimeZone { local: _, value } => {
-            variable::handle_set_time_zone(handler_args, value)
+            async move { variable::handle_set_time_zone(handler_args, value) }.boxed()
         }
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
+        Statement::ShowVariable { variable } => {
+            async move { variable::handle_show(handler_args, variable) }.boxed()
+        }
         Statement::CreateIndex {
             name,
             table_name,
@@ -658,640 +751,769 @@ pub async fn handle(
             unique,
             if_not_exists,
         } => {
-            if unique {
-                bail_not_implemented!("create unique index");
-            }
+            async move {
+                if unique {
+                    bail_not_implemented!("create unique index");
+                }
 
-            create_index::handle_create_index(
-                handler_args,
-                if_not_exists,
-                name,
-                table_name,
-                columns.to_vec(),
-                include,
-                distributed_by,
-            )
-            .await
+                create_index::handle_create_index(
+                    handler_args,
+                    if_not_exists,
+                    name,
+                    table_name,
+                    columns.to_vec(),
+                    include,
+                    distributed_by,
+                )
+                .await
+            }
+            .boxed()
         }
-        Statement::AlterDatabase { name, operation } => match operation {
-            AlterDatabaseOperation::RenameDatabase { database_name } => {
-                alter_rename::handle_rename_database(handler_args, name, database_name).await
-            }
-            AlterDatabaseOperation::ChangeOwner { new_owner_name } => {
-                alter_owner::handle_alter_owner(
-                    handler_args,
-                    name,
-                    new_owner_name,
-                    StatementType::ALTER_DATABASE,
-                )
-                .await
-            }
-            AlterDatabaseOperation::SetParam(config_param) => {
-                let ConfigParam { param, value } = config_param;
+        Statement::AlterDatabase { name, operation } => {
+            async move {
+                match operation {
+                    AlterDatabaseOperation::RenameDatabase { database_name } => {
+                        alter_rename::handle_rename_database(
+                            handler_args,
+                            name,
+                            database_name,
+                        )
+                        .await
+                    }
+                    AlterDatabaseOperation::ChangeOwner { new_owner_name } => {
+                        alter_owner::handle_alter_owner(
+                            handler_args,
+                            name,
+                            new_owner_name,
+                            StatementType::ALTER_DATABASE,
+                        )
+                        .await
+                    }
+                    AlterDatabaseOperation::SetParam(config_param) => {
+                        let ConfigParam { param, value } = config_param;
 
-                let database_param = match param.real_value().to_uppercase().as_str() {
-                    "BARRIER_INTERVAL_MS" => {
-                        let barrier_interval_ms = match value {
-                            SetVariableValue::Default => None,
-                            SetVariableValue::Single(SetVariableValueSingle::Literal(
-                                Value::Number(num),
-                            )) => {
-                                let num = num.parse::<u32>().map_err(|e| {
-                                    ErrorCode::InvalidInputSyntax(format!(
-                                        "barrier_interval_ms must be a u32 integer: {}",
-                                        e.as_report()
-                                    ))
-                                })?;
-                                Some(num)
+                        let database_param = match param.real_value().to_uppercase().as_str() {
+                            "BARRIER_INTERVAL_MS" => {
+                                let barrier_interval_ms = match value {
+                                    SetVariableValue::Default => None,
+                                    SetVariableValue::Single(SetVariableValueSingle::Literal(
+                                        Value::Number(num),
+                                    )) => {
+                                        let num = num.parse::<u32>().map_err(|e| {
+                                            ErrorCode::InvalidInputSyntax(format!(
+                                                "barrier_interval_ms must be a u32 integer: {}",
+                                                e.as_report()
+                                            ))
+                                        })?;
+                                        Some(num)
+                                    }
+                                    _ => {
+                                        return Err(ErrorCode::InvalidInputSyntax(
+                                            "barrier_interval_ms must be a u32 integer or DEFAULT"
+                                                .to_owned(),
+                                        )
+                                        .into());
+                                    }
+                                };
+                                AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms)
+                            }
+                            "CHECKPOINT_FREQUENCY" => {
+                                let checkpoint_frequency = match value {
+                                    SetVariableValue::Default => None,
+                                    SetVariableValue::Single(SetVariableValueSingle::Literal(
+                                        Value::Number(num),
+                                    )) => {
+                                        let num = num.parse::<u64>().map_err(|e| {
+                                            ErrorCode::InvalidInputSyntax(format!(
+                                                "checkpoint_frequency must be a u64 integer: {}",
+                                                e.as_report()
+                                            ))
+                                        })?;
+                                        Some(num)
+                                    }
+                                    _ => {
+                                        return Err(ErrorCode::InvalidInputSyntax(
+                                            "checkpoint_frequency must be a u64 integer or DEFAULT"
+                                                .to_owned(),
+                                        )
+                                        .into());
+                                    }
+                                };
+                                AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency)
                             }
                             _ => {
-                                return Err(ErrorCode::InvalidInputSyntax(
-                                    "barrier_interval_ms must be a u32 integer or DEFAULT"
-                                        .to_owned(),
-                                )
+                                return Err(ErrorCode::InvalidInputSyntax(format!(
+                                    "Unsupported database config parameter: {}",
+                                    param.real_value()
+                                ))
                                 .into());
                             }
                         };
-                        AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms)
-                    }
-                    "CHECKPOINT_FREQUENCY" => {
-                        let checkpoint_frequency = match value {
-                            SetVariableValue::Default => None,
-                            SetVariableValue::Single(SetVariableValueSingle::Literal(
-                                Value::Number(num),
-                            )) => {
-                                let num = num.parse::<u64>().map_err(|e| {
-                                    ErrorCode::InvalidInputSyntax(format!(
-                                        "checkpoint_frequency must be a u64 integer: {}",
-                                        e.as_report()
-                                    ))
-                                })?;
-                                Some(num)
-                            }
-                            _ => {
-                                return Err(ErrorCode::InvalidInputSyntax(
-                                    "checkpoint_frequency must be a u64 integer or DEFAULT"
-                                        .to_owned(),
-                                )
-                                .into());
-                            }
-                        };
-                        AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency)
-                    }
-                    _ => {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "Unsupported database config parameter: {}",
-                            param.real_value()
-                        ))
-                        .into());
-                    }
-                };
 
-                alter_database_param::handle_alter_database_param(
-                    handler_args,
-                    name,
-                    database_param,
-                )
-                .await
+                        alter_database_param::handle_alter_database_param(
+                            handler_args,
+                            name,
+                            database_param,
+                        )
+                        .await
+                    }
+                }
             }
-        },
-        Statement::AlterSchema { name, operation } => match operation {
-            AlterSchemaOperation::RenameSchema { schema_name } => {
-                alter_rename::handle_rename_schema(handler_args, name, schema_name).await
+            .boxed()
+        }
+        Statement::AlterSchema { name, operation } => {
+            async move {
+                match operation {
+                    AlterSchemaOperation::RenameSchema { schema_name } => {
+                        alter_rename::handle_rename_schema(handler_args, name, schema_name).await
+                    }
+                    AlterSchemaOperation::ChangeOwner { new_owner_name } => {
+                        alter_owner::handle_alter_owner(
+                            handler_args,
+                            name,
+                            new_owner_name,
+                            StatementType::ALTER_SCHEMA,
+                        )
+                        .await
+                    }
+                    AlterSchemaOperation::SwapRenameSchema { target_schema } => {
+                        alter_swap_rename::handle_swap_rename(
+                            handler_args,
+                            name,
+                            target_schema,
+                            StatementType::ALTER_SCHEMA,
+                        )
+                        .await
+                    }
+                }
             }
-            AlterSchemaOperation::ChangeOwner { new_owner_name } => {
-                alter_owner::handle_alter_owner(
-                    handler_args,
-                    name,
-                    new_owner_name,
-                    StatementType::ALTER_SCHEMA,
-                )
-                .await
+            .boxed()
+        }
+        Statement::AlterTable { name, operation } => {
+            async move {
+                match operation {
+                    AlterTableOperation::AddColumn { .. }
+                    | AlterTableOperation::DropColumn { .. }
+                    | AlterTableOperation::AlterColumn { .. } => {
+                        alter_table_column::handle_alter_table_column(
+                            handler_args,
+                            name,
+                            operation,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::RenameTable { table_name } => {
+                        alter_rename::handle_rename_table(
+                            handler_args,
+                            TableType::Table,
+                            name,
+                            table_name,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::ChangeOwner { new_owner_name } => {
+                        alter_owner::handle_alter_owner(
+                            handler_args,
+                            name,
+                            new_owner_name,
+                            StatementType::ALTER_TABLE,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::SetParallelism {
+                        parallelism,
+                        deferred,
+                    } => {
+                        alter_parallelism::handle_alter_parallelism(
+                            handler_args,
+                            name,
+                            parallelism,
+                            StatementType::ALTER_TABLE,
+                            deferred,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::SetSchema { new_schema_name } => {
+                        alter_set_schema::handle_alter_set_schema(
+                            handler_args,
+                            name,
+                            new_schema_name,
+                            StatementType::ALTER_TABLE,
+                            None,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::RefreshSchema => {
+                        alter_table_with_sr::handle_refresh_schema(handler_args, name).await
+                    }
+                    AlterTableOperation::SetSourceRateLimit { rate_limit } => {
+                        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                            handler_args,
+                            PbThrottleTarget::TableWithSource,
+                            name,
+                            rate_limit,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::DropConnector => {
+                        alter_table_drop_connector::handle_alter_table_drop_connector(
+                            handler_args,
+                            name,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::SetDmlRateLimit { rate_limit } => {
+                        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                            handler_args,
+                            PbThrottleTarget::TableDml,
+                            name,
+                            rate_limit,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
+                        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                            handler_args,
+                            PbThrottleTarget::CdcTable,
+                            name,
+                            rate_limit,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::SwapRenameTable { target_table } => {
+                        alter_swap_rename::handle_swap_rename(
+                            handler_args,
+                            name,
+                            target_table,
+                            StatementType::ALTER_TABLE,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::AlterConnectorProps { alter_props } => {
+                        // If exists a associated source, it should be of the same name.
+                        crate::handler::alter_source_props::handle_alter_table_connector_props(
+                            handler_args,
+                            name,
+                            alter_props,
+                        )
+                        .await
+                    }
+                    AlterTableOperation::AddConstraint { .. }
+                    | AlterTableOperation::DropConstraint { .. }
+                    | AlterTableOperation::RenameColumn { .. }
+                    | AlterTableOperation::ChangeColumn { .. }
+                    | AlterTableOperation::RenameConstraint { .. } => {
+                        bail_not_implemented!(
+                            "Unhandled statement: {}",
+                            Statement::AlterTable { name, operation }
+                        )
+                    }
+                }
             }
-            AlterSchemaOperation::SwapRenameSchema { target_schema } => {
-                alter_swap_rename::handle_swap_rename(
-                    handler_args,
-                    name,
-                    target_schema,
-                    StatementType::ALTER_SCHEMA,
-                )
-                .await
+            .boxed()
+        }
+        Statement::AlterIndex { name, operation } => {
+            async move {
+                match operation {
+                    AlterIndexOperation::RenameIndex { index_name } => {
+                        alter_rename::handle_rename_index(handler_args, name, index_name).await
+                    }
+                    AlterIndexOperation::SetParallelism {
+                        parallelism,
+                        deferred,
+                    } => {
+                        alter_parallelism::handle_alter_parallelism(
+                            handler_args,
+                            name,
+                            parallelism,
+                            StatementType::ALTER_INDEX,
+                            deferred,
+                        )
+                        .await
+                    }
+                }
             }
-        },
-        Statement::AlterTable { name, operation } => match operation {
-            AlterTableOperation::AddColumn { .. }
-            | AlterTableOperation::DropColumn { .. }
-            | AlterTableOperation::AlterColumn { .. } => {
-                alter_table_column::handle_alter_table_column(handler_args, name, operation).await
-            }
-            AlterTableOperation::RenameTable { table_name } => {
-                alter_rename::handle_rename_table(handler_args, TableType::Table, name, table_name)
-                    .await
-            }
-            AlterTableOperation::ChangeOwner { new_owner_name } => {
-                alter_owner::handle_alter_owner(
-                    handler_args,
-                    name,
-                    new_owner_name,
-                    StatementType::ALTER_TABLE,
-                )
-                .await
-            }
-            AlterTableOperation::SetParallelism {
-                parallelism,
-                deferred,
-            } => {
-                alter_parallelism::handle_alter_parallelism(
-                    handler_args,
-                    name,
-                    parallelism,
-                    StatementType::ALTER_TABLE,
-                    deferred,
-                )
-                .await
-            }
-            AlterTableOperation::SetSchema { new_schema_name } => {
-                alter_set_schema::handle_alter_set_schema(
-                    handler_args,
-                    name,
-                    new_schema_name,
-                    StatementType::ALTER_TABLE,
-                    None,
-                )
-                .await
-            }
-            AlterTableOperation::RefreshSchema => {
-                alter_table_with_sr::handle_refresh_schema(handler_args, name).await
-            }
-            AlterTableOperation::SetSourceRateLimit { rate_limit } => {
-                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                    handler_args,
-                    PbThrottleTarget::TableWithSource,
-                    name,
-                    rate_limit,
-                )
-                .await
-            }
-            AlterTableOperation::DropConnector => {
-                alter_table_drop_connector::handle_alter_table_drop_connector(handler_args, name)
-                    .await
-            }
-            AlterTableOperation::SetDmlRateLimit { rate_limit } => {
-                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                    handler_args,
-                    PbThrottleTarget::TableDml,
-                    name,
-                    rate_limit,
-                )
-                .await
-            }
-            AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
-                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                    handler_args,
-                    PbThrottleTarget::CdcTable,
-                    name,
-                    rate_limit,
-                )
-                .await
-            }
-            AlterTableOperation::SwapRenameTable { target_table } => {
-                alter_swap_rename::handle_swap_rename(
-                    handler_args,
-                    name,
-                    target_table,
-                    StatementType::ALTER_TABLE,
-                )
-                .await
-            }
-            AlterTableOperation::AlterConnectorProps { alter_props } => {
-                // If exists a associated source, it should be of the same name.
-                crate::handler::alter_source_props::handle_alter_table_connector_props(
-                    handler_args,
-                    name,
-                    alter_props,
-                )
-                .await
-            }
-            AlterTableOperation::AddConstraint { .. }
-            | AlterTableOperation::DropConstraint { .. }
-            | AlterTableOperation::RenameColumn { .. }
-            | AlterTableOperation::ChangeColumn { .. }
-            | AlterTableOperation::RenameConstraint { .. } => {
-                bail_not_implemented!(
-                    "Unhandled statement: {}",
-                    Statement::AlterTable { name, operation }
-                )
-            }
-        },
-        Statement::AlterIndex { name, operation } => match operation {
-            AlterIndexOperation::RenameIndex { index_name } => {
-                alter_rename::handle_rename_index(handler_args, name, index_name).await
-            }
-            AlterIndexOperation::SetParallelism {
-                parallelism,
-                deferred,
-            } => {
-                alter_parallelism::handle_alter_parallelism(
-                    handler_args,
-                    name,
-                    parallelism,
-                    StatementType::ALTER_INDEX,
-                    deferred,
-                )
-                .await
-            }
-        },
+            .boxed()
+        }
         Statement::AlterView {
             materialized,
             name,
             operation,
         } => {
-            let statement_type = if materialized {
-                StatementType::ALTER_MATERIALIZED_VIEW
-            } else {
-                StatementType::ALTER_VIEW
-            };
-            match operation {
-                AlterViewOperation::RenameView { view_name } => {
-                    if materialized {
-                        alter_rename::handle_rename_table(
+            async move {
+                let statement_type = if materialized {
+                    StatementType::ALTER_MATERIALIZED_VIEW
+                } else {
+                    StatementType::ALTER_VIEW
+                };
+                match operation {
+                    AlterViewOperation::RenameView { view_name } => {
+                        if materialized {
+                            alter_rename::handle_rename_table(
+                                handler_args,
+                                TableType::MaterializedView,
+                                name,
+                                view_name,
+                            )
+                            .await
+                        } else {
+                            alter_rename::handle_rename_view(handler_args, name, view_name).await
+                        }
+                    }
+                    AlterViewOperation::SetParallelism {
+                        parallelism,
+                        deferred,
+                    } => {
+                        if !materialized {
+                            bail_not_implemented!("ALTER VIEW SET PARALLELISM");
+                        }
+                        alter_parallelism::handle_alter_parallelism(
                             handler_args,
-                            TableType::MaterializedView,
                             name,
-                            view_name,
+                            parallelism,
+                            statement_type,
+                            deferred,
                         )
                         .await
-                    } else {
-                        alter_rename::handle_rename_view(handler_args, name, view_name).await
                     }
-                }
-                AlterViewOperation::SetParallelism {
-                    parallelism,
-                    deferred,
-                } => {
-                    if !materialized {
-                        bail_not_implemented!("ALTER VIEW SET PARALLELISM");
-                    }
-                    alter_parallelism::handle_alter_parallelism(
-                        handler_args,
-                        name,
-                        parallelism,
-                        statement_type,
-                        deferred,
-                    )
-                    .await
-                }
-                AlterViewOperation::SetResourceGroup {
-                    resource_group,
-                    deferred,
-                } => {
-                    if !materialized {
-                        bail_not_implemented!("ALTER VIEW SET RESOURCE GROUP");
-                    }
-                    alter_resource_group::handle_alter_resource_group(
-                        handler_args,
-                        name,
+                    AlterViewOperation::SetResourceGroup {
                         resource_group,
-                        statement_type,
                         deferred,
-                    )
-                    .await
-                }
-                AlterViewOperation::ChangeOwner { new_owner_name } => {
-                    alter_owner::handle_alter_owner(
-                        handler_args,
-                        name,
-                        new_owner_name,
-                        statement_type,
-                    )
-                    .await
-                }
-                AlterViewOperation::SetSchema { new_schema_name } => {
-                    alter_set_schema::handle_alter_set_schema(
-                        handler_args,
-                        name,
-                        new_schema_name,
-                        statement_type,
-                        None,
-                    )
-                    .await
-                }
-                AlterViewOperation::SetBackfillRateLimit { rate_limit } => {
-                    if !materialized {
-                        bail_not_implemented!("ALTER VIEW SET BACKFILL RATE LIMIT");
+                    } => {
+                        if !materialized {
+                            bail_not_implemented!("ALTER VIEW SET RESOURCE GROUP");
+                        }
+                        alter_resource_group::handle_alter_resource_group(
+                            handler_args,
+                            name,
+                            resource_group,
+                            statement_type,
+                            deferred,
+                        )
+                        .await
                     }
-                    alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                        handler_args,
-                        PbThrottleTarget::Mv,
-                        name,
-                        rate_limit,
-                    )
-                    .await
-                }
-                AlterViewOperation::SwapRenameView { target_view } => {
-                    alter_swap_rename::handle_swap_rename(
-                        handler_args,
-                        name,
-                        target_view,
-                        statement_type,
-                    )
-                    .await
-                }
-                AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
-                    if !materialized {
-                        bail!(
-                            "ALTER VIEW SET STREAMING_ENABLE_UNALIGNED_JOIN is not supported. Only supported for materialized views"
-                        );
+                    AlterViewOperation::ChangeOwner { new_owner_name } => {
+                        alter_owner::handle_alter_owner(
+                            handler_args,
+                            name,
+                            new_owner_name,
+                            statement_type,
+                        )
+                        .await
                     }
-                    alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(handler_args, name, enable).await
-                }
-                AlterViewOperation::AsQuery { query } => {
-                    if !materialized {
-                        bail_not_implemented!("ALTER VIEW AS QUERY");
+                    AlterViewOperation::SetSchema { new_schema_name } => {
+                        alter_set_schema::handle_alter_set_schema(
+                            handler_args,
+                            name,
+                            new_schema_name,
+                            statement_type,
+                            None,
+                        )
+                        .await
                     }
-                    // `ALTER MATERIALIZED VIEW AS QUERY` is only available in development build now.
-                    if !cfg!(debug_assertions) {
-                        bail_not_implemented!("ALTER MATERIALIZED VIEW AS QUERY");
+                    AlterViewOperation::SetBackfillRateLimit { rate_limit } => {
+                        if !materialized {
+                            bail_not_implemented!("ALTER VIEW SET BACKFILL RATE LIMIT");
+                        }
+                        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                            handler_args,
+                            PbThrottleTarget::Mv,
+                            name,
+                            rate_limit,
+                        )
+                        .await
                     }
-                    alter_mv::handle_alter_mv(handler_args, name, query).await
+                    AlterViewOperation::SwapRenameView { target_view } => {
+                        alter_swap_rename::handle_swap_rename(
+                            handler_args,
+                            name,
+                            target_view,
+                            statement_type,
+                        )
+                        .await
+                    }
+                    AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                        if !materialized {
+                            bail!(
+                                "ALTER VIEW SET STREAMING_ENABLE_UNALIGNED_JOIN is not supported. Only supported for materialized views"
+                            );
+                        }
+                        alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(handler_args, name, enable).await
+                    }
+                    AlterViewOperation::AsQuery { query } => {
+                        if !materialized {
+                            bail_not_implemented!("ALTER VIEW AS QUERY");
+                        }
+                        // `ALTER MATERIALIZED VIEW AS QUERY` is only available in development build now.
+                        if !cfg!(debug_assertions) {
+                            bail_not_implemented!("ALTER MATERIALIZED VIEW AS QUERY");
+                        }
+                        alter_mv::handle_alter_mv(handler_args, name, query).await
+                    }
                 }
             }
+            .boxed()
         }
-
-        Statement::AlterSink { name, operation } => match operation {
-            AlterSinkOperation::AlterConnectorProps {
-                alter_props: changed_props,
-            } => alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await,
-            AlterSinkOperation::RenameSink { sink_name } => {
-                alter_rename::handle_rename_sink(handler_args, name, sink_name).await
+        Statement::AlterSink { name, operation } => {
+            async move {
+                match operation {
+                    AlterSinkOperation::AlterConnectorProps {
+                        alter_props: changed_props,
+                    } => {
+                        alter_sink_props::handle_alter_sink_props(
+                            handler_args,
+                            name,
+                            changed_props,
+                        )
+                        .await
+                    }
+                    AlterSinkOperation::RenameSink { sink_name } => {
+                        alter_rename::handle_rename_sink(handler_args, name, sink_name).await
+                    }
+                    AlterSinkOperation::ChangeOwner { new_owner_name } => {
+                        alter_owner::handle_alter_owner(
+                            handler_args,
+                            name,
+                            new_owner_name,
+                            StatementType::ALTER_SINK,
+                        )
+                        .await
+                    }
+                    AlterSinkOperation::SetSchema { new_schema_name } => {
+                        alter_set_schema::handle_alter_set_schema(
+                            handler_args,
+                            name,
+                            new_schema_name,
+                            StatementType::ALTER_SINK,
+                            None,
+                        )
+                        .await
+                    }
+                    AlterSinkOperation::SetParallelism {
+                        parallelism,
+                        deferred,
+                    } => {
+                        alter_parallelism::handle_alter_parallelism(
+                            handler_args,
+                            name,
+                            parallelism,
+                            StatementType::ALTER_SINK,
+                            deferred,
+                        )
+                        .await
+                    }
+                    AlterSinkOperation::SwapRenameSink { target_sink } => {
+                        alter_swap_rename::handle_swap_rename(
+                            handler_args,
+                            name,
+                            target_sink,
+                            StatementType::ALTER_SINK,
+                        )
+                        .await
+                    }
+                    AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
+                        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                            handler_args,
+                            PbThrottleTarget::Sink,
+                            name,
+                            rate_limit,
+                        )
+                        .await
+                    }
+                    AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                        alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(
+                            handler_args,
+                            name,
+                            enable,
+                        )
+                        .await
+                    }
+                }
             }
-            AlterSinkOperation::ChangeOwner { new_owner_name } => {
-                alter_owner::handle_alter_owner(
-                    handler_args,
-                    name,
-                    new_owner_name,
-                    StatementType::ALTER_SINK,
-                )
-                .await
+            .boxed()
+        }
+        Statement::AlterSubscription { name, operation } => {
+            async move {
+                match operation {
+                    AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
+                        alter_rename::handle_rename_subscription(
+                            handler_args,
+                            name,
+                            subscription_name,
+                        )
+                        .await
+                    }
+                    AlterSubscriptionOperation::ChangeOwner { new_owner_name } => {
+                        alter_owner::handle_alter_owner(
+                            handler_args,
+                            name,
+                            new_owner_name,
+                            StatementType::ALTER_SUBSCRIPTION,
+                        )
+                        .await
+                    }
+                    AlterSubscriptionOperation::SetSchema { new_schema_name } => {
+                        alter_set_schema::handle_alter_set_schema(
+                            handler_args,
+                            name,
+                            new_schema_name,
+                            StatementType::ALTER_SUBSCRIPTION,
+                            None,
+                        )
+                        .await
+                    }
+                    AlterSubscriptionOperation::SwapRenameSubscription {
+                        target_subscription,
+                    } => {
+                        alter_swap_rename::handle_swap_rename(
+                            handler_args,
+                            name,
+                            target_subscription,
+                            StatementType::ALTER_SUBSCRIPTION,
+                        )
+                        .await
+                    }
+                }
             }
-            AlterSinkOperation::SetSchema { new_schema_name } => {
-                alter_set_schema::handle_alter_set_schema(
-                    handler_args,
-                    name,
-                    new_schema_name,
-                    StatementType::ALTER_SINK,
-                    None,
-                )
-                .await
+            .boxed()
+        }
+        Statement::AlterSource { name, operation } => {
+            async move {
+                match operation {
+                    AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                        alter_source_props::handle_alter_source_connector_props(
+                            handler_args,
+                            name,
+                            alter_props,
+                        )
+                        .await
+                    }
+                    AlterSourceOperation::RenameSource { source_name } => {
+                        alter_rename::handle_rename_source(handler_args, name, source_name).await
+                    }
+                    AlterSourceOperation::AddColumn { .. } => {
+                        alter_source_column::handle_alter_source_column(
+                            handler_args,
+                            name,
+                            operation,
+                        )
+                        .await
+                    }
+                    AlterSourceOperation::ChangeOwner { new_owner_name } => {
+                        alter_owner::handle_alter_owner(
+                            handler_args,
+                            name,
+                            new_owner_name,
+                            StatementType::ALTER_SOURCE,
+                        )
+                        .await
+                    }
+                    AlterSourceOperation::SetSchema { new_schema_name } => {
+                        alter_set_schema::handle_alter_set_schema(
+                            handler_args,
+                            name,
+                            new_schema_name,
+                            StatementType::ALTER_SOURCE,
+                            None,
+                        )
+                        .await
+                    }
+                    AlterSourceOperation::FormatEncode { format_encode } => {
+                        alter_source_with_sr::handle_alter_source_with_sr(
+                            handler_args,
+                            name,
+                            format_encode,
+                        )
+                        .await
+                    }
+                    AlterSourceOperation::RefreshSchema => {
+                        alter_source_with_sr::handler_refresh_schema(handler_args, name).await
+                    }
+                    AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
+                        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                            handler_args,
+                            PbThrottleTarget::Source,
+                            name,
+                            rate_limit,
+                        )
+                        .await
+                    }
+                    AlterSourceOperation::SwapRenameSource { target_source } => {
+                        alter_swap_rename::handle_swap_rename(
+                            handler_args,
+                            name,
+                            target_source,
+                            StatementType::ALTER_SOURCE,
+                        )
+                        .await
+                    }
+                    AlterSourceOperation::SetParallelism {
+                        parallelism,
+                        deferred,
+                    } => {
+                        alter_parallelism::handle_alter_parallelism(
+                            handler_args,
+                            name,
+                            parallelism,
+                            StatementType::ALTER_SOURCE,
+                            deferred,
+                        )
+                        .await
+                    }
+                }
             }
-            AlterSinkOperation::SetParallelism {
-                parallelism,
-                deferred,
-            } => {
-                alter_parallelism::handle_alter_parallelism(
-                    handler_args,
-                    name,
-                    parallelism,
-                    StatementType::ALTER_SINK,
-                    deferred,
-                )
-                .await
-            }
-            AlterSinkOperation::SwapRenameSink { target_sink } => {
-                alter_swap_rename::handle_swap_rename(
-                    handler_args,
-                    name,
-                    target_sink,
-                    StatementType::ALTER_SINK,
-                )
-                .await
-            }
-            AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
-                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                    handler_args,
-                    PbThrottleTarget::Sink,
-                    name,
-                    rate_limit,
-                )
-                .await
-            }
-            AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
-                alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(
-                    handler_args,
-                    name,
-                    enable,
-                )
-                .await
-            }
-        },
-        Statement::AlterSubscription { name, operation } => match operation {
-            AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
-                alter_rename::handle_rename_subscription(handler_args, name, subscription_name)
-                    .await
-            }
-            AlterSubscriptionOperation::ChangeOwner { new_owner_name } => {
-                alter_owner::handle_alter_owner(
-                    handler_args,
-                    name,
-                    new_owner_name,
-                    StatementType::ALTER_SUBSCRIPTION,
-                )
-                .await
-            }
-            AlterSubscriptionOperation::SetSchema { new_schema_name } => {
-                alter_set_schema::handle_alter_set_schema(
-                    handler_args,
-                    name,
-                    new_schema_name,
-                    StatementType::ALTER_SUBSCRIPTION,
-                    None,
-                )
-                .await
-            }
-            AlterSubscriptionOperation::SwapRenameSubscription {
-                target_subscription,
-            } => {
-                alter_swap_rename::handle_swap_rename(
-                    handler_args,
-                    name,
-                    target_subscription,
-                    StatementType::ALTER_SUBSCRIPTION,
-                )
-                .await
-            }
-        },
-        Statement::AlterSource { name, operation } => match operation {
-            AlterSourceOperation::AlterConnectorProps { alter_props } => {
-                alter_source_props::handle_alter_source_connector_props(
-                    handler_args,
-                    name,
-                    alter_props,
-                )
-                .await
-            }
-            AlterSourceOperation::RenameSource { source_name } => {
-                alter_rename::handle_rename_source(handler_args, name, source_name).await
-            }
-            AlterSourceOperation::AddColumn { .. } => {
-                alter_source_column::handle_alter_source_column(handler_args, name, operation).await
-            }
-            AlterSourceOperation::ChangeOwner { new_owner_name } => {
-                alter_owner::handle_alter_owner(
-                    handler_args,
-                    name,
-                    new_owner_name,
-                    StatementType::ALTER_SOURCE,
-                )
-                .await
-            }
-            AlterSourceOperation::SetSchema { new_schema_name } => {
-                alter_set_schema::handle_alter_set_schema(
-                    handler_args,
-                    name,
-                    new_schema_name,
-                    StatementType::ALTER_SOURCE,
-                    None,
-                )
-                .await
-            }
-            AlterSourceOperation::FormatEncode { format_encode } => {
-                alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, format_encode)
-                    .await
-            }
-            AlterSourceOperation::RefreshSchema => {
-                alter_source_with_sr::handler_refresh_schema(handler_args, name).await
-            }
-            AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
-                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-                    handler_args,
-                    PbThrottleTarget::Source,
-                    name,
-                    rate_limit,
-                )
-                .await
-            }
-            AlterSourceOperation::SwapRenameSource { target_source } => {
-                alter_swap_rename::handle_swap_rename(
-                    handler_args,
-                    name,
-                    target_source,
-                    StatementType::ALTER_SOURCE,
-                )
-                .await
-            }
-            AlterSourceOperation::SetParallelism {
-                parallelism,
-                deferred,
-            } => {
-                alter_parallelism::handle_alter_parallelism(
-                    handler_args,
-                    name,
-                    parallelism,
-                    StatementType::ALTER_SOURCE,
-                    deferred,
-                )
-                .await
-            }
-        },
+            .boxed()
+        }
         Statement::AlterFunction {
             name,
             args,
             operation,
-        } => match operation {
-            AlterFunctionOperation::SetSchema { new_schema_name } => {
-                alter_set_schema::handle_alter_set_schema(
-                    handler_args,
-                    name,
-                    new_schema_name,
-                    StatementType::ALTER_FUNCTION,
-                    args,
-                )
-                .await
+        } => {
+            async move {
+                match operation {
+                    AlterFunctionOperation::SetSchema { new_schema_name } => {
+                        alter_set_schema::handle_alter_set_schema(
+                            handler_args,
+                            name,
+                            new_schema_name,
+                            StatementType::ALTER_FUNCTION,
+                            args,
+                        )
+                        .await
+                    }
+                }
             }
-        },
-        Statement::AlterConnection { name, operation } => match operation {
-            AlterConnectionOperation::SetSchema { new_schema_name } => {
-                alter_set_schema::handle_alter_set_schema(
-                    handler_args,
-                    name,
-                    new_schema_name,
-                    StatementType::ALTER_CONNECTION,
-                    None,
-                )
-                .await
+            .boxed()
+        }
+        Statement::AlterConnection { name, operation } => {
+            async move {
+                match operation {
+                    AlterConnectionOperation::SetSchema { new_schema_name } => {
+                        alter_set_schema::handle_alter_set_schema(
+                            handler_args,
+                            name,
+                            new_schema_name,
+                            StatementType::ALTER_CONNECTION,
+                            None,
+                        )
+                        .await
+                    }
+                    AlterConnectionOperation::ChangeOwner { new_owner_name } => {
+                        alter_owner::handle_alter_owner(
+                            handler_args,
+                            name,
+                            new_owner_name,
+                            StatementType::ALTER_CONNECTION,
+                        )
+                        .await
+                    }
+                }
             }
-            AlterConnectionOperation::ChangeOwner { new_owner_name } => {
-                alter_owner::handle_alter_owner(
-                    handler_args,
-                    name,
-                    new_owner_name,
-                    StatementType::ALTER_CONNECTION,
-                )
-                .await
-            }
-        },
+            .boxed()
+        }
         Statement::AlterSystem { param, value } => {
-            alter_system::handle_alter_system(handler_args, param, value).await
+            async move { alter_system::handle_alter_system(handler_args, param, value).await }
+                .boxed()
         }
         Statement::AlterSecret {
             name,
             with_options,
             operation,
-        } => alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await,
+        } => {
+            async move {
+                alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await
+            }
+            .boxed()
+        }
         Statement::AlterFragment {
             fragment_id,
             operation: AlterFragmentOperation::AlterBackfillRateLimit { rate_limit },
         } => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
-                &handler_args.session,
-                PbThrottleTarget::Fragment,
-                fragment_id,
-                rate_limit,
-                StatementType::SET_VARIABLE,
-            )
-            .await
+            async move {
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                    &handler_args.session,
+                    PbThrottleTarget::Fragment,
+                    fragment_id,
+                    rate_limit,
+                    StatementType::SET_VARIABLE,
+                )
+                .await
+            }
+            .boxed()
         }
         Statement::AlterDefaultPrivileges { .. } => {
-            handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
+            async move {
+                handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
+            }
+            .boxed()
         }
         Statement::StartTransaction { modes } => {
-            transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
+            async move { transaction::handle_begin(handler_args, START_TRANSACTION, modes).await }
+                .boxed()
         }
-        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes).await,
+        Statement::Begin { modes } => {
+            async move { transaction::handle_begin(handler_args, BEGIN, modes).await }.boxed()
+        }
         Statement::Commit { chain } => {
-            transaction::handle_commit(handler_args, COMMIT, chain).await
+            async move { transaction::handle_commit(handler_args, COMMIT, chain).await }.boxed()
         }
-        Statement::Abort => transaction::handle_rollback(handler_args, ABORT, false).await,
+        Statement::Abort => {
+            async move { transaction::handle_rollback(handler_args, ABORT, false).await }.boxed()
+        }
         Statement::Rollback { chain } => {
-            transaction::handle_rollback(handler_args, ROLLBACK, chain).await
+            async move { transaction::handle_rollback(handler_args, ROLLBACK, chain).await }.boxed()
         }
         Statement::SetTransaction {
             modes,
             snapshot,
             session,
-        } => transaction::handle_set(handler_args, modes, snapshot, session).await,
-        Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
-        Statement::Kill(worker_process_id) => handle_kill(handler_args, worker_process_id).await,
+        } => {
+            async move { transaction::handle_set(handler_args, modes, snapshot, session).await }
+                .boxed()
+        }
+        Statement::CancelJobs(jobs) => {
+            async move { handle_cancel(handler_args, jobs).await }.boxed()
+        }
+        Statement::Kill(worker_process_id) => {
+            async move { handle_kill(handler_args, worker_process_id).await }.boxed()
+        }
         Statement::Comment {
             object_type,
             object_name,
             comment,
-        } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
-        Statement::Use { db_name } => use_db::handle_use_db(handler_args, db_name),
+        } => {
+            async move {
+                comment::handle_comment(handler_args, object_type, object_name, comment).await
+            }
+            .boxed()
+        }
+        Statement::Use { db_name } => {
+            async move { use_db::handle_use_db(handler_args, db_name) }.boxed()
+        }
         Statement::Prepare {
             name,
             data_types,
             statement,
-        } => prepared_statement::handle_prepare(name, data_types, statement).await,
+        } => {
+            async move { prepared_statement::handle_prepare(name, data_types, statement).await }
+                .boxed()
+        }
         Statement::Deallocate { name, prepare } => {
-            prepared_statement::handle_deallocate(name, prepare).await
+            async move { prepared_statement::handle_deallocate(name, prepare).await }.boxed()
         }
-        Statement::Vacuum { object_name } => vacuum::handle_vacuum(handler_args, object_name).await,
+        Statement::Vacuum { object_name } => {
+            async move { vacuum::handle_vacuum(handler_args, object_name).await }.boxed()
+        }
         Statement::Refresh { table_name } => {
-            refresh::handle_refresh(handler_args, table_name).await
+            async move { refresh::handle_refresh(handler_args, table_name).await }.boxed()
         }
-        _ => bail_not_implemented!("Unhandled statement: {}", stmt),
-    }
+        other => {
+            async move { bail_not_implemented!("Unhandled statement: {}", other) }.boxed()
+        }
+    };
+
+    // Keep the transaction guard alive until the selected branch completes.
+    fut.await
 }
 
 fn check_ban_ddl_for_iceberg_engine_table(
