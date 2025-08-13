@@ -113,6 +113,12 @@ impl<T: Float> OrderedFloat<T> {
         // Safety: OrderedFloat is #[repr(transparent)] and has no invalid values.
         unsafe { std::slice::from_raw_parts(ptr, slice.len()) }
     }
+
+    pub fn from_inner_vec(vec: Vec<T>) -> Vec<Self> {
+        let (ptr, len, cap) = vec.into_raw_parts();
+        // Safety: OrderedFloat is #[repr(transparent)] and has no invalid values.
+        unsafe { Vec::from_raw_parts(ptr as *mut Self, len, cap) }
+    }
 }
 
 impl ToSql for OrderedFloat<f32> {
