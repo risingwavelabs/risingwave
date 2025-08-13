@@ -502,11 +502,9 @@ impl DdlController {
             }
         };
 
-        let res = fut.in_current_span().await;
-
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
-            .instrument(Box::pin(fut));
+            .instrument(fut.in_current_span());
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
