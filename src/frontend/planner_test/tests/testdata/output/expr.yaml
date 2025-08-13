@@ -444,11 +444,7 @@
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  batch_plan: |-
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10009, ARRAY[2]:List(Int32)))) as $expr1] }
-    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-      ├─BatchValues { rows: [[]] }
-      └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
+  batch_plan: 'BatchValues { rows: [[true:Boolean]] }'
 - sql: |
     select 1 < ALL(array[null]::integer[]);
   logical_plan: |-
@@ -467,11 +463,7 @@
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  batch_plan: |-
-    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10009, ARRAY[2]:List(Int32)))) as $expr1] }
-    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-      ├─BatchValues { rows: [[]] }
-      └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
+  batch_plan: 'BatchValues { rows: [[false:Boolean]] }'
 - name: now expression
   sql: |
     create table t (v1 timestamp with time zone);

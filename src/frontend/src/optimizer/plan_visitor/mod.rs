@@ -85,7 +85,7 @@ where
 
 pub trait PlanVisitor<C: ConventionMarker> {
     type Result;
-    fn visit(&mut self, plan: PlanRef) -> Self::Result;
+    fn visit(&mut self, plan: PlanRef<C>) -> Self::Result;
 }
 
 /// Define `PlanVisitor` trait.
@@ -104,7 +104,7 @@ macro_rules! def_visitor {
                     /// The behavior for the default implementations of `visit_xxx`.
                     fn default_behavior() -> Self::DefaultBehavior;
 
-                    fn [<visit_ $convention:snake>](&mut self, plan: PlanRef) -> Self::Result {
+                    fn [<visit_ $convention:snake>](&mut self, plan: PlanRef<$convention>) -> Self::Result {
                         use risingwave_common::util::recursive::{tracker, Recurse};
                         use crate::session::current::notice_to_user;
 
@@ -115,9 +115,8 @@ macro_rules! def_visitor {
 
                             match plan.node_type() {
                                 $(
-                                    PlanNodeType::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
+                                    [<$convention PlanNodeType>]::[<$convention $name>] => self.[<visit_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
                                 )*
-                                _ => unreachable!(),
                             }
                         })
                     }
@@ -134,7 +133,7 @@ macro_rules! def_visitor {
 
                 impl<V: [<$convention  PlanVisitor>]> PlanVisitor<$convention> for V {
                     type Result = V::Result;
-                    fn visit(&mut self, plan: PlanRef) -> Self::Result {
+                    fn visit(&mut self, plan: PlanRef<$convention>) -> Self::Result {
                         self.[<visit_ $convention:snake>](plan)
                     }
                 }
@@ -149,7 +148,7 @@ macro_rules! impl_has_variant {
     ( $({$convention:ident $variant_name:ident}),* ) => {
         paste! {
             $(
-                pub fn [<has_ $convention:snake _ $variant_name:snake _where>]<P>(plan: PlanRef, pred: P) -> bool
+                pub fn [<has_ $convention:snake _ $variant_name:snake _where>]<P>(plan: PlanRef<$convention>, pred: P) -> bool
                 where
                     P: FnMut(&[<$convention $variant_name>]) -> bool,
                 {
@@ -178,7 +177,7 @@ macro_rules! impl_has_variant {
                 }
 
                 #[allow(dead_code)]
-                pub fn [<has_ $convention:snake _ $variant_name:snake>](plan: PlanRef) -> bool {
+                pub fn [<has_ $convention:snake _ $variant_name:snake>](plan: PlanRef<$convention>) -> bool {
                     [<has_ $convention:snake _$variant_name:snake _where>](plan, |_| true)
                 }
             )*

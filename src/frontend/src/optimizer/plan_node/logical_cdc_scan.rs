@@ -19,14 +19,16 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{CdcTableDesc, ColumnCatalog, ColumnDesc, TableId};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::cdc::CdcScanOptions;
+use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
-    StreamProject, ToBatch, ToStream, generic,
+    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject,
+    PlanBase, PredicatePushdown, StreamPlanRef, StreamProject, ToBatch, ToStream, generic,
 };
 use crate::WithOptions;
 use crate::catalog::ColumnId;
@@ -35,7 +37,6 @@ use crate::error::Result;
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::CdcScanOptions;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
     ToStreamContext,
@@ -154,7 +155,9 @@ impl LogicalCdcScan {
 
         let etl_source_properties = WithOptions::new_with_options(cdc_etl_info.properties);
 
-        let options = CdcScanOptions::from_with_options(&etl_source_properties)?;
+        let cdc_table_type = CdcTableType::from_properties(&source_catalog.with_properties);
+        let options =
+            generic::build_cdc_scan_options_with_options(&etl_source_properties, cdc_table_type)?;
 
         let output_exprs = Self::derive_output_exprs_from_generated_columns(&column_catalogs)?;
 
@@ -331,7 +334,7 @@ impl LogicalCdcScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalCdcScan}
+impl_plan_tree_node_for_leaf! { Logical, LogicalCdcScan}
 
 impl Distill for LogicalCdcScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -377,7 +380,7 @@ impl ColPrunable for LogicalCdcScan {
     }
 }
 
-impl ExprRewritable for LogicalCdcScan {
+impl ExprRewritable<Logical> for LogicalCdcScan {
     fn has_rewritable_expr(&self) -> bool {
         self.output_exprs.is_some()
     }
@@ -422,18 +425,18 @@ impl PredicatePushdown for LogicalCdcScan {
 }
 
 impl ToBatch for LogicalCdcScan {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         unreachable!()
     }
 
-    fn to_batch_with_order_required(&self, _required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_with_order_required(&self, _required_order: &Order) -> Result<BatchPlanRef> {
         unreachable!()
     }
 }
 
 impl ToStream for LogicalCdcScan {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let mut plan: PlanRef;
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
+        let mut plan: StreamPlanRef;
         match self.core.kind {
             SourceNodeKind::CreateTable => {
                 // Note: for create table, generated columns is created in plan_root.gen_table_plan.
@@ -456,7 +459,7 @@ impl ToStream for LogicalCdcScan {
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
-    ) -> Result<(PlanRef, ColIndexMapping)> {
+    ) -> Result<(super::LogicalPlanRef, ColIndexMapping)> {
         Ok((
             self.clone().into(),
             ColIndexMapping::identity(self.schema().len()),

@@ -23,15 +23,22 @@ use risingwave_common::hash::ActorMapping;
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::SplitImpl;
+use risingwave_connector::source::cdc::{
+    CdcTableSnapshotSplitAssignment, build_pb_actor_cdc_table_snapshot_splits,
+};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
+use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
@@ -93,6 +100,8 @@ pub struct Reschedule {
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
+
+    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
@@ -122,6 +131,7 @@ pub struct ReplaceStreamJobPlan {
     /// The state table ids to be dropped.
     pub to_drop_state_table_ids: Vec<TableId>,
     pub auto_refresh_schema_sinks: Option<Vec<AutoRefreshSchemaSinkContext>>,
+    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 }
 
 impl ReplaceStreamJobPlan {
@@ -204,6 +214,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub fragment_backfill_ordering: FragmentBackfillOrder,
+    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 }
 
 impl StreamJobFragments {
@@ -674,7 +685,7 @@ impl CommandContext {
         resps: Vec<BarrierCompleteResponse>,
         backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
     ) {
-        let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
+        let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts, vector_index_adds) =
             collect_resp_info(resps);
 
         let new_table_fragment_infos =
@@ -747,6 +758,32 @@ impl CommandContext {
         info.new_table_fragment_infos
             .extend(new_table_fragment_infos);
         info.change_log_delta.extend(table_new_change_log);
+        for (table_id, vector_index_adds) in vector_index_adds {
+            info.vector_index_delta
+                .try_insert(table_id, VectorIndexDelta::Adds(vector_index_adds))
+                .expect("non-duplicate");
+        }
+        if let Some(Command::CreateStreamingJob { info: job_info, .. }) = &self.command {
+            for fragment in job_info.stream_job_fragments.fragments.values() {
+                visit_stream_node_cont(&fragment.nodes, |node| {
+                    match node.node_body.as_ref().unwrap() {
+                        NodeBody::VectorIndexWrite(vector_index_write) => {
+                            let index_table = vector_index_write.table.as_ref().unwrap();
+                            info.vector_index_delta
+                                .try_insert(
+                                    index_table.id.into(),
+                                    VectorIndexDelta::Init(PbVectorIndexInit {
+                                        info: Some(index_table.vector_index_info.unwrap()),
+                                    }),
+                                )
+                                .expect("non-duplicate");
+                            false
+                        }
+                        _ => true,
+                    }
+                })
+            }
+        }
     }
 }
 
@@ -820,6 +857,7 @@ impl Command {
                         init_split_assignment: split_assignment,
                         upstream_fragment_downstreams,
                         fragment_backfill_ordering,
+                        cdc_table_snapshot_split_assignment,
                         ..
                     },
                 job_type,
@@ -865,6 +903,9 @@ impl Command {
                     pause: is_currently_paused,
                     subscriptions_to_add,
                     backfill_nodes_to_pause,
+                    actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
+                        cdc_table_snapshot_split_assignment.clone(),
+                    ),
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -872,6 +913,7 @@ impl Command {
                     init_split_assignment,
                     replace_upstream,
                     upstream_fragment_downstreams,
+                    cdc_table_snapshot_split_assignment,
                     ..
                 }) = job_type
                 {
@@ -890,6 +932,7 @@ impl Command {
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
+                        cdc_table_snapshot_split_assignment,
                     );
 
                     Some(Mutation::Combined(CombinedMutation {
@@ -924,6 +967,7 @@ impl Command {
                 upstream_fragment_downstreams,
                 init_split_assignment,
                 auto_refresh_schema_sinks,
+                cdc_table_snapshot_split_assignment,
                 ..
             }) => {
                 let edges = edges.as_mut().expect("should exist");
@@ -954,6 +998,7 @@ impl Command {
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
+                    cdc_table_snapshot_split_assignment,
                 )
             }
 
@@ -1090,6 +1135,7 @@ impl Command {
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
                 let mut actor_splits = HashMap::new();
+                let mut actor_cdc_table_snapshot_splits = HashMap::new();
 
                 for reschedule in reschedules.values() {
                     for (actor_id, splits) in &reschedule.actor_splits {
@@ -1100,6 +1146,11 @@ impl Command {
                             },
                         );
                     }
+                    actor_cdc_table_snapshot_splits.extend(
+                        build_pb_actor_cdc_table_snapshot_splits(
+                            reschedule.cdc_table_snapshot_split_assignment.clone(),
+                        ),
+                    );
                 }
 
                 // we don't create dispatchers in reschedule scenario
@@ -1112,6 +1163,7 @@ impl Command {
                     dropped_actors,
                     actor_splits,
                     actor_new_dispatchers,
+                    actor_cdc_table_snapshot_splits,
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
@@ -1131,6 +1183,7 @@ impl Command {
                     subscriber_id: *subscription_id,
                 }],
                 backfill_nodes_to_pause: vec![],
+                actor_cdc_table_snapshot_splits: Default::default(),
             })),
             Command::DropSubscription {
                 upstream_mv_table_id,
@@ -1284,6 +1337,7 @@ impl Command {
         merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
+        cdc_table_snapshot_split_assignment: &CdcTableSnapshotSplitAssignment,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
 
@@ -1303,6 +1357,9 @@ impl Command {
             merge_update: merge_updates.into_values().flatten().collect(),
             dropped_actors,
             actor_splits,
+            actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
+                cdc_table_snapshot_split_assignment.clone(),
+            ),
             ..Default::default()
         }))
     }

@@ -21,9 +21,9 @@ use pretty_xmlish::XmlNode;
 use super::generic::GenericPlanNode;
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamMaterializedExprs, StreamProject, ToBatch, ToStream,
-    gen_filter_and_pushdown, generic,
+    BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    LogicalPlanRef, PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamMaterializedExprs,
+    StreamPlanRef, StreamProject, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, collect_input_refs};
@@ -107,12 +107,12 @@ impl LogicalProject {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalProject {
-    fn input(&self) -> PlanRef {
+impl PlanTreeNodeUnary<Logical> for LogicalProject {
+    fn input(&self) -> LogicalPlanRef {
         self.core.input.clone()
     }
 
-    fn clone_with_input(&self, input: PlanRef) -> Self {
+    fn clone_with_input(&self, input: LogicalPlanRef) -> Self {
         Self::new(input, self.exprs().clone())
     }
 
@@ -134,7 +134,7 @@ impl PlanTreeNodeUnary for LogicalProject {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalProject}
+impl_plan_tree_node_for_unary! { Logical, LogicalProject}
 
 impl Distill for LogicalProject {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -170,7 +170,7 @@ impl ColPrunable for LogicalProject {
     }
 }
 
-impl ExprRewritable for LogicalProject {
+impl ExprRewritable<Logical> for LogicalProject {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -219,18 +219,17 @@ impl PredicatePushdown for LogicalProject {
 }
 
 impl ToBatch for LogicalProject {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         self.to_batch_with_order_required(&Order::any())
     }
 
-    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<BatchPlanRef> {
         let input_order = self
             .o2i_col_mapping()
             .rewrite_provided_order(required_order);
         let new_input = self.input().to_batch_with_order_required(&input_order)?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        let batch_project = BatchProject::new(new_logical);
+        let project = self.core.clone_with_input(new_input);
+        let batch_project = BatchProject::new(project);
         required_order.enforce_if_not_satisfies(batch_project.into())
     }
 }
@@ -240,7 +239,7 @@ impl ToStream for LogicalProject {
         &self,
         required_dist: &RequiredDist,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<StreamPlanRef> {
         let input_required = if required_dist.satisfies(&RequiredDist::AnyShard) {
             RequiredDist::Any
         } else {
@@ -289,8 +288,10 @@ impl ToStream for LogicalProject {
                 .collect();
 
             if !impure_exprs.is_empty() {
+                let new_input = new_input.enforce_concrete_distribution();
+
                 // Create `MaterializedExprs` for impure expressions
-                let mat_exprs_plan: PlanRef = StreamMaterializedExprs::new(
+                let mat_exprs_plan: StreamPlanRef = StreamMaterializedExprs::new(
                     new_input.clone(),
                     impure_exprs,
                     impure_field_names,
@@ -329,10 +330,10 @@ impl ToStream for LogicalProject {
             StreamProject::new(core).into()
         };
 
-        required_dist.enforce_if_not_satisfies(stream_plan, &Order::any())
+        required_dist.streaming_enforce_if_not_satisfies(stream_plan)
     }
 
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         self.to_stream_with_dist_required(&RequiredDist::Any, ctx)
     }
 

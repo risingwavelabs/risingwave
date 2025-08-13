@@ -29,27 +29,16 @@ TODO: Find a suitable testing framework
 ## Development
 
 Start a RisingWave cluster, create some tables and materialized views for testing purposes.
-For example:
 
 ```bash
-./risedev d
-./risedev slt  e2e_test/nexmark/create_sources.slt.part
-./risedev psql -c 'CREATE TABLE dimension (v1 int);'
-./risedev psql -c 'CREATE MATERIALIZED VIEW mv AS SELECT auction.* FROM dimension join auction on auction.id-auction.id = dimension.v1;'
-./risedev psql -c 'CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM mv;'
-./risedev psql -c 'CREATE MATERIALIZED VIEW mv3 AS SELECT count(*) FROM mv2;'
-
-./risedev psql -c 'CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM mv;'
-./risedev psql -c 'CREATE MATERIALIZED VIEW mv5 AS SELECT count(*) FROM mv2;'
-./risedev psql -c 'CREATE MATERIALIZED VIEW mv6 AS SELECT mv4.* FROM mv4 join mv2 using(id);'
-./risedev psql -c 'CREATE MATERIALIZED VIEW mv7 AS SELECT max(id) FROM mv;'
-
-./risedev psql -c 'CREATE MATERIALIZED VIEW mv8 AS SELECT mv.* FROM mv join mv6 using(id);'
-./risedev psql -c 'CREATE SCHEMA s1;'
-./risedev psql -c 'CREATE TABLE s1.t1 (v1 int);'
-./risedev psql -c 'CREATE MATERIALIZED VIEW s1.mv1 AS SELECT s1.t1.* FROM s1.t1 join mv on s1.t1.v1 = mv.id;'
-
-./risedev psql -c 'INSERT INTO dimension select 0 from generate_series(1, 20);'
+# Start full cluster so prometheus is available.
+./risedev k
+./risedev clean-data
+./risedev d full
+# We maintain our own separate test data for testing the dashboard's rendering
+# It provides nested MV-on-MV structures (nexmark and tpch only have 1-deep MV-on-MV).
+# It also provides backpressure and lag scenarios.
+./risedev slt e2e_test/dashboard/create_graph.slt.part --label dashboard
 ```
 
 Install dependencies and start the development server.

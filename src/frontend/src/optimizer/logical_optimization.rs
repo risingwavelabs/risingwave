@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use thiserror_ext::AsReport as _;
 
-use super::plan_node::{ConventionMarker, Logical};
+use super::plan_node::{ConventionMarker, Logical, LogicalPlanRef};
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
 use crate::expr::NowProcTimeFinder;
@@ -35,13 +35,12 @@ use crate::optimizer::rule::*;
 use crate::utils::Condition;
 use crate::{Explain, OptimizerContextRef};
 
-impl PlanRef {
-    fn optimize_by_rules_inner<C: ConventionMarker>(
+impl<C: ConventionMarker> PlanRef<C> {
+    fn optimize_by_rules_inner(
         self,
         heuristic_optimizer: &mut HeuristicOptimizer<'_, C>,
         stage_name: &str,
-    ) -> Result<PlanRef> {
-        self.expect_convention::<C>();
+    ) -> Result<PlanRef<C>> {
         let ctx = self.ctx();
 
         let result = heuristic_optimizer.optimize(self);
@@ -60,18 +59,15 @@ impl PlanRef {
         result
     }
 
-    pub(crate) fn optimize_by_rules<C: ConventionMarker>(
+    pub(crate) fn optimize_by_rules(
         self,
         OptimizationStage {
             stage_name,
             rules,
             apply_order,
         }: &OptimizationStage<C>,
-    ) -> Result<PlanRef> {
-        self.optimize_by_rules_inner(
-            &mut HeuristicOptimizer::<C>::new(apply_order, rules),
-            stage_name,
-        )
+    ) -> Result<PlanRef<C>> {
+        self.optimize_by_rules_inner(&mut HeuristicOptimizer::new(apply_order, rules), stage_name)
     }
 
     pub(crate) fn optimize_by_rules_until_fix_point(
@@ -80,8 +76,8 @@ impl PlanRef {
             stage_name,
             rules,
             apply_order,
-        }: &OptimizationStage,
-    ) -> Result<PlanRef> {
+        }: &OptimizationStage<C>,
+    ) -> Result<PlanRef<C>> {
         loop {
             let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
             self = self.optimize_by_rules_inner(&mut heuristic_optimizer, stage_name)?;
@@ -114,6 +110,8 @@ impl<C: ConventionMarker> OptimizationStage<C> {
 use std::sync::LazyLock;
 
 use risingwave_sqlparser::ast::ExplainFormat;
+
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 
 pub struct LogicalOptimizer {}
 
@@ -208,13 +206,15 @@ static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simple Unnesting",
         vec![
+            // Pull correlated predicates up the algebra tree to unnest simple subquery.
+            PullUpCorrelatedPredicateRule::create(),
+            // Pull correlated project expressions with values to inline scalar subqueries.
+            PullUpCorrelatedProjectValueRule::create(),
+            PullUpCorrelatedPredicateAggRule::create(),
             // Eliminate max one row
             MaxOneRowEliminateRule::create(),
             // Convert apply to join.
             ApplyToJoinRule::create(),
-            // Pull correlated predicates up the algebra tree to unnest simple subquery.
-            PullUpCorrelatedPredicateRule::create(),
-            PullUpCorrelatedPredicateAggRule::create(),
         ],
         ApplyOrder::BottomUp,
     )
@@ -505,10 +505,10 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
 
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
-        plan: PlanRef,
+        plan: LogicalPlanRef,
         explain_trace: bool,
         ctx: &OptimizerContextRef,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         let plan = plan.predicate_pushdown(
             Condition::true_cond(),
             &mut PredicatePushdownContext::new(plan.clone()),
@@ -521,11 +521,11 @@ impl LogicalOptimizer {
     }
 
     pub fn subquery_unnesting(
-        mut plan: PlanRef,
+        mut plan: LogicalPlanRef,
         enable_share_plan: bool,
         explain_trace: bool,
         ctx: &OptimizerContextRef,
-    ) -> Result<PlanRef> {
+    ) -> Result<LogicalPlanRef> {
         // Bail our if no apply operators.
         if !has_logical_apply(plan.clone()) {
             return Ok(plan);
@@ -555,10 +555,10 @@ impl LogicalOptimizer {
     }
 
     pub fn column_pruning(
-        mut plan: PlanRef,
+        mut plan: LogicalPlanRef,
         explain_trace: bool,
         ctx: &OptimizerContextRef,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         let required_cols = (0..plan.schema().len()).collect_vec();
         let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
         plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
@@ -580,7 +580,7 @@ impl LogicalOptimizer {
         plan
     }
 
-    pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
+    pub fn inline_now_proc_time(plan: LogicalPlanRef, ctx: &OptimizerContextRef) -> LogicalPlanRef {
         // If now() and proctime() are not found, bail out.
         let mut v = NowProcTimeFinder::default();
         plan.visit_exprs_recursive(&mut v);
@@ -590,7 +590,7 @@ impl LogicalOptimizer {
 
         let mut v = ctx.session_ctx().pinned_snapshot().inline_now_proc_time();
 
-        let plan = plan.rewrite_exprs_recursive::<Logical>(&mut v);
+        let plan = plan.rewrite_exprs_recursive(&mut v);
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Now and ProcTime:");
@@ -599,7 +599,9 @@ impl LogicalOptimizer {
         plan
     }
 
-    pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
+    pub fn gen_optimized_logical_plan_for_stream(
+        mut plan: LogicalPlanRef,
+    ) -> Result<LogicalPlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -721,7 +723,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate::<Logical>(plan.clone());
+        InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
             match ctx.explain_format() {
@@ -746,7 +748,9 @@ impl LogicalOptimizer {
         Ok(plan)
     }
 
-    pub fn gen_optimized_logical_plan_for_batch(mut plan: PlanRef) -> Result<PlanRef> {
+    pub fn gen_optimized_logical_plan_for_batch(
+        mut plan: LogicalPlanRef,
+    ) -> Result<LogicalPlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -846,7 +850,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate::<Logical>(plan.clone());
+        InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
             match ctx.explain_format() {

@@ -45,11 +45,10 @@ pub struct InputRefValidator;
 
 impl InputRefValidator {
     #[track_caller]
-    pub fn validate<C: ConventionMarker>(mut self, plan: PlanRef)
+    pub fn validate<C: ConventionMarker>(mut self, plan: PlanRef<C>)
     where
         Self: PlanVisitor<C, Result = Option<String>>,
     {
-        plan.expect_convention::<C>();
         if let Some(err) = self.visit(plan.clone()) {
             panic!(
                 "Input references are inconsistent with the input schema: {}, plan:\n{}",
@@ -149,7 +148,7 @@ impl LogicalPlanVisitor for InputRefValidator {
         plan: &crate::optimizer::plan_node::LogicalScan,
     ) -> Option<String> {
         let fields = plan
-            .table_desc()
+            .table()
             .columns
             .iter()
             .map(|col| Field::from_with_table_name_prefix(col, plan.table_name()))

@@ -68,6 +68,17 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Union<PlanRef> {
+    pub fn clone_with_inputs<OtherPlanRef>(
+        &self,
+        inputs: Vec<OtherPlanRef>,
+    ) -> Union<OtherPlanRef> {
+        Union {
+            all: self.all,
+            inputs,
+            source_col: self.source_col,
+        }
+    }
+
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         vec![("all", Pretty::debug(&self.all))]
     }

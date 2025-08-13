@@ -22,8 +22,8 @@ use super::generic::{
 };
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, Logical, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, ToBatch, ToStream,
+    BatchPlanRef, ColPrunable, Logical, LogicalJoin, LogicalPlanRef as PlanRef, LogicalProject,
+    PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamPlanRef, ToBatch, ToStream,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
@@ -280,7 +280,7 @@ impl LogicalApply {
     }
 }
 
-impl PlanTreeNodeBinary for LogicalApply {
+impl PlanTreeNodeBinary<Logical> for LogicalApply {
     fn left(&self) -> PlanRef {
         self.left.clone()
     }
@@ -303,7 +303,7 @@ impl PlanTreeNodeBinary for LogicalApply {
     }
 }
 
-impl_plan_tree_node_for_binary! { LogicalApply }
+impl_plan_tree_node_for_binary! { Logical, LogicalApply }
 
 impl ColPrunable for LogicalApply {
     fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -311,7 +311,7 @@ impl ColPrunable for LogicalApply {
     }
 }
 
-impl ExprRewritable for LogicalApply {
+impl ExprRewritable<Logical> for LogicalApply {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -367,7 +367,7 @@ impl PredicatePushdown for LogicalApply {
 }
 
 impl ToBatch for LogicalApply {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_owned(),
         )))
@@ -375,7 +375,7 @@ impl ToBatch for LogicalApply {
 }
 
 impl ToStream for LogicalApply {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_owned(),
         )))

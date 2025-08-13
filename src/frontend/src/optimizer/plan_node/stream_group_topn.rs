@@ -18,8 +18,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{DistillUnit, TopNLimit};
 use super::stream::prelude::*;
 use super::utils::{Distill, plan_node_name, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, generic};
-use crate::PlanRef;
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::{MonotonicityMap, Order};
@@ -67,7 +68,7 @@ impl StreamGroupTopN {
             Some(stream_key),
             core.functional_dependency(),
             input.distribution().clone(),
-            false,
+            StreamKind::Retract, // TODO(kind): reject upsert input
             // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
             false,
             watermark_columns,
@@ -141,9 +142,9 @@ impl Distill for StreamGroupTopN {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamGroupTopN }
+impl_plan_tree_node_for_unary! { Stream, StreamGroupTopN }
 
-impl PlanTreeNodeUnary for StreamGroupTopN {
+impl PlanTreeNodeUnary<Stream> for StreamGroupTopN {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -155,6 +156,6 @@ impl PlanTreeNodeUnary for StreamGroupTopN {
     }
 }
 
-impl ExprRewritable for StreamGroupTopN {}
+impl ExprRewritable<Stream> for StreamGroupTopN {}
 
 impl ExprVisitable for StreamGroupTopN {}

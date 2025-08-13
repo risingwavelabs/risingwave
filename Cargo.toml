@@ -167,13 +167,13 @@ hashbrown = { version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f4d3827e906b5e1e885d396c02591480dcfc92d5", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "49e9814409752db218dbed1aa552c2efe80ee2a3", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f4d3827e906b5e1e885d396c02591480dcfc92d5" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f4d3827e906b5e1e885d396c02591480dcfc92d5" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "49e9814409752db218dbed1aa552c2efe80ee2a3" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "49e9814409752db218dbed1aa552c2efe80ee2a3" }
 
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
@@ -204,6 +204,7 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
 ] }
 redis = { version = "0.28" }
 regex = "1.11"
+reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
 risingwave_batch_executors = { path = "./src/batch/executors" }
