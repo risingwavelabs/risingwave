@@ -301,7 +301,7 @@ impl PulsarPayloadWriter<'_> {
             if retry_num > 0 {
                 tracing::warn!("Failed to send message, at retry no. {retry_num}");
             }
-            match self.producer.send_non_blocking(message.clone()).await {
+            match Box::pin(self.producer.send_non_blocking(message.clone())).await {
                 // If the message is sent successfully,
                 // a SendFuture holding the message receipt
                 // or error after sending is returned
@@ -344,7 +344,7 @@ impl PulsarPayloadWriter<'_> {
             ..Default::default()
         };
 
-        self.send_message(message).await?;
+        Box::pin(self.send_message(message)).await?;
         Ok(())
     }
 }
@@ -354,7 +354,7 @@ impl FormattedSink for PulsarPayloadWriter<'_> {
     type V = Vec<u8>;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
-        self.write_inner(k, v).await
+        Box::pin(self.write_inner(k, v)).await
     }
 }
 

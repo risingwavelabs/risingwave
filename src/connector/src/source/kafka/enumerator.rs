@@ -79,14 +79,16 @@ pub struct KafkaSplitEnumerator {
 
 impl KafkaSplitEnumerator {
     async fn drop_consumer_groups(&self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
-        let admin = SHARED_KAFKA_ADMIN
-            .try_get_with_by_ref(&self.properties.connection, async {
+        let admin = Box::pin(SHARED_KAFKA_ADMIN.try_get_with_by_ref(
+            &self.properties.connection,
+            async {
                 tracing::info!("build new kafka admin for {}", self.broker_address);
                 Ok(Arc::new(
                     build_kafka_admin(&self.config, &self.properties).await?,
                 ))
-            })
-            .await?;
+            },
+        ))
+        .await?;
 
         let group_ids = fragment_ids
             .iter()
@@ -209,11 +211,11 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn on_drop_fragments(&mut self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
-        self.drop_consumer_groups(fragment_ids).await
+        Box::pin(self.drop_consumer_groups(fragment_ids)).await
     }
 
     async fn on_finish_backfill(&mut self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
-        self.drop_consumer_groups(fragment_ids).await
+        Box::pin(self.drop_consumer_groups(fragment_ids)).await
     }
 }
 
