@@ -33,12 +33,12 @@ pub struct StreamUpstreamSinkUnion {
 }
 
 impl StreamUpstreamSinkUnion {
-    pub fn new(ctx: OptimizerContextRef, schema: Schema, append_only: bool) -> Self {
+    pub fn new(ctx: OptimizerContextRef, schema: &Schema, append_only: bool) -> Self {
         let column_num = schema.fields().len();
         // TODO(zyx): Maybe some fields are incorrect.
         let base = PlanBase::new_stream(
             ctx,
-            schema,
+            schema.clone(),
             Some(vec![]), // stream_key
             FunctionalDependencySet::new(column_num),
             Distribution::SomeShard,

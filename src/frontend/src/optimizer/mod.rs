@@ -858,11 +858,9 @@ impl LogicalPlanRoot {
             }
         };
 
-        let upstream_sink_union = StreamUpstreamSinkUnion::new(
-            context.clone(),
-            union_inputs[0].schema().clone(),
-            append_only,
-        );
+        let dml_node = union_inputs.last().unwrap();
+        let upstream_sink_union =
+            StreamUpstreamSinkUnion::new(context.clone(), dml_node.schema(), append_only);
         union_inputs.push(upstream_sink_union.into());
 
         let mut stream_plan = StreamUnion::new_with_dist(
