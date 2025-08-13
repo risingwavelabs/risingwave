@@ -67,6 +67,20 @@ pub enum TimestamptzHandling {
     GuessNumberUnit,
 }
 
+#[derive(Clone, Debug)]
+pub enum TimestampHandling {
+    /// `1712800800123` (milliseconds)
+    Milli,
+    /// `1712800800123456` (microseconds)
+    Micro,
+    /// Both `1712800800123` (ms) and `1712800800123456` (us) maps to `2024-04-11`.
+    ///
+    /// Only works for `[1973-03-03 09:46:40, 5138-11-16 09:46:40)`.
+    ///
+    /// This option is backward compatible.
+    GuessNumberUnit,
+}
+
 impl TimestamptzHandling {
     pub const OPTION_KEY: &'static str = "timestamptz.handling.mode";
 
@@ -76,6 +90,23 @@ impl TimestamptzHandling {
         let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("utc_string") => Self::UtcString,
             Some("utc_without_suffix") => Self::UtcWithoutSuffix,
+            Some("micro") => Self::Micro,
+            Some("milli") => Self::Milli,
+            Some("guess_number_unit") => Self::GuessNumberUnit,
+            Some(v) => bail_invalid_option_error!("unrecognized {} value {}", Self::OPTION_KEY, v),
+            None => return Ok(None),
+        };
+        Ok(Some(mode))
+    }
+}
+
+impl TimestampHandling {
+    pub const OPTION_KEY: &'static str = "timestamp.handling.mode";
+
+    pub fn from_options(
+        options: &std::collections::BTreeMap<String, String>,
+    ) -> Result<Option<Self>, InvalidOptionError> {
+        let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
             Some("micro") => Self::Micro,
             Some("milli") => Self::Milli,
             Some("guess_number_unit") => Self::GuessNumberUnit,
@@ -135,6 +166,7 @@ pub enum StructHandling {
 pub struct JsonParseOptions {
     pub bytea_handling: ByteaHandling,
     pub time_handling: TimeHandling,
+    pub timestamp_handling: TimestampHandling,
     pub timestamptz_handling: TimestamptzHandling,
     pub json_value_handling: JsonValueHandling,
     pub numeric_handling: NumericHandling,
@@ -154,6 +186,7 @@ impl JsonParseOptions {
     pub const CANAL: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
         time_handling: TimeHandling::Micro,
+        timestamp_handling: TimestampHandling::GuessNumberUnit, // backward-compatible
         timestamptz_handling: TimestamptzHandling::GuessNumberUnit, // backward-compatible
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
@@ -170,6 +203,7 @@ impl JsonParseOptions {
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
         time_handling: TimeHandling::Micro,
+        timestamp_handling: TimestampHandling::GuessNumberUnit, // backward-compatible
         timestamptz_handling: TimestamptzHandling::GuessNumberUnit, // backward-compatible
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
@@ -181,10 +215,14 @@ impl JsonParseOptions {
         ignoring_keycase: true,
     };
 
-    pub fn new_for_debezium(timestamptz_handling: TimestamptzHandling) -> Self {
+    pub fn new_for_debezium(
+        timestamptz_handling: TimestamptzHandling,
+        timestamp_handling: TimestampHandling,
+    ) -> Self {
         Self {
             bytea_handling: ByteaHandling::Base64,
             time_handling: TimeHandling::Micro,
+            timestamp_handling,
             timestamptz_handling,
             json_value_handling: JsonValueHandling::AsString,
             numeric_handling: NumericHandling::Relax {
@@ -484,7 +522,7 @@ impl JsonParseOptions {
                 DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => {
-                if let TimestamptzHandling::Milli = self.timestamptz_handling {
+                if let TimestampHandling::Milli = self.timestamp_handling {
                     Timestamp::with_millis(value.as_i64().unwrap())
                         .map_err(|_| create_error())?
                         .into()

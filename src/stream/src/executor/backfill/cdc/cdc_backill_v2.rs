@@ -23,7 +23,7 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
-use risingwave_connector::parser::TimestamptzHandling;
+use risingwave_connector::parser::{TimestampHandling, TimestamptzHandling};
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::ExternalTableReaderImpl;
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
@@ -132,14 +132,25 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         // If user sets debezium.time.precision.mode to "connect", it means the user can guarantee
         // that the upstream data precision is MilliSecond. In this case, we don't use GuessNumberUnit
         // mode to guess precision, but use Milli mode directly, which can handle extreme timestamps.
+        let timestamp_handling: Option<TimestampHandling> = self
+            .properties
+            .get("debezium.time.precision.mode")
+            .map(|v| v == "connect")
+            .unwrap_or(false)
+            .then_some(TimestampHandling::Milli);
         let timestamptz_handling: Option<TimestamptzHandling> = self
             .properties
             .get("debezium.time.precision.mode")
             .map(|v| v == "connect")
             .unwrap_or(false)
             .then_some(TimestamptzHandling::Milli);
-        let mut upstream =
-            transform_upstream(upstream, self.output_columns.clone(), timestamptz_handling).boxed();
+        let mut upstream = transform_upstream(
+            upstream,
+            self.output_columns.clone(),
+            timestamp_handling,
+            timestamptz_handling,
+        )
+        .boxed();
         let mut next_reset_barrier = Some(first_barrier);
         let mut is_reset = false;
         let mut state_impl =

@@ -112,14 +112,6 @@ pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
     ))
 }
 
-pub fn i64_to_timestamp_milli(t: i64) -> Result<Timestamp> {
-    let tz = Timestamptz::from_millis(t).unwrap_or_default();
-    Ok(Timestamp::from_timestamp_uncheck(
-        tz.timestamp(),
-        tz.timestamp_subsec_nanos(),
-    ))
-}
-
 /// Refer to PostgreSQL's implementation <https://github.com/postgres/postgres/blob/5cb54fc310fb84287cbdc74533f3420490a2f63a/src/backend/utils/adt/varlena.c#L276-L288>
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     if let Some(remainder) = elem.strip_prefix(r"\x") {

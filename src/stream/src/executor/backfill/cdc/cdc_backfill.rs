@@ -25,7 +25,8 @@ use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_connector::parser::{
     ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
-    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig, TimestamptzHandling,
+    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig, TimestampHandling,
+    TimestamptzHandling,
 };
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
@@ -206,6 +207,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .await
             .expect("Retry create cdc table reader until success.")
         });
+        let timestamp_handling: Option<TimestampHandling> = self
+            .properties
+            .get("debezium.time.precision.mode")
+            .map(|v| v == "connect")
+            .unwrap_or(false)
+            .then_some(TimestampHandling::Milli);
         let timestamptz_handling: Option<TimestamptzHandling> = self
             .properties
             .get("debezium.time.precision.mode")
@@ -213,8 +220,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .unwrap_or(false)
             .then_some(TimestamptzHandling::Milli);
         // Make sure to use mapping_message after transform_upstream.
-        let mut upstream =
-            transform_upstream(upstream, self.output_columns.clone(), timestamptz_handling).boxed();
+        let mut upstream = transform_upstream(
+            upstream,
+            self.output_columns.clone(),
+            timestamp_handling,
+            timestamptz_handling,
+        )
+        .boxed();
         loop {
             if let Some(msg) =
                 build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
@@ -802,11 +814,13 @@ pub(crate) async fn build_reader_and_poll_upstream(
 pub async fn transform_upstream(
     upstream: BoxedMessageStream,
     output_columns: Vec<ColumnDesc>,
+    timestamp_handling: Option<TimestampHandling>,
     timestamptz_handling: Option<TimestamptzHandling>,
 ) {
     let props = SpecificParserConfig {
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
+            timestamp_handling,
             timestamptz_handling,
         }),
         // the cdc message is generated internally so the key must exist.
@@ -973,7 +987,7 @@ mod tests {
             ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
         ];
 
-        let parsed_stream = transform_upstream(upstream, columns, None);
+        let parsed_stream = transform_upstream(upstream, columns, None, None);
         pin_mut!(parsed_stream);
         // the output chunk must contain the offset column
         if let Some(message) = parsed_stream.next().await {

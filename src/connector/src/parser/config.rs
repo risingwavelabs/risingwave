@@ -20,7 +20,7 @@ use risingwave_connector_codec::decoder::avro::MapHandling;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo};
 
 use super::utils::get_kafka_topic;
-use super::{DebeziumProps, TimestamptzHandling};
+use super::{DebeziumProps, TimestampHandling, TimestamptzHandling};
 use crate::WithOptionsSecResolved;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
@@ -91,6 +91,7 @@ impl SpecificParserConfig {
     pub const DEFAULT_PLAIN_JSON: SpecificParserConfig = SpecificParserConfig {
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
+            timestamp_handling: None,
             timestamptz_handling: None,
         }),
         protocol_config: ProtocolProperties::Plain,
@@ -264,6 +265,9 @@ impl SpecificParserConfig {
                 SourceEncode::Json,
             ) => EncodingProperties::Json(JsonProperties {
                 use_schema_registry: info.use_schema_registry,
+                timestamp_handling: TimestampHandling::from_options(
+                    &format_encode_options_with_secret,
+                )?,
                 timestamptz_handling: TimestamptzHandling::from_options(
                     &format_encode_options_with_secret,
                 )?,
@@ -348,6 +352,7 @@ pub struct CsvProperties {
 #[derive(Debug, Default, Clone)]
 pub struct JsonProperties {
     pub use_schema_registry: bool,
+    pub timestamp_handling: Option<TimestampHandling>,
     pub timestamptz_handling: Option<TimestamptzHandling>,
 }
 
