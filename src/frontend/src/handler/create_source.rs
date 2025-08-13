@@ -746,9 +746,7 @@ pub fn bind_connector_props(
                 ))
             })?
         {
-            Feature::CdcAutoSchemaChange
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
+            Feature::CdcAutoSchemaChange.check_available()?;
         }
 
         // set connector to backfill mode
@@ -759,14 +757,17 @@ pub fn bind_connector_props(
         if with_properties.enable_transaction_metadata() {
             with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
         }
-        with_properties.insert(
-            CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
-            handler_args
-                .session
-                .config()
-                .cdc_source_wait_streaming_start_timeout()
-                .to_string(),
-        );
+        // Only set CDC_WAIT_FOR_STREAMING_START_TIMEOUT if not already specified by user.
+        if !with_properties.contains_key(CDC_WAIT_FOR_STREAMING_START_TIMEOUT) {
+            with_properties.insert(
+                CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
+                handler_args
+                    .session
+                    .config()
+                    .cdc_source_wait_streaming_start_timeout()
+                    .to_string(),
+            );
+        }
     }
     if with_properties.is_mysql_cdc_connector() {
         // Generate a random server id for mysql cdc source if needed

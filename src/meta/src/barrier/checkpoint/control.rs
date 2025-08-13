@@ -863,10 +863,7 @@ impl DatabaseCheckpointControl {
                     .drain()
                     .for_each(|(job_id, resps)| {
                         node.state.resps.extend(resps);
-                        finished_jobs.push(TrackingJob::New(TrackingCommand {
-                            job_id,
-                            replace_stream_job: None,
-                        }));
+                        finished_jobs.push(TrackingJob::New(TrackingCommand { job_id }));
                     });
                 let task = task.get_or_insert_default();
                 node.command_ctx.collect_commit_epoch_info(

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
@@ -56,7 +55,9 @@ impl StreamStatelessSimpleAgg {
         let base = PlanBase::new_stream_with_core(
             &core,
             input_dist.clone(),
-            input.append_only(),
+            // Stateless simple agg outputs one `Insert` row per epoch to the global phase.
+            // TODO(kind): reject upsert input
+            StreamKind::AppendOnly,
             input.emit_on_window_close(),
             watermark_columns,
             MonotonicityMap::new(),
@@ -93,12 +94,6 @@ impl StreamNode for StreamStatelessSimpleAgg {
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
             row_count_index: u32::MAX, // this is not used
-            distribution_key: self
-                .distribution()
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect_vec(),
             agg_call_states: vec![],
             intermediate_state_table: None,
             is_append_only: self.input().append_only(),

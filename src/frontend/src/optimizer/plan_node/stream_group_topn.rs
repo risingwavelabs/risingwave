@@ -68,7 +68,7 @@ impl StreamGroupTopN {
             Some(stream_key),
             core.functional_dependency(),
             input.distribution().clone(),
-            false,
+            StreamKind::Retract, // TODO(kind): reject upsert input
             // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
             false,
             watermark_columns,

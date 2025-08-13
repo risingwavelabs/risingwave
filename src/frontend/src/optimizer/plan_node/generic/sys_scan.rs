@@ -158,14 +158,6 @@ impl SysScan {
         output_col_idx: &[usize],
         table: &SystemTableCatalog,
     ) -> HashMap<ColumnId, usize> {
-        let mut id_to_op_idx = HashMap::new();
-        output_col_idx
-            .iter()
-            .enumerate()
-            .for_each(|(op_idx, tb_idx)| {
-                let col = &table.columns[*tb_idx];
-                id_to_op_idx.insert(col.column_id, op_idx);
-            });
-        id_to_op_idx
+        ColumnDesc::get_id_to_op_idx_mapping(&table.columns, Some(output_col_idx))
     }
 }

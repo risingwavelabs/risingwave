@@ -43,6 +43,9 @@ pub async fn handle_alter_database_param(
 
     match param {
         AlterDatabaseParam::BarrierIntervalMs(Some(interval)) => {
+            if !cfg!(test) {
+                risingwave_common::license::Feature::ResourceGroup.check_available()?;
+            }
             if interval >= NOTICE_BARRIER_INTERVAL_MS {
                 builder = builder.notice(
                     format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.",
@@ -50,6 +53,9 @@ pub async fn handle_alter_database_param(
             }
         }
         AlterDatabaseParam::CheckpointFrequency(Some(frequency)) => {
+            if !cfg!(test) {
+                risingwave_common::license::Feature::ResourceGroup.check_available()?;
+            }
             if frequency >= NOTICE_CHECKPOINT_FREQUENCY {
                 builder = builder.notice(
                     format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.",

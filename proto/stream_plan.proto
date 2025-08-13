@@ -410,9 +410,11 @@ enum AggNodeVersion {
 }
 
 message SimpleAggNode {
+  // Previously we have this field for stateless simple agg, but it's actually not used.
+  reserved 2;
+  reserved "distribution_key";
+
   repeated expr.AggCall agg_calls = 1;
-  // Only used for stateless simple agg.
-  repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
   catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
@@ -936,6 +938,10 @@ message MaterializedExprsNode {
   optional uint32 state_clean_col_idx = 3;
 }
 
+message VectorIndexWriteNode {
+  catalog.Table table = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -987,6 +993,7 @@ message StreamNode {
     AsOfJoinNode as_of_join = 147;
     SyncLogStoreNode sync_log_store = 148;
     MaterializedExprsNode materialized_exprs = 149;
+    VectorIndexWriteNode vector_index_write = 150;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

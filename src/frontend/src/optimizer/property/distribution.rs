@@ -195,14 +195,16 @@ impl Distribution {
         }
     }
 
-    /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
-    /// valid.
+    /// Get distribution column indices.
+    ///
+    /// Panics if the distribution is not `HashShard`, `UpstreamHashShard` or `Single`.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
-            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
-                Default::default()
-            }
+            Distribution::Single => &[],
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => dists,
+            Distribution::SomeShard | Distribution::Broadcast => {
+                panic!("cannot obtain distribution columns for {self:?}")
+            }
         }
     }
 
@@ -362,6 +364,20 @@ impl RequiredDist {
                 Distribution::HashShard(required_keys.ones().collect())
             }
             RequiredDist::PhysicalDist(dist) => dist.clone(),
+        }
+    }
+}
+
+impl StreamPlanRef {
+    /// Eliminate `SomeShard` distribution by using the stream key as the distribution key to
+    /// enforce the current plan to have a known distribution key.
+    pub fn enforce_concrete_distribution(self) -> Self {
+        match self.distribution() {
+            Distribution::SomeShard => {
+                RequiredDist::shard_by_key(self.schema().len(), self.expect_stream_key())
+                    .stream_enforce(self)
+            }
+            _ => self,
         }
     }
 }

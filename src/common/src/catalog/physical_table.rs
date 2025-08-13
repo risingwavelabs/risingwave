@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use fixedbitset::FixedBitSet;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::StorageTableDesc;
 
-use super::{ColumnDesc, ColumnId, TableId};
+use super::{ColumnDesc, TableId};
 use crate::catalog::get_dist_key_in_pk_indices;
 use crate::hash::{VnodeCount, VnodeCountCompat};
 use crate::util::sort_util::ColumnOrder;
@@ -69,22 +66,6 @@ pub struct TableDesc {
 }
 
 impl TableDesc {
-    pub fn arrange_key_orders_protobuf(&self) -> Vec<PbColumnOrder> {
-        // Set materialize key as arrange key + pk
-        self.pk.iter().map(|x| x.to_protobuf()).collect()
-    }
-
-    pub fn order_column_indices(&self) -> Vec<usize> {
-        self.pk.iter().map(|col| (col.column_index)).collect()
-    }
-
-    pub fn order_column_ids(&self) -> Vec<ColumnId> {
-        self.pk
-            .iter()
-            .map(|col| self.columns[col.column_index].column_id)
-            .collect()
-    }
-
     pub fn try_to_protobuf(&self) -> anyhow::Result<StorageTableDesc> {
         let dist_key_indices: Vec<u32> = self.distribution_key.iter().map(|&k| k as u32).collect();
         let pk_indices: Vec<u32> = self
@@ -119,15 +100,6 @@ impl TableDesc {
             vnode_col_idx_in_pk,
             maybe_vnode_count: VnodeCount::set(self.vnode_count).to_protobuf(),
         })
-    }
-
-    /// Helper function to create a mapping from `column id` to `column index`
-    pub fn get_id_to_op_idx_mapping(&self) -> HashMap<ColumnId, usize> {
-        let mut id_to_idx = HashMap::new();
-        self.columns.iter().enumerate().for_each(|(idx, c)| {
-            id_to_idx.insert(c.column_id, idx);
-        });
-        id_to_idx
     }
 
     pub fn from_pb_table(table: &Table) -> Self {

@@ -57,7 +57,7 @@ impl StreamLocalApproxPercentile {
             input.stream_key().map(|k| k.to_vec()),
             functional_dependency,
             input.distribution().clone(),
-            input.append_only(),
+            input.stream_kind(), // TODO(kind): reject upsert input
             input.emit_on_window_close(),
             watermark_columns,
             input.columns_monotonicity().clone(),

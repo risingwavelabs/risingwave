@@ -140,7 +140,7 @@ impl LogicalPlanVisitor for CardinalityVisitor {
     fn visit_logical_scan(&mut self, plan: &plan_node::LogicalScan) -> Cardinality {
         let eq_set = plan
             .predicate()
-            .collect_input_refs(plan.table_desc().columns.len())
+            .collect_input_refs(plan.table().columns.len())
             .ones()
             .collect();
         Self::visit_predicate(plan, plan.table_cardinality(), eq_set)
