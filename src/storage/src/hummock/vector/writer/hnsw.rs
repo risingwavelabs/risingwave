@@ -20,7 +20,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use risingwave_hummock_sdk::HummockObjectId;
 use risingwave_hummock_sdk::vector_index::{
-    HnswFlatIndex, HnswFlatIndexAdd, HnswGraphFileInfo, VectorStoreInfoDelta,
+    HnswFlatIndex, HnswFlatIndexAdd, HnswGraphFileInfo, VectorFileInfo, VectorStoreInfoDelta,
 };
 use risingwave_pb::hummock::PbHnswGraph;
 
@@ -44,6 +44,7 @@ pub(crate) struct HnswFlatIndexWriter {
     vector_store: FileVectorStore,
     next_pending_vector_id: usize,
     graph_builder: Option<HnswGraphBuilder>,
+    unseal_vector_files: Vec<VectorFileInfo>,
     flushed_graph_file: Option<HnswGraphFileInfo>,
     rng: StdRng,
 }
@@ -81,6 +82,7 @@ impl HnswFlatIndexWriter {
             sstable_store,
             object_id_manager,
             graph_builder,
+            unseal_vector_files: vec![],
             flushed_graph_file: None,
             rng: StdRng::from_os_rng(),
             next_pending_vector_id: index.vector_store_info.next_vector_id,
@@ -92,30 +94,31 @@ impl HnswFlatIndexWriter {
             .building_vectors
             .as_mut()
             .expect("for write")
+            .file_builder
             .add(vec.to_ref(), &info);
         Ok(())
     }
 
     pub(crate) fn seal_current_epoch(&mut self) -> Option<HnswFlatIndexAdd> {
-        let building_vectors = self
+        let building_vectors = &mut self
             .vector_store
             .building_vectors
             .as_mut()
             .expect("for write");
-        assert!(building_vectors.is_empty());
-        if self.vector_store.flushed_vector_files.is_empty() {
+        assert!(building_vectors.file_builder.is_empty());
+        let added_vector_files = take(&mut self.unseal_vector_files);
+        if added_vector_files.is_empty() {
             assert_eq!(self.flushed_graph_file, None);
             return None;
         }
-        let flushed_vector_files = take(&mut self.vector_store.flushed_vector_files);
         let new_graph_info = self
             .flushed_graph_file
             .take()
             .expect("should have new graph info when having new data");
         Some(HnswFlatIndexAdd {
             vector_store_info_delta: VectorStoreInfoDelta {
-                next_vector_id: building_vectors.next_vector_id(),
-                added_vector_files: flushed_vector_files,
+                next_vector_id: building_vectors.file_builder.next_vector_id(),
+                added_vector_files,
             },
             graph_file: new_graph_info,
         })
@@ -123,8 +126,8 @@ impl HnswFlatIndexWriter {
 
     pub(crate) async fn flush(&mut self) -> HummockResult<usize> {
         self.add_pending_vectors_to_graph().await?;
-        let size = self.vector_store.flush().await?;
-        if !self.vector_store.flushed_vector_files.is_empty() {
+        let new_file = self.vector_store.flush().await?;
+        if let Some(new_file) = new_file {
             let graph_builder = self
                 .graph_builder
                 .as_ref()
@@ -152,8 +155,12 @@ impl HnswFlatIndexWriter {
                 object_id,
                 file_size: size as _,
             });
+            let file_size = new_file.file_size as _;
+            self.unseal_vector_files.push(new_file);
+            Ok(file_size)
+        } else {
+            Ok(0)
         }
-        Ok(size)
     }
 
     pub(crate) async fn try_flush(&mut self) -> HummockResult<()> {
@@ -161,6 +168,7 @@ impl HnswFlatIndexWriter {
             .building_vectors
             .as_mut()
             .expect("for write")
+            .file_builder
             .try_flush()
             .await?;
         self.add_pending_vectors_to_graph().await
@@ -172,7 +180,7 @@ impl HnswFlatIndexWriter {
             .building_vectors
             .as_ref()
             .expect("for write");
-        for i in self.next_pending_vector_id..building_vectors.next_vector_id() {
+        for i in self.next_pending_vector_id..building_vectors.file_builder.next_vector_id() {
             let node = new_node(&self.options, &mut self.rng);
             if let Some(graph_builder) = &mut self.graph_builder {
                 dispatch_measurement!(&self.measure, M, {
@@ -180,7 +188,7 @@ impl HnswFlatIndexWriter {
                         &self.vector_store,
                         graph_builder,
                         node,
-                        building_vectors.get_vector(i).vec_ref(),
+                        building_vectors.file_builder.get_vector(i).vec_ref(),
                         self.options.ef_construction,
                     )
                     .await?;
@@ -189,7 +197,7 @@ impl HnswFlatIndexWriter {
                 self.graph_builder = Some(HnswGraphBuilder::first(node));
             }
         }
-        self.next_pending_vector_id = building_vectors.next_vector_id();
+        self.next_pending_vector_id = building_vectors.file_builder.next_vector_id();
         Ok(())
     }
 }

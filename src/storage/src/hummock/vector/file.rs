@@ -510,21 +510,23 @@ impl VectorFileBuilder {
     }
 }
 
+pub(super) struct BuildingVectors {
+    flushed_next_vector_id: usize,
+    pub(super) file_builder: VectorFileBuilder,
+}
+
 pub(crate) struct FileVectorStore {
     sstable_store: SstableStoreRef,
 
-    pub(super) flushed_vector_files: Vec<VectorFileInfo>,
-    flushed_next_vector_id: usize,
-    pub(super) building_vectors: Option<VectorFileBuilder>,
+    flushed_vector_files: Vec<VectorFileInfo>,
+    pub(super) building_vectors: Option<BuildingVectors>,
 }
 
 impl FileVectorStore {
     pub(crate) fn new_for_reader(index: &HnswFlatIndex, sstable_store: SstableStoreRef) -> Self {
-        let next_vector_id = index.vector_store_info.next_vector_id;
         Self {
             sstable_store,
             flushed_vector_files: index.vector_store_info.vector_files.clone(),
-            flushed_next_vector_id: next_vector_id,
             building_vectors: None,
         }
     }
@@ -540,28 +542,30 @@ impl FileVectorStore {
         Self {
             sstable_store: sstable_store.clone(),
             flushed_vector_files: index.vector_store_info.vector_files.clone(),
-            flushed_next_vector_id: next_vector_id,
-            building_vectors: Some(new_vector_file_builder(
-                dimension,
-                next_vector_id,
-                sstable_store,
-                object_id_manager,
-                storage_opts,
-            )),
+            building_vectors: Some(BuildingVectors {
+                flushed_next_vector_id: next_vector_id,
+                file_builder: new_vector_file_builder(
+                    dimension,
+                    next_vector_id,
+                    sstable_store,
+                    object_id_manager,
+                    storage_opts,
+                ),
+            }),
         }
     }
 
-    pub(super) async fn flush(&mut self) -> HummockResult<usize> {
+    pub(super) async fn flush(&mut self) -> HummockResult<Option<VectorFileInfo>> {
         let building_vectors = self.building_vectors.as_mut().expect("for write");
-        if let Some((vector_file, blocks, meta)) = building_vectors.finish().await? {
+        if let Some((vector_file, blocks, meta)) = building_vectors.file_builder.finish().await? {
             self.sstable_store
                 .insert_vector_cache(vector_file.object_id, meta, blocks);
-            let file_size = vector_file.file_size as usize;
-            self.flushed_vector_files.push(vector_file);
-            self.flushed_next_vector_id = building_vectors.next_vector_id();
-            Ok(file_size)
+            self.flushed_vector_files.push(vector_file.clone());
+            building_vectors.flushed_next_vector_id =
+                building_vectors.file_builder.next_vector_id();
+            Ok(Some(vector_file))
         } else {
-            Ok(0)
+            Ok(None)
         }
     }
 }
@@ -574,9 +578,9 @@ impl VectorStore for FileVectorStore {
 
     async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>> {
         if let Some(building_vectors) = self.building_vectors.as_ref()
-            && idx >= self.flushed_next_vector_id
+            && idx >= building_vectors.flushed_next_vector_id
         {
-            Ok(building_vectors.get_vector(idx))
+            Ok(building_vectors.file_builder.get_vector(idx))
         } else {
             Ok(EnumVectorAccessor::BlockHolder(
                 get_vector_block(&self.sstable_store, &self.flushed_vector_files, idx).await?,
