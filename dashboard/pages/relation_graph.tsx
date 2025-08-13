@@ -115,7 +115,7 @@ export default function StreamingGraph() {
         toast,
       },
       initialSnapshot,
-      "relation",
+      "relation"
     )
 
     refresh() // run once immediately

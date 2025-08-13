@@ -347,7 +347,7 @@ export default function Streaming() {
         toast,
       },
       initialSnapshot,
-      "fragment",
+      "fragment"
     )
 
     refresh() // run once immediately

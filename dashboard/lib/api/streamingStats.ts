@@ -44,7 +44,7 @@ export interface StreamingStatsCallbacks {
 export function createStreamingStatsRefresh(
   callbacks: StreamingStatsCallbacks,
   initialSnapshot: ChannelStatsSnapshot | undefined,
-  statsType: StatsType,
+  statsType: StatsType
 ) {
   return function refresh() {
     // Try Prometheus first, fall back to embedded if it fails
