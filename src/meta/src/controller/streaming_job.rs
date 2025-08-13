@@ -80,7 +80,7 @@ use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
-    StreamJobFragmentsToCreate, TableParallelism,
+    StreamJobFragmentsToCreate,
 };
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::{MetaError, MetaResult};
