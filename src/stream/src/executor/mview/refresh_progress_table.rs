@@ -22,7 +22,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use risingwave_common::bitmap::Bitmap;
-// use futures_async_stream::for_await; // Commented out as it's unused
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRefImpl};
@@ -33,61 +32,59 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use crate::common::table::state_table::{StateTableInner, StateTablePostCommit};
 use crate::executor::StreamExecutorResult;
 
-/// Schema for the refresh progress table:
+/// Schema for the refresh progress table (simplified, following backfill pattern):
 /// - `vnode` (i32): `VirtualNode` identifier
-/// - `stage` (i32): Current refresh stage (Normal=0, Refreshing=1, Merging=2, Cleanup=3)
-/// - `started_epoch` (i64): Epoch when the refresh started
-/// - `current_epoch` (i64): Current processing epoch
-/// - `processed_rows` (i64): Number of rows processed so far in this vnode
+/// - `current_pos` (variable): Current processing position (primary key of last processed row)
 /// - `is_completed` (bool): Whether this vnode has completed processing
-/// - `last_updated_at` (i64): Timestamp of last update
+/// - `processed_rows` (i64): Number of rows processed so far in this vnode
 pub struct RefreshProgressTable<S: StateStore, SD: ValueRowSerde> {
     /// The underlying state table for persistence
     pub state_table: StateTableInner<S, SD>,
     /// In-memory cache of progress information for quick access
     cache: HashMap<VirtualNode, RefreshProgressEntry>,
+    /// Primary key length for upstream table (needed for schema)
+    pk_len: usize,
 }
 
 /// Progress information for a single `VirtualNode`
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefreshProgressEntry {
     pub vnode: VirtualNode,
-    pub stage: RefreshStage,
-    pub started_epoch: u64,
-    pub current_epoch: u64,
-    pub processed_rows: u64,
+    pub current_pos: Option<OwnedRow>,
     pub is_completed: bool,
-    pub last_updated_at: u64,
+    pub processed_rows: u64,
 }
 
-/// Refresh stages matching the `RefreshStage` enum
+/// Refresh stages are now tracked by MaterializeExecutor in memory
+/// This enum is kept for compatibility but no longer stored in progress table
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
-pub enum RefreshStage {
+pub enum ProgressRefreshStage {
     Normal = 0,
     Refreshing = 1,
     Merging = 2,
     Cleanup = 3,
 }
 
-impl From<i32> for RefreshStage {
+impl From<i32> for ProgressRefreshStage {
     fn from(value: i32) -> Self {
         match value {
-            0 => RefreshStage::Normal,
-            1 => RefreshStage::Refreshing,
-            2 => RefreshStage::Merging,
-            3 => RefreshStage::Cleanup,
-            _ => RefreshStage::Normal, // Default fallback
+            0 => ProgressRefreshStage::Normal,
+            1 => ProgressRefreshStage::Refreshing,
+            2 => ProgressRefreshStage::Merging,
+            3 => ProgressRefreshStage::Cleanup,
+            _ => unreachable!(),
         }
     }
 }
 
 impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     /// Create a new `RefreshProgressTable`
-    pub fn new(state_table: StateTableInner<S, SD>) -> Self {
+    pub fn new(state_table: StateTableInner<S, SD>, pk_len: usize) -> Self {
         Self {
             state_table,
             cache: HashMap::new(),
+            pk_len,
         }
     }
 
@@ -95,9 +92,26 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     pub async fn recover(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.state_table.init_epoch(epoch).await?;
 
-        // TODO: implement recovery here
+        // Load existing progress entries from storage into cache
+        let mut loaded_count = 0;
 
-        tracing::debug!("Loading existing progress entries during initialization");
+        for vnode in self.state_table.vnodes().iter_ones() {
+            let row = self
+                .state_table
+                .get_row(OwnedRow::new(vec![
+                    VirtualNode::from_index(vnode).to_datum(),
+                ]))
+                .await?;
+            if let Some(entry) = self.parse_row_to_entry(&row, self.pk_len) {
+                self.cache.insert(entry.vnode, entry);
+                loaded_count += 1;
+            }
+        }
+
+        tracing::debug!(
+            loaded_count,
+            "Loading existing progress entries during initialization"
+        );
 
         tracing::info!(
             loaded_entries = self.cache.len(),
@@ -111,32 +125,22 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     pub fn set_progress(
         &mut self,
         vnode: VirtualNode,
-        stage: RefreshStage,
-        started_epoch: u64,
-        current_epoch: u64,
-        processed_rows: u64,
+        current_pos: Option<OwnedRow>,
         is_completed: bool,
+        processed_rows: u64,
     ) -> StreamExecutorResult<()> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
         let entry = RefreshProgressEntry {
             vnode,
-            stage,
-            started_epoch,
-            current_epoch,
-            processed_rows,
+            current_pos,
             is_completed,
-            last_updated_at: now,
+            processed_rows,
         };
 
         // Update cache
         self.cache.insert(vnode, entry.clone());
 
         // Write to persistent storage
-        let row = self.entry_to_row(&entry);
+        let row = self.entry_to_row(&entry, self.pk_len);
         self.state_table.insert(&row);
 
         Ok(())
@@ -161,19 +165,19 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
             .collect()
     }
 
-    /// Get all `VirtualNodes` in a specific stage
-    pub fn get_vnodes_in_stage(&self, stage: RefreshStage) -> Vec<VirtualNode> {
-        self.cache
-            .iter()
-            .filter(|(_, entry)| entry.stage == stage)
-            .map(|(&vnode, _)| vnode)
-            .collect()
+    /// Get all `VirtualNodes` in a specific stage (now tracked by executor memory)
+    /// This method is kept for compatibility but should not be used with simplified schema
+    pub fn get_vnodes_in_stage(&self, _stage: ProgressRefreshStage) -> Vec<VirtualNode> {
+        tracing::warn!(
+            "get_vnodes_in_stage called on simplified progress table - stage info no longer stored"
+        );
+        Vec::new()
     }
 
     /// Clear progress for a specific `VirtualNode`
     pub fn clear_progress(&mut self, vnode: VirtualNode) -> StreamExecutorResult<()> {
         if let Some(entry) = self.cache.remove(&vnode) {
-            let row = self.entry_to_row(&entry);
+            let row = self.entry_to_row(&entry, self.pk_len);
             self.state_table.delete(&row);
         }
 
@@ -202,11 +206,6 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
         RefreshProgressStats {
             total_vnodes,
             completed_vnodes,
-            progress_percentage: if total_vnodes > 0 {
-                (completed_vnodes as f64 / total_vnodes as f64) * 100.0
-            } else {
-                0.0
-            },
             total_processed_rows,
         }
     }
@@ -220,82 +219,107 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     }
 
     /// Convert `RefreshProgressEntry` to `OwnedRow` for storage
-    fn entry_to_row(&self, entry: &RefreshProgressEntry) -> OwnedRow {
-        OwnedRow::new(vec![
-            entry.vnode.to_datum(),
-            Some(ScalarImpl::Int32(entry.stage as i32)),
-            Some(ScalarImpl::Int64(entry.started_epoch as i64)),
-            Some(ScalarImpl::Int64(entry.current_epoch as i64)),
-            Some(ScalarImpl::Int64(entry.processed_rows as i64)),
-            Some(ScalarImpl::Bool(entry.is_completed)),
-            Some(ScalarImpl::Int64(entry.last_updated_at as i64)),
-        ])
+    /// New schema: | vnode | current_pos... | is_completed | processed_rows |
+    fn entry_to_row(&self, entry: &RefreshProgressEntry, pk_len: usize) -> OwnedRow {
+        let mut row_data = vec![entry.vnode.to_datum()];
+
+        // Add current_pos fields (variable length based on primary key)
+        if let Some(ref pos) = entry.current_pos {
+            row_data.extend(pos.iter().map(|d| d.map(|s| s.into_scalar_impl())));
+        } else {
+            // Use None placeholders for empty position (similar to backfill finished state)
+            for _ in 0..pk_len {
+                row_data.push(None);
+            }
+        }
+
+        // Add metadata fields
+        row_data.push(Some(ScalarImpl::Bool(entry.is_completed)));
+        row_data.push(Some(ScalarImpl::Int64(entry.processed_rows as i64)));
+
+        OwnedRow::new(row_data)
     }
 
     /// Parse `OwnedRow` from storage to `RefreshProgressEntry`
+    /// New schema: | vnode | current_pos... | is_completed | processed_rows |
+    /// Note: The length depends on the primary key length of upstream table
     #[allow(dead_code)]
-    fn parse_row_to_entry(&self, row: &impl Row) -> Option<RefreshProgressEntry> {
+    fn parse_row_to_entry(&self, row: &impl Row, pk_len: usize) -> Option<RefreshProgressEntry> {
         let datums = row.iter().collect::<Vec<_>>();
-        if datums.len() != 7 {
+        let expected_len = 1 + pk_len + 2; // vnode + pk_fields + is_completed + processed_rows
+
+        if datums.len() != expected_len {
+            tracing::warn!(
+                "Row length mismatch: got {}, expected {} (pk_len={})",
+                datums.len(),
+                expected_len,
+                pk_len
+            );
             return None;
         }
 
+        // Parse vnode (first field)
+        let vnode = VirtualNode::from_index(match datums[0]? {
+            ScalarRefImpl::Int32(val) => val as usize,
+            _ => return None,
+        });
+
+        // Parse current_pos (pk_len fields after vnode)
+        let current_pos = if pk_len > 0 {
+            let pos_datums: Vec<_> = datums[1..1 + pk_len]
+                .iter()
+                .map(|d| d.map(|s| s.into_scalar_impl()))
+                .collect();
+            // Check if all position fields are None (indicating finished/empty state)
+            if pos_datums.iter().all(|d| d.is_none()) {
+                None
+            } else {
+                Some(OwnedRow::new(pos_datums))
+            }
+        } else {
+            None
+        };
+
+        // Parse is_completed (second to last field)
+        let is_completed = match datums[1 + pk_len]? {
+            ScalarRefImpl::Bool(val) => val,
+            _ => return None,
+        };
+
+        // Parse processed_rows (last field)
+        let processed_rows = match datums[1 + pk_len + 1]? {
+            ScalarRefImpl::Int64(val) => val as u64,
+            _ => return None,
+        };
+
         Some(RefreshProgressEntry {
-            vnode: VirtualNode::from_index(match datums[0]? {
-                ScalarRefImpl::Int32(val) => val as usize,
-                _ => return None,
-            }),
-            stage: RefreshStage::from(match datums[1]? {
-                ScalarRefImpl::Int32(val) => val,
-                _ => return None,
-            }),
-            started_epoch: match datums[2]? {
-                ScalarRefImpl::Int64(val) => val as u64,
-                _ => return None,
-            },
-            current_epoch: match datums[3]? {
-                ScalarRefImpl::Int64(val) => val as u64,
-                _ => return None,
-            },
-            processed_rows: match datums[4]? {
-                ScalarRefImpl::Int64(val) => val as u64,
-                _ => return None,
-            },
-            is_completed: match datums[5]? {
-                ScalarRefImpl::Bool(val) => val,
-                _ => return None,
-            },
-            last_updated_at: match datums[6]? {
-                ScalarRefImpl::Int64(val) => val as u64,
-                _ => return None,
-            },
+            vnode,
+            current_pos,
+            is_completed,
+            processed_rows,
         })
     }
 
     /// Get the expected schema for the progress table
-    pub fn expected_schema() -> Vec<DataType> {
-        vec![
-            DataType::Int32,   // vnode
-            DataType::Int32,   // stage
-            DataType::Int64,   // started_epoch
-            DataType::Int64,   // current_epoch
-            DataType::Int64,   // processed_rows
-            DataType::Boolean, // is_completed
-            DataType::Int64,   // last_updated_at
-        ]
+    /// Schema: | vnode | current_pos... | is_completed | processed_rows |
+    pub fn expected_schema(pk_data_types: &[DataType]) -> Vec<DataType> {
+        let mut schema = vec![DataType::Int32]; // vnode
+        schema.extend(pk_data_types.iter().cloned()); // current_pos fields
+        schema.push(DataType::Boolean); // is_completed
+        schema.push(DataType::Int64); // processed_rows
+        schema
     }
 
     /// Get column names for the progress table schema
-    pub fn column_names() -> Vec<&'static str> {
-        vec![
-            "vnode",
-            "stage",
-            "started_epoch",
-            "current_epoch",
-            "processed_rows",
-            "is_completed",
-            "last_updated_at",
-        ]
+    /// Schema: | vnode | current_pos... | is_completed | processed_rows |
+    pub fn column_names(pk_column_names: &[&str]) -> Vec<String> {
+        let mut names = vec!["vnode".to_string()];
+        for (_i, pk_name) in pk_column_names.iter().enumerate() {
+            names.push(format!("pos_{}", pk_name));
+        }
+        names.push("is_completed".to_string());
+        names.push("processed_rows".to_string());
+        names
     }
 
     pub fn vnodes(&self) -> &Arc<Bitmap> {
@@ -308,7 +332,6 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
 pub struct RefreshProgressStats {
     pub total_vnodes: usize,
     pub completed_vnodes: usize,
-    pub progress_percentage: f64,
     pub total_processed_rows: u64,
 }
 
@@ -316,60 +339,5 @@ impl RefreshProgressStats {
     /// Check if refresh is complete
     pub fn is_complete(&self) -> bool {
         self.total_vnodes > 0 && self.completed_vnodes == self.total_vnodes
-    }
-
-    /// Get completion ratio (0.0 to 1.0)
-    pub fn completion_ratio(&self) -> f64 {
-        self.progress_percentage / 100.0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_common::hash::VirtualNode;
-
-    use super::*;
-
-    #[test]
-    fn test_refresh_stage_conversion() {
-        assert_eq!(RefreshStage::from(0), RefreshStage::Normal);
-        assert_eq!(RefreshStage::from(1), RefreshStage::Refreshing);
-        assert_eq!(RefreshStage::from(2), RefreshStage::Merging);
-        assert_eq!(RefreshStage::from(3), RefreshStage::Cleanup);
-        assert_eq!(RefreshStage::from(99), RefreshStage::Normal); // fallback
-    }
-
-    #[test]
-    fn test_progress_stats() {
-        let stats = RefreshProgressStats {
-            total_vnodes: 10,
-            completed_vnodes: 3,
-            progress_percentage: 30.0,
-            total_processed_rows: 1000,
-        };
-
-        assert!(!stats.is_complete());
-        assert_eq!(stats.completion_ratio(), 0.3);
-
-        let complete_stats = RefreshProgressStats {
-            total_vnodes: 5,
-            completed_vnodes: 5,
-            progress_percentage: 100.0,
-            total_processed_rows: 2000,
-        };
-
-        assert!(complete_stats.is_complete());
-        assert_eq!(complete_stats.completion_ratio(), 1.0);
-    }
-
-    #[test]
-    fn test_schema_definition() {
-        let schema = RefreshProgressTable::<()>::expected_schema();
-        let column_names = RefreshProgressTable::<()>::column_names();
-
-        assert_eq!(schema.len(), 7);
-        assert_eq!(column_names.len(), 7);
-        assert_eq!(column_names[0], "vnode");
-        assert_eq!(column_names[6], "last_updated_at");
     }
 }

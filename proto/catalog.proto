@@ -528,45 +528,6 @@ enum RefreshState {
   REFRESH_STATE_FINISHING = 3;
 }
 
-// Progress information for resumable refresh operations
-message RefreshProgress {
-  // Epoch when the refresh operation started
-  uint64 started_epoch = 1;
-
-  // Current refresh stage
-  string current_stage = 2;
-
-  // Per-vnode progress information
-  repeated VnodeProgress vnode_progress = 3;
-
-  // Total number of vnodes to process
-  uint32 total_vnodes = 4;
-
-  // Number of vnodes completed
-  uint32 completed_vnodes = 5;
-}
-
-// Progress information for a specific vnode
-message VnodeProgress {
-  // The vnode number
-  uint32 vnode = 1;
-
-  // Current processing stage for this vnode
-  string stage = 2;
-
-  // Serialized position of main table iterator
-  optional bytes main_iter_position = 3;
-
-  // Serialized position of staging table iterator
-  optional bytes staging_iter_position = 4;
-
-  // Number of rows processed for this vnode
-  uint64 processed_rows = 5;
-
-  // Last checkpoint epoch for this vnode
-  uint64 last_checkpoint_epoch = 6;
-}
-
 message View {
   uint32 id = 1;
   uint32 schema_id = 2;

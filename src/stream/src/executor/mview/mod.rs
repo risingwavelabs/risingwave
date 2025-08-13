@@ -20,6 +20,5 @@ pub(crate) mod test_utils;
 
 pub use materialize::*;
 pub use refresh_progress_table::{
-    RefreshProgressEntry, RefreshProgressStats, RefreshProgressTable,
-    RefreshStage as ProgressRefreshStage,
+    ProgressRefreshStage, RefreshProgressEntry, RefreshProgressStats, RefreshProgressTable,
 };

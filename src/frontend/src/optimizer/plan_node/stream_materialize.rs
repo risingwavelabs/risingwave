@@ -501,78 +501,65 @@ impl StreamMaterialize {
     }
 
     /// The refresh progress table is used to track refresh operation progress.
-    /// Schema: vnode (i32), stage (i32), started_epoch (i64), current_epoch (i64),
-    /// processed_rows (i64), is_completed (bool), last_updated_at (i64)
+    /// Simplified Schema: vnode (i32), current_pos... (variable PK from upstream),
+    /// is_completed (bool), processed_rows (i64)
     fn derive_refresh_progress_table_catalog(table: TableCatalog) -> TableCatalog {
         tracing::info!(
             table_name = %table.name,
             "Creating refresh progress table for refreshable table"
         );
 
-        // Define the schema for the refresh progress table
-        let columns = vec![
-            ColumnCatalog {
+        // Define the simplified schema for the refresh progress table
+        // Schema: | vnode | current_pos... | is_completed | processed_rows |
+        let mut columns = vec![ColumnCatalog {
+            column_desc: risingwave_common::catalog::ColumnDesc::named(
+                "vnode",
+                0.into(),
+                DataType::Int16,
+            ),
+            is_hidden: false,
+        }];
+
+        // Add current_pos columns (mirror upstream table's primary key)
+        let mut col_index = 1;
+        for (_pk_index, pk_col) in table.pk.iter().enumerate() {
+            let upstream_col = &table.columns[pk_col.column_index];
+            columns.push(ColumnCatalog {
                 column_desc: risingwave_common::catalog::ColumnDesc::named(
-                    "vnode",
-                    0.into(),
-                    DataType::Int16,
+                    &format!("pos_{}", upstream_col.name()),
+                    col_index.into(),
+                    upstream_col.data_type().clone(),
                 ),
                 is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: risingwave_common::catalog::ColumnDesc::named(
-                    "stage",
-                    1.into(),
-                    DataType::Int32,
-                ),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: risingwave_common::catalog::ColumnDesc::named(
-                    "started_epoch",
-                    2.into(),
-                    DataType::Int64,
-                ),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: risingwave_common::catalog::ColumnDesc::named(
-                    "current_epoch",
-                    3.into(),
-                    DataType::Int64,
-                ),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: risingwave_common::catalog::ColumnDesc::named(
-                    "processed_rows",
-                    4.into(),
-                    DataType::Int64,
-                ),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: risingwave_common::catalog::ColumnDesc::named(
-                    "is_completed",
-                    5.into(),
-                    DataType::Boolean,
-                ),
-                is_hidden: false,
-            },
-            ColumnCatalog {
-                column_desc: risingwave_common::catalog::ColumnDesc::named(
-                    "last_updated_at",
-                    6.into(),
-                    DataType::Int64,
-                ),
-                is_hidden: false,
-            },
-        ];
+            });
+            col_index += 1;
+        }
+
+        // Add metadata columns
+        columns.push(ColumnCatalog {
+            column_desc: risingwave_common::catalog::ColumnDesc::named(
+                "is_completed",
+                col_index.into(),
+                DataType::Boolean,
+            ),
+            is_hidden: false,
+        });
+        col_index += 1;
+
+        columns.push(ColumnCatalog {
+            column_desc: risingwave_common::catalog::ColumnDesc::named(
+                "processed_rows",
+                col_index.into(),
+                DataType::Int64,
+            ),
+            is_hidden: false,
+        });
 
         // Primary key is vnode (column 0)
         let pk = vec![ColumnOrder::new(0, OrderType::ascending())];
         let stream_key = vec![0];
         let distribution_key = vec![0];
+        let total_cols = columns.len();
 
         TableCatalog {
             id: TableId::placeholder(),
@@ -591,7 +578,7 @@ impl StreamMaterialize {
             dml_fragment_id: None,
             vnode_col_index: Some(0),
             row_id_index: None,
-            value_indices: (0..7).collect(),
+            value_indices: (0..total_cols).collect(),
             definition: table.definition.clone(),
             conflict_behavior: ConflictBehavior::NoCheck,
             version_column_index: None,

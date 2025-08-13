@@ -29,7 +29,7 @@ use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
+use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
@@ -47,7 +47,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
 use crate::common::table::test_utils::gen_pbtable;
 use crate::executor::monitor::MaterializeMetrics;
-use crate::executor::mview::{ProgressRefreshStage, RefreshProgressTable};
+use crate::executor::mview::RefreshProgressTable;
 use crate::executor::prelude::*;
 use crate::task::LocalBarrierManager;
 
@@ -132,9 +132,16 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
         )
         .await;
 
-        let progress_state_table =
-            StateTableInner::from_table_catalog(progress_state_table, store, vnodes).await;
-        let progress_table = RefreshProgressTable::new(progress_state_table);
+        let progress_state_table = StateTableInner::from_table_catalog_inconsistent_op(
+            progress_state_table,
+            store,
+            vnodes,
+        )
+        .await;
+
+        // Get primary key length from main table catalog
+        let pk_len = table_catalog.pk.len();
+        let progress_table = RefreshProgressTable::new(progress_state_table, pk_len);
 
         debug_assert_eq!(staging_table.vnodes(), progress_table.vnodes());
 
@@ -281,15 +288,62 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 tracing::info!(
                     total_vnodes = progress_stats.total_vnodes,
                     completed_vnodes = progress_stats.completed_vnodes,
-                    progress_percentage = progress_stats.progress_percentage,
                     "Recovered refresh in progress, resuming refresh operation"
                 );
+
+                // Since stage info is no longer stored in progress table,
+                // we need to determine recovery state differently.
+                // For now, assume all incomplete VNodes need to continue merging
+                let incomplete_vnodes: Vec<_> = refresh_args
+                    .progress_table
+                    .get_all_progress()
+                    .iter()
+                    .filter(|(_, entry)| !entry.is_completed)
+                    .map(|(&vnode, _)| vnode)
+                    .collect();
+
+                if !incomplete_vnodes.is_empty() {
+                    // Some VNodes are incomplete, need to resume refresh operation
+                    tracing::info!(
+                        incomplete_vnodes = incomplete_vnodes.len(),
+                        "Recovery detected incomplete VNodes, resuming refresh operation"
+                    );
+                    // Since stage tracking is now in memory, we'll determine the appropriate
+                    // stage based on the executor's internal state machine
+                } else {
+                    // This should not happen if is_complete() returned false, but handle it gracefully
+                    tracing::warn!("Unexpected recovery state: no incomplete VNodes found");
+                }
             }
-            // TODO: we need to decide which stage to start based on the recovery.
+        }
+
+        // Check if we need to skip stage1 and go directly to stage2 (for recovery)
+        let mut skip_to_stage2 = false;
+        if let Some(ref refresh_args) = self.refresh_args {
+            if refresh_args.is_refreshing {
+                // Since stage info is no longer in progress table,
+                // use the executor's internal state to determine recovery stage
+                let incomplete_vnodes: Vec<_> = refresh_args
+                    .progress_table
+                    .get_all_progress()
+                    .iter()
+                    .filter(|(_, entry)| !entry.is_completed)
+                    .map(|(&vnode, _)| vnode)
+                    .collect();
+                if !incomplete_vnodes.is_empty() {
+                    // For simplicity, assume all incomplete VNodes need stage2 (merge)
+                    skip_to_stage2 = true;
+                }
+            }
         }
 
         loop {
-            let mut goto_stage2 = false;
+            let mut goto_stage2 = skip_to_stage2;
+            // Reset the skip flag after first use
+            skip_to_stage2 = false;
+            if let Some(ref mut refresh_args) = self.refresh_args {
+                refresh_args.is_refreshing = false;
+            }
 
             #[for_await]
             'stage1: for msg in input.by_ref() {
@@ -576,8 +630,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 {
                     let left_input = input.by_ref().map(Either::Left);
                     let right_merge_sort = pin!(
-                        Self::make_mergesort_stream(&self.state_table, &refresh_args.staging_table)
-                            .map(Either::Right)
+                        Self::make_mergesort_stream(
+                            &self.state_table,
+                            &refresh_args.staging_table,
+                            &mut refresh_args.progress_table
+                        )
+                        .map(Either::Right)
                     );
 
                     // Prefer to select input stream to handle barriers promptly
@@ -814,8 +872,25 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     async fn make_mergesort_stream<'a>(
         main_table: &'a StateTableInner<S, SD>,
         staging_table: &'a StateTableInner<S, SD>,
+        progress_table: &'a mut RefreshProgressTable<S, SD>,
     ) {
         for vnode in main_table.vnodes().clone().iter_vnodes() {
+            let mut processed_rows = 0;
+            // Check if this VNode has already been completed (for fault tolerance)
+            if let Some(current_entry) = progress_table.get_progress(vnode) {
+                // Skip already completed VNodes during recovery
+                if current_entry.is_completed {
+                    tracing::debug!(
+                        vnode = vnode.to_index(),
+                        "Skipping already completed VNode during recovery"
+                    );
+                    continue;
+                }
+                processed_rows += current_entry.processed_rows;
+
+                tracing::debug!(vnode = vnode.to_index(), "Started merging VNode");
+            }
+
             let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
 
             let iter_main = main_table
@@ -876,7 +951,31 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 }
 
                 // Advance main iterator
+                processed_rows += 1;
+                progress_table.set_progress(
+                    vnode,
+                    Some(
+                        main_kv
+                            .row()
+                            .project(main_table.pk_indices())
+                            .to_owned_row(),
+                    ),
+                    false,
+                    processed_rows,
+                )?;
                 main_item = iter_main.next().await.transpose()?;
+            }
+
+            // Mark this VNode as completed
+            if let Some(current_entry) = progress_table.get_progress(vnode) {
+                progress_table.set_progress(
+                    vnode,
+                    current_entry.current_pos.clone(),
+                    true, // completed
+                    current_entry.processed_rows,
+                )?;
+
+                tracing::debug!(vnode = vnode.to_index(), "Completed merging VNode");
             }
         }
 
@@ -924,19 +1023,16 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     async fn init_refresh_progress(
         state_table: &StateTableInner<S, SD>,
         progress_table: &mut RefreshProgressTable<S, SD>,
-        epoch: u64,
+        _epoch: u64,
     ) -> StreamExecutorResult<()> {
         debug_assert_eq!(state_table.vnodes(), progress_table.vnodes());
 
         // Initialize progress for all VNodes in the current bitmap
         for vnode in state_table.vnodes().iter_vnodes() {
             progress_table.set_progress(
-                vnode,
-                ProgressRefreshStage::Refreshing,
-                epoch,
-                epoch,
-                0,     // initial processed rows
+                vnode, None,  // initial position
                 false, // not completed yet
+                0,     // initial processed rows
             )?;
         }
 
