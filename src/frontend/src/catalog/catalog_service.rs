@@ -439,16 +439,14 @@ impl CatalogWriter for CatalogWriterImpl {
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
     ) -> Result<()> {
-        let version = self
-            .meta_client
-            .create_sink(
-                sink,
-                graph,
-                affected_table_change,
-                dependencies,
-                if_not_exists,
-            )
-            .await?;
+        let version = Box::pin(self.meta_client.create_sink(
+            sink,
+            graph,
+            affected_table_change,
+            dependencies,
+            if_not_exists,
+        ))
+        .await?;
         self.wait_version(version).await
     }
 
