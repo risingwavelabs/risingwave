@@ -142,7 +142,7 @@ pub fn start(
 
             let listen_addr = opts.listen_addr.parse().unwrap();
 
-            shared_compactor_serve(listen_addr, opts, shutdown).await;
+            Box::pin(shared_compactor_serve(listen_addr, opts, shutdown)).await;
         }),
         None | Some(CompactorMode::Dedicated) => Box::pin(async move {
             tracing::info!("Compactor node options: {:?}", opts);
@@ -161,13 +161,13 @@ pub fn start(
                 .unwrap();
             tracing::info!(" address is {}", advertise_addr);
 
-            compactor_serve(
+            Box::pin(compactor_serve(
                 listen_addr,
                 advertise_addr,
                 opts,
                 shutdown,
                 CompactorMode::Dedicated,
-            )
+            ))
             .await;
         }),
 
@@ -188,13 +188,13 @@ pub fn start(
                 .unwrap();
             tracing::info!(" address is {}", advertise_addr);
 
-            compactor_serve(
+            Box::pin(compactor_serve(
                 listen_addr,
                 advertise_addr,
                 opts,
                 shutdown,
                 CompactorMode::DedicatedIceberg,
-            )
+            ))
             .await;
         }),
         Some(CompactorMode::SharedIceberg) => {
