@@ -219,6 +219,7 @@ pub enum TableType {
     /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
     /// An index has both a `TableCatalog` and an `IndexCatalog`.
     Index,
+    VectorIndex,
     /// Internal tables for executors.
     Internal,
 }
@@ -237,6 +238,7 @@ impl TableType {
             PbTableType::MaterializedView => Self::MaterializedView,
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
+            PbTableType::VectorIndex => Self::VectorIndex,
             PbTableType::Unspecified => unreachable!(),
         }
     }
@@ -246,6 +248,7 @@ impl TableType {
             Self::Table => PbTableType::Table,
             Self::MaterializedView => PbTableType::MaterializedView,
             Self::Index => PbTableType::Index,
+            Self::VectorIndex => PbTableType::VectorIndex,
             Self::Internal => PbTableType::Internal,
         }
     }
@@ -396,7 +399,7 @@ impl TableCatalog {
             TableType::MaterializedView => {
                 "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
             }
-            TableType::Index => "Use `DROP INDEX` to drop an index.",
+            TableType::Index | TableType::VectorIndex => "Use `DROP INDEX` to drop an index.",
             TableType::Table => "Use `DROP TABLE` to drop a table.",
             TableType::Internal => "Internal tables cannot be dropped.",
         };

@@ -650,7 +650,7 @@ impl DiagnoseCommand {
                 match table_type {
                     PbTableType::Table => user_tables.extend(tables),
                     PbTableType::MaterializedView => mvs.extend(tables),
-                    PbTableType::Index => indexes.extend(tables),
+                    PbTableType::Index | PbTableType::VectorIndex => indexes.extend(tables),
                     PbTableType::Internal => internal_tables.extend(tables),
                     PbTableType::Unspecified => {
                         tracing::error!("unspecified table type: {:?}", tables.collect_vec());
