@@ -60,9 +60,9 @@ jobs:
 
           # Conditionally push to dockerhub
           if [[ "${{ github.event.inputs.push_dockerhub }}" == "true" ]]; then
-            BUILDKITE_TAG="${{ github.event.inputs.push_dockerhub }}"
-            echo "BUILDKITE_TAG=$BUILDKITE_TAG"
-            echo "BUILDKITE_TAG=$BUILDKITE_TAG" >> $GITHUB_ENV
+            PUSH_DOCKERHUB="true"
+            echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB"
+            echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB" >> $GITHUB_ENV
           fi
       - name: 'Trigger Docker build Workflow via Buildkite'
         uses: buildkite/trigger-pipeline-action@v2.3.0
@@ -72,4 +72,4 @@ jobs:
           branch: ${{ env.BRANCH_NAME }}
           commit: HEAD
           message: ':github: Triggering Docker build with image tag: ${{ env.IMAGE_TAG }}'
-          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}", "BUILDKITE_TAG": "${{ env.BUILDKITE_TAG }}" }'
+          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}", "PUSH_DOCKERHUB": "${{ env.PUSH_DOCKERHUB }}" }'
