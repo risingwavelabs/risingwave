@@ -743,7 +743,7 @@ pub fn build_create_table_sql(
         })
         .collect::<Result<Vec<String>>>()?;
     if need_op_and_row_id {
-        columns.push(format!("{} VARCHAR", __ROW_ID));
+        columns.push(format!("{} VARCHAR(MAX)", __ROW_ID));
         columns.push(format!("{} INT", __OP));
     }
     let columns_str = columns.join(", ");
@@ -762,11 +762,11 @@ fn convert_redshift_data_type(data_type: &DataType) -> Result<String> {
         DataType::Float32 => "REAL".to_owned(),
         DataType::Float64 => "FLOAT".to_owned(),
         DataType::Boolean => "BOOLEAN".to_owned(),
-        DataType::Varchar => "VARCHAR".to_owned(),
+        DataType::Varchar => "VARCHAR(MAX)".to_owned(),
         DataType::Date => "DATE".to_owned(),
         DataType::Timestamp => "TIMESTAMP".to_owned(),
         DataType::Timestamptz => "TIMESTAMPTZ".to_owned(),
-        DataType::Jsonb => "VARCHAR".to_owned(),
+        DataType::Jsonb => "VARCHAR(MAX)".to_owned(),
         DataType::Decimal => "DECIMAL".to_owned(),
         DataType::Time => "TIME".to_owned(),
         _ => {
