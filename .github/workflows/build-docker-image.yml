@@ -63,7 +63,14 @@ jobs:
             PUSH_DOCKERHUB="true"
             echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB"
             echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB" >> $GITHUB_ENV
+          # Always set PUSH_DOCKERHUB based on input
+          if [[ "${{ github.event.inputs.push_dockerhub }}" == "true" ]]; then
+            PUSH_DOCKERHUB="true"
+          else
+            PUSH_DOCKERHUB="false"
           fi
+          echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB"
+          echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB" >> $GITHUB_ENV
       - name: 'Trigger Docker build Workflow via Buildkite'
         uses: buildkite/trigger-pipeline-action@v2.3.0
         with:
