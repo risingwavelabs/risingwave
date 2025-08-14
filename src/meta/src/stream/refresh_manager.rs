@@ -130,7 +130,6 @@ impl RefreshManager {
             )));
         }
 
-        // TODO: check table refresh state
         let current_state = self
             .metadata_manager
             .catalog_controller

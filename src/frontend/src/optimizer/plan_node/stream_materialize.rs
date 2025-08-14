@@ -32,7 +32,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
 use super::stream::prelude::*;
-use super::utils::{Distill, childless_record};
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
 use super::{
     ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, reorganize_elements_id,
 };
@@ -504,7 +504,7 @@ impl StreamMaterialize {
     /// Simplified Schema: vnode (i32), `current_pos`... (variable PK from upstream),
     /// `is_completed` (bool), `processed_rows` (i64)
     fn derive_refresh_progress_table_catalog(table: TableCatalog) -> TableCatalog {
-        tracing::info!(
+        tracing::debug!(
             table_name = %table.name,
             "Creating refresh progress table for refreshable table"
         );
@@ -555,56 +555,20 @@ impl StreamMaterialize {
             is_hidden: false,
         });
 
-        // Primary key is vnode (column 0)
-        let pk = vec![ColumnOrder::new(0, OrderType::ascending())];
-        let stream_key = vec![0];
-        let distribution_key = vec![0];
-        let total_cols = columns.len();
+        let mut builder = TableCatalogBuilder::default();
 
-        TableCatalog {
-            id: TableId::placeholder(),
-            schema_id: table.schema_id,
-            database_id: table.database_id,
-            associated_source_id: None,
-            name: table.name.clone(),
-            columns,
-            pk,
-            stream_key,
-            distribution_key,
-            table_type: TableType::Internal,
-            append_only: false,
-            owner: table.owner,
-            fragment_id: OBJECT_ID_PLACEHOLDER,
-            dml_fragment_id: None,
-            vnode_col_index: Some(0),
-            row_id_index: None,
-            value_indices: (0..total_cols).collect(),
-            definition: table.definition.clone(),
-            conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_index: None,
-            read_prefix_len_hint: 1,
-            version: table.version.clone(),
-            watermark_columns: FixedBitSet::new(),
-            dist_key_in_pk: vec![0],
-            cardinality: table.cardinality,
-            created_at_epoch: table.created_at_epoch,
-            initialized_at_epoch: table.initialized_at_epoch,
-            cleaned_by_watermark: false,
-            create_type: table.create_type,
-            stream_job_status: table.stream_job_status,
-            description: table.description.clone(),
-            incoming_sinks: vec![],
-            created_at_cluster_version: table.created_at_cluster_version.clone(),
-            initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
-            retention_seconds: None,
-            cdc_table_id: None,
-            vnode_count: table.vnode_count,
-            webhook_info: None,
-            job_id: table.job_id,
-            engine: table.engine,
-            clean_watermark_index_in_pk: None,
-            refreshable: false,
+        // Add all columns to builder
+        for column in &columns {
+            builder.add_column(&(&column.column_desc).into());
         }
+
+        // Primary key is vnode (column 0)
+        builder.add_order_column(0, OrderType::ascending());
+        builder.set_vnode_col_idx(0);
+        builder.set_value_indices((0..columns.len()).collect());
+        builder.set_dist_key_in_pk(vec![0]);
+
+        builder.build(vec![0], 1)
     }
 
     /// Get a reference to the stream materialize's table.

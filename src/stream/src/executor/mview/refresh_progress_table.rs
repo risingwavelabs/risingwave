@@ -27,19 +27,19 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
-use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 
-use crate::common::table::state_table::{StateTableInner, StateTablePostCommit};
+use crate::common::table::state_table::StateTablePostCommit;
 use crate::executor::StreamExecutorResult;
+use crate::executor::prelude::StateTable;
 
 /// Schema for the refresh progress table (simplified, following backfill pattern):
 /// - `vnode` (i32): `VirtualNode` identifier
 /// - `current_pos` (variable): Current processing position (primary key of last processed row)
 /// - `is_completed` (bool): Whether this vnode has completed processing
 /// - `processed_rows` (i64): Number of rows processed so far in this vnode
-pub struct RefreshProgressTable<S: StateStore, SD: ValueRowSerde> {
+pub struct RefreshProgressTable<S: StateStore> {
     /// The underlying state table for persistence
-    pub state_table: StateTableInner<S, SD>,
+    pub state_table: StateTable<S>,
     /// In-memory cache of progress information for quick access
     cache: HashMap<VirtualNode, RefreshProgressEntry>,
     /// Primary key length for upstream table (needed for schema)
@@ -78,9 +78,9 @@ impl From<i32> for ProgressRefreshStage {
     }
 }
 
-impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
+impl<S: StateStore> RefreshProgressTable<S> {
     /// Create a new `RefreshProgressTable`
-    pub fn new(state_table: StateTableInner<S, SD>, pk_len: usize) -> Self {
+    pub fn new(state_table: StateTable<S>, pk_len: usize) -> Self {
         Self {
             state_table,
             cache: HashMap::new(),
@@ -214,7 +214,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshProgressTable<S, SD> {
     pub async fn commit(
         &mut self,
         epoch: EpochPair,
-    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD>> {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S>> {
         self.state_table.commit(epoch).await
     }
 

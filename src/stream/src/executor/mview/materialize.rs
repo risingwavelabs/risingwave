@@ -107,7 +107,7 @@ pub struct RefreshableMaterializeArgs<S: StateStore, SD: ValueRowSerde> {
     pub staging_table: StateTableInner<S, SD>,
 
     /// Progress table for tracking refresh state per `VNode` for fault tolerance
-    pub progress_table: RefreshProgressTable<S, SD>,
+    pub progress_table: RefreshProgressTable<S>,
 
     /// Table ID for this refreshable materialized view
     pub table_id: TableId,
@@ -871,7 +871,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     async fn make_mergesort_stream<'a>(
         main_table: &'a StateTableInner<S, SD>,
         staging_table: &'a StateTableInner<S, SD>,
-        progress_table: &'a mut RefreshProgressTable<S, SD>,
+        progress_table: &'a mut RefreshProgressTable<S>,
     ) {
         for vnode in main_table.vnodes().clone().iter_vnodes() {
             let mut processed_rows = 0;
@@ -1021,7 +1021,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     /// Initialize refresh progress tracking for all `VNodes`
     fn init_refresh_progress(
         state_table: &StateTableInner<S, SD>,
-        progress_table: &mut RefreshProgressTable<S, SD>,
+        progress_table: &mut RefreshProgressTable<S>,
         _epoch: u64,
     ) -> StreamExecutorResult<()> {
         debug_assert_eq!(state_table.vnodes(), progress_table.vnodes());
