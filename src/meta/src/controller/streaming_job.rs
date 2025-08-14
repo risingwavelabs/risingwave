@@ -712,10 +712,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let actor_ids = actor_ids
-            .into_iter()
-            .map(|id| id as ActorId)
-            .collect_vec();
+        let actor_ids = actor_ids.into_iter().map(|id| id as ActorId).collect_vec();
 
         Actor::update_many()
             .col_expr(
