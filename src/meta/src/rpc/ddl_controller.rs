@@ -375,27 +375,57 @@ impl DdlController {
         let await_tree_key = format!("DDL Command {}", self.next_seq());
         let await_tree_span = await_tree::span!("{command}({})", command.object());
 
-        let ctrl = self.clone();
-
         let fut: BoxFuture<'static, _> = match command {
-            DdlCommand::CreateDatabase(database) => ctrl.create_database(database).boxed(),
-            DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).boxed(),
-            DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).boxed(),
+            DdlCommand::CreateDatabase(database) => {
+                let ctrl = self.clone();
+                async move { ctrl.create_database(database).await }.boxed()
+            }
+
+            DdlCommand::DropDatabase(database_id) => {
+                let ctrl = self.clone();
+                async move { ctrl.drop_database(database_id).await }.boxed()
+            }
+
+            DdlCommand::CreateSchema(schema) => {
+                let ctrl = self.clone();
+                async move { ctrl.create_schema(schema).await }.boxed()
+            }
+
             DdlCommand::DropSchema(schema_id, drop_mode) => {
-                ctrl.drop_schema(schema_id, drop_mode).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.drop_schema(schema_id, drop_mode).await }.boxed()
             }
+
             DdlCommand::CreateNonSharedSource(source) => {
-                ctrl.create_non_shared_source(source).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.create_non_shared_source(source).await }.boxed()
             }
+
             DdlCommand::DropSource(source_id, drop_mode) => {
-                ctrl.drop_source(source_id, drop_mode).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.drop_source(source_id, drop_mode).await }.boxed()
             }
-            DdlCommand::CreateFunction(function) => ctrl.create_function(function).boxed(),
-            DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).boxed(),
+
+            DdlCommand::CreateFunction(function) => {
+                let ctrl = self.clone();
+                async move { ctrl.create_function(function).await }.boxed()
+            }
+
+            DdlCommand::DropFunction(function_id) => {
+                let ctrl = self.clone();
+                async move { ctrl.drop_function(function_id).await }.boxed()
+            }
+
             DdlCommand::CreateView(view, dependencies) => {
-                ctrl.create_view(view, dependencies).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.create_view(view, dependencies).await }.boxed()
             }
-            DdlCommand::DropView(view_id, drop_mode) => ctrl.drop_view(view_id, drop_mode).boxed(),
+
+            DdlCommand::DropView(view_id, drop_mode) => {
+                let ctrl = self.clone();
+                async move { ctrl.drop_view(view_id, drop_mode).await }.boxed()
+            }
+
             DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
@@ -403,54 +433,107 @@ impl DdlController {
                 dependencies,
                 specific_resource_group,
                 if_not_exists,
-            } => ctrl
-                .create_streaming_job(
-                    stream_job,
-                    fragment_graph,
-                    affected_table_replace_info,
-                    dependencies,
-                    specific_resource_group,
-                    if_not_exists,
-                )
-                .boxed(),
+            } => {
+                let ctrl = self.clone();
+                async move {
+                    ctrl.create_streaming_job(
+                        stream_job,
+                        fragment_graph,
+                        affected_table_replace_info,
+                        dependencies,
+                        specific_resource_group,
+                        if_not_exists,
+                    )
+                    .await
+                }
+                .boxed()
+            }
+
             DdlCommand::DropStreamingJob {
                 job_id,
                 drop_mode,
                 target_replace_info,
-            } => ctrl
-                .drop_streaming_job(job_id, drop_mode, target_replace_info)
-                .boxed(),
+            } => {
+                let ctrl = self.clone();
+                async move {
+                    ctrl.drop_streaming_job(job_id, drop_mode, target_replace_info)
+                        .await
+                }
+                .boxed()
+            }
+
             DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
                 streaming_job,
                 fragment_graph,
-            }) => ctrl.replace_job(streaming_job, fragment_graph).boxed(),
-            DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).boxed(),
+            }) => {
+                let ctrl = self.clone();
+                async move { ctrl.replace_job(streaming_job, fragment_graph).await }.boxed()
+            }
+
+            DdlCommand::AlterName(relation, name) => {
+                let ctrl = self.clone();
+                async move {
+                    // keeps `name` owned inside the future, borrowing it only for the call
+                    ctrl.alter_name(relation, &name).await
+                }
+                .boxed()
+            }
+
             DdlCommand::AlterObjectOwner(object, owner_id) => {
-                ctrl.alter_owner(object, owner_id).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.alter_owner(object, owner_id).await }.boxed()
             }
+
             DdlCommand::AlterSetSchema(object, new_schema_id) => {
-                ctrl.alter_set_schema(object, new_schema_id).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.alter_set_schema(object, new_schema_id).await }.boxed()
             }
-            DdlCommand::CreateConnection(connection) => ctrl.create_connection(connection).boxed(),
+
+            DdlCommand::CreateConnection(connection) => {
+                let ctrl = self.clone();
+                async move { ctrl.create_connection(connection).await }.boxed()
+            }
+
             DdlCommand::DropConnection(connection_id, drop_mode) => {
-                ctrl.drop_connection(connection_id, drop_mode).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.drop_connection(connection_id, drop_mode).await }.boxed()
             }
-            DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).boxed(),
-            DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).boxed(),
-            DdlCommand::AlterSecret(secret) => ctrl.alter_secret(secret).boxed(),
+
+            DdlCommand::CreateSecret(secret) => {
+                let ctrl = self.clone();
+                async move { ctrl.create_secret(secret).await }.boxed()
+            }
+            DdlCommand::DropSecret(secret_id) => {
+                let ctrl = self.clone();
+                async move { ctrl.drop_secret(secret_id).await }.boxed()
+            }
+            DdlCommand::AlterSecret(secret) => {
+                let ctrl = self.clone();
+                async move { ctrl.alter_secret(secret).await }.boxed()
+            }
             DdlCommand::AlterNonSharedSource(source) => {
-                ctrl.alter_non_shared_source(source).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.alter_non_shared_source(source).await }.boxed()
             }
-            DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).boxed(),
+            DdlCommand::CommentOn(comment) => {
+                let ctrl = self.clone();
+                async move { ctrl.comment_on(comment).await }.boxed()
+            }
             DdlCommand::CreateSubscription(subscription) => {
-                ctrl.create_subscription(subscription).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.create_subscription(subscription).await }.boxed()
             }
             DdlCommand::DropSubscription(subscription_id, drop_mode) => {
-                ctrl.drop_subscription(subscription_id, drop_mode).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.drop_subscription(subscription_id, drop_mode).await }.boxed()
             }
-            DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).boxed(),
+            DdlCommand::AlterSwapRename(objects) => {
+                let ctrl = self.clone();
+                async move { ctrl.alter_swap_rename(objects).await }.boxed()
+            }
             DdlCommand::AlterDatabaseParam(database_id, param) => {
-                ctrl.alter_database_param(database_id, param).boxed()
+                let ctrl = self.clone();
+                async move { ctrl.alter_database_param(database_id, param).await }.boxed()
             }
         };
 
