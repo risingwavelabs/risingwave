@@ -109,7 +109,7 @@ pub async fn handle_drop_table(
             //   - Purge table from warehouse
             //   - Drop table from catalog
             // Drop source
-            crate::handler::drop_sink::handle_drop_sink(
+            Box::pin(crate::handler::drop_sink::handle_drop_sink(
                 handler_args.clone(),
                 ObjectName::from(match schema_name {
                     Some(ref schema) => vec![
@@ -122,7 +122,7 @@ pub async fn handle_drop_table(
                 }),
                 true,
                 false,
-            )
+            ))
             .await?;
 
             if let Some(either) = either {

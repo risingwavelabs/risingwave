@@ -280,7 +280,7 @@ pub async fn handle(
             options,
         } => {
             async move {
-                explain::handle_explain(handler_args, *statement, options, analyze).await
+                Box::pin(explain::handle_explain(handler_args, *statement, options, analyze)).await
             }
             .boxed()
         }
@@ -302,7 +302,7 @@ pub async fn handle(
             async move { create_source::handle_create_source(handler_args, stmt).await }.boxed()
         }
         Statement::CreateSink { stmt } => {
-            async move { create_sink::handle_create_sink(handler_args, stmt, false).await }.boxed()
+            async move { Box::pin(create_sink::handle_create_sink(handler_args, stmt, false)).await }.boxed()
         }
         Statement::CreateSubscription { stmt } => {
             async move { create_subscription::handle_create_subscription(handler_args, stmt).await }
@@ -430,7 +430,7 @@ pub async fn handle(
                     .await;
                 }
                 let format_encode = format_encode.map(|s| s.into_v2_with_warning());
-                create_table::handle_create_table(
+                Box::pin(create_table::handle_create_table(
                     handler_args,
                     name,
                     columns,
@@ -446,7 +446,7 @@ pub async fn handle(
                     include_column_options,
                     webhook_info,
                     engine,
-                )
+                ))
                 .await
             }
             .boxed()
@@ -564,7 +564,7 @@ pub async fn handle(
                 };
                 match object_type {
                     ObjectType::Table => {
-                        drop_table::handle_drop_table(handler_args, object_name, if_exists, cascade)
+                        Box::pin(drop_table::handle_drop_table(handler_args, object_name, if_exists, cascade))
                             .await
                     }
                     ObjectType::MaterializedView => {
@@ -575,12 +575,10 @@ pub async fn handle(
                             .await
                     }
                     ObjectType::Source => {
-                        drop_source::handle_drop_source(handler_args, object_name, if_exists, cascade)
-                            .await
+                        drop_source::handle_drop_source(handler_args, object_name, if_exists, cascade).await
                     }
                     ObjectType::Sink => {
-                        drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade)
-                            .await
+                        Box::pin(drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade)).await
                     }
                     ObjectType::Subscription => {
                         drop_subscription::handle_drop_subscription(
@@ -895,11 +893,11 @@ pub async fn handle(
                     AlterTableOperation::AddColumn { .. }
                     | AlterTableOperation::DropColumn { .. }
                     | AlterTableOperation::AlterColumn { .. } => {
-                        alter_table_column::handle_alter_table_column(
+                        Box::pin(alter_table_column::handle_alter_table_column(
                             handler_args,
                             name,
                             operation,
-                        )
+                        ))
                         .await
                     }
                     AlterTableOperation::RenameTable { table_name } => {
@@ -944,7 +942,7 @@ pub async fn handle(
                         .await
                     }
                     AlterTableOperation::RefreshSchema => {
-                        alter_table_with_sr::handle_refresh_schema(handler_args, name).await
+                        Box::pin(alter_table_with_sr::handle_refresh_schema(handler_args, name)).await
                     }
                     AlterTableOperation::SetSourceRateLimit { rate_limit } => {
                         alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
@@ -956,10 +954,10 @@ pub async fn handle(
                         .await
                     }
                     AlterTableOperation::DropConnector => {
-                        alter_table_drop_connector::handle_alter_table_drop_connector(
+                        Box::pin(alter_table_drop_connector::handle_alter_table_drop_connector(
                             handler_args,
                             name,
-                        )
+                        ))
                         .await
                     }
                     AlterTableOperation::SetDmlRateLimit { rate_limit } => {

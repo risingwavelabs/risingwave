@@ -1475,7 +1475,7 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            create_iceberg_engine_table(
+            Box::pin(create_iceberg_engine_table(
                 session,
                 handler_args,
                 source.map(|s| s.to_prost()),
@@ -1484,7 +1484,7 @@ pub async fn handle_create_table(
                 table_name,
                 job_type,
                 if_not_exists,
-            )
+            ))
             .await?;
         }
     }
@@ -1971,16 +1971,33 @@ pub async fn create_iceberg_engine_table(
             HashSet::default(),
         )
         .await?;
-    let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
+    let res = Box::pin(create_sink::handle_create_sink(
+        sink_handler_args,
+        create_sink_stmt,
+        true,
+    ))
+    .await;
     if res.is_err() {
         // Since we don't support ddl atomicity, we need to drop the partial created table.
-        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
+        Box::pin(handle_drop_table(
+            handler_args.clone(),
+            table_name.clone(),
+            true,
+            true,
+        ))
+        .await?;
         res?;
     }
     let res = create_source::handle_create_source(source_handler_args, create_source_stmt).await;
     if res.is_err() {
         // Since we don't support ddl atomicity, we need to drop the partial created table.
-        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
+        Box::pin(handle_drop_table(
+            handler_args.clone(),
+            table_name.clone(),
+            true,
+            true,
+        ))
+        .await?;
         res?;
     }
 
