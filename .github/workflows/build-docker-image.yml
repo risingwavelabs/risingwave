@@ -13,16 +13,27 @@ on:
         required: false
         type: boolean
         default: false
+      branch:
+        description: 'Branch to build the image from (defaults to current branch if not provided)'
+        required: false
+        type: string
+      push_dockerhub:
+        description: 'Whether to push to DockerHub'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build_image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
       - name: 'Generate image tag'
         id: get_release_branch
         run: |
-          # Get current branch name
+          # Get branch name
           BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
@@ -63,6 +74,15 @@ jobs:
             echo "CARGO_PROFILE=$CARGO_PROFILE"
             echo "CARGO_PROFILE=$CARGO_PROFILE" >> $GITHUB_ENV
           fi
+
+          # Always set PUSH_DOCKERHUB based on input
+          if [[ "${{ github.event.inputs.push_dockerhub }}" == "true" ]]; then
+            PUSH_DOCKERHUB="true"
+          else
+            PUSH_DOCKERHUB="false"
+          fi
+          echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB"
+          echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB" >> $GITHUB_ENV
       - name: 'Trigger Docker build Workflow via Buildkite'
         uses: buildkite/trigger-pipeline-action@v2.0.0
         with:
@@ -71,4 +91,4 @@ jobs:
           branch: ${{ env.BRANCH_NAME }}
           commit: HEAD
           message: ':github: Triggering Docker build with image tag: ${{ env.IMAGE_TAG }}'
-          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}", "SKIP_TARGET_AMD64": "${{ env.SKIP_TARGET_AMD64 }}", "CARGO_PROFILE": "${{ env.CARGO_PROFILE }}" }'
+          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}", "PUSH_DOCKERHUB": "${{ env.PUSH_DOCKERHUB }}", "SKIP_TARGET_AMD64": "${{ env.SKIP_TARGET_AMD64 }}", "CARGO_PROFILE": "${{ env.CARGO_PROFILE }}" }'
