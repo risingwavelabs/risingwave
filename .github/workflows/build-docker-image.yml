@@ -23,13 +23,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
       - name: 'Generate image tag'
         id: get_release_branch
         run: |
           # Get branch name
-          if [[ "${{ github.event.inputs.branch }}" != "" ]]; then
-            git checkout "${{ github.event.inputs.branch }}"
-          fi
           BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
