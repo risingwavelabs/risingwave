@@ -41,3 +41,17 @@ WITH (
 	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
 	topic = 'test_include_key')
 FORMAT UPSERT ENCODE JSON
+
+statement ok
+CREATE TABLE tb (
+    "ID" INT primary key,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+
+statement ok
+create sink sk into tb as select * from upsert_students where age >= 20;
+
