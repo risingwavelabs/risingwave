@@ -283,14 +283,14 @@ fn estimate_serialize_list_size(list: ListRef<'_>) -> usize {
 }
 
 fn serialize_vector(value: VectorRef<'_>, buf: &mut impl BufMut) {
-    let elems = value.into_slice();
+    let elems = value.as_raw_slice();
     elems.iter().for_each(|v| {
         // follow the `put_f32_le` in `serialize_scalar`
         buf.put_f32_le(*v);
     });
 }
 fn estimate_serialize_vector_size(v: VectorRef<'_>) -> usize {
-    size_of_val(v.into_slice())
+    size_of_val(v.as_slice())
 }
 
 fn serialize_str(bytes: &[u8], buf: &mut impl BufMut) {

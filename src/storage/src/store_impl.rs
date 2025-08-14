@@ -1265,9 +1265,10 @@ mod dyn_state_store {
             vec: Vector,
             options: VectorNearestOptions,
         ) -> StorageResult<Vec<(Vector, VectorDistance, Bytes)>> {
+            use risingwave_common::types::ScalarRef;
             self.nearest(vec, options, |vec, distance, info| {
                 (
-                    Vector::clone_from_ref(vec),
+                    vec.to_owned_scalar(),
                     distance,
                     Bytes::copy_from_slice(info),
                 )
