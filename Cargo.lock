@@ -12184,6 +12184,7 @@ dependencies = [
  "moka",
  "num-traits",
  "openssl",
+ "rand 0.9.0",
  "regex",
  "risingwave_common",
  "risingwave_common_estimate_size",

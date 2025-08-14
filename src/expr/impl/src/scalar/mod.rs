@@ -71,6 +71,7 @@ mod md5;
 mod overlay;
 mod position;
 mod proctime;
+mod random;
 pub mod regexp;
 mod repeat;
 mod replace;

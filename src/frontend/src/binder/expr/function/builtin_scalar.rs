@@ -735,6 +735,7 @@ impl Binder {
                 ("proctime", proctime()),
                 ("pg_sleep", raw_call(ExprType::PgSleep)),
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
+                ("random", raw_call(ExprType::Random)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
 
