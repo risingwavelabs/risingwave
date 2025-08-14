@@ -57,14 +57,7 @@ pub struct DispatchExecutor {
 
 struct DispatcherWithMetrics {
     dispatcher: DispatcherImpl,
-    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
-}
-
-impl DispatcherWithMetrics {
-    pub fn record_output_buffer_blocking_duration(&self, duration: Duration) {
-        let ns = duration.as_nanos() as u64;
-        self.actor_output_buffer_blocking_duration_ns.inc_by(ns);
-    }
+    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
 }
 
 impl Debug for DispatcherWithMetrics {
@@ -161,6 +154,30 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
+        macro_rules! await_with_metrics {
+            ($fut:expr, $metrics:expr, $interval:expr, $start_time:expr) => {{
+                // First tick completes immediately: https://docs.rs/tokio/1.47.1/tokio/time/fn.interval.html.
+                $interval.tick().await;
+
+                loop {
+                    tokio::select! {
+                        biased;
+                        res = &mut $fut => {
+                            res?;
+                            let ns = $start_time.elapsed().as_nanos() as u64;
+                            $metrics.inc_by(ns);
+                            break;
+                        }
+                        _ = $interval.tick() => {
+                            $start_time = Instant::now();
+                            $metrics.inc_by(Duration::from_secs(15).as_nanos() as u64);
+                        }
+                    };
+                }
+                StreamResult::Ok(())
+            }};
+        }
+
         let limit = self
             .local_barrier_manager
             .env
@@ -179,18 +196,19 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher
-                            .dispatch_barriers(
-                                barrier_batch
-                                    .iter()
-                                    .cloned()
-                                    .map(|b| b.into_dispatcher())
-                                    .collect(),
-                            )
-                            .await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
-                        StreamResult::Ok(())
+                        let mut start_time = Instant::now();
+                        let mut interval = tokio::time::interval(Duration::from_secs(15));
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
+                        let fut = dispatcher_output.dispatch_barriers(
+                            barrier_batch
+                                .iter()
+                                .cloned()
+                                .map(|b| b.into_dispatcher())
+                                .collect(),
+                        );
+                        tokio::pin!(fut);
+                        await_with_metrics!(fut, metrics, interval, start_time)
                     })
                     .await?;
                 self.post_mutate_dispatchers(&mutation)?;
@@ -199,10 +217,13 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher.dispatch_watermark(watermark.clone()).await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
-                        StreamResult::Ok(())
+                        let mut start_time = Instant::now();
+                        let mut interval = tokio::time::interval(Duration::from_secs(15));
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
+                        let fut = dispatcher_output.dispatch_watermark(watermark.clone());
+                        tokio::pin!(fut);
+                        await_with_metrics!(fut, metrics, interval, start_time)
                     })
                     .await?;
             }
@@ -210,10 +231,17 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher.dispatch_data(chunk.clone()).await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
-                        StreamResult::Ok(())
+                        let mut start_time = Instant::now();
+                        let mut interval = tokio::time::interval(Duration::from_secs(15));
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
+                        interval
+                            .tick()
+                            .now_or_never()
+                            .expect("interval tick should immediately resolve");
+                        let fut = dispatcher_output.dispatch_data(chunk.clone());
+                        tokio::pin!(fut);
+                        await_with_metrics!(fut, metrics, interval, start_time)
                     })
                     .await?;
 
@@ -633,6 +661,7 @@ pub enum DispatcherImpl {
 
 impl DispatcherImpl {
     pub fn new(outputs: Vec<Output>, dispatcher: &PbDispatcher) -> StreamResult<Self> {
+        tracing::debug!("outputs: {:?}", outputs);
         let output_mapping =
             DispatchOutputMapping::from_protobuf(dispatcher.output_mapping.clone().unwrap());
 
