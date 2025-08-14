@@ -100,23 +100,6 @@ pub enum TimestampHandling {
     GuessNumberUnit,
 }
 
-impl TimestampHandling {
-    pub const OPTION_KEY: &'static str = "timestamp.handling.mode";
-
-    pub fn from_options(
-        options: &std::collections::BTreeMap<String, String>,
-    ) -> Result<Option<Self>, InvalidOptionError> {
-        let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
-            Some("micro") => Self::Micro,
-            Some("milli") => Self::Milli,
-            Some("guess_number_unit") => Self::GuessNumberUnit,
-            Some(v) => bail_invalid_option_error!("unrecognized {} value {}", Self::OPTION_KEY, v),
-            None => return Ok(None),
-        };
-        Ok(Some(mode))
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum JsonValueHandling {
     AsValue,
@@ -523,14 +506,15 @@ impl JsonParseOptions {
                 DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => {
-                if let TimestampHandling::Milli = self.timestamp_handling {
-                    Timestamp::with_millis(value.as_i64().unwrap())
+                match self.timestamp_handling {
+                    // Only when user configures debezium.time.precision.mode = 'connect',
+                    // the Milli branch will be executed
+                    TimestampHandling::Milli => Timestamp::with_millis(value.as_i64().unwrap())
                         .map_err(|_| create_error())?
-                        .into()
-                } else {
-                    i64_to_timestamp(value.as_i64().unwrap())
+                        .into(),
+                    _ => i64_to_timestamp(value.as_i64().unwrap())
                         .map_err(|_| create_error())?
-                        .into()
+                        .into(),
                 }
             }
             // ---- Timestamptz -----
