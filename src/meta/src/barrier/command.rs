@@ -23,19 +23,23 @@ use risingwave_common::hash::ActorMapping;
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignment, build_pb_actor_cdc_table_snapshot_splits,
 };
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
+use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::{ActorInfo, PbActorInfo, PbUint32Vector};
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
@@ -680,7 +684,7 @@ impl CommandContext {
         resps: Vec<BarrierCompleteResponse>,
         backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
     ) {
-        let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
+        let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts, vector_index_adds) =
             collect_resp_info(resps);
 
         let new_table_fragment_infos =
@@ -753,6 +757,32 @@ impl CommandContext {
         info.new_table_fragment_infos
             .extend(new_table_fragment_infos);
         info.change_log_delta.extend(table_new_change_log);
+        for (table_id, vector_index_adds) in vector_index_adds {
+            info.vector_index_delta
+                .try_insert(table_id, VectorIndexDelta::Adds(vector_index_adds))
+                .expect("non-duplicate");
+        }
+        if let Some(Command::CreateStreamingJob { info: job_info, .. }) = &self.command {
+            for fragment in job_info.stream_job_fragments.fragments.values() {
+                visit_stream_node_cont(&fragment.nodes, |node| {
+                    match node.node_body.as_ref().unwrap() {
+                        NodeBody::VectorIndexWrite(vector_index_write) => {
+                            let index_table = vector_index_write.table.as_ref().unwrap();
+                            info.vector_index_delta
+                                .try_insert(
+                                    index_table.id.into(),
+                                    VectorIndexDelta::Init(PbVectorIndexInit {
+                                        info: Some(index_table.vector_index_info.unwrap()),
+                                    }),
+                                )
+                                .expect("non-duplicate");
+                            false
+                        }
+                        _ => true,
+                    }
+                })
+            }
+        }
     }
 }
 

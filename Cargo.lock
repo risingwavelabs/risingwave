@@ -5359,9 +5359,9 @@ checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
 
 [[package]]
 name = "fancy-regex"
-version = "0.14.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+checksum = "bf04c5ec15464ace8355a7b440a33aece288993475556d461154d7a62ad9947c"
 dependencies = [
  "bit-set",
  "regex-automata 0.4.8",
@@ -6943,7 +6943,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=f87b384f1224783892ca17b74569df99263e7d17#f87b384f1224783892ca17b74569df99263e7d17"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=287a7527531fbd39da2ec44f57f339c1a05f3a4a#287a7527531fbd39da2ec44f57f339c1a05f3a4a"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -12184,6 +12184,7 @@ dependencies = [
  "moka",
  "num-traits",
  "openssl",
+ "rand 0.9.0",
  "regex",
  "risingwave_common",
  "risingwave_common_estimate_size",

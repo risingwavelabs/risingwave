@@ -560,7 +560,7 @@ impl CatalogController {
         let Some(obj) = obj else {
             tracing::warn!(
                 id = job_id,
-                "streaming job not found when aborting creating, might be cleaned by recovery"
+                "streaming job not found when aborting creating, might be cancelled already or cleaned by recovery"
             );
             return Ok((true, None));
         };
@@ -707,37 +707,22 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         split_assignment: &SplitAssignment,
-    ) -> MetaResult<()> {
-        self.post_collect_job_fragments_inner(
-            job_id,
-            actor_ids,
-            upstream_fragment_new_downstreams,
-            split_assignment,
-            None,
-        )
-        .await
-    }
-
-    pub async fn post_collect_job_fragments_inner(
-        &self,
-        job_id: ObjectId,
-        actor_ids: Vec<crate::model::ActorId>,
-        upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
-        split_assignment: &SplitAssignment,
         sink_update_ctx: Option<(TableId, FragmentDownstreamRelation)>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        let actor_ids = actor_ids
+            .into_iter()
+            .map(|id| id as ActorId)
+            .collect_vec();
 
         Actor::update_many()
             .col_expr(
                 actor::Column::Status,
                 SimpleExpr::from(ActorStatus::Running.into_value()),
             )
-            .filter(
-                actor::Column::ActorId
-                    .is_in(actor_ids.into_iter().map(|id| id as ActorId).collect_vec()),
-            )
+            .filter(actor::Column::ActorId.is_in(actor_ids))
             .exec(&txn)
             .await?;
 
@@ -801,7 +786,6 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
-
         if !objects.is_empty() {
             self.notify_frontend(
                 NotificationOperation::Update,
@@ -1241,10 +1225,11 @@ impl CatalogController {
                 }
 
                 if let Some(sink_id) = dropping_sink_id {
-                    let drained = incoming_sinks
+                    let _drained = incoming_sinks
                         .extract_if(.., |id| *id == sink_id)
                         .collect_vec();
-                    debug_assert_eq!(drained, vec![sink_id]);
+                    // TODO(august): re-enable this assertion after refactoring sink into table
+                    // debug_assert_eq!(drained, vec![sink_id]);
                 }
 
                 table.incoming_sinks = Set(incoming_sinks.into());

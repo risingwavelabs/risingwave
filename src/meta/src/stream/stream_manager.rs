@@ -181,6 +181,11 @@ impl CreatingStreamingJobInfo {
         }
         (receivers, recovered_job_ids)
     }
+
+    async fn check_job_exists(&self, job_id: TableId) -> bool {
+        let jobs = self.streaming_jobs.lock().await;
+        jobs.contains_key(&job_id)
+    }
 }
 
 type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
@@ -617,6 +622,23 @@ impl GlobalStreamManager {
         fragment_ids: HashSet<FragmentId>,
         removed_upstream_fragments: HashMap<FragmentId, Vec<FragmentId>>,
     ) {
+        // TODO(august): This is a workaround for canceling SITT via drop, remove it after refactoring SITT.
+        for &job_id in &streaming_job_ids {
+            if self
+                .creating_job_info
+                .check_job_exists(TableId::new(job_id as _))
+                .await
+            {
+                tracing::info!(
+                    ?job_id,
+                    "streaming job is creating, cancel it with drop directly"
+                );
+                self.metadata_manager
+                    .notify_cancelled(database_id, job_id)
+                    .await;
+            }
+        }
+
         if !removed_actors.is_empty()
             || !streaming_job_ids.is_empty()
             || !state_table_ids.is_empty()

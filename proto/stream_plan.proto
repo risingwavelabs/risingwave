@@ -952,6 +952,10 @@ message MaterializedExprsNode {
   optional uint32 state_clean_col_idx = 3;
 }
 
+message VectorIndexWriteNode {
+  catalog.Table table = 1;
+}
+
 // This is just for creating. Upstreams may be added and removed dynamically at runtime.
 message UpstreamSinkUnionNode {
   repeated UpstreamSinkInfo init_upstreams = 1;
@@ -1008,7 +1012,8 @@ message StreamNode {
     AsOfJoinNode as_of_join = 147;
     SyncLogStoreNode sync_log_store = 148;
     MaterializedExprsNode materialized_exprs = 149;
-    UpstreamSinkUnionNode upstream_sink_union = 150;
+    VectorIndexWriteNode vector_index_write = 150;
+    UpstreamSinkUnionNode upstream_sink_union = 151;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

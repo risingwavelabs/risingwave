@@ -289,10 +289,11 @@ impl CommandContext {
                 } else {
                     None
                 };
+
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
-                    .post_collect_job_fragments_inner(
+                    .post_collect_job_fragments(
                         stream_job_fragments.stream_job_id().table_id as _,
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
@@ -343,6 +344,7 @@ impl CommandContext {
                         new_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
+                        None,
                     )
                     .await?;
 
@@ -356,6 +358,7 @@ impl CommandContext {
                                 sink.actor_status.keys().cloned().collect(),
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
                                 &Default::default(), // no split assignment
+                                None, // no replace plan
                             )
                             .await?;
                     }

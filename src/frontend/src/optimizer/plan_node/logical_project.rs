@@ -295,7 +295,7 @@ impl ToStream for LogicalProject {
                     new_input.clone(),
                     impure_exprs,
                     impure_field_names,
-                )
+                )?
                 .into();
 
                 let input_len = new_input.schema().len();
