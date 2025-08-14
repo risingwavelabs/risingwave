@@ -540,9 +540,7 @@ pub fn start(
 
     // Returns a very small future that only awaits `fut`
     Box::pin(async move {
-        if let Err(e) = fut.await {
-            tracing::error!("rpc_serve failed: {e:?}");
-        }
+        fut.await.unwrap();
     })
 }
 
