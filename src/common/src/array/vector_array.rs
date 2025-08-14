@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use super::{Array, ArrayBuilder};
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::types::{DataType, Scalar, ScalarRef, ToText};
-use crate::vector::{decode_vector_payload, encode_vector_payload};
+use crate::vector::{VectorInner, decode_vector_payload, encode_vector_payload};
 
 pub type VectorItemType = F32;
 pub type VectorDistanceType = f64;
@@ -182,7 +182,7 @@ impl Array for VectorArray {
 
     fn to_protobuf(&self) -> PbArray {
         let mut payload = Vec::with_capacity(self.inner.len() * size_of::<VectorItemType>());
-        encode_vector_payload(F32::inner_slice(self.inner.as_slice()), &mut payload);
+        encode_vector_payload(self.inner.as_slice(), &mut payload);
         PbArray {
             array_type: PbArrayType::Vector as _,
             null_bitmap: Some(self.bitmap.to_protobuf()),
@@ -251,7 +251,7 @@ impl VectorArray {
         Ok(VectorArray {
             bitmap,
             offsets,
-            inner: F32::from_inner_vec(payload),
+            inner: payload,
             elem_size,
         }
         .into())
@@ -266,10 +266,7 @@ impl VectorArray {
     }
 }
 
-#[derive(Clone, EstimateSize)]
-pub struct VectorVal {
-    pub(crate) inner: Box<[VectorItemType]>,
-}
+pub type VectorVal = VectorInner<Box<[VectorItemType]>>;
 
 impl Debug for VectorVal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -277,28 +274,11 @@ impl Debug for VectorVal {
     }
 }
 
-impl PartialEq for VectorVal {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
-    }
-}
-impl Eq for VectorVal {}
-impl PartialOrd for VectorVal {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for VectorVal {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.inner.cmp(&other.inner)
-    }
-}
-
 impl Scalar for VectorVal {
     type ScalarRefType<'a> = VectorRef<'a>;
 
     fn as_scalar_ref(&self) -> VectorRef<'_> {
-        VectorRef { inner: &self.inner }
+        VectorInner { inner: &self.inner }
     }
 }
 
@@ -340,6 +320,10 @@ impl VectorVal {
     pub fn test_type() -> DataType {
         DataType::Vector(Self::TEST_VECTOR_DIMENSION)
     }
+
+    pub fn to_ref(&self) -> VectorRef<'_> {
+        VectorRef { inner: &self.inner }
+    }
 }
 
 /// A `f32` without nan/inf/-inf. Added as intermediate type to `try_collect` `f32` values into a `VectorVal`.
@@ -376,37 +360,17 @@ impl FromIterator<Finite32> for VectorVal {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct VectorRef<'a> {
-    inner: &'a [VectorItemType],
-}
+pub type VectorRef<'a> = VectorInner<&'a [VectorItemType]>;
 
 impl Debug for VectorRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.write_with_type(&DataType::Vector(self.into_slice().len()), f)
-    }
-}
-
-impl PartialEq for VectorRef<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
-    }
-}
-impl Eq for VectorRef<'_> {}
-impl PartialOrd for VectorRef<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for VectorRef<'_> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.inner.cmp(other.inner)
+        self.write_with_type(&DataType::Vector(self.dimension()), f)
     }
 }
 
 impl ToText for VectorRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        self.write_with_type(&DataType::Vector(self.into_slice().len()), f)
+        self.write_with_type(&DataType::Vector(self.dimension()), f)
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, _ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -436,13 +400,8 @@ impl<'a> ScalarRef<'a> for VectorRef<'a> {
 }
 
 impl<'a> VectorRef<'a> {
-    /// Get the slice of floats in this vector.
-    pub fn into_slice(self) -> &'a [f32] {
-        F32::inner_slice(self.inner)
-    }
-
-    pub fn inner(&self) -> &[VectorItemType] {
-        self.inner
+    pub fn from_slice(inner: &'a [VectorItemType]) -> Self {
+        Self { inner }
     }
 
     pub fn memcmp_serialize(

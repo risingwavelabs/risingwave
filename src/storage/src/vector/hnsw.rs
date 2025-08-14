@@ -22,8 +22,7 @@ use rand::distr::uniform::{UniformFloat, UniformSampler};
 use crate::hummock::HummockResult;
 use crate::vector::utils::{BoundedNearest, MinDistanceHeap};
 use crate::vector::{
-    MeasureDistance, MeasureDistanceBuilder, OnNearestItem, VectorDistance, VectorInner,
-    VectorItem, VectorRef,
+    MeasureDistance, MeasureDistanceBuilder, OnNearestItem, VectorDistance, VectorItem, VectorRef,
 };
 
 pub struct HnswBuilderOptions {
@@ -71,16 +70,16 @@ impl VectorHnswNode {
 }
 
 struct VectorStoreImpl {
-    vector_len: usize,
+    dimension: usize,
     vector_payload: Vec<VectorItem>,
     info_payload: Vec<u8>,
     info_offsets: Vec<usize>,
 }
 
 impl VectorStoreImpl {
-    fn new(vector_len: usize) -> Self {
+    fn new(dimension: usize) -> Self {
         Self {
-            vector_len,
+            dimension,
             vector_payload: vec![],
             info_payload: Default::default(),
             info_offsets: vec![],
@@ -93,9 +92,9 @@ impl VectorStoreImpl {
 
     fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
         assert!(idx < self.info_offsets.len());
-        let start = idx * self.vector_len;
-        let end = start + self.vector_len;
-        VectorInner(&self.vector_payload[start..end])
+        let start = idx * self.dimension;
+        let end = start + self.dimension;
+        VectorRef::from_slice(&self.vector_payload[start..end])
     }
 
     fn info(&self, idx: usize) -> &[u8] {
@@ -109,9 +108,9 @@ impl VectorStoreImpl {
     }
 
     fn add(&mut self, vec: VectorRef<'_>, info: &[u8]) {
-        assert_eq!(vec.0.len(), self.vector_len);
+        assert_eq!(vec.dimension(), self.dimension);
 
-        self.vector_payload.extend_from_slice(vec.0);
+        self.vector_payload.extend_from_slice(vec.as_slice());
         let offset = self.info_payload.len();
         self.info_payload.extend_from_slice(info);
         self.info_offsets.push(offset);
@@ -252,11 +251,11 @@ impl VecSet {
 }
 
 impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphBuilder, M, R> {
-    pub fn new(vector_len: usize, rng: R, options: HnswBuilderOptions) -> Self {
+    pub fn new(dimension: usize, rng: R, options: HnswBuilderOptions) -> Self {
         Self {
             options,
             graph: None,
-            vector_store: VectorStoreImpl::new(vector_len),
+            vector_store: VectorStoreImpl::new(dimension),
             rng,
             _measure: Default::default(),
         }
@@ -268,7 +267,7 @@ impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphBu
         let levels = faiss_hnsw.levels_raw();
         let Some(graph) = &self.graph else {
             assert_eq!(levels.len(), 0);
-            return Self::new(self.vector_store.vector_len, self.rng, self.options);
+            return Self::new(self.vector_store.dimension, self.rng, self.options);
         };
         assert_eq!(levels.len(), graph.nodes.len());
         let mut nodes = Vec::with_capacity(graph.nodes.len());
@@ -554,9 +553,10 @@ mod tests {
     use itertools::Itertools;
     use rand::SeedableRng;
     use rand::prelude::StdRng;
+    use risingwave_common::types::F32;
+    use risingwave_common::vector::distance::InnerProductDistance;
 
     use crate::vector::NearestBuilder;
-    use crate::vector::distance::InnerProductDistance;
     use crate::vector::hnsw::{HnswBuilder, HnswBuilderOptions, nearest};
     use crate::vector::test_utils::{gen_info, gen_vector};
 
@@ -612,7 +612,7 @@ mod tests {
         .unwrap();
 
         faiss_hnsw
-            .add(&hnsw_builder.vector_store.vector_payload)
+            .add(F32::inner_slice(&hnsw_builder.vector_store.vector_payload))
             .unwrap();
         // for (vec, info) in &input {
         //     faiss_hnsw.add(&vec.0).unwrap();
@@ -662,7 +662,7 @@ mod tests {
             .map(|(i, query)| {
                 let start_time = Instant::now();
                 let actual = faiss_hnsw
-                    .assign(&query.0, TOP_N)
+                    .assign(query.as_raw_slice(), TOP_N)
                     .unwrap()
                     .labels
                     .into_iter()
