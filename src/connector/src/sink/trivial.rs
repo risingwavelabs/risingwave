@@ -27,8 +27,11 @@ pub const BLACKHOLE_SINK: &str = "blackhole";
 pub const TABLE_SINK: &str = "table";
 
 pub trait TrivialSinkType: Send + 'static {
-    /// Whether to enable debug log for every item to sink.
-    const DEBUG_LOG: bool;
+    /// Whether to enable `trace` log for every item to sink.
+    ///
+    /// Note that logs (tracing events) with `trace` level will be optimized out in release build
+    /// thus cannot be enabled at all. This is for debugging purpose only.
+    const TRACE_LOG: bool;
     const SINK_NAME: &'static str;
 }
 
@@ -36,8 +39,8 @@ pub trait TrivialSinkType: Send + 'static {
 pub struct BlackHole;
 
 impl TrivialSinkType for BlackHole {
-    const DEBUG_LOG: bool = true;
     const SINK_NAME: &'static str = BLACKHOLE_SINK;
+    const TRACE_LOG: bool = true;
 }
 
 pub type BlackHoleSink = TrivialSink<BlackHole>;
@@ -46,8 +49,8 @@ pub type BlackHoleSink = TrivialSink<BlackHole>;
 pub struct Table;
 
 impl TrivialSinkType for Table {
-    const DEBUG_LOG: bool = false;
     const SINK_NAME: &'static str = TABLE_SINK;
+    const TRACE_LOG: bool = false;
 }
 
 pub type TableSink = TrivialSink<Table>;
@@ -113,8 +116,8 @@ impl<T: TrivialSinkType> LogSinker for TrivialSink<T> {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
                 LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
-                    if T::DEBUG_LOG {
-                        tracing::debug!(
+                    if T::TRACE_LOG {
+                        tracing::trace!(
                             target: "events::sink::message::chunk",
                             sink_id = %self.param.sink_id,
                             sink_name = self.param.sink_name,
@@ -127,8 +130,8 @@ impl<T: TrivialSinkType> LogSinker for TrivialSink<T> {
                     log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
                 }
                 LogStoreReadItem::Barrier { .. } => {
-                    if T::DEBUG_LOG {
-                        tracing::debug!(
+                    if T::TRACE_LOG {
+                        tracing::trace!(
                             target: "events::sink::message::barrier",
                             sink_id = %self.param.sink_id,
                             sink_name = self.param.sink_name,
