@@ -253,7 +253,13 @@ pub fn start(
             .unwrap();
         tracing::info!("advertise addr is {}", advertise_addr);
 
-        compute_node_serve(listen_addr, advertise_addr, opts, shutdown).await;
+        Box::pin(compute_node_serve(
+            listen_addr,
+            advertise_addr,
+            opts,
+            shutdown,
+        ))
+        .await;
     })
 }
 
