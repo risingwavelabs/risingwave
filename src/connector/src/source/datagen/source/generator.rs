@@ -278,6 +278,7 @@ mod tests {
                     use_schema_registry: false,
                     timestamptz_handling: None,
                     timestamp_handling: None,
+                    time_handling: None,
                 }),
             },
             data_types,

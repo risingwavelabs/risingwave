@@ -14,7 +14,7 @@
 
 use risingwave_common::bail;
 
-use super::unified::json::{TimestampHandling, TimestamptzHandling};
+use super::unified::json::{TimeHandling, TimestampHandling, TimestamptzHandling};
 use super::unified::kv_event::KvEvent;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
@@ -72,6 +72,7 @@ impl PlainParser {
             DebeziumJsonAccessBuilder::new(
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
+                TimeHandling::Micro,
             )?,
         ));
 

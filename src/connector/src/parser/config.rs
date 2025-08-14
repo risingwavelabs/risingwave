@@ -20,7 +20,7 @@ use risingwave_connector_codec::decoder::avro::MapHandling;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo};
 
 use super::utils::get_kafka_topic;
-use super::{DebeziumProps, TimestampHandling, TimestamptzHandling};
+use super::{DebeziumProps, TimeHandling, TimestampHandling, TimestamptzHandling};
 use crate::WithOptionsSecResolved;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
@@ -93,6 +93,7 @@ impl SpecificParserConfig {
             use_schema_registry: false,
             timestamp_handling: None,
             timestamptz_handling: None,
+            time_handling: None,
         }),
         protocol_config: ProtocolProperties::Plain,
     };
@@ -271,6 +272,7 @@ impl SpecificParserConfig {
                 timestamptz_handling: TimestamptzHandling::from_options(
                     &format_encode_options_with_secret,
                 )?,
+                time_handling: TimeHandling::from_options(&format_encode_options_with_secret)?,
             }),
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
                 let props = MongoProperties::from(&format_encode_options_with_secret);
@@ -354,6 +356,7 @@ pub struct JsonProperties {
     pub use_schema_registry: bool,
     pub timestamp_handling: Option<TimestampHandling>,
     pub timestamptz_handling: Option<TimestamptzHandling>,
+    pub time_handling: Option<TimeHandling>,
 }
 
 #[derive(Debug, Default, Clone)]

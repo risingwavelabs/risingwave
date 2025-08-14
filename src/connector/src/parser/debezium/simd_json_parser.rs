@@ -22,7 +22,7 @@ use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::parser::unified::json::{
-    JsonAccess, JsonParseOptions, TimestampHandling, TimestamptzHandling,
+    JsonAccess, JsonParseOptions, TimeHandling, TimestampHandling, TimestamptzHandling,
 };
 use crate::parser::{AccessBuilder, MongoProperties};
 
@@ -36,12 +36,14 @@ impl DebeziumJsonAccessBuilder {
     pub fn new(
         timestamptz_handling: TimestamptzHandling,
         timestamp_handling: TimestampHandling,
+        time_handling: TimeHandling,
     ) -> ConnectorResult<Self> {
         Ok(Self {
             value: None,
             json_parse_options: JsonParseOptions::new_for_debezium(
                 timestamptz_handling,
                 timestamp_handling,
+                time_handling,
             ),
         })
     }
@@ -93,6 +95,7 @@ impl DebeziumMongoJsonAccessBuilder {
             json_parse_options: JsonParseOptions::new_for_debezium(
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
+                TimeHandling::Micro,
             ),
             strong_schema: props.strong_schema,
         })
@@ -161,6 +164,7 @@ mod tests {
                 use_schema_registry: false,
                 timestamptz_handling: None,
                 timestamp_handling: None,
+                time_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };

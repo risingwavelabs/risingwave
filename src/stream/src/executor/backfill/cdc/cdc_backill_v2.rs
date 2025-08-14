@@ -23,7 +23,7 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
-use risingwave_connector::parser::{TimestampHandling, TimestamptzHandling};
+use risingwave_connector::parser::{TimeHandling, TimestampHandling, TimestamptzHandling};
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::ExternalTableReaderImpl;
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
@@ -144,11 +144,18 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             .map(|v| v == "connect")
             .unwrap_or(false)
             .then_some(TimestamptzHandling::Milli);
+        let time_handling: Option<TimeHandling> = self
+            .properties
+            .get("debezium.time.precision.mode")
+            .map(|v| v == "connect")
+            .unwrap_or(false)
+            .then_some(TimeHandling::Milli);
         let mut upstream = transform_upstream(
             upstream,
             self.output_columns.clone(),
             timestamp_handling,
             timestamptz_handling,
+            time_handling,
         )
         .boxed();
         let mut next_reset_barrier = Some(first_barrier);
