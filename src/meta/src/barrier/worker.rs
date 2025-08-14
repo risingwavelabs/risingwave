@@ -240,12 +240,14 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
 
-            self.recovery(paused, RecoveryReason::Bootstrap)
-                .instrument(span)
-                .await;
+            Box::pin(
+                self.recovery(paused, RecoveryReason::Bootstrap)
+                    .instrument(span),
+            )
+            .await;
         }
 
-        self.run_inner(shutdown_rx).await
+        Box::pin(self.run_inner(shutdown_rx)).await
     }
 }
 
