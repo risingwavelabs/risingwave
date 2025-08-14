@@ -734,7 +734,7 @@ mod tests {
     async fn test_recovery() {
         for count in (0..20).step_by(5) {
             #[expect(deprecated)]
-            Box:pin(test_recovery_inner(
+            Box::pin(test_recovery_inner(
                 count * TEST_DATA_SIZE,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
             ))
