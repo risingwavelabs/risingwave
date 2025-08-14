@@ -15,9 +15,9 @@
 use std::simd::Simd;
 use std::simd::num::SimdFloat;
 
-use crate::vector::{
-    MeasureDistance, MeasureDistanceBuilder, VectorDistance, VectorItem, VectorRef,
-};
+use crate::array::VectorDistanceType as VectorDistance;
+use crate::types::{F32, VectorRef};
+use crate::vector::{MeasureDistance, MeasureDistanceBuilder};
 
 #[macro_export]
 macro_rules! for_all_distance_measurement {
@@ -50,14 +50,14 @@ macro_rules! define_measure {
 define_measure!();
 
 #[macro_export]
-macro_rules! dispatch_measurement {
+macro_rules! dispatch_distance_measurement {
     ({
         $(($distance_name:ident, $distance_type:ty),)+
     },
     $measurement:expr, $type_name:ident, $body:expr) => {
         match $measurement {
             $(
-                DistanceMeasurement::$distance_name => {
+                $crate::vector::distance::DistanceMeasurement::$distance_name => {
                     type $type_name = $distance_type;
                     $body
                 }
@@ -65,7 +65,7 @@ macro_rules! dispatch_measurement {
         }
     };
     ($measurement:expr, $type_name:ident, $body:expr) => {
-        $crate::for_all_distance_measurement! {dispatch_measurement, $measurement, $type_name, $body}
+        $crate::for_all_distance_measurement! {dispatch_distance_measurement, $measurement, $type_name, $body}
     };
 }
 
@@ -83,18 +83,23 @@ impl MeasureDistanceBuilder for L1Distance {
 
 #[cfg_attr(not(test), expect(dead_code))]
 fn l1_trivial(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
-    let len = first.0.len();
-    assert_eq!(len, second.0.len());
+    let first = first.as_slice();
+    let second = second.as_slice();
+    let len = first.len();
+    assert_eq!(len, second.len());
     (0..len)
         .map(|i| {
-            let diff = first.0[i] - second.0[i];
-            diff.abs()
+            let diff = first[i].0 - second[i].0;
+            diff.abs() as VectorDistance
         })
         .sum()
 }
 
-fn l1_faiss(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
-    faiss::utils::fvec_l1(first.0, second.0)
+pub fn l1_faiss(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
+    faiss::utils::fvec_l1(
+        F32::inner_slice(first.as_slice()),
+        F32::inner_slice(second.as_slice()),
+    ) as VectorDistance
 }
 
 impl<'a> MeasureDistance for L1DistanceMeasure<'a> {
@@ -121,13 +126,20 @@ impl MeasureDistanceBuilder for L2Distance {
 
 #[cfg_attr(not(test), expect(dead_code))]
 fn l2_trivial(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
-    let len = first.0.len();
-    assert_eq!(len, second.0.len());
-    (0..len).map(|i| (first.0[i] - second.0[i]).powi(2)).sum()
+    let first = first.as_slice();
+    let second = second.as_slice();
+    let len = first.len();
+    assert_eq!(len, second.len());
+    (0..len)
+        .map(|i| ((first[i].0 - second[i].0) as VectorDistance).powi(2))
+        .sum()
 }
 
-fn l2_faiss(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
-    faiss::utils::fvec_l2sqr(first.0, second.0)
+pub fn l2_faiss(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
+    faiss::utils::fvec_l2sqr(
+        F32::inner_slice(first.as_slice()),
+        F32::inner_slice(second.as_slice()),
+    ) as VectorDistance
 }
 
 impl<'a> MeasureDistance for L2DistanceMeasure<'a> {
@@ -139,7 +151,7 @@ impl<'a> MeasureDistance for L2DistanceMeasure<'a> {
 pub struct CosineDistance;
 pub struct CosineDistanceMeasure<'a> {
     target: VectorRef<'a>,
-    magnitude: VectorItem,
+    magnitude: f32,
 }
 
 impl MeasureDistanceBuilder for CosineDistance {
@@ -153,14 +165,14 @@ impl MeasureDistanceBuilder for CosineDistance {
 
 impl<'a> MeasureDistance for CosineDistanceMeasure<'a> {
     fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
-        let len = self.target.0.len();
-        assert_eq!(len, other.0.len());
+        let len = self.target.as_slice().len();
+        assert_eq!(len, other.as_slice().len());
         let magnitude_mul = other.magnitude() * self.magnitude;
         if magnitude_mul < f32::MIN_POSITIVE {
             // If either vector is zero, the distance is the further 1.1
             return 1.1;
         }
-        1.0 - inner_product_faiss(self.target, other) / magnitude_mul
+        1.0 - inner_product_faiss(self.target, other) / magnitude_mul as VectorDistance
     }
 }
 
@@ -177,35 +189,42 @@ impl MeasureDistanceBuilder for InnerProductDistance {
 
 #[cfg_attr(not(test), expect(dead_code))]
 fn inner_product_trivial(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
-    let len = first.0.len();
-    assert_eq!(len, second.0.len());
+    let first = first.as_slice();
+    let second = second.as_slice();
+    let len = first.len();
+    assert_eq!(len, second.len());
     (0..len)
-        .map(|i| first.0[i] * second.0[i])
-        .sum::<VectorItem>()
+        .map(|i| (first[i].0 * second[i].0) as VectorDistance)
+        .sum::<VectorDistance>()
 }
 
 #[cfg_attr(not(test), expect(dead_code))]
 fn inner_product_simd(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
-    let len = first.0.len();
-    assert_eq!(len, second.0.len());
+    let first = F32::inner_slice(first.as_slice());
+    let second = F32::inner_slice(second.as_slice());
+    let len = first.len();
+    assert_eq!(len, second.len());
     let mut sum = 0.0;
     let mut start = 0;
     let mut end = start + 32;
     while end <= len {
-        let this = Simd::<VectorItem, 32>::from_slice(&first.0[start..end]);
-        let target = Simd::<VectorItem, 32>::from_slice(&second.0[start..end]);
-        sum += (this * target).reduce_sum();
+        let this = Simd::<f32, 32>::from_slice(&first[start..end]);
+        let target = Simd::<f32, 32>::from_slice(&second[start..end]);
+        sum += (this * target).reduce_sum() as VectorDistance;
         start += 32;
         end += 32;
     }
     (start..len)
-        .map(|i| first.0[i] * second.0[i])
+        .map(|i| (first[i] * second[i]) as VectorDistance)
         .sum::<VectorDistance>()
         + sum
 }
 
-fn inner_product_faiss(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
-    faiss::utils::fvec_inner_product(first.0, second.0)
+pub fn inner_product_faiss(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
+    faiss::utils::fvec_inner_product(
+        F32::inner_slice(first.as_slice()),
+        F32::inner_slice(second.as_slice()),
+    ) as VectorDistance
 }
 
 impl<'a> MeasureDistance for InnerProductDistanceMeasure<'a> {
@@ -216,12 +235,11 @@ impl<'a> MeasureDistance for InnerProductDistanceMeasure<'a> {
 
 #[cfg(test)]
 mod tests {
-
     use expect_test::expect;
 
     use super::*;
-    use crate::vector::test_utils::gen_vector;
-    use crate::vector::{MeasureDistanceBuilder, VectorInner};
+    use crate::array::VectorVal;
+    use crate::test_utils::rand_array::gen_vector_for_test;
 
     const VECTOR_LEN: usize = 10;
 
@@ -257,42 +275,48 @@ mod tests {
 
     #[test]
     fn test_distance() {
-        let first_vec = [0.238474, 0.578234];
-        let second_vec = [0.9327183, 0.387495];
+        let first_vec = [0.238474_f32, 0.578234];
+        let second_vec = [0.9327183_f32, 0.387495];
         let [v1_1, v1_2] = first_vec;
         let [v2_1, v2_2] = second_vec;
-        let first_vec = VectorInner(&first_vec[..]);
-        let second_vec = VectorInner(&second_vec[..]);
+        let first_vec = VectorVal {
+            inner: first_vec.map(Into::into).to_vec().into_boxed_slice(),
+        };
+        let second_vec = VectorVal {
+            inner: second_vec.map(Into::into).to_vec().into_boxed_slice(),
+        };
+        let first_vec = first_vec.to_ref();
+        let second_vec = second_vec.to_ref();
         assert_eq_float!(
-            L1Distance::distance(first_vec, second_vec),
+            L1Distance::distance(first_vec, second_vec) as _,
             (v1_1 - v2_1).abs() + (v1_2 - v2_2).abs()
         );
         assert_eq_float!(
-            L2Distance::distance(first_vec, second_vec),
+            L2Distance::distance(first_vec, second_vec) as _,
             (v1_1 - v2_1).powi(2) + (v1_2 - v2_2).powi(2)
         );
         assert_eq_float!(
-            CosineDistance::distance(first_vec, second_vec),
+            CosineDistance::distance(first_vec, second_vec) as _,
             1.0 - (v1_1 * v2_1 + v1_2 * v2_2)
                 / ((v1_1.powi(2) + v1_2.powi(2)).sqrt() * (v2_1.powi(2) + v2_2.powi(2)).sqrt())
         );
         assert_eq_float!(
-            InnerProductDistance::distance(first_vec, second_vec),
+            InnerProductDistance::distance(first_vec, second_vec) as _,
             -(v1_1 * v2_1 + v1_2 * v2_2)
         );
         {
-            let v1 = gen_vector(128);
-            let v2 = gen_vector(128);
-            let trivial = inner_product_trivial(v1.to_ref(), v2.to_ref());
-            assert_eq_float!(inner_product_simd(v1.to_ref(), v2.to_ref()), trivial);
-            assert_eq_float!(inner_product_faiss(v1.to_ref(), v2.to_ref()), trivial);
+            let v1 = gen_vector_for_test(128);
+            let v2 = gen_vector_for_test(128);
+            let trivial = inner_product_trivial(v1.to_ref(), v2.to_ref()) as _;
+            assert_eq_float!(inner_product_simd(v1.to_ref(), v2.to_ref()) as _, trivial);
+            assert_eq_float!(inner_product_faiss(v1.to_ref(), v2.to_ref()) as _, trivial);
             assert_eq_float!(
-                l2_trivial(v1.to_ref(), v2.to_ref()),
-                l2_faiss(v1.to_ref(), v2.to_ref())
+                l2_trivial(v1.to_ref(), v2.to_ref()) as _,
+                l2_faiss(v1.to_ref(), v2.to_ref()) as _
             );
             assert_eq_float!(
-                l1_trivial(v1.to_ref(), v2.to_ref()),
-                l1_faiss(v1.to_ref(), v2.to_ref())
+                l1_trivial(v1.to_ref(), v2.to_ref()) as _,
+                l1_faiss(v1.to_ref(), v2.to_ref()) as _
             );
         }
     }
@@ -303,29 +327,29 @@ mod tests {
             3.6808228
         "#]]
         .assert_debug_eq(&L1Distance::distance(
-            VectorInner(&VEC1),
-            VectorInner(&VEC2),
+            VectorRef::from_slice(&VEC1.map(Into::into)[..]),
+            VectorRef::from_slice(&VEC2.map(Into::into)[..]),
         ));
         expect![[r#"
             2.054677
         "#]]
         .assert_debug_eq(&L2Distance::distance(
-            VectorInner(&VEC1),
-            VectorInner(&VEC2),
+            VectorRef::from_slice(&VEC1.map(Into::into)[..]),
+            VectorRef::from_slice(&VEC2.map(Into::into)[..]),
         ));
         expect![[r#"
             0.22848952
         "#]]
         .assert_debug_eq(&CosineDistance::distance(
-            VectorInner(&VEC1),
-            VectorInner(&VEC2),
+            VectorRef::from_slice(&VEC1.map(Into::into)[..]),
+            VectorRef::from_slice(&VEC2.map(Into::into)[..]),
         ));
         expect![[r#"
             -3.2870955
         "#]]
         .assert_debug_eq(&InnerProductDistance::distance(
-            VectorInner(&VEC1),
-            VectorInner(&VEC2),
+            VectorRef::from_slice(&VEC1.map(Into::into)[..]),
+            VectorRef::from_slice(&VEC2.map(Into::into)[..]),
         ));
     }
 }

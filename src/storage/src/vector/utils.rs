@@ -199,12 +199,15 @@ mod tests {
 
     use itertools::Itertools;
     use rand::{Rng, rng};
+    use risingwave_common::array::VectorDistanceType;
 
     use crate::vector::test_utils::{gen_info, top_n};
     use crate::vector::utils::BoundedNearest;
 
     fn test_inner(count: usize, n: usize, limit: Option<usize>) {
-        let input = (0..count).map(|i| (rng().random::<f32>(), i)).collect_vec();
+        let input = (0..count)
+            .map(|i| (rng().random::<VectorDistanceType>(), i))
+            .collect_vec();
         let mut nearest = BoundedNearest::new(n);
         for &(distance, item) in &input {
             nearest.insert(distance, || item);

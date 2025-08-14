@@ -16,8 +16,10 @@ use std::collections::HashSet;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::array::VectorDistanceType;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
+use risingwave_common::vector::distance::{DistanceMeasurement, InnerProductDistance};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::{PbFlatIndexConfig, PbVectorIndexInfo, vector_index_info};
 use risingwave_pb::common::PbDistanceType;
@@ -28,9 +30,8 @@ use risingwave_storage::store::{
     NewReadSnapshotOptions, NewVectorWriterOptions, SealCurrentEpochOptions, StateStoreReadVector,
     StateStoreWriteEpochControl, StateStoreWriteVector, VectorNearestOptions,
 };
-use risingwave_storage::vector::distance::InnerProductDistance;
 use risingwave_storage::vector::test_utils::{gen_info, gen_vector};
-use risingwave_storage::vector::{DistanceMeasurement, NearestBuilder, Vector, VectorRef};
+use risingwave_storage::vector::{NearestBuilder, Vector, VectorRef};
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::prepare_hummock_test_env;
@@ -128,7 +129,11 @@ async fn test_flat_vector() {
 
     let query = gen_vector(VECTOR_DIM);
     let top_n = 10;
-    fn on_nearest_item(_vec: VectorRef<'_>, distance: f32, info: &[u8]) -> (f32, Bytes) {
+    fn on_nearest_item(
+        _vec: VectorRef<'_>,
+        distance: VectorDistanceType,
+        info: &[u8],
+    ) -> (VectorDistanceType, Bytes) {
         (distance, Bytes::copy_from_slice(info))
     }
     let check_query = async |epoch, vectors: &[&Vec<(Vector, Bytes)>]| {
