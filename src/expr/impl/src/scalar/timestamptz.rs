@@ -309,13 +309,13 @@ mod tests {
 
     #[test]
     fn test_timestamptz_to_and_from_string() {
-        let str1 = "1600-11-15 15:35:40.999999+08:00";
+        let str1 = "0001-11-15 15:35:40.999999+08:00";
         let timestamptz1 = str_to_timestamptz(str1, "UTC").unwrap();
-        assert_eq!(timestamptz1.timestamp_micros(), -11648507059000001);
+        assert_eq!(timestamptz1.timestamp_micros(), -62108094259000001);
 
         let mut writer = String::new();
         timestamptz_to_string(timestamptz1, "UTC", &mut writer).unwrap();
-        assert_eq!(writer, "1600-11-15 07:35:40.999999+00:00");
+        assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
         let timestamptz2 = str_to_timestamptz(str2, "UTC").unwrap();
