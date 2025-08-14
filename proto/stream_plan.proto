@@ -374,11 +374,38 @@ message MaterializeNode {
   uint32 table_id = 1;
   // Column indexes and orders of primary key.
   repeated common.ColumnOrder column_orders = 2;
-  // Used for internal table states.
+
+  // Primary materialized table that stores the final result data.
+  // Purpose: This is the main table that users query against. It contains the
+  //          complete materialized view results with all columns from the SELECT clause.
+  // Schema: Matches the output schema of the materialized view query
+  // PK: Determined by the stream key of the materialized view
+  // Distribution: Hash distributed by primary key columns for parallel processing
   catalog.Table table = 3;
-  // For refreshable tables, staging table for collecting new data during refresh.
-  // This table has the same schema as the main table but with a different table_id.
+
+  // Staging table for refreshable materialized views during refresh operations.
+  // Purpose: Temporary storage for collecting new/updated data during refresh.
+  //          This allows atomic replacement of old data with refreshed data.
+  // Schema: Contains only the primary key columns from the main table (pk-only table)
+  //         - All PK columns with same data types as main table
+  //         - Same primary key definition as main table
+  // Usage: Active only during refresh operations, empty otherwise
+  // Lifecycle: Created -> populated during refresh -> merged with main table -> cleared
   optional catalog.Table staging_table = 5;
+
+  // Progress tracking table for refreshable materialized views.
+  // Purpose: Tracks refresh operation progress per VirtualNode to enable fault-tolerant
+  //          resumable refresh operations. Stores checkpoint information for recovery.
+  // Schema: Simplified variable-length schema (following backfill pattern):
+  //         - vnode (i32): VirtualNode identifier (PK)
+  //         - current_pos...: Current processing position (variable PK fields from upstream)
+  //         - is_completed (bool): Whether this vnode has completed processing
+  //         - processed_rows (i64): Number of rows processed so far in this vnode
+  // PK: vnode (allows efficient per-vnode progress lookup and updates)
+  // Distribution: Hash distributed by vnode for parallel progress tracking
+  // Usage: Persists across refresh operations for resumability
+  // Note: Stage info is now tracked in MaterializeExecutor memory for simplicity
+  optional catalog.Table refresh_progress_table = 6;
 }
 
 message AggCallState {

@@ -612,7 +612,10 @@ impl LocalInstanceUnsyncData {
             assert!(!latest_epoch_data.has_spilled);
             if cfg!(debug_assertions) {
                 panic!(
-                    "sync epoch exceeds latest epoch, and the current instance should have been archived"
+                    "sync epoch exceeds latest epoch, and the current instance should have been archived, table_id = {}, latest_epoch_data = {}, epoch = {}",
+                    self.table_id.table_id,
+                    latest_epoch_data.epoch(),
+                    epoch
                 );
             }
             warn!(

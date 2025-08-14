@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
+use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
@@ -122,14 +123,15 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 tracing::info!(%associated_source_id, "Scheduling LoadFinish command for refreshable batch source");
 
                 // For refreshable batch sources, associated_source_id is the table_id
-                let table_id = TableId::new(associated_source_id);
-                let associated_source_id = table_id;
+                let associated_source_id = TableId::new(associated_source_id);
+                // FIXME: handle this more gracefully
+                let table_id = TableId::new(associated_source_id.table_id() - 1);
 
                 // Find the database ID for this table
                 let database_id = self
                     .metadata_manager
                     .catalog_controller
-                    .get_object_database_id(table_id.table_id() as _)
+                    .get_object_database_id(associated_source_id.table_id() as _)
                     .await
                     .context("Failed to get database id for table")?;
 
@@ -147,10 +149,42 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                     )
                     .context("Failed to schedule LoadFinish command")?;
 
-                tracing::info!(%table_id, %associated_source_id, "LoadFinish command scheduled successfully");
+                tracing::info!(%associated_source_id, %associated_source_id, "LoadFinish command scheduled successfully");
             };
             if let Err(e) = res {
                 tracing::error!(error = %e.as_report(), %associated_source_id, "Failed to handle source load finished");
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_refresh_finished_table_ids(
+        &self,
+        refresh_finished_table_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        use risingwave_meta_model::table::RefreshState;
+
+        tracing::info!(
+            "Handling refresh finished table IDs: {:?}",
+            refresh_finished_table_ids
+        );
+
+        for table_id in refresh_finished_table_ids {
+            let res: MetaResult<()> = try {
+                tracing::info!(%table_id, "Processing refresh finished for materialized view");
+
+                // Update the table's refresh state back to Idle (refresh complete)
+                self.metadata_manager
+                    .catalog_controller
+                    .set_table_refresh_state(table_id as i32, RefreshState::Idle)
+                    .await
+                    .context("Failed to set table refresh state to Idle")?;
+
+                tracing::info!(%table_id, "Table refresh completed, state updated to Idle");
+            };
+            if let Err(e) = res {
+                tracing::error!(error = %e.as_report(), %table_id, "Failed to handle refresh finished table");
             }
         }
 
@@ -399,8 +433,20 @@ impl CommandContext {
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
             Command::StartFragmentBackfill { .. } => {}
-            Command::Refresh { .. } => {}
-            Command::LoadFinish { .. } => {}
+            Command::Refresh { table_id, .. } => {
+                barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .set_table_refresh_state(table_id.table_id() as i32, RefreshState::Refreshing)
+                    .await?;
+            }
+            Command::LoadFinish { table_id, .. } => {
+                barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .set_table_refresh_state(table_id.table_id() as i32, RefreshState::Finishing)
+                    .await?;
+            }
         }
 
         Ok(())

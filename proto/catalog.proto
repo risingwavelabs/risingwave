@@ -503,6 +503,9 @@ message Table {
   // reload data from external source and emit messages based on the diff with current data.
   bool refreshable = 45;
 
+  // Current refresh state of the table for refreshable tables
+  optional RefreshState refresh_state = 46;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
@@ -515,6 +518,14 @@ enum HandleConflictBehavior {
   HANDLE_CONFLICT_BEHAVIOR_IGNORE = 2;
   HANDLE_CONFLICT_BEHAVIOR_NO_CHECK = 3;
   HANDLE_CONFLICT_BEHAVIOR_DO_UPDATE_IF_NOT_NULL = 4;
+}
+
+// State of refresh operation for refreshable tables
+enum RefreshState {
+  REFRESH_STATE_UNSPECIFIED = 0;
+  REFRESH_STATE_IDLE = 1;
+  REFRESH_STATE_REFRESHING = 2;
+  REFRESH_STATE_FINISHING = 3;
 }
 
 message View {

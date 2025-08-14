@@ -866,6 +866,13 @@ mod tests {
         ) -> MetaResult<()> {
             unimplemented!()
         }
+
+        async fn handle_refresh_finished_table_ids(
+            &self,
+            _refresh_finished_table_ids: Vec<u32>,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
     }
 
     #[tokio::test]
