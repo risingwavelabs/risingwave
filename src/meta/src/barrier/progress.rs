@@ -249,20 +249,20 @@ impl TrackingJob {
     pub(crate) async fn finish(self, metadata_manager: &MetadataManager) -> MetaResult<()> {
         match self {
             TrackingJob::New(command) => {
-                metadata_manager
-                    .catalog_controller
-                    .finish_streaming_job(
-                        command.job_id.table_id as i32,
-                        command.replace_stream_job.clone(),
-                    )
-                    .await?;
+                Box::pin(metadata_manager.catalog_controller.finish_streaming_job(
+                    command.job_id.table_id as i32,
+                    command.replace_stream_job.clone(),
+                ))
+                .await?;
                 Ok(())
             }
             TrackingJob::Recovered(recovered) => {
-                metadata_manager
-                    .catalog_controller
-                    .finish_streaming_job(recovered.id, None)
-                    .await?;
+                Box::pin(
+                    metadata_manager
+                        .catalog_controller
+                        .finish_streaming_job(recovered.id, None),
+                )
+                .await?;
                 Ok(())
             }
         }
