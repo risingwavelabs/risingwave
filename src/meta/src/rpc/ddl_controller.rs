@@ -1433,11 +1433,8 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match (streaming_job.create_type(), &streaming_job) {
-            // TODO(August): Unify background sink into table's creation path with MV below.
-            (CreateType::Unspecified, _)
-            | (CreateType::Foreground, _)
-            | (CreateType::Background, StreamingJob::Sink(_, Some(_))) => {
+        match streaming_job.create_type() {
+            CreateType::Unspecified | CreateType::Foreground => {
                 let version = Box::pin(self.stream_manager.create_streaming_job(
                     stream_job_fragments,
                     ctx,
@@ -1446,8 +1443,8 @@ impl DdlController {
                 .await?;
                 Ok(version)
             }
-            (CreateType::Background, _) => {
-                let await_tree_key = format!("Background DDL Worker ({})", streaming_job.id());
+            CreateType::Background => {
+                let await_tree_key = format!("Background DDL Worker ({})", stream_job_id);
                 let await_tree_span =
                     span!("{:?}({})", streaming_job.job_type(), streaming_job.name());
 

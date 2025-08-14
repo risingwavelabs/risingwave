@@ -15,7 +15,6 @@
 use anyhow::anyhow;
 use pgwire::pg_response::StatementType;
 use prost::Message;
-use risingwave_common::bail_not_implemented;
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::secret;
@@ -65,13 +64,16 @@ pub async fn handle_alter_secret(
                     };
                     secret_payload.encode_to_vec()
                 }
-                secret::SecretBackend::HashicorpVault(_) => {
-                    bail_not_implemented!("hashicorp_vault backend is not implemented yet")
+                secret::SecretBackend::HashicorpVault(_vault_backend) => {
+                    return Err(crate::error::ErrorCode::InvalidParameterValue(
+                        "alter secret with hashicorp_vault backend is not supported".to_owned(),
+                    )
+                    .into());
                 }
             }
         } else {
             let with_options = WithOptions::try_from(sql_options.as_ref() as &[SqlOption])?;
-            get_secret_payload(new_credential, with_options)?
+            get_secret_payload(new_credential, with_options).await?
         };
 
         let catalog_writer = session.catalog_writer()?;

@@ -348,7 +348,8 @@ impl Strong {
             | ExprType::CompositeCast
             | ExprType::RwEpochToTs
             | ExprType::OpenaiEmbedding
-            | ExprType::HasDatabasePrivilege => false,
+            | ExprType::HasDatabasePrivilege
+            | ExprType::Random => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

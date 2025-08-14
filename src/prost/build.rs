@@ -168,6 +168,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.as_of_join")
         .boxed(".stream_plan.StreamNode.node_body.sync_log_store")
         .boxed(".stream_plan.StreamNode.node_body.materialized_exprs")
+        .boxed(".stream_plan.StreamNode.node_body.vector_index_write")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // Eq + Hash are for plan nodes to do common sub-plan detection.
@@ -256,6 +257,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(
             "hummock.TableWatermarks.EpochNewWatermarks",
             "#[derive(Eq)]",
+        )
+        .type_attribute(
+            "catalog.VectorIndexInfo",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "catalog.VectorIndexInfo.config",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "catalog.FlatIndexConfig",
+            "#[derive(Eq, Hash)]",
         )
         // proto version enums
         .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")

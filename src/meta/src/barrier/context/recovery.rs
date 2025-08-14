@@ -278,7 +278,6 @@ impl GlobalBarrierWorkerContextImpl {
                                         .catalog_controller
                                         .finish_streaming_job(
                                             stream_job_fragments.stream_job_id().table_id as _,
-                                            None,
                                         ),
                                 )
                                 .await?;
@@ -531,7 +530,6 @@ impl GlobalBarrierWorkerContextImpl {
                             .catalog_controller
                             .finish_streaming_job(
                                 stream_job_fragments.stream_job_id().table_id as _,
-                                None,
                             ),
                     )
                     .await?;

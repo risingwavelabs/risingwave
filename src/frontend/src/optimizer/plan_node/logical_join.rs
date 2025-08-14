@@ -956,7 +956,7 @@ impl LogicalJoin {
         // session variable `streaming_force_filter_inside_join` as it can save unnecessary
         // materialization of rows only to be filtered later.
 
-        let stream_hash_join = StreamHashJoin::new(core.clone(), predicate.clone());
+        let stream_hash_join = StreamHashJoin::new(core.clone(), predicate.clone())?;
 
         let force_filter_inside_join = self
             .base
@@ -982,7 +982,7 @@ impl LogicalJoin {
                 self.right().schema().len(),
             );
             core.on = eq_cond.eq_cond();
-            let hash_join = StreamHashJoin::new(core, eq_cond).into();
+            let hash_join = StreamHashJoin::new(core, eq_cond)?.into();
             let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
@@ -1243,11 +1243,7 @@ impl LogicalJoin {
 
         let new_predicate = new_predicate.retain_prefix_eq_key(lookup_prefix_len);
 
-        Ok(StreamTemporalJoin::new(
-            new_logical_join,
-            new_predicate,
-            false,
-        ))
+        StreamTemporalJoin::new(new_logical_join, new_predicate, false)
     }
 
     fn to_stream_nested_loop_temporal_join(
@@ -1300,7 +1296,7 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate, true).into())
+        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate, true)?.into())
     }
 
     fn to_stream_dynamic_filter(
@@ -1360,7 +1356,7 @@ impl LogicalJoin {
             return Ok(None);
         }
 
-        let left = self.left().to_stream(ctx)?;
+        let left = self.left().to_stream(ctx)?.enforce_concrete_distribution();
         let right = self.right().to_stream_with_dist_required(
             &RequiredDist::PhysicalDist(Distribution::Broadcast),
             ctx,
@@ -1373,7 +1369,7 @@ impl LogicalJoin {
         );
 
         let core = DynamicFilter::new(comparator, left_ref.index, left, right);
-        let plan = StreamDynamicFilter::new(core).into();
+        let plan = StreamDynamicFilter::new(core)?.into();
         // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
         if self
             .output_indices()
@@ -1435,7 +1431,7 @@ impl LogicalJoin {
         let inequality_desc =
             Self::get_inequality_desc_from_predicate(predicate.other_cond().clone(), left_len)?;
 
-        Ok(StreamAsOfJoin::new(core, predicate, inequality_desc).into())
+        Ok(StreamAsOfJoin::new(core, predicate, inequality_desc)?.into())
     }
 
     /// Convert the logical join to a Hash join.

@@ -288,12 +288,14 @@ impl ToStream for LogicalProject {
                 .collect();
 
             if !impure_exprs.is_empty() {
+                let new_input = new_input.enforce_concrete_distribution();
+
                 // Create `MaterializedExprs` for impure expressions
                 let mat_exprs_plan: StreamPlanRef = StreamMaterializedExprs::new(
                     new_input.clone(),
                     impure_exprs,
                     impure_field_names,
-                )
+                )?
                 .into();
 
                 let input_len = new_input.schema().len();
