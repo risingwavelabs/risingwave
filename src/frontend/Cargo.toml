@@ -26,7 +26,7 @@ easy-ext = "1"
 educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
-fancy-regex = "0.14.0"
+fancy-regex = "0.16.1"
 fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
