@@ -84,8 +84,9 @@ impl StreamUnion {
                 // Single input. Follow the input's kind.
                 inputs[0].stream_kind()
             } else if inputs.iter().all(|x| x.stream_kind().is_append_only()) {
-                // Special case for append-only table. There must be a `RowIdGen` following the `Union`,
-                // we can treat the merged stream as append-only here.
+                // Special case for append-only table. Either there will be a `RowIdGen` following the `Union`,
+                // or there will be a `Materialize` with conflict handling enabled. In both cases there
+                // will be no key conflict, so we can treat the merged stream as append-only here.
                 StreamKind::AppendOnly
             } else {
                 // Otherwise we must treat it as upsert.
