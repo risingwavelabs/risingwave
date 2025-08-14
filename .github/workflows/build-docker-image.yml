@@ -8,6 +8,11 @@ on:
         required: true
         type: string
         default: 'unlabeled'
+      push_dockerhub:
+        description: ''
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build_image:
@@ -54,4 +59,4 @@ jobs:
           branch: ${{ env.BRANCH_NAME }}
           commit: HEAD
           message: ':github: Triggering Docker build with image tag: ${{ env.IMAGE_TAG }}'
-          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}" }'
+          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}", "BUILDKITE_TAG": "${{ env.BUILDKITE_TAG }}" }'
