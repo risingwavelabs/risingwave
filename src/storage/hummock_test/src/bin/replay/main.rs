@@ -71,7 +71,7 @@ async fn main() {
     let args = Args::parse();
     // disable runtime tracing when replaying
     unsafe { std::env::set_var(USE_TRACE, "false") };
-    run_replay(args).await.unwrap();
+    Box::pin(run_replay(args)).await.unwrap();
 }
 
 async fn run_replay(args: Args) -> Result<()> {
@@ -80,7 +80,7 @@ async fn run_replay(args: Args) -> Result<()> {
     let mut reader = TraceReaderImpl::new_bincode(f)?;
     // first record is the snapshot
     let r: Record = reader.read().unwrap();
-    let replay_interface = create_replay_hummock(r, &args).await.unwrap();
+    let replay_interface = Box::pin(create_replay_hummock(r, &args)).await.unwrap();
     let mut replayer = HummockReplay::new(reader, replay_interface);
     replayer.run().await.unwrap();
 
