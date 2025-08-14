@@ -266,13 +266,11 @@ impl SpecificParserConfig {
                 SourceEncode::Json,
             ) => EncodingProperties::Json(JsonProperties {
                 use_schema_registry: info.use_schema_registry,
-                timestamp_handling: TimestampHandling::from_options(
-                    &format_encode_options_with_secret,
-                )?,
+                timestamp_handling: None,
                 timestamptz_handling: TimestamptzHandling::from_options(
                     &format_encode_options_with_secret,
                 )?,
-                time_handling: TimeHandling::from_options(&format_encode_options_with_secret)?,
+                time_handling: None,
             }),
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
                 let props = MongoProperties::from(&format_encode_options_with_secret);

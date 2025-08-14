@@ -25,6 +25,7 @@ statement ok
 CREATE TABLE timestamp_test (
     id INT,
     timestamp TIMESTAMP,
+    time_col TIME,
     PRIMARY KEY (id)
 ) from mssql_timestamp_source table 'mydb.dbo.timestamp_test';
 
@@ -59,15 +60,15 @@ sleep 10s
 # ------------ check after update stage ------------
 
 # Check all data after update (should show updated IDs)
-query II
-select id, timestamp from timestamp_test order by id;
+query III
+select id, timestamp, time_col from timestamp_test order by id;
 ----
-4 8000-06-01 12:00:00
-5 5138-11-16 09:46:40
-6 9999-12-31 23:59:59.999
-11 9999-01-01 00:00:00
-12 0001-01-01 00:00:00
-13 1972-01-01 00:00:00
+4 8000-06-01 12:00:00 12:00:00
+5 5138-11-16 09:46:40 09:46:40
+6 9999-12-31 23:59:59.999 23:00:00
+11 9999-01-01 00:00:00 06:00:00
+12 0001-01-01 00:00:00 00:00:00
+13 1972-01-01 00:00:00 12:34:56.123
 
 # ------------ drop stage ------------
 statement ok

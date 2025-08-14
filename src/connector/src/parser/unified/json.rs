@@ -49,22 +49,6 @@ pub enum TimeHandling {
     Micro,
 }
 
-impl TimeHandling {
-    pub const OPTION_KEY: &'static str = "time.handling.mode";
-
-    pub fn from_options(
-        options: &std::collections::BTreeMap<String, String>,
-    ) -> Result<Option<Self>, InvalidOptionError> {
-        let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
-            Some("micro") => Self::Micro,
-            Some("milli") => Self::Milli,
-            Some(v) => bail_invalid_option_error!("unrecognized {} value {}", Self::OPTION_KEY, v),
-            None => return Ok(None),
-        };
-        Ok(Some(mode))
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum TimestamptzHandling {
     /// `"2024-04-11T02:00:00.123456Z"`
@@ -82,7 +66,6 @@ pub enum TimestamptzHandling {
     /// This option is backward compatible.
     GuessNumberUnit,
 }
-
 
 impl TimestamptzHandling {
     pub const OPTION_KEY: &'static str = "timestamptz.handling.mode";
