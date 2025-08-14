@@ -82,7 +82,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
-        job.finish(&self.metadata_manager).await
+        Box::pin(job.finish(&self.metadata_manager)).await
     }
 
     #[await_tree::instrument("new_control_stream({})", node.id)]
@@ -95,14 +95,14 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     }
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
-        self.reload_runtime_info_impl().await
+        Box::pin(self.reload_runtime_info_impl()).await
     }
 
     async fn reload_database_runtime_info(
         &self,
         database_id: DatabaseId,
     ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
-        self.reload_database_runtime_info_impl(database_id).await
+        Box::pin(self.reload_database_runtime_info_impl(database_id)).await
     }
 
     async fn handle_load_finished_source_ids(
