@@ -14,6 +14,9 @@
 
 #![feature(let_chains)]
 
+use std::future::Future;
+use std::pin::Pin;
+
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
@@ -558,37 +561,40 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
     result
 }
 
-async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
+fn dispatch_command<'a>(
+    opts: CliOpts,
+    context: &'a CtlContext,
+) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
-            cmd_impl::compute::show_config(&host).await?
+            Box::pin(async move { cmd_impl::compute::show_config(&host).await })
         }
         Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
-            cmd_impl::hummock::disable_commit_epoch(context).await?
+            Box::pin(async move { cmd_impl::hummock::disable_commit_epoch(context).await })
         }
         Commands::Hummock(HummockCommands::ListVersion {
             verbose,
             verbose_key_range,
-        }) => {
-            cmd_impl::hummock::list_version(context, verbose, verbose_key_range).await?;
-        }
+        }) => Box::pin(async move {
+            cmd_impl::hummock::list_version(context, verbose, verbose_key_range).await
+        }),
         Commands::Hummock(HummockCommands::ListVersionDeltas {
             start_id,
             num_epochs,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::hummock::list_version_deltas(
                 context,
                 HummockVersionId::new(start_id),
                 num_epochs,
             )
-            .await?;
-        }
+            .await
+        }),
         Commands::Hummock(HummockCommands::ListKv {
             epoch,
             table_id,
             data_dir,
             use_new_object_prefix_strategy,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::hummock::list_kv(
                 context,
                 epoch,
@@ -596,17 +602,17 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 data_dir,
                 use_new_object_prefix_strategy,
             )
-            .await?;
-        }
+            .await
+        }),
         Commands::Hummock(HummockCommands::SstDump(args)) => {
-            cmd_impl::hummock::sst_dump(context, args).await.unwrap()
+            Box::pin(async move { cmd_impl::hummock::sst_dump(context, args).await })
         }
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
             table_id,
             level,
             sst_ids,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
@@ -614,17 +620,19 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 level,
                 sst_ids,
             )
-            .await?
-        }
+            .await
+        }),
         Commands::Hummock(HummockCommands::TriggerFullGc {
             sst_retention_time_sec,
             prefix,
-        }) => cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec, prefix).await?,
+        }) => Box::pin(async move {
+            cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec, prefix).await
+        }),
         Commands::Hummock(HummockCommands::ListPinnedVersions {}) => {
-            list_pinned_versions(context).await?
+            Box::pin(async move { list_pinned_versions(context).await })
         }
         Commands::Hummock(HummockCommands::ListCompactionGroup) => {
-            cmd_impl::hummock::list_compaction_group(context).await?
+            Box::pin(async move { cmd_impl::hummock::list_compaction_group(context).await })
         }
         Commands::Hummock(HummockCommands::UpdateCompactionConfig {
             compaction_group_ids,
@@ -655,7 +663,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::hummock::update_compaction_config(
                 context,
                 compaction_group_ids,
@@ -696,53 +704,53 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     enable_optimize_l0_interval_selection,
                 ),
             )
-            .await?
-        }
+            .await
+        }),
         Commands::Hummock(HummockCommands::SplitCompactionGroup {
             compaction_group_id,
             table_ids,
             partition_vnode_count,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::hummock::split_compaction_group(
                 context,
                 compaction_group_id,
                 &table_ids,
                 partition_vnode_count,
             )
-            .await?;
-        }
+            .await
+        }),
         Commands::Hummock(HummockCommands::PauseVersionCheckpoint) => {
-            cmd_impl::hummock::pause_version_checkpoint(context).await?;
+            Box::pin(async move { cmd_impl::hummock::pause_version_checkpoint(context).await })
         }
         Commands::Hummock(HummockCommands::ResumeVersionCheckpoint) => {
-            cmd_impl::hummock::resume_version_checkpoint(context).await?;
+            Box::pin(async move { cmd_impl::hummock::resume_version_checkpoint(context).await })
         }
         Commands::Hummock(HummockCommands::ReplayVersion) => {
-            cmd_impl::hummock::replay_version(context).await?;
+            Box::pin(async move { cmd_impl::hummock::replay_version(context).await })
         }
-        Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
-            cmd_impl::hummock::list_compaction_status(context, verbose).await?;
-        }
+        Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => Box::pin(
+            async move { cmd_impl::hummock::list_compaction_status(context, verbose).await },
+        ),
         Commands::Hummock(HummockCommands::GetCompactionScore {
             compaction_group_id,
-        }) => {
-            cmd_impl::hummock::get_compaction_score(context, compaction_group_id).await?;
-        }
+        }) => Box::pin(async move {
+            cmd_impl::hummock::get_compaction_score(context, compaction_group_id).await
+        }),
         Commands::Hummock(HummockCommands::ValidateVersion) => {
-            cmd_impl::hummock::validate_version(context).await?;
+            Box::pin(async move { cmd_impl::hummock::validate_version(context).await })
         }
         Commands::Hummock(HummockCommands::RebuildTableStats) => {
-            cmd_impl::hummock::rebuild_table_stats(context).await?;
+            Box::pin(async move { cmd_impl::hummock::rebuild_table_stats(context).await })
         }
         Commands::Hummock(HummockCommands::CancelCompactTask { task_id }) => {
-            cmd_impl::hummock::cancel_compact_task(context, task_id).await?;
+            Box::pin(async move { cmd_impl::hummock::cancel_compact_task(context, task_id).await })
         }
         Commands::Hummock(HummockCommands::PrintVersionDeltaInArchive {
             archive_ids,
             data_dir,
             sst_id,
             use_new_object_prefix_strategy,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::hummock::print_version_delta_in_archive(
                 context,
                 archive_ids.into_iter().map(HummockVersionId::new),
@@ -750,14 +758,14 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 sst_id,
                 use_new_object_prefix_strategy,
             )
-            .await?;
-        }
+            .await
+        }),
         Commands::Hummock(HummockCommands::PrintUserKeyInArchive {
             archive_ids,
             data_dir,
             user_key,
             use_new_object_prefix_strategy,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::hummock::print_user_key_in_archive(
                 context,
                 archive_ids.into_iter().map(HummockVersionId::new),
@@ -765,8 +773,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 user_key,
                 use_new_object_prefix_strategy,
             )
-            .await?;
-        }
+            .await
+        }),
         Commands::Hummock(HummockCommands::TieredCacheTracing {
             enable,
             record_hybrid_insert_threshold_ms,
@@ -774,7 +782,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             record_hybrid_obtain_threshold_ms,
             record_hybrid_remove_threshold_ms,
             record_hybrid_fetch_threshold_ms,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::hummock::tiered_cache_tracing(
                 context,
                 enable,
@@ -784,59 +792,66 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 record_hybrid_remove_threshold_ms,
                 record_hybrid_fetch_threshold_ms,
             )
-            .await?
-        }
+            .await
+        }),
         Commands::Hummock(HummockCommands::MergeCompactionGroup {
             left_group_id,
             right_group_id,
-        }) => {
-            cmd_impl::hummock::merge_compaction_group(context, left_group_id, right_group_id)
-                .await?
-        }
-
+        }) => Box::pin(async move {
+            cmd_impl::hummock::merge_compaction_group(context, left_group_id, right_group_id).await
+        }),
         Commands::Hummock(HummockCommands::MigrateLegacyObject {
             url,
             source_dir,
             target_dir,
             concurrency,
-        }) => {
-            migrate_legacy_object(url, source_dir, target_dir, concurrency).await?;
-        }
+        }) => Box::pin(async move {
+            migrate_legacy_object(url, source_dir, target_dir, concurrency).await
+        }),
         Commands::Hummock(HummockCommands::ResizeCache {
             meta_cache_capacity_mb,
             data_cache_capacity_mb,
-        }) => {
+        }) => Box::pin(async move {
             const MIB: u64 = 1024 * 1024;
             cmd_impl::hummock::resize_cache(
                 context,
                 meta_cache_capacity_mb.map(|v| v * MIB),
                 data_cache_capacity_mb.map(|v| v * MIB),
             )
-            .await?
-        }
+            .await
+        }),
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,
             use_new_object_prefix_strategy,
-        }) => {
-            cmd_impl::table::scan(context, mv_name, data_dir, use_new_object_prefix_strategy)
-                .await?
-        }
+        }) => Box::pin(async move {
+            cmd_impl::table::scan(context, mv_name, data_dir, use_new_object_prefix_strategy).await
+        }),
         Commands::Table(TableCommands::ScanById {
             table_id,
             data_dir,
             use_new_object_prefix_strategy,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::table::scan_id(context, table_id, data_dir, use_new_object_prefix_strategy)
-                .await?
+                .await
+        }),
+        Commands::Table(TableCommands::List) => {
+            Box::pin(async move { cmd_impl::table::list(context).await })
         }
-        Commands::Table(TableCommands::List) => cmd_impl::table::list(context).await?,
-        Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,
-        Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
-        Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
-        Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
+        Commands::Bench(cmd) => {
+            Box::pin(async move { cmd_impl::bench::do_bench(context, cmd).await })
+        }
+        Commands::Meta(MetaCommands::Pause) => {
+            Box::pin(async move { cmd_impl::meta::pause(context).await })
+        }
+        Commands::Meta(MetaCommands::Resume) => {
+            Box::pin(async move { cmd_impl::meta::resume(context).await })
+        }
+        Commands::Meta(MetaCommands::ClusterInfo) => {
+            Box::pin(async move { cmd_impl::meta::cluster_info(context).await })
+        }
         Commands::Meta(MetaCommands::SourceSplitInfo { ignore_id }) => {
-            cmd_impl::meta::source_split_info(context, ignore_id).await?
+            Box::pin(async move { cmd_impl::meta::source_split_info(context, ignore_id).await })
         }
         Commands::Meta(MetaCommands::Reschedule {
             from,
@@ -844,31 +859,33 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             plan,
             revision,
             resolve_no_shuffle,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::meta::reschedule(context, plan, revision, from, dry_run, resolve_no_shuffle)
-                .await?
-        }
+                .await
+        }),
         Commands::Meta(MetaCommands::BackupMeta { remarks }) => {
-            cmd_impl::meta::backup_meta(context, remarks).await?
+            Box::pin(async move { cmd_impl::meta::backup_meta(context, remarks).await })
         }
-        Commands::Meta(MetaCommands::RestoreMeta { opts }) => {
-            risingwave_meta::backup_restore::restore(opts).await?
-        }
-        Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
-            cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
-        }
+        Commands::Meta(MetaCommands::RestoreMeta { opts }) => Box::pin(async move {
+            // different pattern to convert BackupError into anyhow::Error
+            risingwave_meta::backup_restore::restore(opts).await?;
+            Ok(())
+        }),
+        Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => Box::pin(
+            async move { cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await },
+        ),
         Commands::Meta(MetaCommands::ListConnections) => {
-            cmd_impl::meta::list_connections(context).await?
+            Box::pin(async move { cmd_impl::meta::list_connections(context).await })
         }
         Commands::Meta(MetaCommands::ListServingFragmentMapping) => {
-            cmd_impl::meta::list_serving_fragment_mappings(context).await?
+            Box::pin(async move { cmd_impl::meta::list_serving_fragment_mappings(context).await })
         }
         Commands::Meta(MetaCommands::UnregisterWorkers {
             workers,
             yes,
             ignore_not_found,
             check_fragment_occupied,
-        }) => {
+        }) => Box::pin(async move {
             cmd_impl::meta::unregister_workers(
                 context,
                 workers,
@@ -876,49 +893,55 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 ignore_not_found,
                 check_fragment_occupied,
             )
-            .await?
-        }
+            .await
+        }),
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
-            cmd_impl::meta::validate_source(context, props).await?
+            Box::pin(async move { cmd_impl::meta::validate_source(context, props).await })
         }
         Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
-            cmd_impl::meta::graph_check(endpoint).await?
+            Box::pin(async move { cmd_impl::meta::graph_check(endpoint).await })
         }
         Commands::AwaitTree(AwaitTreeCommands::Dump {
             actor_traces_format,
-        }) => cmd_impl::await_tree::dump(context, actor_traces_format).await?,
+        }) => {
+            Box::pin(async move { cmd_impl::await_tree::dump(context, actor_traces_format).await })
+        }
         Commands::AwaitTree(AwaitTreeCommands::Analyze { path }) => {
-            cmd_impl::await_tree::bottleneck_detect(context, path).await?
+            Box::pin(async move { cmd_impl::await_tree::bottleneck_detect(context, path).await })
         }
         Commands::AwaitTree(AwaitTreeCommands::Transcribe { path }) => {
-            rw_diagnose_tools::await_tree::transcribe(path)?
+            Box::pin(async move { rw_diagnose_tools::await_tree::transcribe(path) })
         }
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
-            cmd_impl::profile::cpu_profile(context, sleep).await?
+            Box::pin(async move { cmd_impl::profile::cpu_profile(context, sleep).await })
         }
         Commands::Profile(ProfileCommands::Heap { dir }) => {
-            cmd_impl::profile::heap_profile(context, dir).await?
+            Box::pin(async move { cmd_impl::profile::heap_profile(context, dir).await })
         }
-        Commands::Scale(ScaleCommands::Cordon { workers }) => {
+        Commands::Scale(ScaleCommands::Cordon { workers }) => Box::pin(async move {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
-                .await?
-        }
-        Commands::Scale(ScaleCommands::Uncordon { workers }) => {
+                .await
+        }),
+        Commands::Scale(ScaleCommands::Uncordon { workers }) => Box::pin(async move {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
-                .await?
-        }
-        Commands::Throttle(ThrottleCommands::Source(args)) => {
-            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
-        }
-        Commands::Throttle(ThrottleCommands::Mv(args)) => {
-            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
-        }
+                .await
+        }),
+        Commands::Throttle(ThrottleCommands::Source(args)) => Box::pin(async move {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await
+        }),
+        Commands::Throttle(ThrottleCommands::Mv(args)) => Box::pin(async move {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await
+        }),
         Commands::Meta(MetaCommands::SetCdcTableBackfillParallelism {
             table_id,
             parallelism,
-        }) => {
-            set_cdc_table_backfill_parallelism(context, table_id, parallelism).await?;
-        }
+        }) => Box::pin(async move {
+            set_cdc_table_backfill_parallelism(context, table_id, parallelism).await
+        }),
     }
+}
+
+async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
+    dispatch_command(opts, context).await?;
     Ok(())
 }
