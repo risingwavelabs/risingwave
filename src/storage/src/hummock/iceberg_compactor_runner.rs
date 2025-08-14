@@ -296,10 +296,11 @@ impl IcebergCompactorRunner {
                 data_files,
                 stats,
                 table,
-            } = compaction
-                .compact_with_plan(compaction_plan, &compaction_execution_config)
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            } = Box::pin(
+                compaction.compact_with_plan(compaction_plan, &compaction_execution_config),
+            )
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
             if let Some(committed_table) = table
                 && should_enable_iceberg_cow(
