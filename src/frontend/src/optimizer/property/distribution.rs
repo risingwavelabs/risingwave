@@ -195,16 +195,20 @@ impl Distribution {
         }
     }
 
-    /// Get distribution column indices.
-    ///
-    /// Panics if the distribution is not `HashShard`, `UpstreamHashShard` or `Single`.
+    /// Get distribution column indices. Panics if the distribution is `SomeShard` or `Broadcast`.
     pub fn dist_column_indices(&self) -> &[usize] {
+        self.dist_column_indices_opt()
+            .unwrap_or_else(|| panic!("cannot obtain distribution columns for {self:?}"))
+    }
+
+    /// Get distribution column indices. Returns `None` if the distribution is `SomeShard` or `Broadcast`.
+    pub fn dist_column_indices_opt(&self) -> Option<&[usize]> {
         match self {
-            Distribution::Single => &[],
-            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => dists,
-            Distribution::SomeShard | Distribution::Broadcast => {
-                panic!("cannot obtain distribution columns for {self:?}")
+            Distribution::Single => Some(&[]),
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
+                Some(dists)
             }
+            Distribution::SomeShard | Distribution::Broadcast => None,
         }
     }
 
