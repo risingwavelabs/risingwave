@@ -517,13 +517,13 @@ pub fn start_iceberg_compactor(
                                         },
                                     );
 
-                                    if let Err(e) = iceberg_runner.compact(
+                                    if let Err(e) = Box::pin(iceberg_runner.compact(
                                         RunnerContext::new(
                                             max_task_parallelism,
                                             running_task_parallelism.clone(),
                                         ),
                                         rx,
-                                    )
+                                    ))
                                     .await {
                                         tracing::warn!(error = %e.as_report(), "Failed to compact iceberg runner {}", task_id);
                                     }
