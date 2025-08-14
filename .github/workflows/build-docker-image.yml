@@ -58,11 +58,6 @@ jobs:
           echo "IMAGE_TAG=$IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
-          # Conditionally push to dockerhub
-          if [[ "${{ github.event.inputs.push_dockerhub }}" == "true" ]]; then
-            PUSH_DOCKERHUB="true"
-            echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB"
-            echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB" >> $GITHUB_ENV
           # Always set PUSH_DOCKERHUB based on input
           if [[ "${{ github.event.inputs.push_dockerhub }}" == "true" ]]; then
             PUSH_DOCKERHUB="true"
