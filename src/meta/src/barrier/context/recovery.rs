@@ -25,6 +25,7 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::StreamingParallelism;
+use risingwave_pb::catalog::table::PbTableType;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
@@ -272,6 +273,9 @@ impl GlobalBarrierWorkerContextImpl {
             .get_table_catalog_by_ids(&job_ids)
             .await?;
         for table in tables {
+            if table.table_type() != PbTableType::Table {
+                continue;
+            }
             let fragments = jobs.get_mut(&table.id).unwrap();
             let mut union_fragment_id = None;
             for fragment in fragments.fragment_infos.values_mut() {
