@@ -14,6 +14,8 @@
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #![allow(clippy::large_stack_frames)]
+
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
     use std::ops::Bound;
     use std::sync::Arc;

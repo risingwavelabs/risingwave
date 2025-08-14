@@ -14,6 +14,7 @@
 
 #![feature(let_chains)]
 #![feature(coverage_attribute)]
+#![allow(clippy::large_futures)]
 
 mod server;
 

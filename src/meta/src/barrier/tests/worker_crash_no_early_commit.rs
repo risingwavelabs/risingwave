@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::large_futures)]
+
 use std::collections::{HashMap, HashSet};
 use std::future::pending;
 use std::sync::Arc;
