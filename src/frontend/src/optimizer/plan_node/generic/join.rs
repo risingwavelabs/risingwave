@@ -24,6 +24,7 @@ use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::StreamPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata as _;
+use crate::optimizer::plan_node::stream::prelude::*;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::property::{FunctionalDependencySet, StreamKind};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
@@ -97,16 +98,18 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
 }
 
 impl Join<StreamPlanRef> {
-    pub fn stream_kind(&self) -> StreamKind {
+    pub fn stream_kind(&self) -> Result<StreamKind> {
+        let left_kind = reject_upsert_input!(self.left, "Join");
+        let right_kind = reject_upsert_input!(self.right, "Join");
+
         // Inner join won't change the append-only behavior of the stream. The rest might.
-        // TODO(kind): reject upsert input
         if let JoinType::Inner | JoinType::AsofInner = self.join_type
-            && self.left.append_only()
-            && self.right.append_only()
+            && let StreamKind::AppendOnly = left_kind
+            && let StreamKind::AppendOnly = right_kind
         {
-            StreamKind::AppendOnly
+            Ok(StreamKind::AppendOnly)
         } else {
-            StreamKind::Retract
+            Ok(StreamKind::Retract)
         }
     }
 

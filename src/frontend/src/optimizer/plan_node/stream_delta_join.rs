@@ -46,7 +46,7 @@ pub struct StreamDeltaJoin {
 }
 
 impl StreamDeltaJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Result<Self> {
         let ctx = core.ctx();
 
         if eq_join_predicate.has_non_eq() {
@@ -86,17 +86,17 @@ impl StreamDeltaJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            core.stream_kind(),
+            core.stream_kind()?,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
             eq_join_predicate,
-        }
+        })
     }
 
     /// Get a reference to the delta hash join's eq join predicate.
@@ -142,7 +142,7 @@ impl PlanTreeNodeBinary<Stream> for StreamDeltaJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone())
+        Self::new(core, self.eq_join_predicate.clone()).unwrap()
     }
 }
 
@@ -235,7 +235,9 @@ impl ExprRewritable<Stream> for StreamDeltaJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+        Self::new(core, self.eq_join_predicate.rewrite_exprs(r))
+            .unwrap()
+            .into()
     }
 }
 impl ExprVisitable for StreamDeltaJoin {
