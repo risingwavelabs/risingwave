@@ -12,122 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod distance;
 pub mod hnsw;
-pub use distance::DistanceMeasurement;
 
 pub mod utils;
 
-use std::sync::Arc;
+pub use risingwave_common::array::{
+    VectorDistanceType as VectorDistance, VectorItemType as VectorItem,
+};
+pub use risingwave_common::types::{VectorRef, VectorVal as Vector};
+pub use risingwave_common::vector::{MeasureDistance, MeasureDistanceBuilder};
 
 use crate::vector::utils::BoundedNearest;
 
-pub type VectorItem = f32;
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct VectorInner<T>(T);
-
-pub type Vector = VectorInner<Arc<[VectorItem]>>;
-pub type VectorRef<'a> = VectorInner<&'a [VectorItem]>;
-pub type VectorMutRef<'a> = VectorInner<&'a mut [VectorItem]>;
-
-impl Vector {
-    pub fn new(inner: &[VectorItem]) -> Self {
-        Self(Arc::from(inner))
-    }
-
-    pub fn to_ref(&self) -> VectorRef<'_> {
-        VectorInner(self.0.as_ref())
-    }
-
-    pub fn clone_from_ref(r: VectorRef<'_>) -> Self {
-        Self(Vec::from(r.0).into())
-    }
-
-    pub fn get_mut(&mut self) -> Option<VectorMutRef<'_>> {
-        Arc::get_mut(&mut self.0).map(VectorInner)
-    }
-
-    /// # Safety
-    ///
-    /// safe under the same condition to [`Arc::get_mut_unchecked`]
-    pub unsafe fn get_mut_unchecked(&mut self) -> VectorMutRef<'_> {
-        // safety: under unsafe function
-        unsafe { VectorInner(Arc::get_mut_unchecked(&mut self.0)) }
-    }
-}
-
-impl<'a> VectorRef<'a> {
-    pub fn from_slice(slice: &'a [VectorItem]) -> Self {
-        VectorInner(slice)
-    }
-}
-
-#[cfg_attr(not(test), expect(dead_code))]
-fn l2_norm_trivial(vec: &VectorInner<impl AsRef<[VectorItem]>>) -> VectorItem {
-    vec.0
-        .as_ref()
-        .iter()
-        .map(|item| item.powi(2))
-        .sum::<VectorItem>()
-        .sqrt()
-}
-
-fn l2_norm_faiss(vec: &VectorInner<impl AsRef<[VectorItem]>>) -> VectorItem {
-    faiss::utils::fvec_norm_l2sqr(vec.0.as_ref()).sqrt()
-}
-
-impl<T: AsRef<[VectorItem]>> VectorInner<T> {
-    pub fn dimension(&self) -> usize {
-        self.0.as_ref().len()
-    }
-
-    pub fn as_slice(&self) -> &[VectorItem] {
-        self.0.as_ref()
-    }
-
-    pub fn magnitude(&self) -> VectorItem {
-        l2_norm_faiss(self)
-    }
-
-    pub fn normalized(&self) -> Vector {
-        let slice = self.0.as_ref();
-        let len = slice.len();
-        let mut uninit = Arc::new_uninit_slice(len);
-        // safety: just initialized, must be owned
-        let uninit_mut = unsafe { Arc::get_mut_unchecked(&mut uninit) };
-        let magnitude = self.magnitude();
-        for i in 0..len {
-            // safety: 0 <= i < len
-            unsafe {
-                uninit_mut
-                    .get_unchecked_mut(i)
-                    .write(slice.get_unchecked(i) / magnitude)
-            };
-        }
-        // safety: initialized with len, and have set all item
-        unsafe { VectorInner(uninit.assume_init()) }
-    }
-}
-
-pub type VectorDistance = f32;
-
 pub trait OnNearestItem<O> = for<'i> Fn(VectorRef<'i>, VectorDistance, &'i [u8]) -> O;
-
-pub trait MeasureDistance {
-    fn measure(&self, other: VectorRef<'_>) -> VectorDistance;
-}
-
-pub trait MeasureDistanceBuilder {
-    type Measure<'a>: MeasureDistance + 'a;
-    fn new(target: VectorRef<'_>) -> Self::Measure<'_>;
-
-    fn distance(target: VectorRef<'_>, other: VectorRef<'_>) -> VectorDistance
-    where
-        Self: Sized,
-    {
-        Self::new(target).measure(other)
-    }
-}
 
 pub struct NearestBuilder<'a, O, M: MeasureDistanceBuilder> {
     measure: M::Measure<'a>,
@@ -163,26 +60,10 @@ impl<'a, O, M: MeasureDistanceBuilder> NearestBuilder<'a, O, M> {
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils {
     use std::cmp::min;
-    use std::sync::LazyLock;
 
     use bytes::Bytes;
-    use itertools::Itertools;
-    use parking_lot::Mutex;
-    use rand::prelude::StdRng;
-    use rand::{Rng, SeedableRng};
 
-    use crate::store::Vector;
-    use crate::vector::{VectorDistance, VectorItem};
-
-    pub fn gen_vector(d: usize) -> Vector {
-        static RNG: LazyLock<Mutex<StdRng>> =
-            LazyLock::new(|| Mutex::new(StdRng::seed_from_u64(233)));
-        Vector::new(
-            &(0..d)
-                .map(|_| RNG.lock().random::<VectorItem>())
-                .collect_vec(),
-        )
-    }
+    use crate::vector::VectorDistance;
 
     pub fn gen_info(i: usize) -> Bytes {
         Bytes::copy_from_slice(i.to_le_bytes().as_slice())
@@ -195,6 +76,8 @@ pub mod test_utils {
         let n = min(n, input.len());
         input.resize_with(n, || unreachable!());
     }
+
+    pub use risingwave_common::test_utils::rand_array::gen_vector_for_test as gen_vector;
 }
 
 #[cfg(test)]
@@ -202,47 +85,28 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
+    use risingwave_common::array::VectorVal;
+    use risingwave_common::vector::MeasureDistanceBuilder;
+    use risingwave_common::vector::distance::L2SqrDistance;
 
-    use crate::vector::distance::L2Distance;
+    use crate::vector::NearestBuilder;
     use crate::vector::test_utils::{gen_info, gen_vector, top_n};
-    use crate::vector::{
-        MeasureDistanceBuilder, NearestBuilder, Vector, VectorInner, l2_norm_faiss, l2_norm_trivial,
-    };
 
-    fn gen_random_input(count: usize) -> Vec<(Vector, Bytes)> {
+    fn gen_random_input(count: usize) -> Vec<(VectorVal, Bytes)> {
         (0..count).map(|i| (gen_vector(10), gen_info(i))).collect()
-    }
-
-    #[test]
-    fn test_vector() {
-        let vec = [0.238474, 0.578234];
-        let [v1_1, v1_2] = vec;
-        let vec = VectorInner(&vec[..]);
-
-        assert_eq!(vec.magnitude(), (v1_1.powi(2) + v1_2.powi(2)).sqrt());
-        assert_eq!(l2_norm_faiss(&vec), l2_norm_trivial(&vec));
-
-        let mut normalized_vec = Vector::new(&[v1_1 / vec.magnitude(), v1_2 / vec.magnitude()]);
-        assert_eq!(vec.normalized(), normalized_vec);
-        assert!(normalized_vec.get_mut().is_some());
-        let mut normalized_vec_clone = normalized_vec.clone();
-        assert!(normalized_vec.get_mut().is_none());
-        assert!(normalized_vec_clone.get_mut().is_none());
-        drop(normalized_vec);
-        assert!(normalized_vec_clone.get_mut().is_some());
     }
 
     #[test]
     fn test_empty_top_n() {
         let vec = gen_vector(10);
-        let builder = NearestBuilder::<'_, (), L2Distance>::new(vec.to_ref(), 10);
+        let builder = NearestBuilder::<'_, (), L2SqrDistance>::new(vec.to_ref(), 10);
         assert!(builder.finish().is_empty());
     }
 
     fn test_inner(count: usize, n: usize) {
         let input = gen_random_input(count);
         let vec = gen_vector(10);
-        let mut builder = NearestBuilder::<'_, _, L2Distance>::new(vec.to_ref(), 10);
+        let mut builder = NearestBuilder::<'_, _, L2SqrDistance>::new(vec.to_ref(), 10);
         builder.add(
             input.iter().map(|(v, b)| (v.to_ref(), b.as_ref())),
             |_, d, b| (d, Bytes::copy_from_slice(b)),
@@ -250,7 +114,7 @@ mod tests {
         let output = builder.finish();
         let mut expected_output = input
             .into_iter()
-            .map(|(v, b)| (L2Distance::distance(vec.to_ref(), v.to_ref()), b))
+            .map(|(v, b)| (L2SqrDistance::distance(vec.to_ref(), v.to_ref()), b))
             .collect_vec();
         top_n(&mut expected_output, n);
         assert_eq!(output, expected_output);
