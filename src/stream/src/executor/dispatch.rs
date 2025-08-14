@@ -156,10 +156,8 @@ impl DispatchExecutorInner {
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
         macro_rules! await_with_metrics {
             ($fut:expr, $metrics:expr, $interval:expr, $start_time:expr) => {{
-                $interval
-                    .tick()
-                    .now_or_never()
-                    .expect("interval tick should immediately resolve");
+                // First tick completes immediately: https://docs.rs/tokio/1.47.1/tokio/time/fn.interval.html.
+                $interval.tick().await;
 
                 loop {
                     tokio::select! {
