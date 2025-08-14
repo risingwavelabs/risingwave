@@ -131,6 +131,14 @@
   formatted_sql: CREATE TABLE t (a INT, b INT, ts timestamptz AS proctime(), PRIMARY KEY (a)) ON CONFLICT DO UPDATE IF NOT NULL INCLUDE timestamp AS ts_col WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') FORMAT PLAIN ENCODE JSON
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
+- input: CREATE USER admin_user WITH ADMIN
+  formatted_sql: CREATE USER admin_user WITH ADMIN
+- input: CREATE USER regular_user WITH NOADMIN
+  formatted_sql: CREATE USER regular_user WITH NOADMIN
+- input: CREATE USER full_admin WITH ADMIN SUPERUSER CREATEDB LOGIN PASSWORD 'secure'
+  formatted_sql: CREATE USER full_admin WITH SUPERUSER CREATEDB LOGIN ADMIN PASSWORD 'secure'
+- input: CREATE USER user WITH NOADMIN NOSUPERUSER NOCREATEDB
+  formatted_sql: CREATE USER user WITH NOSUPERUSER NOCREATEDB NOADMIN
 - input: CREATE SINK snk
   error_msg: |-
     sql parser error: expected FROM or AS after CREATE SINK sink_name, found: EOF
@@ -198,6 +206,16 @@
     sql parser error: conflicting or redundant options
     LINE 1: create user tmp with encrypted password '' password null
                                                                     ^
+- input: create user tmp admin noadmin
+  error_msg: |-
+    sql parser error: conflicting or redundant options
+    LINE 1: create user tmp admin noadmin
+                                         ^
+- input: create user tmp noadmin admin
+  error_msg: |-
+    sql parser error: conflicting or redundant options
+    LINE 1: create user tmp noadmin admin
+                                         ^
 - input: create user tmp with encrypted password null
   error_msg: |-
     sql parser error: expected literal string, found: null
