@@ -378,46 +378,24 @@ impl DdlController {
         let ctrl = self.clone();
 
         let fut: BoxFuture<'static, _> = match command {
-            DdlCommand::CreateDatabase(database) => {
-                async move { ctrl.create_database(database).await }.boxed()
-            }
-
-            DdlCommand::DropDatabase(database_id) => {
-                async move { ctrl.drop_database(database_id).await }.boxed()
-            }
-
-            DdlCommand::CreateSchema(schema) => {
-                async move { ctrl.create_schema(schema).await }.boxed()
-            }
-
+            DdlCommand::CreateDatabase(database) => ctrl.create_database(database).boxed(),
+            DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).boxed(),
+            DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).boxed(),
             DdlCommand::DropSchema(schema_id, drop_mode) => {
-                async move { ctrl.drop_schema(schema_id, drop_mode).await }.boxed()
+                ctrl.drop_schema(schema_id, drop_mode).boxed()
             }
-
             DdlCommand::CreateNonSharedSource(source) => {
-                async move { ctrl.create_non_shared_source(source).await }.boxed()
+                ctrl.create_non_shared_source(source).boxed()
             }
-
             DdlCommand::DropSource(source_id, drop_mode) => {
-                async move { ctrl.drop_source(source_id, drop_mode).await }.boxed()
+                ctrl.drop_source(source_id, drop_mode).boxed()
             }
-
-            DdlCommand::CreateFunction(function) => {
-                async move { ctrl.create_function(function).await }.boxed()
-            }
-
-            DdlCommand::DropFunction(function_id) => {
-                async move { ctrl.drop_function(function_id).await }.boxed()
-            }
-
+            DdlCommand::CreateFunction(function) => ctrl.create_function(function).boxed(),
+            DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).boxed(),
             DdlCommand::CreateView(view, dependencies) => {
-                async move { ctrl.create_view(view, dependencies).await }.boxed()
+                ctrl.create_view(view, dependencies).boxed()
             }
-
-            DdlCommand::DropView(view_id, drop_mode) => {
-                async move { ctrl.drop_view(view_id, drop_mode).await }.boxed()
-            }
-
+            DdlCommand::DropView(view_id, drop_mode) => ctrl.drop_view(view_id, drop_mode).boxed(),
             DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
@@ -425,8 +403,8 @@ impl DdlController {
                 dependencies,
                 specific_resource_group,
                 if_not_exists,
-            } => async move {
-                ctrl.create_streaming_job(
+            } => ctrl
+                .create_streaming_job(
                     stream_job,
                     fragment_graph,
                     affected_table_replace_info,
@@ -434,71 +412,45 @@ impl DdlController {
                     specific_resource_group,
                     if_not_exists,
                 )
-                .await
-            }
-            .boxed(),
-
+                .boxed(),
             DdlCommand::DropStreamingJob {
                 job_id,
                 drop_mode,
                 target_replace_info,
-            } => async move {
-                ctrl.drop_streaming_job(job_id, drop_mode, target_replace_info)
-                    .await
-            }
-            .boxed(),
-
+            } => ctrl
+                .drop_streaming_job(job_id, drop_mode, target_replace_info)
+                .boxed(),
             DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
                 streaming_job,
                 fragment_graph,
-            }) => async move { ctrl.replace_job(streaming_job, fragment_graph).await }.boxed(),
-
-            DdlCommand::AlterName(relation, name) => async move {
-                // keeps `name` owned inside the future, borrowing it only for the call
-                ctrl.alter_name(relation, &name).await
-            }
-            .boxed(),
-
+            }) => ctrl.replace_job(streaming_job, fragment_graph).boxed(),
+            DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).boxed(),
             DdlCommand::AlterObjectOwner(object, owner_id) => {
-                async move { ctrl.alter_owner(object, owner_id).await }.boxed()
+                ctrl.alter_owner(object, owner_id).boxed()
             }
-
             DdlCommand::AlterSetSchema(object, new_schema_id) => {
-                async move { ctrl.alter_set_schema(object, new_schema_id).await }.boxed()
+                ctrl.alter_set_schema(object, new_schema_id).boxed()
             }
-
-            DdlCommand::CreateConnection(connection) => {
-                async move { ctrl.create_connection(connection).await }.boxed()
-            }
-
+            DdlCommand::CreateConnection(connection) => ctrl.create_connection(connection).boxed(),
             DdlCommand::DropConnection(connection_id, drop_mode) => {
-                async move { ctrl.drop_connection(connection_id, drop_mode).await }.boxed()
+                ctrl.drop_connection(connection_id, drop_mode).boxed()
             }
-
-            DdlCommand::CreateSecret(secret) => {
-                async move { ctrl.create_secret(secret).await }.boxed()
-            }
-            DdlCommand::DropSecret(secret_id) => {
-                async move { ctrl.drop_secret(secret_id).await }.boxed()
-            }
-            DdlCommand::AlterSecret(secret) => {
-                async move { ctrl.alter_secret(secret).await }.boxed()
-            }
+            DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).boxed(),
+            DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).boxed(),
+            DdlCommand::AlterSecret(secret) => ctrl.alter_secret(secret).boxed(),
             DdlCommand::AlterNonSharedSource(source) => {
-                async move { ctrl.alter_non_shared_source(source).await }.boxed()
+                ctrl.alter_non_shared_source(source).boxed()
             }
-            DdlCommand::CommentOn(comment) => async move { ctrl.comment_on(comment).await }.boxed(),
+            DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).boxed(),
             DdlCommand::CreateSubscription(subscription) => {
-                async move { ctrl.create_subscription(subscription).await }.boxed()
+                ctrl.create_subscription(subscription).boxed()
             }
             DdlCommand::DropSubscription(subscription_id, drop_mode) => {
-                async move { ctrl.drop_subscription(subscription_id, drop_mode).await }.boxed()
+                ctrl.drop_subscription(subscription_id, drop_mode).boxed()
             }
-            DdlCommand::AlterSwapRename(objects) => {
-                async move { ctrl.alter_swap_rename(objects).await }.boxed()
-            }
+            DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).boxed(),
             DdlCommand::AlterDatabaseParam(database_id, param) => {
-                async move { ctrl.alter_database_param(database_id, param).await }.boxed()
+                ctrl.alter_database_param(database_id, param).boxed()
             }
         };
 
@@ -568,12 +520,12 @@ impl DdlController {
     }
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
-        self.drop_object(
+        Box::pin(self.drop_object(
             ObjectType::Database,
             database_id as _,
             DropMode::Cascade,
             None,
-        )
+        ))
         .await
     }
 
@@ -589,8 +541,7 @@ impl DdlController {
         schema_id: SchemaId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Schema, schema_id as _, drop_mode, None)
-            .await
+        Box::pin(self.drop_object(ObjectType::Schema, schema_id as _, drop_mode, None)).await
     }
 
     /// Shared source is handled in [`Self::create_streaming_job`]
@@ -615,8 +566,7 @@ impl DdlController {
         source_id: SourceId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Source, source_id as _, drop_mode, None)
-            .await
+        Box::pin(self.drop_object(ObjectType::Source, source_id as _, drop_mode, None)).await
     }
 
     /// This replaces the source in the catalog.
@@ -636,12 +586,12 @@ impl DdlController {
     }
 
     async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
-        self.drop_object(
+        Box::pin(self.drop_object(
             ObjectType::Function,
             function_id as _,
             DropMode::Restrict,
             None,
-        )
+        ))
         .await
     }
 
@@ -661,8 +611,7 @@ impl DdlController {
         view_id: ViewId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::View, view_id as _, drop_mode, None)
-            .await
+        Box::pin(self.drop_object(ObjectType::View, view_id as _, drop_mode, None)).await
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
@@ -678,7 +627,7 @@ impl DdlController {
         connection_id: ConnectionId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Connection, connection_id as _, drop_mode, None)
+        Box::pin(self.drop_object(ObjectType::Connection, connection_id as _, drop_mode, None))
             .await
     }
 
@@ -737,7 +686,7 @@ impl DdlController {
     }
 
     async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Secret, secret_id as _, DropMode::Restrict, None)
+        Box::pin(self.drop_object(ObjectType::Secret, secret_id as _, DropMode::Restrict, None))
             .await
     }
 
@@ -1312,15 +1261,14 @@ impl DdlController {
 
         // create fragment and actor catalogs.
         tracing::debug!(id = streaming_job.id(), "building streaming job");
-        let (ctx, stream_job_fragments) = self
-            .build_stream_job(
-                ctx,
-                streaming_job,
-                fragment_graph,
-                affected_table_replace_info,
-                specific_resource_group,
-            )
-            .await?;
+        let (ctx, stream_job_fragments) = Box::pin(self.build_stream_job(
+            ctx,
+            streaming_job,
+            fragment_graph,
+            affected_table_replace_info,
+            specific_resource_group,
+        ))
+        .await?;
 
         let streaming_job = &ctx.streaming_job;
 
@@ -1407,10 +1355,12 @@ impl DdlController {
             (CreateType::Unspecified, _)
             | (CreateType::Foreground, _)
             | (CreateType::Background, StreamingJob::Sink(_, Some(_))) => {
-                let version = self
-                    .stream_manager
-                    .create_streaming_job(stream_job_fragments, ctx, None)
-                    .await?;
+                let version = Box::pin(self.stream_manager.create_streaming_job(
+                    stream_job_fragments,
+                    ctx,
+                    None,
+                ))
+                .await?;
                 Ok(version)
             }
             (CreateType::Background, _) => {
@@ -1421,10 +1371,10 @@ impl DdlController {
                 let ctrl = self.clone();
                 let (tx, rx) = oneshot::channel();
                 let fut = async move {
-                    let _ = ctrl
+                    let _ = Box::pin(ctrl
                         .stream_manager
                         .create_streaming_job(stream_job_fragments, ctx, Some(tx))
-                        .await
+                    ).await
                         .inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
@@ -1530,31 +1480,34 @@ impl DdlController {
                     .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true)
                     .await?;
 
-                self.stream_manager
-                    .replace_stream_job(stream_job_fragments, ctx)
-                    .await?;
+                Box::pin(
+                    self.stream_manager
+                        .replace_stream_job(stream_job_fragments, ctx),
+                )
+                .await?;
 
                 replace_upstream
             };
 
             version = match result {
                 Ok(replace_upstream) => {
-                    let version = self
-                        .metadata_manager
-                        .catalog_controller
-                        .finish_replace_streaming_job(
-                            tmp_id as _,
-                            streaming_job,
-                            replace_upstream,
-                            SinkIntoTableContext {
-                                creating_sink_id: None,
-                                dropping_sink_id: Some(sink_id),
-                                updated_sink_catalogs: vec![],
-                            },
-                            None, // no source is dropped when dropping sink into table
-                            None, // no auto refresh schema sink when dropping sink into table
-                        )
-                        .await?;
+                    let version = Box::pin(
+                        self.metadata_manager
+                            .catalog_controller
+                            .finish_replace_streaming_job(
+                                tmp_id as _,
+                                streaming_job,
+                                replace_upstream,
+                                SinkIntoTableContext {
+                                    creating_sink_id: None,
+                                    dropping_sink_id: Some(sink_id),
+                                    updated_sink_catalogs: vec![],
+                                },
+                                None, // no source is dropped when dropping sink into table
+                                None, // no auto refresh schema sink when dropping sink into table
+                            ),
+                    )
+                    .await?;
                     Ok(version)
                 }
                 Err(err) => {
@@ -1880,30 +1833,33 @@ impl DdlController {
                 .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true)
                 .await?;
 
-            self.stream_manager
-                .replace_stream_job(stream_job_fragments, ctx)
-                .await?;
+            Box::pin(
+                self.stream_manager
+                    .replace_stream_job(stream_job_fragments, ctx),
+            )
+            .await?;
             (replace_upstream, auto_refresh_schema_sink_finish_ctx)
         };
 
         match result {
             Ok((replace_upstream, auto_refresh_schema_sink_finish_ctx)) => {
-                let version = self
-                    .metadata_manager
-                    .catalog_controller
-                    .finish_replace_streaming_job(
-                        tmp_id,
-                        streaming_job,
-                        replace_upstream,
-                        SinkIntoTableContext {
-                            creating_sink_id: None,
-                            dropping_sink_id: None,
-                            updated_sink_catalogs,
-                        },
-                        drop_table_connector_ctx.as_ref(),
-                        auto_refresh_schema_sink_finish_ctx,
-                    )
-                    .await?;
+                let version = Box::pin(
+                    self.metadata_manager
+                        .catalog_controller
+                        .finish_replace_streaming_job(
+                            tmp_id,
+                            streaming_job,
+                            replace_upstream,
+                            SinkIntoTableContext {
+                                creating_sink_id: None,
+                                dropping_sink_id: None,
+                                updated_sink_catalogs,
+                            },
+                            drop_table_connector_ctx.as_ref(),
+                            auto_refresh_schema_sink_finish_ctx,
+                        ),
+                )
+                .await?;
                 if let Some(drop_table_connector_ctx) = &drop_table_connector_ctx {
                     self.source_manager
                         .apply_source_change(SourceChange::DropSource {
@@ -1943,9 +1899,9 @@ impl DdlController {
             StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
         };
 
-        let version = self
-            .drop_object(object_type, object_id, drop_mode, target_replace_info)
-            .await?;
+        let version =
+            Box::pin(self.drop_object(object_type, object_id, drop_mode, target_replace_info))
+                .await?;
         #[cfg(not(madsim))]
         if let StreamingJobId::Sink(sink_id) = job_id {
             // delete system table for exactly once iceberg sink

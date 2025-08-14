@@ -317,7 +317,7 @@ impl GlobalStreamManager {
         let stream_manager = self.clone();
         let fut = async move {
             let res: MetaResult<_> = try {
-                let (source_change, streaming_job) = stream_manager
+                let (source_change, streaming_job) = Box::pin(stream_manager
                     .run_create_streaming_job_command(stream_job_fragments, ctx)
                     .inspect(move |result| {
                         if let Some(tx) = run_command_notifier {
@@ -330,7 +330,7 @@ impl GlobalStreamManager {
                                 }
                             });
                         }
-                    })
+                    }))
                     .await?;
                 let version = stream_manager
                     .metadata_manager
