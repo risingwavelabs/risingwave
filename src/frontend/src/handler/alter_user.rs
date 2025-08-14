@@ -48,9 +48,10 @@ fn alter_prost_user_info(
             .iter()
             .any(|option| matches!(option, UserOption::Admin | UserOption::NoAdmin));
     if !change_self_password_only && require_admin && !session_user.is_admin {
-        return Err(
-            PermissionDenied(format!("{} cannot be altered", user_info.name).to_owned()).into(),
-        );
+        return Err(PermissionDenied(
+            format!("{} cannot be altered with admin option", user_info.name).to_owned(),
+        )
+        .into());
     }
 
     if !session_user.is_super {
@@ -82,13 +83,8 @@ fn alter_prost_user_info(
                 update_fields.insert(UpdateField::Super);
             }
             UserOption::NoSuperUser => {
-                if user_info.is_admin {
-                    // Admin users cannot have superuser status removed - show notice but ignore
-                    notices.push("admin users must remain superusers, ignoring NOSUPERUSER".to_owned());
-                } else {
-                    user_info.is_super = false;
-                    update_fields.insert(UpdateField::Super);
-                }
+                user_info.is_super = false;
+                update_fields.insert(UpdateField::Super);
             }
             UserOption::CreateDB => {
                 user_info.can_create_db = true;
@@ -160,6 +156,13 @@ fn alter_prost_user_info(
     if user_info.is_admin && !user_info.is_super {
         user_info.is_super = true;
         update_fields.insert(UpdateField::Super);
+        if options
+            .0
+            .iter()
+            .any(|option| matches!(option, UserOption::NoSuperUser))
+        {
+            notices.push("admin users must remain superusers, ignoring NOSUPERUSER".to_owned());
+        }
     }
 
     Ok((user_info, update_fields.into_iter().collect(), notices))

@@ -47,7 +47,7 @@ pub async fn handle_create_user(
         can_login: true,
         ..Default::default()
     };
-    let mut notice = None;
+    let mut notices = vec![];
     {
         let user_reader = session.env().user_info_reader().read_guard();
         if user_reader.get_user_by_name(&user_name).is_some() {
@@ -114,7 +114,7 @@ pub async fn handle_create_user(
                     if !password.0.is_empty() {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                     } else {
-                        notice = Some(
+                        notices.push(
                             "empty string is not a valid password, clearing password".to_owned(),
                         );
                     }
@@ -125,7 +125,7 @@ pub async fn handle_create_user(
                     {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                     } else {
-                        notice = Some(
+                        notices.push(
                             "empty string is not a valid password, clearing password".to_owned(),
                         );
                     }
@@ -142,20 +142,20 @@ pub async fn handle_create_user(
             }
         }
 
-        if user_info.is_admin {
+        if user_info.is_admin && !user_info.is_super {
             // Admin users are always superusers
             user_info.is_super = true;
+            notices.push("Admin users are always superusers".to_owned());
         }
     };
 
     let user_info_writer = session.user_info_writer()?;
     user_info_writer.create_user(user_info).await?;
-    let response_builder = RwPgResponse::builder(StatementType::CREATE_USER);
-    if let Some(notice) = notice {
-        Ok(response_builder.notice(notice).into())
-    } else {
-        Ok(response_builder.into())
+    let mut response_builder = RwPgResponse::builder(StatementType::CREATE_USER);
+    for notice in notices {
+        response_builder = response_builder.notice(notice);
     }
+    Ok(response_builder.into())
 }
 
 #[cfg(test)]
