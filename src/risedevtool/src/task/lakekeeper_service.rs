@@ -141,13 +141,29 @@ impl LakekeeperService {
                     }
                 };
 
-                // Intentionally not executing in a transaction because Postgres does not allow it.
-                sqlx::raw_sql(&format!("DROP DATABASE IF EXISTS {};", db_name))
-                    .execute(&mut conn)
-                    .await?;
-                sqlx::raw_sql(&format!("CREATE DATABASE {};", db_name))
-                    .execute(&mut conn)
-                    .await?;
+                // Check if database exists before creating it
+                let db_exists_query = format!(
+                    "SELECT 1 FROM pg_database WHERE datname = '{}';",
+                    db_name
+                );
+                let db_exists = match sqlx::raw_sql(&db_exists_query)
+                    .fetch_one(&mut conn)
+                    .await
+                {
+                    Ok(_) => true,
+                    Err(sqlx::Error::RowNotFound) => false,
+                    Err(e) => return Err(e.into()),
+                };
+
+                if !db_exists {
+                    // Create database only if it doesn't exist
+                    // Intentionally not executing in a transaction because Postgres does not allow it.
+                    sqlx::raw_sql(&format!("CREATE DATABASE {};", db_name))
+                        .execute(&mut conn)
+                        .await?;
+                } else {
+                    println!("Database '{}' already exists, skipping creation", db_name);
+                }
 
                 Ok::<_, anyhow::Error>(())
             })
@@ -208,7 +224,7 @@ impl LakekeeperService {
                             let response_text = response.text().await.unwrap_or_default();
                             println!("Successfully bootstrapped lakekeeper: {}", response_text);
                             break;
-                        } else if response.status() == reqwest::StatusCode::CONFLICT {
+                        } else if response.status() == reqwest::StatusCode::CONFLICT || response.status() == reqwest::StatusCode::BAD_REQUEST {
                             let error_text = response.text().await.unwrap_or_default();
                             if error_text.contains("already bootstrapped") || error_text.contains("Server already initialized") {
                                 println!("Lakekeeper already bootstrapped, skipping");
