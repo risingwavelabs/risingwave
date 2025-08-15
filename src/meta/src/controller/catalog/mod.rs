@@ -136,6 +136,8 @@ pub struct ReleaseContext {
     pub(crate) removed_actors: HashSet<ActorId>,
     pub(crate) removed_fragments: HashSet<FragmentId>,
 
+    /// Removed sinks that target table has not been removed.
+    pub(crate) removed_sink_in_existing_table: HashMap<SinkId, TableId>,
     /// Removed upstream sink fragments for existing table.
     pub(crate) removed_upstream_fragments: HashMap<FragmentId, Vec<FragmentId>>,
 }

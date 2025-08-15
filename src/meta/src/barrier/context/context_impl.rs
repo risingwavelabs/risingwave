@@ -197,12 +197,20 @@ impl CommandContext {
 
             Command::DropStreamingJobs {
                 unregistered_state_table_ids,
+                removed_sink_in_existing_table,
                 ..
             } => {
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
+                if !removed_sink_in_existing_table.is_empty() {
+                    barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .update_table_remove_incoming_sinks(removed_sink_in_existing_table)
+                        .await?;
+                }
             }
             Command::ConnectorPropsChange(obj_id_map_props) => {
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.

@@ -276,7 +276,7 @@ impl CatalogController {
         let (removed_source_fragments, removed_actors, removed_fragments) =
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
-        let mut removed_sink_with_existing_table = HashMap::new();
+        let mut removed_sink_in_existing_table = HashMap::new();
         for obj in removed_objects.values() {
             if obj.obj_type != ObjectType::Sink {
                 continue;
@@ -288,12 +288,12 @@ impl CatalogController {
             if let Some(target_table_id) = sink.target_table
                 && !removed_streaming_job_ids.contains(&target_table_id)
             {
-                removed_sink_with_existing_table.insert(sink.sink_id, target_table_id);
+                removed_sink_in_existing_table.insert(sink.sink_id, target_table_id);
             }
         }
 
         let mut removed_upstream_fragments: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
-        for (sink_id, _) in removed_sink_with_existing_table {
+        for &sink_id in removed_sink_in_existing_table.keys() {
             let sink_fragment_id = get_sink_fragment_by_id(&txn, sink_id).await?;
             let target_fragments = fetch_target_fragments(&txn, sink_fragment_id).await?;
             assert_eq!(
@@ -398,6 +398,7 @@ impl CatalogController {
                 removed_source_fragments,
                 removed_actors,
                 removed_fragments,
+                removed_sink_in_existing_table,
                 removed_upstream_fragments,
             },
             version,

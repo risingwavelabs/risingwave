@@ -700,6 +700,74 @@ impl CatalogController {
         Ok((true, Some(database_id)))
     }
 
+    pub async fn update_table_remove_incoming_sinks(
+        &self,
+        removed_sink_in_existing_table: &HashMap<SinkId, TableId>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let mut removed_sink_by_table = HashMap::new();
+        for (sink_id, table_id) in removed_sink_in_existing_table {
+            removed_sink_by_table
+                .entry(*table_id)
+                .or_insert_with(Vec::new)
+                .push(*sink_id);
+        }
+        let mut objects = Vec::with_capacity(removed_sink_by_table.len());
+        for (table_id, sink_ids) in removed_sink_by_table {
+            let obj =
+                Self::update_table_incoming_sinks_inner(&txn, table_id, vec![], sink_ids).await?;
+            objects.push(obj);
+        }
+
+        txn.commit().await?;
+
+        self.notify_frontend(
+            NotificationOperation::Update,
+            NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+        )
+        .await;
+
+        Ok(())
+    }
+
+    // Returns the object that needs to notify fe to update.
+    async fn update_table_incoming_sinks_inner(
+        txn: &DatabaseTransaction,
+        table_id: TableId,
+        added_incoming_sinks: Vec<SinkId>,
+        removed_incoming_sinks: Vec<SinkId>,
+    ) -> MetaResult<PbObject> {
+        let table = Table::find_by_id(table_id)
+            .one(txn)
+            .await?
+            .ok_or(MetaError::catalog_id_not_found("table", table_id))?;
+
+        let mut incoming_sinks = table.incoming_sinks.inner_ref().clone();
+
+        incoming_sinks.retain(|&id| !removed_incoming_sinks.contains(&id));
+        incoming_sinks.extend(added_incoming_sinks.iter());
+
+        Table::update(table::ActiveModel {
+            table_id: Set(table_id),
+            incoming_sinks: Set(incoming_sinks.into()),
+            ..Default::default()
+        })
+        .exec(txn)
+        .await?;
+        let (table, table_obj) = Table::find_by_id(table_id)
+            .find_also_related(Object)
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+        let pb_table = ObjectModel(table, table_obj.unwrap()).into();
+
+        Ok(PbObject {
+            object_info: Some(PbObjectInfo::Table(pb_table)),
+        })
+    }
+
     #[await_tree::instrument]
     pub async fn post_collect_job_fragments(
         &self,
@@ -742,35 +810,14 @@ impl CatalogController {
         let mut objects = vec![];
         if let Some((target_table_id, downstreams)) = sink_update_ctx {
             insert_fragment_relations(&txn, &downstreams).await?;
-
-            let table = Table::find_by_id(target_table_id as ObjectId)
-                .one(&txn)
-                .await?
-                .ok_or(MetaError::catalog_id_not_found("table", target_table_id))?;
-
-            let mut incoming_sinks = table.incoming_sinks.inner_ref().clone();
-
-            let sink_id = job_id;
-
-            assert!(!incoming_sinks.contains(&sink_id));
-            incoming_sinks.push(sink_id);
-
-            Table::update(table::ActiveModel {
-                table_id: Set(target_table_id as ObjectId),
-                incoming_sinks: Set(incoming_sinks.into()),
-                ..Default::default()
-            })
-            .exec(&txn)
+            let obj = Self::update_table_incoming_sinks_inner(
+                &txn,
+                target_table_id,
+                vec![job_id as _],
+                vec![],
+            )
             .await?;
-            let (table, table_obj) = Table::find_by_id(target_table_id)
-                .find_also_related(Object)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", target_table_id))?;
-            let pb_table = ObjectModel(table, table_obj.unwrap()).into();
-            objects.push(PbObject {
-                object_info: Some(PbObjectInfo::Table(pb_table)),
-            });
+            objects.push(obj);
         }
 
         // Mark job as CREATING.
