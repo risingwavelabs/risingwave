@@ -416,13 +416,20 @@ impl GlobalStreamManager {
                             tracing::debug!(
                                 "cancelling streaming job {table_id} by issue cancel command."
                             );
+
+                            let cancel_command = self
+                                .metadata_manager
+                                .catalog_controller
+                                .build_cancel_command(&table_fragments)
+                                .await?;
+
                             self.metadata_manager
                                 .catalog_controller
                                 .try_abort_creating_streaming_job(table_id.table_id as _, true)
                                 .await?;
 
                             self.barrier_scheduler
-                                .run_command(database_id, Command::cancel(&table_fragments))
+                                .run_command(database_id, cancel_command)
                                 .await?;
                         } else {
                             // streaming job is already completed.
@@ -739,6 +746,12 @@ impl GlobalStreamManager {
                     )))?;
                 }
 
+                let cancel_command = self
+                    .metadata_manager
+                    .catalog_controller
+                    .build_cancel_command(&fragment)
+                    .await?;
+
                 let (_, database_id) = self.metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(id.table_id as _, true)
@@ -746,7 +759,7 @@ impl GlobalStreamManager {
 
                 if let Some(database_id) = database_id {
                     self.barrier_scheduler
-                        .run_command(DatabaseId::new(database_id as _), Command::cancel(&fragment))
+                        .run_command(DatabaseId::new(database_id as _), cancel_command)
                         .await?;
                 }
             };

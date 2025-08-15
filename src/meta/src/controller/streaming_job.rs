@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use anyhow::anyhow;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::catalog::{self, FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -67,14 +67,15 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
-use crate::barrier::Reschedule;
+use crate::barrier::{Command, Reschedule};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_internal_tables_by_id, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_user_info_by_ids,
+    get_internal_tables_by_id, get_removed_upstream_fragments_by_sink_ids, get_table_columns,
+    grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
+    try_get_sink_into_table,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -542,6 +543,48 @@ impl CatalogController {
         }
 
         Ok(())
+    }
+
+    pub async fn build_cancel_command(
+        &self,
+        table_fragments: &StreamJobFragments,
+    ) -> MetaResult<Command> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let mut removed_sink_in_existing_table = HashMap::new();
+        let mut removed_upstream_fragments = HashMap::new();
+
+        if let Some((sink_id, table_id)) =
+            try_get_sink_into_table(&txn, table_fragments.stream_job_id.table_id as _).await?
+        {
+            removed_sink_in_existing_table = HashMap::from([(sink_id, table_id)]);
+            removed_upstream_fragments =
+                get_removed_upstream_fragments_by_sink_ids(&txn, vec![sink_id]).await?;
+        }
+
+        Ok(Command::DropStreamingJobs {
+            table_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
+            actors: table_fragments.actor_ids(),
+            unregistered_state_table_ids: table_fragments
+                .all_table_ids()
+                .map(catalog::TableId::new)
+                .collect(),
+            unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
+            removed_sink_in_existing_table,
+            removed_upstream_fragments: removed_upstream_fragments
+                .into_iter()
+                .map(|(id, fragments)| {
+                    (
+                        id as _,
+                        fragments
+                            .into_iter()
+                            .map(|fragment| fragment as _)
+                            .collect(),
+                    )
+                })
+                .collect(),
+        })
     }
 
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.

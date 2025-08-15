@@ -292,22 +292,12 @@ impl CatalogController {
             }
         }
 
-        let mut removed_upstream_fragments: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
-        for &sink_id in removed_sink_in_existing_table.keys() {
-            let sink_fragment_id = get_sink_fragment_by_id(&txn, sink_id).await?;
-            let target_fragments = fetch_target_fragments(&txn, sink_fragment_id).await?;
-            assert_eq!(
-                target_fragments.len(),
-                1,
-                "expect only one target fragment for sink {sink_id}"
-            );
-
-            let table_fragment_id = target_fragments[0];
-            removed_upstream_fragments
-                .entry(table_fragment_id)
-                .or_default()
-                .push(sink_fragment_id);
-        }
+        let sink_ids = removed_sink_in_existing_table
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let removed_upstream_fragments =
+            get_removed_upstream_fragments_by_sink_ids(&txn, sink_ids).await?;
 
         // Find affect users with privileges on all this objects.
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()

@@ -2167,6 +2167,24 @@ where
     Ok(())
 }
 
+pub async fn try_get_sink_into_table<C>(
+    txn: &C,
+    job_id: ObjectId,
+) -> MetaResult<Option<(SinkId, TableId)>>
+where
+    C: ConnectionTrait,
+{
+    let sink_table: Option<(SinkId, TableId)> = Sink::find_by_id(job_id)
+        .select_only()
+        .columns([sink::Column::SinkId, sink::Column::TargetTable])
+        .filter(sink::Column::TargetTable.is_not_null())
+        .into_tuple()
+        .one(txn)
+        .await?;
+
+    Ok(sink_table)
+}
+
 pub async fn get_sink_fragment_by_id<C>(txn: &C, sink_id: SinkId) -> MetaResult<FragmentId>
 where
     C: ConnectionTrait,
@@ -2239,6 +2257,32 @@ where
         job_info.max_parallelism as _,
         job_definition,
     )
+}
+
+pub async fn get_removed_upstream_fragments_by_sink_ids<C>(
+    txn: &C,
+    sink_ids: Vec<SinkId>,
+) -> MetaResult<HashMap<FragmentId, Vec<FragmentId>>>
+where
+    C: ConnectionTrait,
+{
+    let mut removed_upstream_fragments: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+    for sink_id in sink_ids {
+        let sink_fragment_id = get_sink_fragment_by_id(txn, sink_id).await?;
+        let target_fragments = fetch_target_fragments(txn, sink_fragment_id).await?;
+        assert_eq!(
+            target_fragments.len(),
+            1,
+            "expect only one target fragment for sink {sink_id}"
+        );
+        let table_fragment_id = target_fragments[0];
+        removed_upstream_fragments
+            .entry(table_fragment_id)
+            .or_default()
+            .push(sink_fragment_id);
+    }
+
+    Ok(removed_upstream_fragments)
 }
 
 pub fn build_select_node_list(

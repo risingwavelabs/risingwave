@@ -456,22 +456,6 @@ impl Command {
         Self::Resume
     }
 
-    // TODO(zyx): suspect that some types of jobs (such as sink-into-table) cannot be dropped in this way,
-    // and need to go through the complete `drop_object` process.
-    pub fn cancel(table_fragments: &StreamJobFragments) -> Self {
-        Self::DropStreamingJobs {
-            table_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
-            actors: table_fragments.actor_ids(),
-            unregistered_state_table_ids: table_fragments
-                .all_table_ids()
-                .map(TableId::new)
-                .collect(),
-            unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
-            removed_sink_in_existing_table: Default::default(),
-            removed_upstream_fragments: Default::default(),
-        }
-    }
-
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
             Command::Flush => None,
