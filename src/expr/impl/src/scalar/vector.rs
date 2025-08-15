@@ -18,9 +18,7 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::vector::MeasureDistanceBuilder;
-use risingwave_common::vector::distance::{
-    CosineDistance, L1Distance, L2Distance, inner_product_faiss,
-};
+use risingwave_common::vector::distance::{L1Distance, L2SqrDistance, inner_product_faiss};
 use risingwave_expr::expr::Context;
 use risingwave_expr::{ExprError, Result, function};
 
@@ -71,14 +69,14 @@ fn check_dims(name: &'static str, lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Res
 #[function("l2_distance(vector, vector) -> float8"/*, type_infer = "unreachable"*/)]
 fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     check_dims("l2_distance", lhs, rhs)?;
-    Ok(L2Distance::distance(lhs, rhs).into())
+    Ok(L2SqrDistance::distance(lhs, rhs).sqrt().into())
 }
 
 /// ```slt
 /// query R
-/// SELECT cosine_distance('[1,2]'::vector(2), '[2,4]');
+/// SELECT abs(cosine_distance('[1,2]'::vector(2), '[2,4]')) < 1e-5;
 /// ----
-/// 0
+/// t
 ///
 /// query R
 /// SELECT cosine_distance('[1,2]'::vector(2), '[0,0]');
@@ -86,19 +84,19 @@ fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
 /// NaN
 ///
 /// query R
-/// SELECT cosine_distance('[1,1]'::vector(2), '[1,1]');
+/// SELECT abs(cosine_distance('[1,1]'::vector(2), '[1,1]')) < 1e-5;
 /// ----
-/// 0
+/// t
 ///
 /// query R
-/// SELECT cosine_distance('[1,0]'::vector(2), '[0,2]');
+/// SELECT abs(cosine_distance('[1,0]'::vector(2), '[0,2]') - 1.0) < 1e-5;
 /// ----
-/// 1
+/// t
 ///
 /// query R
-/// SELECT cosine_distance('[1,1]'::vector(2), '[-1,-1]');
+/// SELECT abs(cosine_distance('[1,1]'::vector(2), '[-1,-1]') - 2) < 1e-5;
 /// ----
-/// 2
+/// t
 ///
 /// query error dimensions
 /// SELECT cosine_distance('[1,2]'::vector(2), '[3]');
@@ -136,7 +134,7 @@ fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
 #[function("cosine_distance(vector, vector) -> float8")]
 fn cosine_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     check_dims("cosine_distance", lhs, rhs)?;
-    Ok(CosineDistance::distance(lhs, rhs).into())
+    Ok(risingwave_common::vector::distance::cosine_distance(lhs, rhs).into())
 }
 
 /// ```slt
