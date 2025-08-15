@@ -841,9 +841,32 @@ impl LogicalPlanRoot {
             vec![dml_node]
         };
 
+        let dists = union_inputs
+            .iter()
+            .map(|input| input.distribution())
+            .unique()
+            .collect_vec();
+
+        let dist = match &dists[..] {
+            &[Distribution::SomeShard, Distribution::HashShard(_)]
+            | &[Distribution::HashShard(_), Distribution::SomeShard] => Distribution::SomeShard,
+            &[dist @ Distribution::SomeShard] | &[dist @ Distribution::HashShard(_)] => {
+                dist.clone()
+            }
+            _ => {
+                unreachable!()
+            }
+        };
+
         let dml_node = union_inputs.last().unwrap();
-        let upstream_sink_union =
-            StreamUpstreamSinkUnion::new(context.clone(), dml_node.schema(), append_only);
+        let generated_column_exprs =
+            LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
+        let upstream_sink_union = StreamUpstreamSinkUnion::new(
+            context.clone(),
+            dml_node.schema(),
+            append_only,
+            generated_column_exprs,
+        );
         union_inputs.push(upstream_sink_union.into());
 
         let mut stream_plan = StreamUnion::new_with_dist(
@@ -852,7 +875,7 @@ impl LogicalPlanRoot {
                 inputs: union_inputs,
                 source_col: None,
             },
-            Distribution::SomeShard,
+            dist,
         )
         .into();
 

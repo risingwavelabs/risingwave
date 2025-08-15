@@ -24,7 +24,7 @@ use super::utils::{Distill, childless_record, watermark_pretty};
 use super::{ExprRewritable, StreamPlanRef as PlanRef, generic};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode, StreamPlanNodeType};
+use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -55,7 +55,6 @@ impl StreamUnion {
 
         let watermark_indices = inputs
             .iter()
-            .filter(|x| x.node_type() != StreamPlanNodeType::StreamUpstreamSinkUnion)
             .map(|x| x.watermark_columns().index_set().to_bitset())
             .fold(
                 {
