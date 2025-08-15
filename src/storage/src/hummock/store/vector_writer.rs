@@ -121,7 +121,8 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
                         self.sstable_store.clone(),
                         self.object_id_manager.clone(),
                         &self.storage_opts,
-                    ),
+                    )
+                    .await?,
                     _guard: VectorWriterInitGuard::new(
                         self.table_id,
                         opts.epoch.curr,
