@@ -482,7 +482,7 @@ impl HummockStorage {
                     id: SharedBufferBatchId,
                     epochs: &'a Vec<HummockEpoch>,
                 }
-                let get_imm_info = |imm: &ImmutableMemtable| -> ImmInfo<'_> {
+                fn get_imm_info(imm: &ImmutableMemtable) -> ImmInfo<'_> {
                     ImmInfo {
                         id: imm.batch_id(),
                         epochs: imm.epochs(),
@@ -495,7 +495,7 @@ impl HummockStorage {
                     max_epoch: u64,
                     table_ids: &'a Vec<u32>,
                 }
-                let get_sst_info = |sst: &SstableInfo| -> SstInfo<'_> {
+                fn get_sst_info(sst: &SstableInfo) -> SstInfo<'_> {
                     SstInfo {
                         id: sst.sst_id,
                         min_epoch: sst.min_epoch,
