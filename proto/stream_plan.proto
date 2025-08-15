@@ -946,6 +946,7 @@ message StreamNode {
   // This field used to be a `bool append_only`.
   // Enum variants are ordered for backwards compatibility.
   enum StreamKind {
+    // buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
     STREAM_KIND_RETRACT = 0;
     STREAM_KIND_APPEND_ONLY = 1;
     STREAM_KIND_UPSERT = 2;
