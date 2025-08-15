@@ -22,7 +22,7 @@ use multimap::MultiMap;
 use risingwave_common::array::Op;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::RowExt;
-use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
+use risingwave_common::types::DefaultOrd;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::ExprError;
@@ -30,6 +30,7 @@ use risingwave_expr::expr::NonStrictExpression;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
+use self::row::row_concat;
 use super::barrier_align::*;
 use super::join::hash_join::*;
 use super::join::row::{JoinEncoding, JoinRow};
@@ -816,23 +817,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         Ok(watermarks_to_emit)
     }
 
-    fn row_concat(
-        row_update: impl Row,
-        update_start_pos: usize,
-        row_matched: impl Row,
-        matched_start_pos: usize,
-    ) -> OwnedRow {
-        let mut new_row = vec![None; row_update.len() + row_matched.len()];
-
-        for (i, datum_ref) in row_update.iter().enumerate() {
-            new_row[i + update_start_pos] = datum_ref.to_owned_datum();
-        }
-        for (i, datum_ref) in row_matched.iter().enumerate() {
-            new_row[i + matched_start_pos] = datum_ref.to_owned_datum();
-        }
-        OwnedRow::new(new_row)
-    }
-
     /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_left(
         args: EqJoinArgs<'_, K, S, E>,
@@ -1279,7 +1263,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         join_condition: &Option<NonStrictExpression>,
     ) -> bool {
         if let Some(join_condition) = join_condition {
-            let new_row = Self::row_concat(
+            let new_row = row_concat(
                 row,
                 side_update_start_pos,
                 matched_row,
