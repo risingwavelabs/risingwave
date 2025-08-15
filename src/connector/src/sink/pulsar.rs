@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![warn(clippy::large_futures, clippy::large_stack_frames)]
-
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::time::Duration;
