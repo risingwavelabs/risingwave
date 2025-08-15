@@ -369,16 +369,17 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
         dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
-            // sync: format & own everything
-            let mut pairs: Vec<(Option<String>, Option<Vec<u8>>)> = Vec::new();
+            // reduces compile-time/code size by avoiding formatter-specific state in the async FSM.
+            let mut pairs: Vec<(Option<String>, Option<Vec<u8>>)> =
+                Vec::with_capacity(chunk.cardinality());
             for r in formatter.format_chunk(&chunk) {
                 let (key, value) = r?;
                 let key = key.map(SerTo::ser_to).transpose()?;
                 let value = value.map(SerTo::ser_to).transpose()?;
                 pairs.push((key, value));
-            }
+            } // formatter iterator and &chunk are intentionally dropped before the first .await.
 
-            // async: no formatter/iterator generics across .await
+            // Async phase uses only concrete types; no formatter/iterator generics cross .await.
             let mut payload_writer = PulsarPayloadWriter {
                 producer: &mut self.producer,
                 add_future,
@@ -386,7 +387,7 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
             };
 
             for (k, v) in pairs {
-                // Box per-record so the parent future stays small
+                // Box per record so the large child future doesn't bloat this parent future (Clippy fix).
                 Box::pin(payload_writer.write_inner(k, v)).await?;
             }
 
