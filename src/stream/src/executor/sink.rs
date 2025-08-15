@@ -36,12 +36,13 @@ use risingwave_connector::sink::log_store::{
 use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
+use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 
-use crate::common::compact_chunk::{StreamChunkCompactor, merge_chunk_row};
+use crate::common::compact_chunk::{InconsistencyBehavior, StreamChunkCompactor, merge_chunk_row};
 use crate::executor::prelude::*;
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
@@ -210,6 +211,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             fragment_id,
         );
 
+        // When processing upsert stream, we need to tolerate the inconsistency (mismatched `DELETE`
+        // and `INSERT` pairs) when compacting input chunks with derived stream key.
+        let input_compact_ib = if self.input.stream_kind() == StreamKind::Upsert {
+            InconsistencyBehavior::Tolerate
+        } else {
+            InconsistencyBehavior::Panic
+        };
+
         let input = self.input.execute();
 
         let input = input.inspect_ok(move |msg| {
@@ -227,6 +236,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.re_construct_with_sink_pk,
             self.chunk_size,
             self.input_data_types,
+            input_compact_ib,
             self.sink_param.downstream_pk.clone(),
             metrics.sink_chunk_buffer_size,
             self.compact_chunk,
@@ -282,6 +292,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_param,
                             self.sink_writer_param,
                             self.pk_matched,
+                            input_compact_ib,
                             self.actor_context,
                             rate_limit_rx,
                             rebuild_sink_rx,
@@ -417,6 +428,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         re_construct_with_sink_pk: bool,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
+        input_compact_ib: InconsistencyBehavior,
         down_stream_pk: Vec<usize>,
         sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
         compact_chunk: bool,
@@ -441,7 +453,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             let mut insert_chunks = vec![];
 
                             for c in StreamChunkCompactor::new(stream_key.clone(), chunks)
-                                .into_compacted_chunks()
+                                .into_compacted_chunks(input_compact_ib)
                             {
                                 // We only enter the branch if need_advance_delete, in which case `sink_type` is not ForceAppendOnly or AppendOnly.
                                 {
@@ -470,7 +482,13 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 .reconstructed_compacted_chunks(
                                     chunk_size,
                                     input_data_types.clone(),
-                                    sink_type != SinkType::ForceAppendOnly,
+                                    // When compacting based on user provided primary key, we should never panic
+                                    // on inconsistency in case the user provided primary key is not unique.
+                                    if sink_type == SinkType::ForceAppendOnly {
+                                        InconsistencyBehavior::Tolerate
+                                    } else {
+                                        InconsistencyBehavior::Warn
+                                    },
                                 );
                             for c in chunks {
                                 yield Message::Chunk(c);
@@ -507,7 +525,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
                         if compact_chunk {
-                            chunk = merge_chunk_row(chunk, &stream_key);
+                            chunk = merge_chunk_row(chunk, &stream_key, input_compact_ib);
                         }
                         match sink_type {
                             SinkType::AppendOnly => yield Message::Chunk(chunk),
@@ -536,6 +554,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         mut sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         pk_matched: bool,
+        input_compact_ib: InconsistencyBehavior,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
         mut rebuild_sink_rx: UnboundedReceiver<RebuildSinkMessage>,
@@ -592,7 +611,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 // `append_only`, we should only append to downstream, so there should not be any
                 // overlapping keys.
                 let chunk = if pk_matched && matches!(sink_param.sink_type, SinkType::Upsert) {
-                    merge_chunk_row(chunk, &downstream_pk)
+                    merge_chunk_row(chunk, &downstream_pk, input_compact_ib)
                 } else {
                     chunk
                 };
