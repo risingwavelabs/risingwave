@@ -135,7 +135,7 @@ profile:
       - use: kafka
         persist-data: true
       - use: lakekeeper
-        port: 8080
+        port: 8181
 
   standalone-full-peripherals:
     steps:
@@ -1454,7 +1454,7 @@ template:
     listen-address: ${address}
 
     # Listen port of Lakekeeper
-    port: 8080
+    port: 8181
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true

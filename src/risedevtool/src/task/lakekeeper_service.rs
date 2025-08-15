@@ -16,8 +16,8 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Result, anyhow};
-
+use anyhow::{Context, Result, anyhow};
+use sqlx::ConnectOptions;
 use super::{ExecuteContext, Task};
 use crate::LakekeeperConfig;
 use crate::util::stylized_risedev_subcmd;
@@ -82,6 +82,77 @@ impl LakekeeperService {
         Ok(())
     }
 
+    fn initialize_lakekeeper_database(&self, ctx: &mut ExecuteContext<impl std::io::Write>) -> Result<()> {
+        if let Some(postgres_configs) = &self.config.provide_postgres_backend
+            && let Some(pg_config) = postgres_configs.first()
+        {
+            // Wait for PostgreSQL to be ready first
+            ctx.pb.set_message("waiting for PostgreSQL to be ready...");
+            let mut tcp_check = crate::TcpReadyCheckTask::new(
+                pg_config.address.clone(),
+                pg_config.port,
+                pg_config.user_managed,
+            )?;
+            tcp_check.execute(ctx)?;
+
+            // Give PostgreSQL a bit more time to fully initialize after TCP is ready
+            std::thread::sleep(std::time::Duration::from_secs(2));
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+
+            let db_name = "lakekeeper";
+            let host = pg_config.address.clone();
+            let port = pg_config.port;
+            let username = pg_config.user.clone();
+            let password = pg_config.password.clone();
+
+            rt.block_on(async move {
+                use sqlx::postgres::*;
+                use tokio::time::{sleep, Duration};
+                
+                let options = PgConnectOptions::new()
+                    .host(&host)
+                    .port(port)
+                    .username(&username)
+                    .password(&password)
+                    .database("template1")
+                    .ssl_mode(sqlx::postgres::PgSslMode::Disable);
+
+                // Retry connection with exponential backoff
+                let mut attempts = 0;
+                let max_attempts = 5;
+                let mut conn = loop {
+                    match options.connect().await {
+                        Ok(conn) => break conn,
+                        Err(_) if attempts < max_attempts => {
+                            attempts += 1;
+                            let delay = Duration::from_millis(500 * (1 << attempts)); // 1s, 2s, 4s, 8s, 16s
+                            sleep(delay).await;
+                        }
+                        Err(e) => {
+                            return Err(e).context("failed to connect to template database for lakekeeper after retries")?;
+                        }
+                    }
+                };
+
+                // Intentionally not executing in a transaction because Postgres does not allow it.
+                sqlx::raw_sql(&format!("DROP DATABASE IF EXISTS {};", db_name))
+                    .execute(&mut conn)
+                    .await?;
+                sqlx::raw_sql(&format!("CREATE DATABASE {};", db_name))
+                    .execute(&mut conn)
+                    .await?;
+
+                Ok::<_, anyhow::Error>(())
+            })
+            .context("failed to initialize lakekeeper database")?;
+        }
+
+        Ok(())
+    }
+
     fn run_migrate(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> Result<()> {
         ctx.pb.set_message("running database migration...");
         let mut cmd = self.lakekeeper()?;
@@ -106,8 +177,10 @@ impl Task for LakekeeperService {
             ));
         }
 
-        // Run database migration first if using postgres backend
+        // Initialize and migrate database if using postgres backend
         if self.config.provide_postgres_backend.is_some() {
+            ctx.pb.set_message("initializing lakekeeper database...");
+            self.initialize_lakekeeper_database(ctx)?;
             self.run_migrate(ctx)?;
         }
 
