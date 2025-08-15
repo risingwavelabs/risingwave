@@ -775,6 +775,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     // break after the state have been saved
                     break;
                 }
+
                 yield msg;
             }
         }

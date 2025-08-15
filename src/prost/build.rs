@@ -74,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".catalog.Sink",
         ".catalog.View",
         ".catalog.SinkFormatDesc",
+        ".catalog.CdcEtlSourceInfo",
         ".connector_service.ValidateSourceRequest",
         ".connector_service.GetEventStreamRequest",
         ".connector_service.SinkParam",
@@ -178,6 +179,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("catalog.WebhookSourceInfo", "#[derive(Eq, Hash)]")
         .type_attribute("secret.SecretRef", "#[derive(Eq, Hash)]")
         .type_attribute("catalog.IndexColumnProperties", "#[derive(Eq, Hash)]")
+        .type_attribute("catalog.CdcEtlSourceInfo", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
         .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")

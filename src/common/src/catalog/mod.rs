@@ -636,7 +636,8 @@ macro_rules! for_all_fragment_type_flags {
                 FsFetch,
                 CrossDbSnapshotBackfillStreamScan,
                 StreamCdcScan,
-                VectorIndexWrite
+                VectorIndexWrite,
+                SharedCdcSource
             },
             {},
             0
@@ -885,6 +886,11 @@ mod tests {
                     VectorIndexWrite,
                     32768,
                     "VECTOR_INDEX_WRITE",
+                ),
+                (
+                    SharedCdcSource,
+                    65536,
+                    "SHARED_CDC_SOURCE",
                 ),
             ]
         "#]]
