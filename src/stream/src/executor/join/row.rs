@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 use risingwave_common_estimate_size::EstimateSize;
 
 use crate::executor::StreamExecutorResult;
@@ -140,6 +140,23 @@ impl CachedJoinRow for JoinRow<OwnedRow> {
     fn decrease_degree(&mut self) {
         self.degree -= 1;
     }
+}
+
+pub fn row_concat(
+    row_update: impl Row,
+    update_start_pos: usize,
+    row_matched: impl Row,
+    matched_start_pos: usize,
+) -> OwnedRow {
+    let mut new_row = vec![None; row_update.len() + row_matched.len()];
+
+    for (i, datum_ref) in row_update.iter().enumerate() {
+        new_row[i + update_start_pos] = datum_ref.to_owned_datum();
+    }
+    for (i, datum_ref) in row_matched.iter().enumerate() {
+        new_row[i + matched_start_pos] = datum_ref.to_owned_datum();
+    }
+    OwnedRow::new(new_row)
 }
 
 #[cfg(test)]
