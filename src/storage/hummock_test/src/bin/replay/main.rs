@@ -18,6 +18,7 @@
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![allow(rw::format_error)] // test code
+#![allow(clippy::large_futures, clippy::large_stack_frames)]
 
 #[macro_use]
 mod replay_impl;

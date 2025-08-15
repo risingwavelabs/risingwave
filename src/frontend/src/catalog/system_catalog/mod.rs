@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::large_futures, clippy::large_stack_frames)]
+
 pub mod information_schema;
 pub mod pg_catalog;
 pub mod rw_catalog;

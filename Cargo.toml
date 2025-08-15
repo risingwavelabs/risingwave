@@ -334,6 +334,12 @@ large_enum_variant = "allow"
 # TODO: this makes sense, but it's too noisy for now (2025-03-10)
 result_large_err = "allow"
 
+# Warn on potential stack overflows
+large_futures = "warn"
+large_stack_arrays = "warn"
+large_stack_frames = "warn"
+large_types_passed_by_value = "warn"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 # Explicit lints don't hurt, and sometimes rust-analyzer works better with explicit links.
