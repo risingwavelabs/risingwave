@@ -900,7 +900,7 @@ impl dyn StreamPlanNode {
                     .map(|x| *x as u32)
                     .collect(),
                 fields: self.schema().to_prost(),
-                append_only: self.plan_base().append_only(),
+                stream_kind: self.plan_base().stream_kind().to_protobuf() as i32,
             })
         })
     }
