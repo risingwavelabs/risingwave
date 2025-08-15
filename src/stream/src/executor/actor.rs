@@ -45,6 +45,7 @@ use crate::error::StreamResult;
 use crate::task::{ActorId, FragmentId, LocalBarrierManager};
 
 /// Shared by all operators of an actor.
+#[derive(Clone)]
 pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,

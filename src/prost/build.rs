@@ -133,6 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.top_n")
         .boxed(".stream_plan.StreamNode.node_body.hop_window")
         .boxed(".stream_plan.StreamNode.node_body.merge")
+        .boxed(".stream_plan.StreamNode.node_body.upstream_sink_union")
         .boxed(".stream_plan.StreamNode.node_body.exchange")
         .boxed(".stream_plan.StreamNode.node_body.stream_scan")
         .boxed(".stream_plan.StreamNode.node_body.batch_plan")

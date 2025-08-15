@@ -1068,6 +1068,7 @@ mod tests {
                 subscriptions_to_add: vec![],
                 backfill_nodes_to_pause: Default::default(),
                 actor_cdc_table_snapshot_splits: Default::default(),
+                new_upstream_sinks: Default::default(),
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -1163,6 +1164,7 @@ mod tests {
                 subscriptions_to_add: vec![],
                 backfill_nodes_to_pause: Default::default(),
                 actor_cdc_table_snapshot_splits: Default::default(),
+                new_upstream_sinks: Default::default(),
             }));
         barrier_tx.send(init_barrier).unwrap();
 

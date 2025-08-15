@@ -28,7 +28,8 @@ StreamMaterialize { columns: [id, value], stream_key: [id], pk_columns: [id], pk
 ├── output: [ id, value ]
 ├── stream key: [ id ]
 └── StreamUnion { all: true } { output: [ id, value ], stream key: [] }
-    └── MergeExecutor { output: [ id, value ], stream key: [] }'
+    ├── MergeExecutor { output: [ id, value ], stream key: [] }
+    └── StreamUpstreamSinkUnion { output: [ id, value ], stream key: [] }'
 
 
 # Test with non-existent fragment ID

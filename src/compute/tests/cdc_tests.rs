@@ -315,6 +315,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             subscriptions_to_add: vec![],
             backfill_nodes_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits: Default::default(),
+            new_upstream_sinks: Default::default(),
         }));
 
     tx.send_barrier(init_barrier);
@@ -652,6 +653,7 @@ async fn test_parallelized_cdc_backfill() {
             subscriptions_to_add: vec![],
             backfill_nodes_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits,
+            new_upstream_sinks: Default::default(),
         }));
     tx.send_barrier(init_barrier);
     assert!(matches!(
@@ -828,6 +830,7 @@ async fn test_parallelized_cdc_backfill_reschedule() {
             subscriptions_to_add: vec![],
             backfill_nodes_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits,
+            new_upstream_sinks: Default::default(),
         }));
     tx.send_barrier(init_barrier);
     assert!(matches!(
