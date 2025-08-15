@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
+
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::time::Duration;
@@ -367,23 +369,27 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
         dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
+            // sync: format & own everything
+            let mut pairs: Vec<(Option<String>, Option<Vec<u8>>)> = Vec::new();
+            for r in formatter.format_chunk(&chunk) {
+                let (key, value) = r?;
+                let key = key.map(SerTo::ser_to).transpose()?;
+                let value = value.map(SerTo::ser_to).transpose()?;
+                pairs.push((key, value));
+            }
+
+            // async: no formatter/iterator generics across .await
             let mut payload_writer = PulsarPayloadWriter {
                 producer: &mut self.producer,
                 add_future,
                 config: &self.config,
             };
-            // TODO: we can call `payload_writer.write_chunk(chunk, formatter)`,
-            // but for an unknown reason, this will greatly increase the compile time,
-            // by nearly 4x. May investigate it later.
-            for r in formatter.format_chunk(&chunk) {
-                let (key, value) = r?;
-                payload_writer
-                    .write_inner(
-                        key.map(SerTo::ser_to).transpose()?,
-                        value.map(SerTo::ser_to).transpose()?,
-                    )
-                    .await?;
+
+            for (k, v) in pairs {
+                // Box per-record so the parent future stays small
+                Box::pin(payload_writer.write_inner(k, v)).await?;
             }
+
             Ok(())
         })
     }
