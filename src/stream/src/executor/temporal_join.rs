@@ -81,6 +81,9 @@ impl EstimateSize for JoinEntry {
 impl JoinEntry {
     /// Insert into the cache.
     pub fn insert(&mut self, key: OwnedRow, value: OwnedRow) {
+        if self.cached.contains_key(&key) {
+            panic!("key {:?} double insert in the cache", key);
+        }
         // Lookup might refill the cache before the `insert` messages from the temporal side
         // upstream.
         if let Entry::Vacant(e) = self.cached.entry(key) {

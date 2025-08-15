@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
@@ -34,6 +34,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
+use tracing::info;
 
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{CommittedVersion, HummockVersionReader, read_filter_for_version};
@@ -47,12 +48,14 @@ use crate::hummock::compactor::{
 };
 use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
 use crate::hummock::event_handler::{
-    HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
+    HummockEvent, HummockEventHandler, HummockVersionUpdate, LocalInstanceId,
+    ReadOnlyReadVersionMapping,
 };
 use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{PinnedVersion, start_pinned_version_worker};
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::observer_manager::HummockObserverNode;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchId;
 use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
 use crate::hummock::utils::{wait_for_epoch, wait_for_update};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
@@ -60,7 +63,7 @@ use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockStorageIterator, HummockStorageRevIterator,
     MemoryLimiter, ObjectIdManager, ObjectIdManagerRef, SstableStoreRef,
 };
-use crate::mem_table::ImmutableMemtable;
+use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use crate::opts::StorageOpts;
 use crate::panic_store::PanicStateStore;
@@ -498,12 +501,68 @@ impl HummockStorageReadSnapshot {
                         .collect_vec();
                     return Err(HummockError::other(format!("There are {} read version associated with vnode {}. read_version_vnodes={:?}", read_version_vnodes.len(), vnode.to_index(), read_version_vnodes)).into());
                 }
-                read_filter_for_version(
-                    epoch,
-                    table_id,
-                    key_range,
-                    read_version_vec.first().unwrap(),
-                )?
+                let read_version = read_version_vec.first().unwrap();
+                let (key_range, (imms, ssts, version)) =
+                    read_filter_for_version(epoch, table_id, key_range, read_version)?;
+                #[derive(Debug)]
+                struct ImmInfo<'a> {
+                    id: SharedBufferBatchId,
+                    epochs: &'a Vec<HummockEpoch>,
+                }
+                let get_imm_info = |imm: &ImmutableMemtable| -> ImmInfo<'_> {
+                    ImmInfo {
+                        id: imm.batch_id(),
+                        epochs: imm.epochs(),
+                    }
+                };
+                #[derive(Debug)]
+                struct SstInfo<'a> {
+                    id: u64,
+                    min_epoch: u64,
+                    max_epoch: u64,
+                    table_ids: &'a Vec<u32>,
+                }
+                let get_sst_info = |sst: &SstableInfo| -> SstInfo<'_> {
+                    SstInfo {
+                        id: sst.sst_id,
+                        min_epoch: sst.min_epoch,
+                        max_epoch: sst.max_epoch,
+                        table_ids: &sst.table_ids,
+                    }
+                };
+                let table_committed_epoch = info.map(|info| info.committed_epoch);
+                let imm_infos = imms.iter().map(&get_imm_info).collect_vec();
+                let sst_infos = ssts.iter().map(&get_sst_info).collect_vec();
+                let read_version = read_version.read();
+                let staging = read_version.staging();
+                #[derive(Debug)]
+                struct ReadVersionInfo<'a> {
+                    imm_infos: Vec<ImmInfo<'a>>,
+                    sst_infos: Vec<(
+                        Vec<SstInfo<'a>>,
+                        &'a HashMap<LocalInstanceId, Vec<ImmId>>,
+                        &'a Vec<HummockEpoch>,
+                    )>,
+                }
+                let read_version_info = ReadVersionInfo {
+                    imm_infos: staging.imm.iter().map(&get_imm_info).collect_vec(),
+                    sst_infos: staging
+                        .sst
+                        .iter()
+                        .map(|sst| {
+                            (
+                                sst.sstable_infos()
+                                    .iter()
+                                    .map(|sst| get_sst_info(&sst.sst_info))
+                                    .collect_vec(),
+                                sst.imm_ids(),
+                                sst.epochs(),
+                            )
+                        })
+                        .collect_vec(),
+                };
+                info!(%table_id, epoch, ?table_committed_epoch, ?imm_infos, ?sst_infos, ?read_version_info, "read uncommitted from read version");
+                (key_range, (imms, ssts, version))
             }
         };
 
