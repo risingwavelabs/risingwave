@@ -79,7 +79,9 @@ impl GenericPlanNode for Source {
     fn stream_key(&self) -> Option<Vec<usize>> {
         // FIXME: output col idx is not set. But iceberg source can prune cols.
         // XXX: there's a RISINGWAVE_ICEBERG_ROW_ID. Should we use it?
-        if let Some(catalog) = &self.catalog {
+        if let Some(idx) = self.row_id_index {
+            Some(vec![idx])
+        } else if let Some(catalog) = &self.catalog {
             catalog
                 .pk_col_ids
                 .iter()
@@ -90,7 +92,7 @@ impl GenericPlanNode for Source {
                 })
                 .collect::<Option<Vec<_>>>()
         } else {
-            self.row_id_index.map(|idx| vec![idx])
+            None
         }
     }
 
