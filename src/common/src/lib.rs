@@ -87,6 +87,7 @@ pub mod telemetry;
 pub mod test_utils;
 pub mod transaction;
 pub mod types;
+pub mod vector;
 pub mod vnode_mapping;
 
 pub mod test_prelude {
