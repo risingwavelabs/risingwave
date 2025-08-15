@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::future::BoxFuture;
-use risingwave_common::util::vector::{decode_vector_payload, encode_vector_payload};
+use risingwave_common::vector::{decode_vector_payload, encode_vector_payload};
 use risingwave_hummock_sdk::HummockVectorFileId;
 use risingwave_hummock_sdk::vector_index::VectorFileInfo;
 use risingwave_object_store::object::ObjectStreamingUploader;

@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use super::{Array, ArrayBuilder};
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::types::{DataType, Scalar, ScalarRef, ToText};
-use crate::util::vector::{decode_vector_payload, encode_vector_payload};
+use crate::vector::{decode_vector_payload, encode_vector_payload};
 
 pub type VectorItemType = F32;
 pub type VectorDistanceType = f64;
