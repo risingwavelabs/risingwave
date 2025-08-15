@@ -41,11 +41,6 @@ use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
 const DEBEZIUM_UNAVAILABLE_VALUE_BASE64: &str = "X19kZWJleml1bV91bmF2YWlsYWJsZV92YWx1ZQ==";
 
-// ASCII codes for "__debezium_unavailable_value"
-const DEBEZIUM_UNAVAILABLE_VALUE_ASCII: [u64; 28] = [
-    95, 95, 100, 101, 98, 101, 122, 105, 117, 109, 95, 117, 110, 97, 118, 97, 105, 108, 97, 98,
-    108, 101, 95, 118, 97, 108, 117, 101,
-];
 
 #[derive(Clone, Debug)]
 pub enum ByteaHandling {

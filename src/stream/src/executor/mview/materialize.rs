@@ -18,7 +18,6 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::{Deref, Index};
 
-use base64::Engine as Base64Engine;
 use bytes::Bytes;
 use futures::stream;
 use itertools::Itertools;
@@ -449,76 +448,60 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
 /// Debezium's default unavailable value placeholder for TOAST columns.
 const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
 
+/// Check if a datum represents Debezium's unavailable value placeholder.
+/// This function handles both scalar types and one-dimensional arrays.
+fn is_debezium_unavailable_value(datum: &Option<risingwave_common::types::ScalarRefImpl<'_>>) -> bool {
+    match datum {
+        Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => {
+            val == &DEBEZIUM_UNAVAILABLE_VALUE
+        }
+        Some(risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref)) => {
+            // For jsonb type, check if it's a string containing the unavailable value
+            jsonb_ref
+                .as_str()
+                .map(|s| s == DEBEZIUM_UNAVAILABLE_VALUE)
+                .unwrap_or(false)
+        }
+        Some(risingwave_common::types::ScalarRefImpl::Bytea(bytea)) => {
+            // For bytea type, we need to check if it contains the string bytes of DEBEZIUM_UNAVAILABLE_VALUE
+            // This is because when processing bytea from Debezium, we convert the base64-encoded string
+            // to `DEBEZIUM_UNAVAILABLE_VALUE` in the json.rs parser to maintain consistency
+            if let Ok(bytea_str) = std::str::from_utf8(bytea) {
+                bytea_str == DEBEZIUM_UNAVAILABLE_VALUE
+            } else {
+                false
+            }
+        }
+        Some(risingwave_common::types::ScalarRefImpl::List(list_ref)) => {
+            // For list type, check if it contains exactly one element with the unavailable value
+            // This is because when any element in an array triggers TOAST, Debezium treats the entire
+            // array as unchanged and sends a placeholder array with only one element
+            if list_ref.len() == 1 {
+                if let Some(Some(element)) = list_ref.get(0) {
+                    // Recursively check the array element
+                    is_debezium_unavailable_value(&Some(element))
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
 /// Fix TOAST columns by replacing unavailable values with old row values.
 fn handle_toast_columns_for_cdc(
     old_row: &OwnedRow,
     new_row: &OwnedRow,
     toastable_indices: &[usize],
-    data_types: &[DataType],
 ) -> OwnedRow {
     let mut fixed_row_data = new_row.as_inner().to_vec();
 
     for &toast_idx in toastable_indices {
-        println!("开始处理第{}个TOAST列", toast_idx);
-        println!(
-            "new_row.datum_at(toast_idx): {:?}",
-            new_row.datum_at(toast_idx)
-        );
-
         // Check if the new value is Debezium's unavailable value placeholder
-        let is_unavailable = match new_row.datum_at(toast_idx) {
-            Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => {
-                val == DEBEZIUM_UNAVAILABLE_VALUE
-            }
-            Some(risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                // For jsonb type, check if it's a string containing the unavailable value
-                jsonb_ref
-                    .as_str()
-                    .map(|s| s == DEBEZIUM_UNAVAILABLE_VALUE)
-                    .unwrap_or(false)
-            }
-            Some(risingwave_common::types::ScalarRefImpl::Bytea(bytea)) => {
-                // For bytea type, now it contains the string bytes after json.rs processing
-                if let Ok(bytea_str) = std::str::from_utf8(bytea) {
-                    bytea_str == DEBEZIUM_UNAVAILABLE_VALUE
-                } else {
-                    false
-                }
-            }
-            Some(risingwave_common::types::ScalarRefImpl::List(list_ref)) => {
-                // For list type, check if it contains exactly one element with the unavailable value
-                if list_ref.len() == 1 {
-                    if let Some(Some(element)) = list_ref.get(0) {
-                        match element {
-                            risingwave_common::types::ScalarRefImpl::Utf8(val) => {
-                                val == DEBEZIUM_UNAVAILABLE_VALUE
-                            }
-                            risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref) => {
-                                // For jsonb array element, check if it's a string containing the unavailable value
-                                jsonb_ref
-                                    .as_str()
-                                    .map(|s| s == DEBEZIUM_UNAVAILABLE_VALUE)
-                                    .unwrap_or(false)
-                            }
-                            risingwave_common::types::ScalarRefImpl::Bytea(bytea) => {
-                                // For bytea array element, check if it contains the string bytes
-                                if let Ok(bytea_str) = std::str::from_utf8(bytea) {
-                                    bytea_str == DEBEZIUM_UNAVAILABLE_VALUE
-                                } else {
-                                    false
-                                }
-                            }
-                            _ => false,
-                        }
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        };
+        let is_unavailable = is_debezium_unavailable_value(&new_row.datum_at(toast_idx));
 
         if is_unavailable {
             // Replace with old row value if available
@@ -526,7 +509,6 @@ fn handle_toast_columns_for_cdc(
                 fixed_row_data[toast_idx] = Some(old_datum_ref.into_scalar_impl());
             }
         }
-        println!("处理完成, is_unavailable = {}", is_unavailable);
     }
 
     OwnedRow::new(fixed_row_data)
@@ -763,7 +745,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                         &old_row_deserialized,
                                         &new_row_deserialized,
                                         toastable_indices,
-                                        row_serde.deserializer.data_types(),
                                     );
                                     Bytes::from(row_serde.serializer.serialize(fixed_row))
                                 } else {
@@ -818,7 +799,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                         &old_row_deserialized_again,
                                         &updated_row,
                                         toastable_indices,
-                                        row_serde.deserializer.data_types(),
+    
                                     );
                                 }
 
