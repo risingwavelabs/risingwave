@@ -81,7 +81,7 @@ impl<T: AsRef<[VectorItemType]>> VectorInner<T> {
         F32::inner_slice(self.inner.as_ref())
     }
 
-    pub fn magnitude(&self) -> f32 {
+    pub fn l2_norm(&self) -> f32 {
         l2_norm_faiss(self)
     }
 
@@ -89,10 +89,11 @@ impl<T: AsRef<[VectorItemType]>> VectorInner<T> {
         let slice = self.inner.as_ref();
         let len = slice.len();
         let mut inner = Vec::with_capacity(len);
-        let magnitude = self.magnitude();
+        let l2_norm = self.l2_norm();
+        // TODO: vectorize it
         inner.extend((0..len).map(|i| {
             // safety: 0 <= i < len
-            unsafe { slice.get_unchecked(i) / magnitude }
+            unsafe { slice.get_unchecked(i) / l2_norm }
         }));
         VectorInner {
             inner: inner.into_boxed_slice(),
@@ -141,11 +142,11 @@ mod tests {
             inner: vec.map(Into::into).to_vec().into_boxed_slice(),
         };
 
-        assert_eq!(vec.magnitude(), (v1_1.powi(2) + v1_2.powi(2)).sqrt());
+        assert_eq!(vec.l2_norm(), (v1_1.powi(2) + v1_2.powi(2)).sqrt());
         assert_eq!(l2_norm_faiss(&vec), l2_norm_trivial(&vec));
 
         let normalized_vec = VectorVal::from_iter(
-            [v1_1 / vec.magnitude(), v1_2 / vec.magnitude()].map(|v| v.try_into().unwrap()),
+            [v1_1 / vec.l2_norm(), v1_2 / vec.l2_norm()].map(|v| v.try_into().unwrap()),
         );
         assert_eq!(vec.normalized(), normalized_vec);
     }

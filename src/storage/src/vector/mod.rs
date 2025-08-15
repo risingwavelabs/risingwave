@@ -87,7 +87,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::VectorVal;
     use risingwave_common::vector::MeasureDistanceBuilder;
-    use risingwave_common::vector::distance::L2Distance;
+    use risingwave_common::vector::distance::L2SqrDistance;
 
     use crate::vector::NearestBuilder;
     use crate::vector::test_utils::{gen_info, gen_vector, top_n};
@@ -99,14 +99,14 @@ mod tests {
     #[test]
     fn test_empty_top_n() {
         let vec = gen_vector(10);
-        let builder = NearestBuilder::<'_, (), L2Distance>::new(vec.to_ref(), 10);
+        let builder = NearestBuilder::<'_, (), L2SqrDistance>::new(vec.to_ref(), 10);
         assert!(builder.finish().is_empty());
     }
 
     fn test_inner(count: usize, n: usize) {
         let input = gen_random_input(count);
         let vec = gen_vector(10);
-        let mut builder = NearestBuilder::<'_, _, L2Distance>::new(vec.to_ref(), 10);
+        let mut builder = NearestBuilder::<'_, _, L2SqrDistance>::new(vec.to_ref(), 10);
         builder.add(
             input.iter().map(|(v, b)| (v.to_ref(), b.as_ref())),
             |_, d, b| (d, Bytes::copy_from_slice(b)),
@@ -114,7 +114,7 @@ mod tests {
         let output = builder.finish();
         let mut expected_output = input
             .into_iter()
-            .map(|(v, b)| (L2Distance::distance(vec.to_ref(), v.to_ref()), b))
+            .map(|(v, b)| (L2SqrDistance::distance(vec.to_ref(), v.to_ref()), b))
             .collect_vec();
         top_n(&mut expected_output, n);
         assert_eq!(output, expected_output);
