@@ -20,7 +20,7 @@ use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::error::ConnectorResult;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
-use crate::parser::unified::json::TimestamptzHandling;
+use crate::parser::unified::json::{TimeHandling, TimestampHandling, TimestamptzHandling};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
@@ -73,6 +73,10 @@ async fn build_accessor_builder(
                 json_config
                     .timestamptz_handling
                     .unwrap_or(TimestamptzHandling::GuessNumberUnit),
+                json_config
+                    .timestamp_handling
+                    .unwrap_or(TimestampHandling::GuessNumberUnit),
+                json_config.time_handling.unwrap_or(TimeHandling::Micro),
             )?,
         )),
         _ => bail!("unsupported encoding for Debezium"),
@@ -113,6 +117,8 @@ impl DebeziumParser {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
+                timestamp_handling: None,
+                time_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -217,6 +223,8 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
+                timestamp_handling: None,
+                time_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -289,6 +297,8 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
+                timestamp_handling: None,
+                time_handling: None,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
