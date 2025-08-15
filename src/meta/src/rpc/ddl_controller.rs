@@ -2294,10 +2294,6 @@ pub fn refill_upstream_sink_union_in_table(
                 })
                 .collect();
             upstream_sink_union.init_upstreams = init_upstreams;
-            tracing::debug!(
-                "xx Initialized upstreams: {:?}",
-                upstream_sink_union.init_upstreams
-            );
             false
         } else {
             true
