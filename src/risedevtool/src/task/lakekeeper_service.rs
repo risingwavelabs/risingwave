@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, anyhow};
+use serde_json::json;
 use sqlx::ConnectOptions;
+
 use super::{ExecuteContext, Task};
 use crate::LakekeeperConfig;
 use crate::util::stylized_risedev_subcmd;
@@ -82,7 +84,10 @@ impl LakekeeperService {
         Ok(())
     }
 
-    fn initialize_lakekeeper_database(&self, ctx: &mut ExecuteContext<impl std::io::Write>) -> Result<()> {
+    fn initialize_lakekeeper_database(
+        &self,
+        ctx: &mut ExecuteContext<impl std::io::Write>,
+    ) -> Result<()> {
         if let Some(postgres_configs) = &self.config.provide_postgres_backend
             && let Some(pg_config) = postgres_configs.first()
         {
@@ -111,7 +116,6 @@ impl LakekeeperService {
             rt.block_on(async move {
                 use sqlx::postgres::*;
                 use tokio::time::{sleep, Duration};
-                
                 let options = PgConnectOptions::new()
                     .host(&host)
                     .port(port)
@@ -161,6 +165,213 @@ impl LakekeeperService {
         ctx.run_command(cmd)?;
         Ok(())
     }
+
+    fn bootstrap_lakekeeper(&self, ctx: &mut ExecuteContext<impl std::io::Write>) -> Result<()> {
+        ctx.pb.set_message("bootstrapping lakekeeper...");
+
+        // Wait for lakekeeper service to be ready
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
+        let bootstrap_config = json!({
+            "accept-terms-of-use": true,
+            "is-operator": true
+        });
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+
+        let bootstrap_json = bootstrap_config.to_string();
+        let lakekeeper_url = format!(
+            "http://{}:{}/management/v1/bootstrap",
+            self.config.listen_address, self.config.port
+        );
+
+        rt.block_on(async move {
+            use tokio::time::{sleep, Duration};
+
+            // Retry bootstrap with exponential backoff
+            let mut attempts = 0;
+            let max_attempts = 5;
+
+            loop {
+                let client = reqwest::Client::new();
+                match client
+                    .post(&lakekeeper_url)
+                    .header("Content-Type", "application/json")
+                    .body(bootstrap_json.clone())
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if response.status().is_success() {
+                            let response_text = response.text().await.unwrap_or_default();
+                            println!("Successfully bootstrapped lakekeeper: {}", response_text);
+                            break;
+                        } else if response.status() == reqwest::StatusCode::CONFLICT {
+                            let error_text = response.text().await.unwrap_or_default();
+                            if error_text.contains("already bootstrapped") || error_text.contains("Server already initialized") {
+                                println!("Lakekeeper already bootstrapped, skipping");
+                                break;
+                            } else {
+                                println!("Bootstrap conflict: {}", error_text);
+                                break;
+                            }
+                        } else {
+                            let status = response.status();
+                            let error_text = response.text().await.unwrap_or_default();
+                            println!("Failed to bootstrap lakekeeper ({}): {}", status, error_text);
+
+                            if attempts >= max_attempts {
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if attempts >= max_attempts {
+                            println!("Failed to bootstrap lakekeeper after {} attempts: {}", max_attempts + 1, e);
+                            break;
+                        }
+
+                        attempts += 1;
+                        let delay = Duration::from_millis(1000 * (1 << attempts)); // 2s, 4s, 8s, 16s, 32s
+                        println!("Failed to connect to lakekeeper for bootstrap, retrying in {}s... (attempt {}/{})",
+                               delay.as_secs(), attempts, max_attempts + 1);
+                        sleep(delay).await;
+                    }
+                }
+            }
+
+            Ok::<_, anyhow::Error>(())
+        }).context("failed to bootstrap lakekeeper")?;
+
+        Ok(())
+    }
+
+    fn create_default_warehouse(
+        &self,
+        ctx: &mut ExecuteContext<impl std::io::Write>,
+    ) -> Result<()> {
+        ctx.pb.set_message("creating default warehouse...");
+
+        // Brief wait after bootstrap
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        let warehouse_config = if let Some(minio_configs) = &self.config.provide_minio
+            && let Some(minio_config) = minio_configs.first()
+        {
+            json!({
+                "warehouse-name": "risingwave-warehouse",
+                "storage-profile": {
+                    "type": "s3",
+                    "bucket": "hummock001",
+                    "key-prefix": "risingwave-lakekeeper",
+                    "region": "us-east-1",
+                    "sts-enabled": false,
+                    "flavor": "s3-compat",
+                    "endpoint": format!("http://{}:{}/", minio_config.address, minio_config.port),
+                    "path-style-access": true
+                },
+                "storage-credential": {
+                    "type": "s3",
+                    "credential-type": "access-key",
+                    "aws-access-key-id": minio_config.root_user,
+                    "aws-secret-access-key": minio_config.root_password
+                }
+            })
+        } else {
+            // Default S3 configuration if no MinIO is configured
+            json!({
+                "warehouse-name": "risingwave-warehouse",
+                "storage-profile": {
+                    "type": "s3",
+                    "bucket": "hummock001",
+                    "key-prefix": "risingwave-lakekeeper",
+                    "region": "us-east-1",
+                    "sts-enabled": false,
+                    "flavor": "s3-compat",
+                    "endpoint": "http://127.0.0.1:9301/",
+                    "path-style-access": true
+                },
+                "storage-credential": {
+                    "type": "s3",
+                    "credential-type": "access-key",
+                    "aws-access-key-id": "hummockadmin",
+                    "aws-secret-access-key": "hummockadmin"
+                }
+            })
+        };
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+
+        let warehouse_json = warehouse_config.to_string();
+        let lakekeeper_url = format!(
+            "http://{}:{}/management/v1/warehouse",
+            self.config.listen_address, self.config.port
+        );
+
+        rt.block_on(async move {
+            use tokio::time::{sleep, Duration};
+
+            // Retry warehouse creation with exponential backoff
+            let mut attempts = 0;
+            let max_attempts = 5;
+
+            loop {
+                let client = reqwest::Client::new();
+                match client
+                    .post(&lakekeeper_url)
+                    .header("Content-Type", "application/json")
+                    .body(warehouse_json.clone())
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if response.status().is_success() {
+                            let response_text = response.text().await.unwrap_or_default();
+                            println!("Successfully created warehouse: {}", response_text);
+                            break;
+                        } else if response.status() == reqwest::StatusCode::BAD_REQUEST {
+                            let error_text = response.text().await.unwrap_or_default();
+                            if error_text.contains("Storage profile overlaps") {
+                                println!("Warehouse already exists or overlaps with existing warehouse, skipping creation");
+                                break;
+                            } else {
+                                println!("Failed to create warehouse: {}", error_text);
+                                break;
+                            }
+                        } else {
+                            let status = response.status();
+                            let error_text = response.text().await.unwrap_or_default();
+                            println!("Failed to create warehouse ({}): {}", status, error_text);
+
+                            if attempts >= max_attempts {
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if attempts >= max_attempts {
+                            println!("Failed to create warehouse after {} attempts: {}", max_attempts + 1, e);
+                            break;
+                        }
+
+                        attempts += 1;
+                        let delay = Duration::from_millis(1000 * (1 << attempts)); // 2s, 4s, 8s, 16s, 32s
+                        println!("Failed to connect to lakekeeper, retrying in {}s... (attempt {}/{})",
+                               delay.as_secs(), attempts, max_attempts + 1);
+                        sleep(delay).await;
+                    }
+                }
+            }
+
+            Ok::<_, anyhow::Error>(())
+        }).context("failed to create default warehouse")?;
+
+        Ok(())
+    }
 }
 
 impl Task for LakekeeperService {
@@ -199,6 +410,18 @@ impl Task for LakekeeperService {
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 
         ctx.pb.set_message("started");
+
+        // Bootstrap lakekeeper after service starts
+        if let Err(e) = self.bootstrap_lakekeeper(ctx) {
+            eprintln!("Warning: Failed to bootstrap lakekeeper: {}", e);
+            eprintln!("You can bootstrap it manually later using the lakekeeper API");
+        } else {
+            // Create default warehouse after successful bootstrap
+            if let Err(e) = self.create_default_warehouse(ctx) {
+                eprintln!("Warning: Failed to create default warehouse: {}", e);
+                eprintln!("You can create it manually later using the lakekeeper API");
+            }
+        }
 
         Ok(())
     }
