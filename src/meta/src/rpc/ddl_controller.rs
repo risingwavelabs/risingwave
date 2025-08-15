@@ -1762,7 +1762,7 @@ impl DdlController {
         {
             let tables = self
                 .metadata_manager
-                .get_table_catalog_by_ids(&vec![*table_id as _])
+                .get_table_catalog_by_ids(&[*table_id as _])
                 .await?;
             let target_table = tables
                 .first()
