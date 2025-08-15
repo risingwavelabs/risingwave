@@ -45,7 +45,11 @@ impl StreamNow {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::Single,
-            core.mode.is_generate_series(), // append only
+            if core.mode.is_generate_series() {
+                StreamKind::AppendOnly
+            } else {
+                StreamKind::Retract
+            },
             core.mode.is_generate_series(), // emit on window close
             watermark_columns,
             columns_monotonicity,
@@ -66,20 +70,21 @@ impl Distill for StreamNow {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamNow }
+impl_plan_tree_node_for_leaf! { Stream, StreamNow }
 
 impl StreamNode for StreamNow {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         let schema = self.base.schema();
-        let dist_keys = self.base.distribution().dist_column_indices().to_vec();
         let mut internal_table_catalog_builder = TableCatalogBuilder::default();
         schema.fields().iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
 
+        // `Now` and its state table (recording last generated timestamp) must be singleton.
         let table_catalog = internal_table_catalog_builder
-            .build(dist_keys, 0)
+            .build(vec![], 0)
             .with_id(state.gen_table_id_wrapped());
+
         NodeBody::Now(Box::new(PbNowNode {
             state_table: Some(table_catalog.to_internal_table_prost()),
             mode: Some(match &self.core.mode {
@@ -96,6 +101,6 @@ impl StreamNode for StreamNow {
     }
 }
 
-impl ExprRewritable for StreamNow {}
+impl ExprRewritable<Stream> for StreamNow {}
 
 impl ExprVisitable for StreamNow {}

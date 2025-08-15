@@ -32,6 +32,8 @@ message AddMutation {
   repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
   // nodes which should be paused initially.
   repeated uint32 backfill_nodes_to_pause = 6;
+  // CDC table snapshot splits
+  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
 }
 
 message StopMutation {
@@ -79,6 +81,8 @@ message UpdateMutation {
   // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
   // Consistent with the semantics in AddMutation.
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
+  // CDC table snapshot splits
+  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
 }
 
 message SourceChangeSplitMutation {
@@ -123,6 +127,17 @@ message StartFragmentBackfillMutation {
   repeated uint32 fragment_ids = 1;
 }
 
+message RefreshStartMutation {
+  // Table ID to start refresh operation.
+  uint32 table_id = 1;
+  // Associated source ID for this refresh operation.
+  uint32 associated_source_id = 2;
+}
+message LoadFinishMutation {
+  // Associated source ID for this load operation.
+  uint32 associated_source_id = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -150,6 +165,10 @@ message BarrierMutation {
     // If we use rate limit to pause / resume backfill fragments, if user manually
     // resumes some fragments, this will overwrite the backfill order configuration.
     StartFragmentBackfillMutation start_fragment_backfill = 14;
+    // Start refresh signal for refreshing tables
+    RefreshStartMutation refresh_start = 15;
+    // Load finish signal for refreshing tables
+    LoadFinishMutation load_finish = 16;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
@@ -391,9 +410,11 @@ enum AggNodeVersion {
 }
 
 message SimpleAggNode {
+  // Previously we have this field for stateless simple agg, but it's actually not used.
+  reserved 2;
+  reserved "distribution_key";
+
   repeated expr.AggCall agg_calls = 1;
-  // Only used for stateless simple agg.
-  repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
   catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
@@ -597,8 +618,8 @@ message MergeNode {
   // Type of the upstream dispatcher. If there's always one upstream according to this
   // type, the compute node may use the `ReceiverExecutor` as an optimization.
   DispatcherType upstream_dispatcher_type = 3;
-  // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 4;
+  // The schema of input columns. Already deprecated.
+  repeated plan_common.Field fields = 4 [deprecated = true];
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -684,6 +705,14 @@ message StreamCdcScanOptions {
   uint32 snapshot_barrier_interval = 2;
 
   uint32 snapshot_batch_size = 3;
+
+  uint32 backfill_parallelism = 4;
+
+  uint64 backfill_num_rows_per_split = 5;
+
+  bool backfill_as_even_splits = 6;
+
+  uint32 backfill_split_pk_column_index = 7;
 }
 
 message StreamCdcScanNode {
@@ -909,6 +938,10 @@ message MaterializedExprsNode {
   optional uint32 state_clean_col_idx = 3;
 }
 
+message VectorIndexWriteNode {
+  catalog.Table table = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -960,6 +993,7 @@ message StreamNode {
     AsOfJoinNode as_of_join = 147;
     SyncLogStoreNode sync_log_store = 148;
     MaterializedExprsNode materialized_exprs = 149;
+    VectorIndexWriteNode vector_index_write = 150;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

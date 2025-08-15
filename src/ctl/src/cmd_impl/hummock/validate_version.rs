@@ -208,9 +208,10 @@ pub async fn print_version_delta_in_archive(
 
 fn match_delta(delta: &DeltaType, sst_id: HummockSstableObjectId) -> bool {
     match delta {
-        DeltaType::GroupConstruct(_) | DeltaType::GroupDestroy(_) | DeltaType::GroupMerge(_) => {
-            false
-        }
+        DeltaType::GroupConstruct(_)
+        | DeltaType::GroupDestroy(_)
+        | DeltaType::GroupMerge(_)
+        | DeltaType::TruncateTables(_) => false,
         DeltaType::IntraLevel(delta) => {
             delta
                 .inserted_table_infos

@@ -43,8 +43,7 @@ impl WrapperExecutor {
             input,
             actor_ctx,
             enable_executor_row_count,
-            enable_explain_analyze_stats: enable_explain_analyze_stats
-                && cfg!(all(not(test), not(madsim))),
+            enable_explain_analyze_stats,
         }
     }
 

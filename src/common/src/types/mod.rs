@@ -391,6 +391,10 @@ pub mod data_types {
 }
 
 impl DataType {
+    /// Same as pgvector; unsure how it was chosen there
+    /// <https://github.com/pgvector/pgvector/blob/v0.8.0/README.md#vector-type>
+    pub const VEC_MAX_SIZE: usize = 16000;
+
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
 

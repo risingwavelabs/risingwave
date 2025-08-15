@@ -16,17 +16,17 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::ops::Bound;
-use std::rc::Rc;
 use std::sync::LazyLock;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Schema, TableDesc};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::{ScanRange, is_full_range};
 use risingwave_common::util::sort_util::{OrderType, cmp_rows};
 
+use crate::TableCatalog;
 use crate::error::Result;
 use crate::expr::{
     ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall,
@@ -299,7 +299,7 @@ impl Condition {
     /// Currently, only support equal type range scans.
     /// Keep in mind that range scans can not overlap, otherwise duplicate rows will occur.
     fn disjunctions_to_scan_ranges(
-        table_desc: Rc<TableDesc>,
+        table: &TableCatalog,
         max_split_range_gap: u64,
         disjunctions: Vec<ExprImpl>,
     ) -> Result<Option<(Vec<ScanRange>, bool)>> {
@@ -309,7 +309,7 @@ impl Condition {
                 Condition {
                     conjunctions: to_conjunctions(x),
                 }
-                .split_to_scan_ranges(table_desc.clone(), max_split_range_gap)
+                .split_to_scan_ranges(table, max_split_range_gap)
             })
             .collect();
 
@@ -367,7 +367,7 @@ impl Condition {
                 scan_ranges.extend(scan_ranges_chunk);
             }
 
-            let order_types = table_desc
+            let order_types = table
                 .pk
                 .iter()
                 .cloned()
@@ -508,7 +508,7 @@ impl Condition {
 
     fn split_row_cmp_to_scan_ranges(
         &self,
-        table_desc: Rc<TableDesc>,
+        table: &TableCatalog,
     ) -> Result<Option<(Vec<ScanRange>, Self)>> {
         let (mut row_conjunctions, row_conjunctions_without_struct): (Vec<_>, Vec<_>) =
             self.conjunctions.clone().into_iter().partition(|expr| {
@@ -565,7 +565,7 @@ impl Condition {
                 let mut order_type = None;
                 let mut all_added = true;
                 let mut iter = row_left_inputs.iter().zip_eq_fast(right_iter);
-                for column_order in &table_desc.pk {
+                for column_order in &table.pk {
                     if let Some((left_expr, right_expr)) = iter.next() {
                         if left_expr.as_input_ref().unwrap().index != column_order.column_index {
                             all_added = false;
@@ -642,7 +642,7 @@ impl Condition {
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
     pub fn split_to_scan_ranges(
         self,
-        table_desc: Rc<TableDesc>,
+        table: &TableCatalog,
         max_split_range_gap: u64,
     ) -> Result<(Vec<ScanRange>, Self)> {
         fn false_cond() -> (Vec<ScanRange>, Condition) {
@@ -654,7 +654,7 @@ impl Condition {
             && let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions()
         {
             if let Some((scan_ranges, maintaining_condition)) =
-                Self::disjunctions_to_scan_ranges(table_desc, max_split_range_gap, disjunctions)?
+                Self::disjunctions_to_scan_ranges(table, max_split_range_gap, disjunctions)?
             {
                 if maintaining_condition {
                     return Ok((scan_ranges, self));
@@ -665,18 +665,16 @@ impl Condition {
                 return Ok((vec![], self));
             }
         }
-        if let Some((scan_ranges, other_condition)) =
-            self.split_row_cmp_to_scan_ranges(table_desc.clone())?
-        {
+        if let Some((scan_ranges, other_condition)) = self.split_row_cmp_to_scan_ranges(table)? {
             return Ok((scan_ranges, other_condition));
         }
 
-        let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, &table_desc);
+        let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, table);
         let mut other_conds = groups.pop().unwrap();
 
         // Analyze each group and use result to update scan range.
         let mut scan_range = ScanRange::full_table_scan();
-        for i in 0..table_desc.order_column_indices().len() {
+        for i in 0..table.pk.len() {
             let group = std::mem::take(&mut groups[i]);
             if group.is_empty() {
                 groups.push(other_conds);
@@ -764,10 +762,7 @@ impl Condition {
         Ok((
             if scan_range.is_full_table_scan() {
                 vec![]
-            } else if table_desc.columns[table_desc.order_column_indices()[0]]
-                .data_type
-                .is_int()
-            {
+            } else if table.columns[table.pk[0].column_index].data_type.is_int() {
                 match scan_range.split_small_range(max_split_range_gap) {
                     Some(scan_ranges) => scan_ranges,
                     None => vec![scan_range],
@@ -786,16 +781,18 @@ impl Condition {
     /// The last group contains all the other exprs.
     fn classify_conjunctions_by_pk(
         conjunctions: Vec<ExprImpl>,
-        table_desc: &Rc<TableDesc>,
+        table: &TableCatalog,
     ) -> Vec<Vec<ExprImpl>> {
-        let pk_column_ids = &table_desc.order_column_indices();
-        let pk_cols_num = pk_column_ids.len();
-        let cols_num = table_desc.columns.len();
+        let pk_cols_num = table.pk.len();
+        let cols_num = table.columns.len();
 
         let mut col_idx_to_pk_idx = vec![None; cols_num];
-        pk_column_ids.iter().enumerate().for_each(|(idx, pk_idx)| {
-            col_idx_to_pk_idx[*pk_idx] = Some(idx);
-        });
+        table
+            .order_column_indices()
+            .enumerate()
+            .for_each(|(idx, pk_idx)| {
+                col_idx_to_pk_idx[pk_idx] = Some(idx);
+            });
 
         let mut groups = vec![vec![]; pk_cols_num + 1];
         for (key, group) in &conjunctions.into_iter().chunk_by(|expr| {
@@ -840,9 +837,8 @@ impl Condition {
         // analyze exprs in the group. scan_range is not updated
         for expr in group {
             if let Some((input_ref, const_expr)) = expr.as_eq_const() {
-                let new_expr = if let Ok(expr) = const_expr
-                    .clone()
-                    .cast_implicit(input_ref.data_type.clone())
+                let new_expr = if let Ok(expr) =
+                    const_expr.clone().cast_implicit(&input_ref.data_type)
                 {
                     expr
                 } else {
@@ -876,9 +872,7 @@ impl Condition {
                 for const_expr in in_const_list {
                     // The cast should succeed, because otherwise the input_ref is casted
                     // and thus `as_in_const_list` returns None.
-                    let const_expr = const_expr
-                        .cast_implicit(input_ref.data_type.clone())
-                        .unwrap();
+                    let const_expr = const_expr.cast_implicit(&input_ref.data_type).unwrap();
                     let value = const_expr.fold_const()?;
                     let Some(value) = value else {
                         continue;
@@ -904,24 +898,22 @@ impl Condition {
                     .sorted_by(DefaultOrd::default_cmp)
                     .collect();
             } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() {
-                let new_expr = if let Ok(expr) = const_expr
-                    .clone()
-                    .cast_implicit(input_ref.data_type.clone())
-                {
-                    expr
-                } else {
-                    match self::cast_compare::cast_compare_for_cmp(
-                        const_expr,
-                        input_ref.data_type,
-                        op,
-                    ) {
-                        Ok(ResultForCmp::Success(expr)) => expr,
-                        _ => {
-                            other_conds.push(expr);
-                            continue;
+                let new_expr =
+                    if let Ok(expr) = const_expr.clone().cast_implicit(&input_ref.data_type) {
+                        expr
+                    } else {
+                        match self::cast_compare::cast_compare_for_cmp(
+                            const_expr,
+                            input_ref.data_type,
+                            op,
+                        ) {
+                            Ok(ResultForCmp::Success(expr)) => expr,
+                            _ => {
+                                other_conds.push(expr);
+                                continue;
+                            }
                         }
-                    }
-                };
+                    };
                 let Some(value) = new_expr.fold_const()? else {
                     // column compare with NULL, the result is always  NULL.
                     return Ok(None);
@@ -1301,12 +1293,12 @@ mod cast_compare {
                     Ok(ShrinkResult::OutLowerBound)
                 } else {
                     Ok(ShrinkResult::InRange(
-                        const_expr.cast_explicit(target).unwrap(),
+                        const_expr.cast_explicit(&target).unwrap(),
                     ))
                 }
             }
             None => Ok(ShrinkResult::InRange(
-                const_expr.cast_explicit(target).unwrap(),
+                const_expr.cast_explicit(&target).unwrap(),
             )),
         }
     }

@@ -634,7 +634,9 @@ macro_rules! for_all_fragment_type_flags {
                 SourceScan,
                 SnapshotBackfillStreamScan,
                 FsFetch,
-                CrossDbSnapshotBackfillStreamScan
+                CrossDbSnapshotBackfillStreamScan,
+                StreamCdcScan,
+                VectorIndexWrite
             },
             {},
             0
@@ -873,6 +875,16 @@ mod tests {
                     CrossDbSnapshotBackfillStreamScan,
                     8192,
                     "CROSS_DB_SNAPSHOT_BACKFILL_STREAM_SCAN",
+                ),
+                (
+                    StreamCdcScan,
+                    16384,
+                    "STREAM_CDC_SCAN",
+                ),
+                (
+                    VectorIndexWrite,
+                    32768,
+                    "VECTOR_INDEX_WRITE",
                 ),
             ]
         "#]]

@@ -16,8 +16,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalApply, LogicalExpand, LogicalFilter, LogicalProject};
 use crate::utils::Condition;
@@ -46,7 +45,7 @@ use crate::utils::Condition;
 ///  Domain        Input
 /// ```
 pub struct ApplyExpandTransposeRule {}
-impl Rule for ApplyExpandTransposeRule {
+impl Rule<Logical> for ApplyExpandTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =

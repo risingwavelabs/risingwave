@@ -31,9 +31,7 @@ pub async fn handle_drop_secret(
     secret_name: ObjectName,
     if_exists: bool,
 ) -> Result<RwPgResponse> {
-    Feature::SecretManagement
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
+    Feature::SecretManagement.check_available()?;
 
     let session = handler_args.session;
 
@@ -61,8 +59,7 @@ pub fn fetch_secret_catalog_with_db_schema_id(
     if_exists: bool,
 ) -> Result<Option<(Arc<SecretCatalog>, DatabaseId, SchemaId)>> {
     let db_name = &session.database();
-    let (schema_name, secret_name) =
-        Binder::resolve_schema_qualified_name(db_name, secret_name.clone())?;
+    let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, secret_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
 

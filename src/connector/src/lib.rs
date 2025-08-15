@@ -68,6 +68,8 @@ pub use with_options::{Get, GetKeyIter, WithOptionsSecResolved, WithPropertiesEx
 #[cfg(test)]
 mod with_options_test;
 
+pub const AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
+
 pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: de::Deserializer<'de>,

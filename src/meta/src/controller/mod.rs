@@ -267,6 +267,8 @@ impl From<ObjectModel<table::Model>> for PbTable {
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
             toastable_column_indices: vec![],
+            refreshable: value.0.refreshable,
+            vector_index_info: value.0.vector_index_info.map(|index| index.to_protobuf()),
         }
     }
 }
@@ -351,6 +353,10 @@ impl From<ObjectModel<sink::Model>> for PbSink {
                 .original_target_columns
                 .map(|cols| cols.to_protobuf())
                 .unwrap_or_default(),
+            auto_refresh_schema_from_table: value
+                .0
+                .auto_refresh_schema_from_table
+                .map(|id| id as _),
         }
     }
 }
@@ -471,6 +477,10 @@ impl From<ObjectModel<function::Model>> for PbFunction {
                 .options
                 .as_ref()
                 .and_then(|o| o.0.get("batch").map(|v| v == "true")),
+            created_at_epoch: Some(
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+            ),
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }

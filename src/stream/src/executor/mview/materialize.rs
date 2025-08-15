@@ -448,7 +448,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
 /// Debezium's default unavailable value placeholder for TOAST columns.
 const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
 
-/// Fast string comparison to check if a string equals DEBEZIUM_UNAVAILABLE_VALUE.
+/// Fast string comparison to check if a string equals `DEBEZIUM_UNAVAILABLE_VALUE`.
 /// Optimized by checking length first to avoid expensive string comparison.
 fn is_unavailable_value_str(s: &str) -> bool {
     s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE
@@ -456,11 +456,11 @@ fn is_unavailable_value_str(s: &str) -> bool {
 
 /// Check if a datum represents Debezium's unavailable value placeholder.
 /// This function handles both scalar types and one-dimensional arrays.
-fn is_debezium_unavailable_value(datum: &Option<risingwave_common::types::ScalarRefImpl<'_>>) -> bool {
+fn is_debezium_unavailable_value(
+    datum: &Option<risingwave_common::types::ScalarRefImpl<'_>>,
+) -> bool {
     match datum {
-        Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => {
-            is_unavailable_value_str(val)
-        }
+        Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => is_unavailable_value_str(val),
         Some(risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref)) => {
             // For jsonb type, check if it's a string containing the unavailable value
             jsonb_ref
@@ -805,7 +805,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                         &old_row_deserialized_again,
                                         &updated_row,
                                         toastable_indices,
-    
                                     );
                                 }
 

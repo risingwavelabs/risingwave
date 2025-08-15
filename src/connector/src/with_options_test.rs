@@ -611,7 +611,25 @@ mod sink_properties {{
 /// Map of source connector names to their `allow_alter_on_fly` field names
 pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
     use source_properties::*;
-    let mut map = HashMap::new();{source_entries}
+    let mut map = HashMap::new();
+    // CDC Properties - added for schema.change.failure.policy
+    map.try_insert(
+        std::any::type_name::<MysqlCdcProperties>().to_owned(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+    ).unwrap();
+    map.try_insert(
+        std::any::type_name::<PostgresCdcProperties>().to_owned(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+    ).unwrap();
+    map.try_insert(
+        std::any::type_name::<SqlServerCdcProperties>().to_owned(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+    ).unwrap();
+
+    map.try_insert(
+        std::any::type_name::<MongodbCdcProperties>().to_owned(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+    ).unwrap();{source_entries}
     map
 }});
 

@@ -225,6 +225,10 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     streaming_separate_consecutive_join: bool,
 
+    /// Separate `StreamSink` by no-shuffle `StreamExchange`
+    #[parameter(default = false)]
+    streaming_separate_sink: bool,
+
     /// Determine which encoding will be used to encode join rows in operator cache.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = JoinEncodingType::default())]
@@ -307,7 +311,7 @@ pub struct SessionConfig {
     lock_timeout: i32,
 
     /// For limiting the startup time of a shareable CDC streaming source when the source is being created. Unit: seconds.
-    #[parameter(default = 30)]
+    #[parameter(default = 60)]
     cdc_source_wait_streaming_start_timeout: i32,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY>.

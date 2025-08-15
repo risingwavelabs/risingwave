@@ -171,6 +171,7 @@ impl MergeExecutor {
         inputs: Vec<super::exchange::permit::Receiver>,
         local_barrier_manager: crate::task::LocalBarrierManager,
         schema: Schema,
+        chunk_size: usize,
     ) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::ActorInput;
@@ -197,7 +198,7 @@ impl MergeExecutor {
             local_barrier_manager,
             metrics.into(),
             barrier_rx,
-            100,
+            chunk_size,
             schema,
         )
     }
@@ -225,7 +226,7 @@ impl MergeExecutor {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self: Box<Self>) {
+    pub(crate) async fn execute_inner(mut self: Box<Self>) {
         let select_all = self.upstreams;
         let select_all = BufferChunks::new(select_all, self.chunk_size, self.schema);
         let actor_id = self.actor_context.id;
@@ -638,6 +639,7 @@ mod tests {
             rxs,
             barrier_test_env.local_barrier_manager.clone(),
             Schema::new(vec![]),
+            100,
         );
         let mut merger = merger.boxed().execute();
         for (idx, epoch) in epochs {
@@ -722,6 +724,7 @@ mod tests {
                 dropped_actors: Default::default(),
                 actor_splits: Default::default(),
                 actor_new_dispatchers: Default::default(),
+                actor_cdc_table_snapshot_splits: Default::default(),
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);

@@ -71,6 +71,11 @@ message BarrierCompleteResponse {
   // prev_epoch of barrier
   uint64 epoch = 9;
   uint32 database_id = 10;
+  // Used for refreshable batch source.
+  // SourceExecutor reports the source load is finished, and then
+  // meta will issue a LoadFinished barrier to notify MaterializeExecutor to start diff calculation.
+  repeated uint32 load_finished_source_ids = 11;
+  map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
 }
 
 message StreamingControlStreamRequest {
