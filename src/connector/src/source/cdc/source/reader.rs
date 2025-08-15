@@ -222,6 +222,7 @@ impl<T: CdcSourceTypeTrait> CdcSplitReader<T> {
         while let Some(result) = rx.recv().await {
             match result {
                 Ok(GetEventStreamResponse { events, .. }) => {
+                    println!("debezium原始消息 = {:?}", events);
                     tracing::trace!("receive {} cdc events ", events.len());
                     let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
                     yield msgs;

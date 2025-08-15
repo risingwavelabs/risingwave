@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::{Deref, Index};
 
+use base64::Engine as Base64Engine;
 use bytes::Bytes;
 use futures::stream;
 use itertools::Itertools;
@@ -167,8 +168,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     .collect(),
             )
         };
-
-        println!("这里toastable_column_indices: {:?}", toastable_column_indices);
 
         Self {
             input,
@@ -461,8 +460,11 @@ fn handle_toast_columns_for_cdc(
 
     for &toast_idx in toastable_indices {
         println!("开始处理第{}个TOAST列", toast_idx);
-        println!("new_row.datum_at(toast_idx): {:?}", new_row.datum_at(toast_idx));
-        
+        println!(
+            "new_row.datum_at(toast_idx): {:?}",
+            new_row.datum_at(toast_idx)
+        );
+
         // Check if the new value is Debezium's unavailable value placeholder
         let is_unavailable = match new_row.datum_at(toast_idx) {
             Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => {
@@ -470,18 +472,61 @@ fn handle_toast_columns_for_cdc(
             }
             Some(risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref)) => {
                 // For jsonb type, check if it's a string containing the unavailable value
-                jsonb_ref.as_str().map(|s| s == DEBEZIUM_UNAVAILABLE_VALUE).unwrap_or(false)
+                jsonb_ref
+                    .as_str()
+                    .map(|s| s == DEBEZIUM_UNAVAILABLE_VALUE)
+                    .unwrap_or(false)
+            }
+            Some(risingwave_common::types::ScalarRefImpl::Bytea(bytea)) => {
+                // For bytea type, now it contains the string bytes after json.rs processing
+                if let Ok(bytea_str) = std::str::from_utf8(bytea) {
+                    bytea_str == DEBEZIUM_UNAVAILABLE_VALUE
+                } else {
+                    false
+                }
+            }
+            Some(risingwave_common::types::ScalarRefImpl::List(list_ref)) => {
+                // For list type, check if it contains exactly one element with the unavailable value
+                if list_ref.len() == 1 {
+                    if let Some(Some(element)) = list_ref.get(0) {
+                        match element {
+                            risingwave_common::types::ScalarRefImpl::Utf8(val) => {
+                                val == DEBEZIUM_UNAVAILABLE_VALUE
+                            }
+                            risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref) => {
+                                // For jsonb array element, check if it's a string containing the unavailable value
+                                jsonb_ref
+                                    .as_str()
+                                    .map(|s| s == DEBEZIUM_UNAVAILABLE_VALUE)
+                                    .unwrap_or(false)
+                            }
+                            risingwave_common::types::ScalarRefImpl::Bytea(bytea) => {
+                                // For bytea array element, check if it contains the string bytes
+                                if let Ok(bytea_str) = std::str::from_utf8(bytea) {
+                                    bytea_str == DEBEZIUM_UNAVAILABLE_VALUE
+                                } else {
+                                    false
+                                }
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
             }
             _ => false,
         };
-        
+
         if is_unavailable {
             // Replace with old row value if available
             if let Some(old_datum_ref) = old_row.datum_at(toast_idx) {
                 fixed_row_data[toast_idx] = Some(old_datum_ref.into_scalar_impl());
             }
         }
-        println!("处理完成")
+        println!("处理完成, is_unavailable = {}", is_unavailable);
     }
 
     OwnedRow::new(fixed_row_data)
