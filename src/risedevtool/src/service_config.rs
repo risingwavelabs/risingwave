@@ -415,6 +415,27 @@ pub struct SqlServerConfig {
     pub persist_data: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct LakekeeperConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+    pub listen_address: String,
+
+    pub user_managed: bool,
+    pub persist_data: bool,
+
+    pub catalog_backend: String,
+    pub encryption_key: String,
+    pub provide_postgres_backend: Option<Vec<PostgresConfig>>,
+    pub provide_minio: Option<Vec<MinioConfig>>,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -437,6 +458,7 @@ pub enum ServiceConfig {
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
+    Lakekeeper(LakekeeperConfig),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -450,6 +472,7 @@ pub enum TaskGroup {
     Postgres,
     SqlServer,
     Redis,
+    Lakekeeper,
 }
 
 impl ServiceConfig {
@@ -474,6 +497,7 @@ impl ServiceConfig {
             Self::Postgres(c) => &c.id,
             Self::SqlServer(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
+            Self::Lakekeeper(c) => &c.id,
         }
     }
 
@@ -499,6 +523,7 @@ impl ServiceConfig {
             Self::Postgres(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
+            Self::Lakekeeper(c) => Some(c.port),
         }
     }
 
@@ -523,6 +548,7 @@ impl ServiceConfig {
             Self::Postgres(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
+            Self::Lakekeeper(c) => c.user_managed,
         }
     }
 
@@ -558,6 +584,7 @@ impl ServiceConfig {
                 }
             }
             ServiceConfig::SqlServer(_) => SqlServer,
+            ServiceConfig::Lakekeeper(_) => Lakekeeper,
         }
     }
 }
