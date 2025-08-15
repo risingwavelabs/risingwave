@@ -88,15 +88,7 @@ impl TimestamptzHandling {
 
 #[derive(Clone, Debug)]
 pub enum TimestampHandling {
-    /// `1712800800123` (milliseconds)
     Milli,
-    /// `1712800800123456` (microseconds)
-    Micro,
-    /// Both `1712800800123` (ms) and `1712800800123456` (us) maps to `2024-04-11`.
-    ///
-    /// Only works for `[1973-03-03 09:46:40, 5138-11-16 09:46:40)`.
-    ///
-    /// This option is backward compatible.
     GuessNumberUnit,
 }
 
@@ -512,7 +504,7 @@ impl JsonParseOptions {
                     TimestampHandling::Milli => Timestamp::with_millis(value.as_i64().unwrap())
                         .map_err(|_| create_error())?
                         .into(),
-                    _ => i64_to_timestamp(value.as_i64().unwrap())
+                    TimestampHandling::GuessNumberUnit => i64_to_timestamp(value.as_i64().unwrap())
                         .map_err(|_| create_error())?
                         .into(),
                 }
