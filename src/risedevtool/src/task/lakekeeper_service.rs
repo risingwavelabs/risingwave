@@ -162,7 +162,7 @@ impl LakekeeperService {
                         .execute(&mut conn)
                         .await?;
                 } else {
-                    println!("Database '{}' already exists, skipping creation", db_name);
+                    // Database already exists, skipping creation
                 }
 
                 Ok::<_, anyhow::Error>(())
@@ -221,22 +221,22 @@ impl LakekeeperService {
                 {
                     Ok(response) => {
                         if response.status().is_success() {
-                            let response_text = response.text().await.unwrap_or_default();
-                            println!("Successfully bootstrapped lakekeeper: {}", response_text);
+                            let _response_text = response.text().await.unwrap_or_default();
+                            // Successfully bootstrapped lakekeeper
                             break;
                         } else if response.status() == reqwest::StatusCode::CONFLICT || response.status() == reqwest::StatusCode::BAD_REQUEST {
                             let error_text = response.text().await.unwrap_or_default();
                             if error_text.contains("already bootstrapped") || error_text.contains("Server already initialized") {
-                                println!("Lakekeeper already bootstrapped, skipping");
+                                // Lakekeeper already bootstrapped, skipping
                                 break;
                             } else {
-                                println!("Bootstrap conflict: {}", error_text);
+                                eprintln!("Bootstrap conflict: {}", error_text);
                                 break;
                             }
                         } else {
                             let status = response.status();
                             let error_text = response.text().await.unwrap_or_default();
-                            println!("Failed to bootstrap lakekeeper ({}): {}", status, error_text);
+                            eprintln!("Failed to bootstrap lakekeeper ({}): {}", status, error_text);
 
                             if attempts >= max_attempts {
                                 break;
@@ -245,13 +245,13 @@ impl LakekeeperService {
                     }
                     Err(e) => {
                         if attempts >= max_attempts {
-                            println!("Failed to bootstrap lakekeeper after {} attempts: {}", max_attempts + 1, e);
+                            eprintln!("Failed to bootstrap lakekeeper after {} attempts: {}", max_attempts + 1, e);
                             break;
                         }
 
                         attempts += 1;
                         let delay = Duration::from_millis(1000 * (1 << attempts)); // 2s, 4s, 8s, 16s, 32s
-                        println!("Failed to connect to lakekeeper for bootstrap, retrying in {}s... (attempt {}/{})",
+                        eprintln!("Failed to connect to lakekeeper for bootstrap, retrying in {}s... (attempt {}/{})",
                                delay.as_secs(), attempts, max_attempts + 1);
                         sleep(delay).await;
                     }
@@ -329,7 +329,7 @@ impl LakekeeperService {
         );
 
         rt.block_on(async move {
-            use tokio::time::{sleep, Duration};
+            use tokio::time::{Duration, sleep};
 
             // Retry warehouse creation with exponential backoff
             let mut attempts = 0;
@@ -346,22 +346,22 @@ impl LakekeeperService {
                 {
                     Ok(response) => {
                         if response.status().is_success() {
-                            let response_text = response.text().await.unwrap_or_default();
-                            println!("Successfully created warehouse: {}", response_text);
+                            let _response_text = response.text().await.unwrap_or_default();
+                            // Successfully created warehouse
                             break;
                         } else if response.status() == reqwest::StatusCode::BAD_REQUEST {
                             let error_text = response.text().await.unwrap_or_default();
                             if error_text.contains("Storage profile overlaps") {
-                                println!("Warehouse already exists or overlaps with existing warehouse, skipping creation");
+                                // Warehouse already exists, skipping creation
                                 break;
                             } else {
-                                println!("Failed to create warehouse: {}", error_text);
+                                eprintln!("Failed to create warehouse: {}", error_text);
                                 break;
                             }
                         } else {
                             let status = response.status();
                             let error_text = response.text().await.unwrap_or_default();
-                            println!("Failed to create warehouse ({}): {}", status, error_text);
+                            eprintln!("Failed to create warehouse ({}): {}", status, error_text);
 
                             if attempts >= max_attempts {
                                 break;
@@ -370,21 +370,30 @@ impl LakekeeperService {
                     }
                     Err(e) => {
                         if attempts >= max_attempts {
-                            println!("Failed to create warehouse after {} attempts: {}", max_attempts + 1, e);
+                            eprintln!(
+                                "Failed to create warehouse after {} attempts: {}",
+                                max_attempts + 1,
+                                e
+                            );
                             break;
                         }
 
                         attempts += 1;
                         let delay = Duration::from_millis(1000 * (1 << attempts)); // 2s, 4s, 8s, 16s, 32s
-                        println!("Failed to connect to lakekeeper, retrying in {}s... (attempt {}/{})",
-                               delay.as_secs(), attempts, max_attempts + 1);
+                        eprintln!(
+                            "Failed to connect to lakekeeper, retrying in {}s... (attempt {}/{})",
+                            delay.as_secs(),
+                            attempts,
+                            max_attempts + 1
+                        );
                         sleep(delay).await;
                     }
                 }
             }
 
             Ok::<_, anyhow::Error>(())
-        }).context("failed to create default warehouse")?;
+        })
+        .context("failed to create default warehouse")?;
 
         Ok(())
     }
