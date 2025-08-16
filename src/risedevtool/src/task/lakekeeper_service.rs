@@ -47,7 +47,7 @@ impl LakekeeperService {
     pub fn apply_command_args(cmd: &mut Command, config: &LakekeeperConfig) -> Result<()> {
         // Set basic environment variables
         cmd.env("LAKEKEEPER__BIND_ADDRESS", &config.listen_address)
-            .env("LAKEKEEPER__PORT", config.port.to_string())
+            .env("LAKEKEEPER__LISTEN_PORT", config.port.to_string())
             .env("LAKEKEEPER__PG_ENCRYPTION_KEY", &config.encryption_key);
 
         // Configure database backend
