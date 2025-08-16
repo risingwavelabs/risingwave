@@ -301,7 +301,7 @@ impl PulsarPayloadWriter<'_> {
             if retry_num > 0 {
                 tracing::warn!("Failed to send message, at retry no. {retry_num}");
             }
-            match self.producer.send_non_blocking(message.clone()).await {
+            match Box::pin(self.producer.send_non_blocking(message.clone())).await {
                 // If the message is sent successfully,
                 // a SendFuture holding the message receipt
                 // or error after sending is returned
@@ -366,31 +366,39 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
         chunk: StreamChunk,
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
-            // reduces compile-time/code size by avoiding formatter-specific state in the async FSM.
-            let mut pairs: Vec<(Option<String>, Option<Vec<u8>>)> =
-                Vec::with_capacity(chunk.cardinality());
-            for r in formatter.format_chunk(&chunk) {
-                let (key, value) = r?;
-                let key = key.map(SerTo::ser_to).transpose()?;
-                let value = value.map(SerTo::ser_to).transpose()?;
-                pairs.push((key, value));
-            } // formatter iterator and &chunk are intentionally dropped before the first .await.
+        // Structured to avoid `clippy::large_stack_frames` and `large_futures`
+        let iter = {
+            dispatch_sink_formatter_str_key_impl!(
+                &self.formatter,
+                formatter,
+                {
+                    // Convert items to owned, concrete types before any `.await`,
+                    // so the future doesn't capture formatter/iterator generics.
+                    formatter.format_chunk(&chunk).map(|r| {
+                        let (key, value) = r?;
+                        let key: Option<String> = key.map(SerTo::ser_to).transpose()?;
+                        let value: Option<Vec<u8>> = value.map(SerTo::ser_to).transpose()?;
+                        Ok((key, value)) as Result<_>
+                    })
+                },
+                // Produce a single iterator type for all formatter variants.
+                auto_enums::auto_enum(Iterator)
+            )
+        };
 
-            // Async phase uses only concrete types; no formatter/iterator generics cross .await.
-            let mut payload_writer = PulsarPayloadWriter {
-                producer: &mut self.producer,
-                add_future,
-                config: &self.config,
-            };
+        // Only concrete state is held across `.await`, keeping the future small.
+        let mut payload_writer = PulsarPayloadWriter {
+            producer: &mut self.producer,
+            add_future,
+            config: &self.config,
+        };
 
-            for (k, v) in pairs {
-                // Box per record so the large child future doesn't bloat this parent future (Clippy fix).
-                Box::pin(payload_writer.write_inner(k, v)).await?;
-            }
+        for r in iter {
+            let (key, value): (Option<String>, Option<Vec<u8>>) = r?;
+            payload_writer.write_inner(key, value).await?;
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {

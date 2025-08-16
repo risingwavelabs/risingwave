@@ -577,7 +577,8 @@ macro_rules! dispatch_sink_formatter_impl {
 /// in contexts requiring string keys.
 #[macro_export]
 macro_rules! dispatch_sink_formatter_str_key_impl {
-    ($impl:expr, $name:ident, $body:expr) => {
+    ($impl:expr, $name:ident, $body:expr $(,$attr:meta)?) => {
+        $(#[$attr])?
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
             SinkFormatterImpl::AppendOnlyBytesJson(_) => unreachable!(),
