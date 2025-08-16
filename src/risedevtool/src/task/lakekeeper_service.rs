@@ -19,6 +19,7 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow};
 use serde_json::json;
 use sqlx::ConnectOptions;
+use thiserror_ext::AsReport;
 
 use super::{ExecuteContext, Task};
 use crate::LakekeeperConfig;
@@ -245,7 +246,7 @@ impl LakekeeperService {
                     }
                     Err(e) => {
                         if attempts >= max_attempts {
-                            eprintln!("Failed to bootstrap lakekeeper after {} attempts: {}", max_attempts + 1, e);
+                            eprintln!("Failed to bootstrap lakekeeper after {} attempts: {}", max_attempts + 1, e.as_report());
                             break;
                         }
 
@@ -373,7 +374,7 @@ impl LakekeeperService {
                             eprintln!(
                                 "Failed to create warehouse after {} attempts: {}",
                                 max_attempts + 1,
-                                e
+                                e.as_report()
                             );
                             break;
                         }
@@ -438,12 +439,15 @@ impl Task for LakekeeperService {
 
         // Bootstrap lakekeeper after service starts
         if let Err(e) = self.bootstrap_lakekeeper(ctx) {
-            eprintln!("Warning: Failed to bootstrap lakekeeper: {}", e);
+            eprintln!("Warning: Failed to bootstrap lakekeeper: {}", e.as_report());
             eprintln!("You can bootstrap it manually later using the lakekeeper API");
         } else {
             // Create default warehouse after successful bootstrap
             if let Err(e) = self.create_default_warehouse(ctx) {
-                eprintln!("Warning: Failed to create default warehouse: {}", e);
+                eprintln!(
+                    "Warning: Failed to create default warehouse: {}",
+                    e.as_report()
+                );
                 eprintln!("You can create it manually later using the lakekeeper API");
             }
         }
