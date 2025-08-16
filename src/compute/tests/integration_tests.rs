@@ -159,7 +159,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = Executor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             all_schema.clone(),
             pk_indices.clone(),
             "SourceExecutor".to_owned(),
@@ -170,7 +170,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = Executor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             all_schema.clone(),
             pk_indices.clone(),
             "DmlExecutor".to_owned(),
@@ -190,7 +190,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     );
 
     let row_id_gen_executor = Executor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             all_schema.clone(),
             pk_indices.clone(),
             "RowIdGenExecutor".to_owned(),

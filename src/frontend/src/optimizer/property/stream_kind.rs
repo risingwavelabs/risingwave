@@ -14,18 +14,21 @@
 
 use std::fmt::Display;
 
-/// The kind of the changelog stream output by a stream operator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum StreamKind {
-    /// The stream contains only `Insert` operations.
-    AppendOnly,
+use risingwave_pb::stream_plan::stream_node::PbStreamKind;
+use static_assertions::const_assert_eq;
 
+/// The kind of the changelog stream output by a stream operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StreamKind {
     /// The stream contains `Insert`, `Delete`, `UpdateDelete`, and `UpdateInsert` operations.
     ///
     /// When a row is going to be updated or deleted, a `Delete` or `UpdateDelete` record
     /// containing the complete old value will be emitted first, before the new value is emitted
     /// as an `Insert` or `UpdateInsert` record.
     Retract,
+
+    /// The stream contains only `Insert` operations.
+    AppendOnly,
 
     /// The stream contains `Insert` and `Delete` operations.
     /// When a row is going to be updated, only the new value is emitted as an `Insert` record.
@@ -43,13 +46,22 @@ impl Display for StreamKind {
             f,
             "{}",
             match self {
-                Self::AppendOnly => "append-only",
                 Self::Retract => "retract",
+                Self::AppendOnly => "append-only",
                 Self::Upsert => "upsert",
             }
         )
     }
 }
+
+// Although there's a `to_protobuf` method, we have no way to avoid calling `as i32` to fit
+// `StreamKind` to the protobuf enum. We ensure their values are the same here for safety.
+const_assert_eq!(StreamKind::Retract as i32, PbStreamKind::Retract as i32);
+const_assert_eq!(
+    StreamKind::AppendOnly as i32,
+    PbStreamKind::AppendOnly as i32
+);
+const_assert_eq!(StreamKind::Upsert as i32, PbStreamKind::Upsert as i32);
 
 impl StreamKind {
     /// Returns `true` if it's [`StreamKind::AppendOnly`].
@@ -62,7 +74,24 @@ impl StreamKind {
     /// Note that there should be no conflict on the stream key between the two streams,
     /// otherwise it will result in an "inconsistent" stream.
     pub fn merge(self, other: Self) -> Self {
-        self.max(other)
+        let any = |kind| self == kind || other == kind;
+
+        if any(Self::Upsert) {
+            Self::Upsert
+        } else if any(Self::Retract) {
+            Self::Retract
+        } else {
+            Self::AppendOnly
+        }
+    }
+
+    /// Converts the stream kind to the protobuf representation.
+    pub fn to_protobuf(self) -> PbStreamKind {
+        match self {
+            Self::Retract => PbStreamKind::Retract,
+            Self::AppendOnly => PbStreamKind::AppendOnly,
+            Self::Upsert => PbStreamKind::Upsert,
+        }
     }
 }
 

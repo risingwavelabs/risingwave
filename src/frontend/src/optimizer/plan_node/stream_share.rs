@@ -132,7 +132,7 @@ impl StreamShare {
                         .map(|x| *x as u32)
                         .collect(),
                     fields: self.schema().to_prost(),
-                    append_only: self.append_only(),
+                    stream_kind: self.stream_kind().to_protobuf() as i32,
                 };
 
                 state.add_share_stream_node(operator_id, stream_node.clone());

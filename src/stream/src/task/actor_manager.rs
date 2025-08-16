@@ -93,10 +93,14 @@ impl StreamActorManager {
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
 
+        let stream_kind = node.stream_kind();
+
         let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
+
         ExecutorInfo {
             schema,
             pk_indices,
+            stream_kind,
             identity,
             id: executor_id,
         }
