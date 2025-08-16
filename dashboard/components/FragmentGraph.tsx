@@ -16,8 +16,8 @@ import * as dagre from "dagre"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import { Edge, Enter, FragmentBox, Position } from "../lib/layout"
-import { ChannelStatsDerived, PlanNodeDatum } from "../pages/fragment_graph"
-import { FragmentStats } from "../proto/gen/monitor_service"
+import { PlanNodeDatum } from "../pages/fragment_graph"
+import { ChannelDeltaStats, FragmentStats } from "../proto/gen/monitor_service"
 import { StreamNode } from "../proto/gen/stream_plan"
 import {
   backPressureColor,
@@ -99,7 +99,7 @@ export default function FragmentGraph({
   planNodeDependencies: Map<string, d3.HierarchyNode<PlanNodeDatum>>
   fragmentDependency: FragmentBox[]
   selectedFragmentId?: string
-  channelStats?: Map<string, ChannelStatsDerived>
+  channelStats?: Map<string, ChannelDeltaStats>
   fragmentStats?: { [fragmentId: number]: FragmentStats }
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
@@ -478,7 +478,7 @@ export default function FragmentGraph({
           if (channelStats) {
             let value = channelStats.get(
               `${d.source}_${d.target}`
-            )?.backPressure
+            )?.backpressureRate
             if (value) {
               return backPressureColor(value)
             }
@@ -493,7 +493,7 @@ export default function FragmentGraph({
           if (channelStats) {
             let value = channelStats.get(
               `${d.source}_${d.target}`
-            )?.backPressure
+            )?.backpressureRate
             if (value) {
               return backPressureWidth(value, 30)
             }
@@ -518,8 +518,8 @@ export default function FragmentGraph({
             const tooltipText = `<b>Fragment ${d.source} → ${
               d.target
             }</b><br>Backpressure: ${
-              stats?.backPressure != null
-                ? `${(stats.backPressure * 100).toFixed(2)}%`
+              stats?.backpressureRate != null
+                ? `${(stats.backpressureRate * 100).toFixed(2)}%`
                 : "N/A"
             }<br>Recv Throughput: ${
               stats?.recvThroughput != null
