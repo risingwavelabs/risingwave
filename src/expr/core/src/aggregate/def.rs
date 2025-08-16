@@ -349,6 +349,8 @@ pub mod agg_types {
                     // ApproxPercentile always uses custom agg executors,
                     // rather than an aggregation operator
                     | PbAggKind::ApproxPercentile
+                    | PbAggKind::ArgMin
+                    | PbAggKind::ArgMax
             )
         };
     }
