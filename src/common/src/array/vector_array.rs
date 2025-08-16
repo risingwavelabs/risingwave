@@ -22,6 +22,11 @@ use crate::array::ArrayError;
 use crate::bitmap::Bitmap;
 use crate::types::{DataType, Scalar, ScalarRef, ScalarRefImpl, ToText};
 
+pub type VectorItemType = f32;
+pub type VectorDistanceType = f64;
+pub const VECTOR_ITEM_TYPE: DataType = DataType::Float32;
+pub const VECTOR_DISTANCE_TYPE: DataType = DataType::Float64;
+
 #[derive(Debug, Clone, EstimateSize)]
 pub struct VectorArrayBuilder {
     inner: ListArrayBuilder,
@@ -38,7 +43,7 @@ impl ArrayBuilder for VectorArrayBuilder {
 
     #[cfg(test)]
     fn new(capacity: usize) -> Self {
-        Self::with_type(capacity, DataType::Vector(3))
+        Self::with_type(capacity, VectorVal::test_type())
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
@@ -143,6 +148,10 @@ impl VectorArray {
             .unwrap() as _;
         Ok(Self { inner, elem_size }.into())
     }
+
+    pub fn inner(&self) -> &ListArray {
+        &self.inner
+    }
 }
 
 #[derive(Clone, EstimateSize)]
@@ -157,8 +166,8 @@ impl Debug for VectorVal {
 }
 
 impl PartialEq for VectorVal {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!("VECTOR_PLACEHOLDER")
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
     }
 }
 impl Eq for VectorVal {}
@@ -168,8 +177,8 @@ impl PartialOrd for VectorVal {
     }
 }
 impl Ord for VectorVal {
-    fn cmp(&self, _other: &Self) -> std::cmp::Ordering {
-        todo!("VECTOR_PLACEHOLDER")
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.inner.cmp(&other.inner)
     }
 }
 
@@ -184,6 +193,9 @@ impl Scalar for VectorVal {
 }
 
 impl VectorVal {
+    #[cfg(test)]
+    pub const TEST_VECTOR_DIMENSION: usize = 3;
+
     pub fn from_text(text: &str, size: usize) -> Result<Self, String> {
         let text = text.trim();
         let text = text
@@ -231,6 +243,11 @@ impl VectorVal {
         }
         Ok(Self { inner })
     }
+
+    #[cfg(test)]
+    pub fn test_type() -> DataType {
+        DataType::Vector(Self::TEST_VECTOR_DIMENSION)
+    }
 }
 
 /// A `f32` without nan/inf/-inf. Added as intermediate type to `try_collect` `f32` values into a `VectorVal`.
@@ -268,8 +285,8 @@ impl Debug for VectorRef<'_> {
 }
 
 impl PartialEq for VectorRef<'_> {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!("VECTOR_PLACEHOLDER")
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
     }
 }
 impl Eq for VectorRef<'_> {}
@@ -279,8 +296,8 @@ impl PartialOrd for VectorRef<'_> {
     }
 }
 impl Ord for VectorRef<'_> {
-    fn cmp(&self, _other: &Self) -> std::cmp::Ordering {
-        todo!("VECTOR_PLACEHOLDER")
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.inner.cmp(&other.inner)
     }
 }
 

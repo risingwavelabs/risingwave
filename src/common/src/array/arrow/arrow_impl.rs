@@ -54,7 +54,7 @@ use super::arrow_schema::IntervalUnit;
 use super::{ArrowIntervalType, arrow_array, arrow_buffer, arrow_cast, arrow_schema};
 // Other import should always use the absolute path.
 use crate::array::*;
-use crate::types::{DataType as RwDataType, *};
+use crate::types::{DataType as RwDataType, Scalar, *};
 use crate::util::iter_util::ZipEqFast;
 
 /// Defines how to convert RisingWave arrays to Arrow arrays.
@@ -118,7 +118,7 @@ pub trait ToArrow {
             ArrayImpl::List(array) => self.list_to_arrow(data_type, array),
             ArrayImpl::Struct(array) => self.struct_to_arrow(data_type, array),
             ArrayImpl::Map(array) => self.map_to_arrow(data_type, array),
-            ArrayImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            ArrayImpl::Vector(inner) => self.list_to_arrow(data_type, inner.inner()),
         }?;
         if arrow_array.data_type() != data_type {
             arrow_cast::cast(&arrow_array, data_type).map_err(ArrayError::to_arrow)
@@ -331,7 +331,7 @@ pub trait ToArrow {
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
     }
