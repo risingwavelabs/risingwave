@@ -26,7 +26,8 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
-use risingwave_common::row::{CompactedRow, RowDeserializer};
+use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
@@ -71,6 +72,9 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// No data will be written to hummock table. This Materialize is just a dummy node.
     /// Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
     is_dummy_table: bool,
+
+    /// Indices of TOAST columns for PostgreSQL CDC tables. None means either non-CDC table or CDC table without TOAST columns.
+    toastable_column_indices: Option<Vec<usize>>,
 }
 
 fn get_op_consistency_level(
@@ -151,6 +155,19 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
 
+        // Extract TOAST-able column indices from table catalog.
+        let toastable_column_indices = if table_catalog.toastable_column_indices.is_empty() {
+            None
+        } else {
+            Some(
+                table_catalog
+                    .toastable_column_indices
+                    .iter()
+                    .map(|&x| x as usize)
+                    .collect(),
+            )
+        };
+
         Self {
             input,
             schema,
@@ -169,13 +186,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             may_have_downstream,
             depended_subscription_ids,
             metrics: mv_metrics,
+            toastable_column_indices,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mv_table_id = TableId::new(self.state_table.table_id());
-
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
@@ -209,6 +226,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     let do_not_handle_conflict = !self.state_table.is_consistent_op()
                         && self.version_column_index.is_none()
                         && self.conflict_behavior == ConflictBehavior::Overwrite;
+
                     match self.conflict_behavior {
                         checked_conflict_behaviors!() if !do_not_handle_conflict => {
                             if chunk.cardinality() == 0 {
@@ -256,6 +274,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     &self.state_table,
                                     self.conflict_behavior,
                                     &self.metrics,
+                                    self.toastable_column_indices.as_deref(),
                                 )
                                 .await?;
 
@@ -418,11 +437,87 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             conflict_behavior,
             version_column_index: None,
             is_dummy_table: false,
+            toastable_column_indices: None,
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
             metrics,
         }
     }
+}
+
+/// Debezium's default unavailable value placeholder for TOAST columns.
+const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
+
+/// Fast string comparison to check if a string equals `DEBEZIUM_UNAVAILABLE_VALUE`.
+/// Optimized by checking length first to avoid expensive string comparison.
+fn is_unavailable_value_str(s: &str) -> bool {
+    s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE
+}
+
+/// Check if a datum represents Debezium's unavailable value placeholder.
+/// This function handles both scalar types and one-dimensional arrays.
+fn is_debezium_unavailable_value(
+    datum: &Option<risingwave_common::types::ScalarRefImpl<'_>>,
+) -> bool {
+    match datum {
+        Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => is_unavailable_value_str(val),
+        Some(risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref)) => {
+            // For jsonb type, check if it's a string containing the unavailable value
+            jsonb_ref
+                .as_str()
+                .map(is_unavailable_value_str)
+                .unwrap_or(false)
+        }
+        Some(risingwave_common::types::ScalarRefImpl::Bytea(bytea)) => {
+            // For bytea type, we need to check if it contains the string bytes of DEBEZIUM_UNAVAILABLE_VALUE
+            // This is because when processing bytea from Debezium, we convert the base64-encoded string
+            // to `DEBEZIUM_UNAVAILABLE_VALUE` in the json.rs parser to maintain consistency
+            if let Ok(bytea_str) = std::str::from_utf8(bytea) {
+                is_unavailable_value_str(bytea_str)
+            } else {
+                false
+            }
+        }
+        Some(risingwave_common::types::ScalarRefImpl::List(list_ref)) => {
+            // For list type, check if it contains exactly one element with the unavailable value
+            // This is because when any element in an array triggers TOAST, Debezium treats the entire
+            // array as unchanged and sends a placeholder array with only one element
+            if list_ref.len() == 1 {
+                if let Some(Some(element)) = list_ref.get(0) {
+                    // Recursively check the array element
+                    is_debezium_unavailable_value(&Some(element))
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Fix TOAST columns by replacing unavailable values with old row values.
+fn handle_toast_columns_for_cdc(
+    old_row: &OwnedRow,
+    new_row: &OwnedRow,
+    toastable_indices: &[usize],
+) -> OwnedRow {
+    let mut fixed_row_data = new_row.as_inner().to_vec();
+
+    for &toast_idx in toastable_indices {
+        // Check if the new value is Debezium's unavailable value placeholder
+        let is_unavailable = is_debezium_unavailable_value(&new_row.datum_at(toast_idx));
+
+        if is_unavailable {
+            // Replace with old row value if available
+            if let Some(old_datum_ref) = old_row.datum_at(toast_idx) {
+                fixed_row_data[toast_idx] = Some(old_datum_ref.into_scalar_impl());
+            }
+        }
+    }
+
+    OwnedRow::new(fixed_row_data)
 }
 
 /// Construct output `StreamChunk` from given buffer.
@@ -594,6 +689,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         table: &StateTableInner<S, SD>,
         conflict_behavior: ConflictBehavior,
         metrics: &MaterializeMetrics,
+        toastable_column_indices: Option<&[usize]>,
     ) -> StreamExecutorResult<ChangeBuffer> {
         assert_matches!(conflict_behavior, checked_conflict_behaviors!());
 
@@ -643,8 +739,31 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 true
                             };
                             if need_overwrite {
-                                change_buffer.update(key.clone(), old_row.row.clone(), row.clone());
-                                self.lru_cache.put(key.clone(), Some(CompactedRow { row }));
+                                let final_row = if let Some(toastable_indices) =
+                                    toastable_column_indices
+                                {
+                                    // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
+                                    let old_row_deserialized =
+                                        row_serde.deserializer.deserialize(old_row.row.clone())?;
+                                    let new_row_deserialized =
+                                        row_serde.deserializer.deserialize(row.clone())?;
+                                    let fixed_row = handle_toast_columns_for_cdc(
+                                        &old_row_deserialized,
+                                        &new_row_deserialized,
+                                        toastable_indices,
+                                    );
+                                    Bytes::from(row_serde.serializer.serialize(fixed_row))
+                                } else {
+                                    row.clone()
+                                };
+
+                                change_buffer.update(
+                                    key.clone(),
+                                    old_row.row.clone(),
+                                    final_row.clone(),
+                                );
+                                self.lru_cache
+                                    .put(key.clone(), Some(CompactedRow { row: final_row }));
                             };
                         }
                         ConflictBehavior::IgnoreConflict => {
@@ -672,9 +791,23 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                     old_row_deserialized.into_inner().into_vec();
                                 replace_if_not_null(
                                     &mut row_deserialized_vec,
-                                    new_row_deserialized,
+                                    new_row_deserialized.clone(),
                                 );
-                                let updated_row = OwnedRow::new(row_deserialized_vec);
+                                let mut updated_row = OwnedRow::new(row_deserialized_vec);
+
+                                // Apply TOAST column fix for CDC tables with TOAST columns
+                                if let Some(toastable_indices) = toastable_column_indices {
+                                    // Note: we need to use old_row_deserialized again, but it was moved above
+                                    // So we re-deserialize the old row
+                                    let old_row_deserialized_again =
+                                        row_serde.deserializer.deserialize(old_row.row.clone())?;
+                                    updated_row = handle_toast_columns_for_cdc(
+                                        &old_row_deserialized_again,
+                                        &updated_row,
+                                        toastable_indices,
+                                    );
+                                }
+
                                 let updated_row_bytes =
                                     Bytes::from(row_serde.serializer.serialize(updated_row));
 

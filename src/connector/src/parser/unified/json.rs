@@ -37,6 +37,10 @@ use super::{Access, AccessError, AccessResult};
 use crate::parser::DatumCow;
 use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 
+// Constants for Debezium unavailable value handling
+const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
+const DEBEZIUM_UNAVAILABLE_VALUE_BASE64: &str = "X19kZWJleml1bV91bmF2YWlsYWJsZV92YWx1ZQ==";
+
 #[derive(Clone, Debug)]
 pub enum ByteaHandling {
     Standard,
@@ -224,7 +228,6 @@ impl JsonParseOptions {
             got: value.value_type().to_string(),
             value: value.to_string(),
         };
-
         let v: ScalarImpl = match (type_expected, value.value_type()) {
             (_, ValueType::Null) => return Ok(DatumCow::NULL),
             // ---- Boolean -----
@@ -591,28 +594,43 @@ impl JsonParseOptions {
             }
 
             // ---- List -----
-            (DataType::List(item_type), ValueType::Array) => ListValue::new({
+            (DataType::List(item_type), ValueType::Array) => {
                 let array = value.as_array().unwrap();
+
+                // Normal processing
                 let mut builder = item_type.create_array_builder(array.len());
                 for v in array {
                     let value = self.parse(v, item_type)?;
                     builder.append(value);
                 }
-                builder.finish()
-            })
-            .into(),
+                ListValue::new(builder.finish()).into()
+            }
 
             // ---- Bytea -----
-            (DataType::Bytea, ValueType::String) => match self.bytea_handling {
-                ByteaHandling::Standard => str_to_bytea(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into(),
-                ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
-                    .decode(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into_boxed_slice()
-                    .into(),
-            },
+            (DataType::Bytea, ValueType::String) => {
+                let value_str = value.as_str().unwrap();
+
+                // Check if this is the Debezium unavailable value
+                if value_str == DEBEZIUM_UNAVAILABLE_VALUE_BASE64 {
+                    // Return the original string as bytea
+                    DEBEZIUM_UNAVAILABLE_VALUE
+                        .as_bytes()
+                        .to_vec()
+                        .into_boxed_slice()
+                        .into()
+                } else {
+                    match self.bytea_handling {
+                        ByteaHandling::Standard => {
+                            str_to_bytea(value_str).map_err(|_| create_error())?.into()
+                        }
+                        ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
+                            .decode(value_str)
+                            .map_err(|_| create_error())?
+                            .into_boxed_slice()
+                            .into(),
+                    }
+                }
+            }
             // ---- Jsonb -----
             (DataType::Jsonb, ValueType::String)
                 if matches!(self.json_value_handling, JsonValueHandling::AsString) =>

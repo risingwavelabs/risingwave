@@ -5,7 +5,7 @@ control substitution on
 
 # Step 1: Create table and insert initial data in PostgreSQL
 system ok
-psql -c "DROP TABLE IF EXISTS toast_test_table; CREATE TABLE toast_test_table (id SERIAL PRIMARY KEY, name VARCHAR(100), large_jsonb JSONB, large_text TEXT, created_at TIMESTAMP DEFAULT NOW()); INSERT INTO toast_test_table (name, large_jsonb, large_text) SELECT 'toast_record_' || s, jsonb_build_object('id', s, 'large_string', repeat('This is a very long string that will definitely trigger TOAST mechanism when combined with other data. ', 80), 'nested_object', jsonb_build_object('deep_content', repeat('Deep nested content that adds to the size. ', 40)), 'metadata', jsonb_build_object('description', repeat('Additional metadata content to ensure TOAST is triggered. ', 30))), repeat('Large text field content that should also trigger TOAST when combined with the large JSON. ', 60) FROM generate_series(1, 4) s;"
+psql -c "DROP TABLE IF EXISTS toast_test_table; CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE TABLE toast_test_table (id SERIAL PRIMARY KEY, name VARCHAR(100), large_text TEXT, created_at TIMESTAMP DEFAULT NOW()); INSERT INTO toast_test_table (name, large_text) SELECT 'toast_record_' || s, (encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex')) FROM generate_series(1, 2) s;"
 
 # Step 2: Create RisingWave source from PostgreSQL CDC
 statement ok
@@ -25,48 +25,41 @@ statement ok
 create table toast_test_table (
     id int primary key,
     name varchar,
-    large_jsonb jsonb,
     large_text text,
     created_at timestamp
 ) from toast_test_source table 'public.toast_test_table';
 
+# Create materialized view to trigger MaterializeExecutor
+statement ok
+create materialized view toast_test_mv as select * from toast_test_table;
+
 # Wait for backfill data synchronization
 sleep 5s
 
-# Test 1: Verify backfill data (4 records with TOAST data)
+# Test 1: Verify backfill data (2 records with TOAST data)
 query TTTTT
 select count(*) from toast_test_table;
 ----
-4
+2
 
 # Verify TOAST data integrity for backfill
 query TTTTT
 select
     id,
     name,
-    octet_length(large_jsonb::text) + octet_length(large_text) as total_size_bytes,
-    large_jsonb ? 'large_string' as has_large_string,
-    large_jsonb ? 'nested_object' as has_nested_object
+    octet_length(large_text) as total_size_bytes
 from toast_test_table
 order by id;
 ----
-1 toast_record_1 17261 t t
-2 toast_record_2 17261 t t
-3 toast_record_3 17261 t t
-4 toast_record_4 17261 t t
+1 toast_record_1 10000
+2 toast_record_2 10000
 
 # Test 2: Insert incremental data with TOAST in PostgreSQL
 system ok
-psql -c "insert into toast_test_table (name, large_jsonb, large_text)
+psql -c "insert into toast_test_table (name, large_text)
 values (
     'incremental_toast',
-    jsonb_build_object(
-        'id', 5,
-        'large_string', repeat('This is a very long string that will definitely trigger TOAST mechanism when combined with other data. ', 80),
-        'nested_object', jsonb_build_object('deep_content', repeat('Deep nested content that adds to the size. ', 40)),
-        'metadata', jsonb_build_object('description', repeat('Additional metadata content to ensure TOAST is triggered. ', 30))
-    ),
-    repeat('Large text field content that should also trigger TOAST when combined with the large JSON. ', 60)
+    (encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex'))
 );"
 
 # Wait for incremental data synchronization
@@ -77,21 +70,71 @@ query TTTTT
 select
     id,
     name,
-    octet_length(large_jsonb::text) + octet_length(large_text) as total_size_bytes,
-    large_jsonb ? 'large_string' as has_large_string,
-    large_jsonb ? 'nested_object' as has_nested_object
+    octet_length(large_text) as total_size_bytes
 from toast_test_table
 where name = 'incremental_toast';
 ----
-5 incremental_toast	17261 t t
+3 incremental_toast	10000
 
 # Verify total count after incremental insert
 query TTTTT
 select count(*) from toast_test_table;
 ----
-5
+3
+
+# Test 3: Update non-TOAST column and verify TOAST column behavior
+# This test verifies that TOAST columns are properly handled during UPDATE operations
+system ok
+psql -c "UPDATE toast_test_table SET name = 'updated_name' WHERE id = 1;"
+
+# Wait for update to propagate
+sleep 3s
+
+# Verify that TOAST columns are preserved after UPDATE
+query TTTTT
+select
+    id,
+    name,
+    octet_length(large_text) as total_size_bytes,
+    CASE
+        WHEN large_text IS NULL THEN 'NULL - TOAST column lost!'
+        WHEN large_text = '__debezium_unavailable_value' THEN 'PLACEHOLDER - Debezium placeholder!'
+        WHEN octet_length(large_text) < 100 THEN 'SHORT - possible placeholder: ' || substring(large_text, 1, 20)
+        ELSE 'NORMAL - TOAST column preserved'
+    END as large_text_status
+from toast_test_table
+where id = 1;
+----
+1 updated_name 10000 NORMAL - TOAST column preserved
+
+# Test 4: Update another record to verify consistency
+system ok
+psql -c "UPDATE toast_test_table SET created_at = NOW() WHERE id = 2;"
+
+# Wait for update to propagate
+sleep 3s
+
+# Verify consistency across multiple updates
+query TTTTT
+select
+    id,
+    name,
+    octet_length(large_text) as total_size_bytes,
+    CASE
+        WHEN large_text IS NULL THEN 'NULL - TOAST column lost!'
+        WHEN large_text = '__debezium_unavailable_value' THEN 'PLACEHOLDER - Debezium placeholder!'
+        WHEN octet_length(large_text) < 100 THEN 'SHORT - possible placeholder: ' || substring(large_text, 1, 20)
+        ELSE 'NORMAL - TOAST column preserved'
+    END as large_text_status
+from toast_test_table
+where id = 2;
+----
+2 toast_record_2 10000 NORMAL - TOAST column preserved
 
 # Clean up
+statement ok
+drop materialized view toast_test_mv;
+
 statement ok
 drop table toast_test_table;
 
