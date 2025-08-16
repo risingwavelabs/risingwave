@@ -126,6 +126,7 @@ impl CatalogController {
                 user.auth_info = Set(update_user.auth_info.as_ref().map(AuthInfo::from))
             }
             PbUpdateField::Rename => user.name = Set(update_user.name.clone()),
+            PbUpdateField::Admin => user.is_admin = Set(update_user.is_admin),
         });
 
         let user = user.update(&inner.db).await?;

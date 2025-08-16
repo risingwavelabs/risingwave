@@ -47,7 +47,7 @@ pub async fn handle_create_user(
         can_login: true,
         ..Default::default()
     };
-    let mut notice = None;
+    let mut notices = vec![];
     {
         let user_reader = session.env().user_info_reader().read_guard();
         if user_reader.get_user_by_name(&user_name).is_some() {
@@ -75,6 +75,18 @@ pub async fn handle_create_user(
             }
         }
 
+        // Admin users can only be created by other admin users
+        let require_admin = stmt
+            .with_options
+            .0
+            .iter()
+            .any(|option| matches!(option, UserOption::Admin));
+        if require_admin && !session_user.is_admin {
+            return Err(
+                PermissionDenied("only admin users can create admin users".to_owned()).into(),
+            );
+        }
+
         // Since we don't have a concept of PUBLIC group yet, here we simply grant new user with CONNECT
         // action for the session database.
         user_info.grant_privileges = vec![GrantPrivilege {
@@ -96,11 +108,13 @@ pub async fn handle_create_user(
                 UserOption::NoCreateUser => user_info.can_create_user = false,
                 UserOption::Login => user_info.can_login = true,
                 UserOption::NoLogin => user_info.can_login = false,
+                UserOption::Admin => user_info.is_admin = true,
+                UserOption::NoAdmin => user_info.is_admin = false,
                 UserOption::EncryptedPassword(password) => {
                     if !password.0.is_empty() {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                     } else {
-                        notice = Some(
+                        notices.push(
                             "empty string is not a valid password, clearing password".to_owned(),
                         );
                     }
@@ -111,7 +125,7 @@ pub async fn handle_create_user(
                     {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                     } else {
-                        notice = Some(
+                        notices.push(
                             "empty string is not a valid password, clearing password".to_owned(),
                         );
                     }
@@ -127,23 +141,30 @@ pub async fn handle_create_user(
                 }
             }
         }
+
+        if user_info.is_admin && !user_info.is_super {
+            // Admin users are always superusers
+            user_info.is_super = true;
+            notices.push("Admin users are always superusers".to_owned());
+        }
     };
 
     let user_info_writer = session.user_info_writer()?;
     user_info_writer.create_user(user_info).await?;
-    let response_builder = RwPgResponse::builder(StatementType::CREATE_USER);
-    if let Some(notice) = notice {
-        Ok(response_builder.notice(notice).into())
-    } else {
-        Ok(response_builder.into())
+    let mut response_builder = RwPgResponse::builder(StatementType::CREATE_USER);
+    for notice in notices {
+        response_builder = response_builder.notice(notice);
     }
+    Ok(response_builder.into())
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
+    use risingwave_common::catalog::{
+        DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER_FOR_ADMIN, DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+    };
     use risingwave_pb::user::AuthInfo;
     use risingwave_pb::user::auth_info::EncryptionType;
 
@@ -212,5 +233,49 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn test_create_admin_user() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let user_info_reader = session.env().user_info_reader();
+
+        frontend
+            .run_sql("CREATE USER no_admin_user WITH NOADMIN")
+            .await
+            .unwrap();
+
+        let no_admin_user = user_info_reader
+            .read_guard()
+            .get_user_by_name("no_admin_user")
+            .cloned()
+            .unwrap();
+        assert!(!no_admin_user.is_admin);
+
+        assert!(
+            frontend
+                .run_sql("CREATE USER admin_user WITH ADMIN")
+                .await
+                .is_err(),
+            "admin users can only be created by other admin users"
+        );
+
+        frontend
+            .run_user_sql(
+                "CREATE USER admin_user WITH NOSUPERUSER CREATEUSER ADMIN",
+                DEFAULT_DATABASE_NAME.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+            )
+            .await
+            .unwrap();
+        let admin_user = user_info_reader
+            .read_guard()
+            .get_user_by_name("admin_user")
+            .cloned()
+            .unwrap();
+        assert!(admin_user.is_admin);
+        assert!(admin_user.is_super);
     }
 }

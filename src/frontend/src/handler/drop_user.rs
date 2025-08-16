@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::is_reserved_admin_user;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -34,20 +33,13 @@ pub async fn handle_drop_user(
     let user_info = user_info_reader
         .read_guard()
         .get_user_by_name(&user_name)
-        .map(|u| (u.id, u.is_super));
+        .map(|u| (u.id, u.is_super, u.is_admin));
     match user_info {
-        Some((user_id, is_super)) => {
+        Some((user_id, is_super, is_admin)) => {
             if session.user_id() == user_id {
                 return Err(ErrorCode::PermissionDenied(
                     "current user cannot be dropped".to_owned(),
                 )
-                .into());
-            }
-            if is_reserved_admin_user(&user_name) {
-                return Err(ErrorCode::PermissionDenied(format!(
-                    "cannot drop the admin superuser \"{}\"",
-                    user_name
-                ))
                 .into());
             }
             if let Some(current_user) = user_info_reader
@@ -67,6 +59,14 @@ pub async fn handle_drop_user(
                         )
                         .into());
                     }
+                }
+
+                // Only admin users can drop admin users
+                if is_admin && !current_user.is_admin {
+                    return Err(ErrorCode::PermissionDenied(
+                        "only admin users can drop admin users".to_owned(),
+                    )
+                    .into());
                 }
             } else {
                 return Err(
