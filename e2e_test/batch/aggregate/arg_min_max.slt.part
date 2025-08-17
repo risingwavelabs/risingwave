@@ -1,21 +1,140 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
+# Core cases
 statement ok
-create table t (v1 int, v2 smallint, v3 varchar);
+drop table if exists core;
 
 statement ok
-insert into t values (1, 10, 'a'), (2, 20, 'b'), (3, 15, 'c'), (4, 30, NULL), (5, 1, NULL), (4, NULL, 'd'), (5, NULL, 'e');
+create table core (v1 int, v2 smallint, v3 varchar);
+
+statement ok
+insert into core values (1, 10, 'a'), (2, 20, 'b'), (3, 15, 'c'), (4, 30, NULL), (5, 1, NULL), (4, NULL, 'd'), (5, NULL, 'e');
 
 query I
-select arg_min(v3, v2) from t;
+select arg_min(v3, v2),arg_max(v3, v2) from core;
 ----
-a
-
-query I
-select arg_max(v3, v2) from t;
-----
-b
+a b
 
 statement ok
-drop table t;
+drop table core;
+
+# Other data types 
+statement ok
+drop table if exists type_test;
+
+statement ok
+create table type_test (str_val varchar, int_val int, float_val real, date_val date);
+
+statement ok
+insert into type_test values 
+  ('apple', 1, 1.1, '2023-01-01'),
+  ('banana', 2, 2.2, '2023-01-02'),
+  ('cherry', 3, 3.3, '2023-01-03');
+
+query T
+select arg_min(str_val, int_val), arg_max(str_val, int_val) from type_test;
+----
+apple cherry
+
+query T
+select arg_min(str_val, float_val), arg_max(str_val, float_val) from type_test;
+----
+apple cherry
+
+query T
+select arg_min(str_val, date_val), arg_max(str_val, date_val) from type_test;
+----
+apple cherry
+
+statement ok
+drop table type_test;
+
+# Order by cases
+statement ok
+drop table if exists order_test;
+
+statement ok
+create table order_test (a int, b int, c int);
+
+statement ok
+insert into order_test values (1, 20, 100), (2, 20, 200), (3, 30, 100), (4, 30, 200);
+
+query I
+select arg_min(a, b order by c), arg_max(a, b order by c) from order_test;
+----
+1 3
+
+query I
+select arg_min(a, b order by c desc), arg_max(a, b order by c desc) from order_test;
+----
+2 4
+
+statement ok
+drop table order_test;
+
+# Window functions
+statement ok
+drop table if exists window_test;
+
+statement ok
+create table window_test (a int, b int, partition_col int);
+
+statement ok
+insert into window_test values (1, 10, 1), (2, 20, 1), (3, 15, 2), (4, 30, 2);
+
+query I rowsort
+select arg_min(a, b) over (partition by partition_col), arg_max(a, b) over (partition by partition_col) from window_test;
+----
+1 2
+1 2
+3 4
+3 4
+
+statement ok
+drop table window_test;
+
+# Error cases
+statement error
+select arg_min();
+
+statement error
+select arg_max();
+
+statement error
+select arg_min(*);
+
+statement error
+select arg_max(*);
+
+
+# Corner Cases
+
+query I
+select arg_min(1, 1), arg_max(1, 1);
+----
+1 1
+
+query I
+select arg_min(v1, v2), arg_max(v1, v2) from (values (1, 2)) as t(v1, v2) where false;
+----
+NULL NULL
+
+# Unsupported data types
+statement ok
+drop table if exists complex_types;
+
+statement ok
+create table complex_types (id int, arr int[], obj jsonb);
+
+statement ok
+insert into complex_types values (1, array[1,2,3], '{"key": "value"}'), (2, array[4,5,6], '{"key2": "value2"}');
+
+statement error
+select arg_min(id, arr) from complex_types;
+
+statement error  
+select arg_max(id, obj) from complex_types;
+
+statement ok
+drop table complex_types;

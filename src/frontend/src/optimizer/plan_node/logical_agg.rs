@@ -773,6 +773,27 @@ impl LogicalAggBuilder {
             }
             AggType::Builtin(PbAggKind::ArgMin | PbAggKind::ArgMax) => {
                 let mut agg_call = agg_call;
+                
+                if agg_call.args.len() != 2 {
+                    bail!(format!(
+                        "{} requires exactly 2 arguments, got {}",
+                        if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) { "arg_min" } else { "arg_max" },
+                        agg_call.args.len()
+                    ));
+                }
+                
+                let comparison_arg_type = agg_call.args[1].return_type();
+                match comparison_arg_type {
+                    DataType::Struct(_) | DataType::List(_) | DataType::Map(_) | DataType::Vector(_) | DataType::Jsonb => {
+                        bail!(format!(
+                            "{} does not support struct, array, map, vector, jsonb for comparison argument, got {}",
+                            if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) { "arg_min" } else { "arg_max" },
+                            comparison_arg_type
+                        ));
+                    }
+                    _ => {}
+                }
+                
                 let not_null_exprs: Vec<ExprImpl> = agg_call
                     .args
                     .iter()
@@ -781,18 +802,25 @@ impl LogicalAggBuilder {
                     })
                     .try_collect()?;
 
-                let order_by = OrderBy::new(vec![OrderByExpr {
-                    expr: agg_call.args.pop().unwrap(),
+                let comparison_expr = agg_call.args[1].clone();
+                let mut order_exprs = vec![OrderByExpr {
+                    expr: comparison_expr,
                     order_type: if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) {
-                        OrderType::ascending_nulls_last()
+                        OrderType::ascending()
                     } else {
-                        OrderType::descending_nulls_last()
+                        OrderType::descending()
                     },
-                }]);
+                }];
+                
+                order_exprs.extend(agg_call.order_by.sort_exprs);
+                
+                let order_by = OrderBy::new(order_exprs);
 
                 let filter = agg_call.filter.clone().and(Condition {
                     conjunctions: not_null_exprs,
                 });
+
+                agg_call.args.truncate(1);
 
                 let new_agg_call = AggCall {
                     agg_type: AggType::Builtin(PbAggKind::FirstValue),
