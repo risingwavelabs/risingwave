@@ -773,7 +773,7 @@ impl LogicalAggBuilder {
             }
             AggType::Builtin(PbAggKind::ArgMin | PbAggKind::ArgMax) => {
                 let mut agg_call = agg_call;
-                
+
                 if agg_call.args.len() != 2 {
                     bail!(format!(
                         "{} requires exactly 2 arguments, got {}",
@@ -781,7 +781,7 @@ impl LogicalAggBuilder {
                         agg_call.args.len()
                     ));
                 }
-                
+
                 let comparison_arg_type = agg_call.args[1].return_type();
                 match comparison_arg_type {
                     DataType::Struct(_) | DataType::List(_) | DataType::Map(_) | DataType::Vector(_) | DataType::Jsonb => {
@@ -793,7 +793,7 @@ impl LogicalAggBuilder {
                     }
                     _ => {}
                 }
-                
+
                 let not_null_exprs: Vec<ExprImpl> = agg_call
                     .args
                     .iter()
@@ -811,9 +811,9 @@ impl LogicalAggBuilder {
                         OrderType::descending()
                     },
                 }];
-                
+
                 order_exprs.extend(agg_call.order_by.sort_exprs);
-                
+
                 let order_by = OrderBy::new(order_exprs);
 
                 let filter = agg_call.filter.clone().and(Condition {

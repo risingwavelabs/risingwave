@@ -19,7 +19,7 @@ a b
 statement ok
 drop table core;
 
-# Other data types 
+# Other data types
 statement ok
 drop table if exists type_test;
 
@@ -27,7 +27,7 @@ statement ok
 create table type_test (str_val varchar, int_val int, float_val real, date_val date);
 
 statement ok
-insert into type_test values 
+insert into type_test values
   ('apple', 1, 1.1, '2023-01-01'),
   ('banana', 2, 2.2, '2023-01-02'),
   ('cherry', 3, 3.3, '2023-01-03');
@@ -133,7 +133,7 @@ insert into complex_types values (1, array[1,2,3], '{"key": "value"}'), (2, arra
 statement error
 select arg_min(id, arr) from complex_types;
 
-statement error  
+statement error
 select arg_max(id, obj) from complex_types;
 
 statement ok
