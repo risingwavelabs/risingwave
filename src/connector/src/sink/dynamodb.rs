@@ -35,7 +35,7 @@ use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
-use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
+use super::{Result, Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::AwsAuthProps;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
@@ -122,7 +122,6 @@ impl EnforceSecret for DynamoDbSink {
 }
 
 impl Sink for DynamoDbSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<DynamoDbSinkWriter>;
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
@@ -289,6 +288,7 @@ pub type DynamoDbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError>
 impl AsyncTruncateSinkWriter for DynamoDbSinkWriter {
     type DeliveryFuture = DynamoDbSinkDeliveryFuture;
 
+    #[define_opaque(DynamoDbSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
@@ -363,6 +363,7 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
         DataType::Map(_m) => {
             return Err(SinkError::DynamoDb(anyhow!("map is not supported yet")));
         }
+        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
     };
     Ok(attr)
 }
@@ -455,6 +456,7 @@ mod write_chunk_future {
             request_items.push(r_req);
         }
 
+        #[define_opaque(WriteChunkFuture)]
         pub fn write_chunk(&mut self, request_items: Vec<DynamoDbRequest>) -> WriteChunkFuture {
             let table = self.table.clone();
             let chunks = request_items

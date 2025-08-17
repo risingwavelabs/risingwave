@@ -35,7 +35,7 @@ use crate::handler::create_table::handle_create_table_plan;
 use crate::optimizer::OptimizerContext;
 use crate::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Convention, Explain};
+use crate::optimizer::plan_node::{BatchPlanRef, Explain, StreamPlanRef};
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::{explain_stream_graph, explain_stream_graph_as_dot};
@@ -52,8 +52,13 @@ pub async fn do_handle_explain(
 
     let session = handler_args.session.clone();
 
+    enum PhysicalPlanRef {
+        Stream(StreamPlanRef),
+        Batch(BatchPlanRef),
+    }
+
     {
-        let (plan, context) = match stmt {
+        let (plan, table, context) = match stmt {
             // `CREATE TABLE` takes the ownership of the `OptimizerContext` to avoid `Rc` across
             // `await` point. We can only take the reference back from the `PlanRef` if it's
             // successfully planned.
@@ -74,12 +79,12 @@ pub async fn do_handle_explain(
             } => {
                 let format_encode = format_encode.map(|s| s.into_v2_with_warning());
 
-                let (plan, _source, _table, _job_type) = handle_create_table_plan(
+                let (plan, _source, table, _job_type, _) = handle_create_table_plan(
                     handler_args,
                     explain_options,
                     format_encode,
                     cdc_table_info,
-                    name.clone(),
+                    &name,
                     columns,
                     wildcard_idx,
                     constraints,
@@ -93,14 +98,14 @@ pub async fn do_handle_explain(
                 )
                 .await?;
                 let context = plan.ctx();
-                (Ok(plan), context)
+                (Ok(PhysicalPlanRef::Stream(plan)), Some(table), context)
             }
             Statement::CreateSink { stmt } => {
                 let plan = gen_sink_plan(handler_args, stmt, Some(explain_options), false)
                     .await
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
-                (Ok(plan), context)
+                (Ok(PhysicalPlanRef::Stream(plan)), None, context)
             }
 
             Statement::FetchCursor {
@@ -115,7 +120,7 @@ pub async fn do_handle_explain(
                     .await
                     .map(|x| x.plan)?;
                 let context = plan.ctx();
-                (Ok(plan), context)
+                (Ok(PhysicalPlanRef::Batch(plan)), None, context)
             }
 
             // For other queries without `await` point, we can keep a copy of reference to the
@@ -124,7 +129,7 @@ pub async fn do_handle_explain(
             _ => {
                 let context: OptimizerContextRef =
                     OptimizerContext::new(handler_args, explain_options).into();
-                let plan = match stmt {
+                let (plan, table) = match stmt {
                     // -- Streaming DDLs --
                     Statement::CreateView {
                         or_replace: false,
@@ -142,7 +147,7 @@ pub async fn do_handle_explain(
                         columns,
                         emit_mode,
                     )
-                    .map(|x| x.0),
+                    .map(|(plan, table)| (PhysicalPlanRef::Stream(plan), Some(table))),
                     Statement::CreateView {
                         materialized: false,
                         ..
@@ -180,23 +185,28 @@ pub async fn do_handle_explain(
                             distributed_by,
                         )
                     }
-                    .map(|x| x.0),
+                    .map(|(plan, index_table, _index)| {
+                        (PhysicalPlanRef::Stream(plan), Some(index_table))
+                    }),
 
                     // -- Batch Queries --
                     Statement::Insert { .. }
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context, stmt).map(|x| x.plan)
+                        gen_batch_plan_by_statement(&session, context, stmt)
+                            .map(|x| (PhysicalPlanRef::Batch(x.plan), None))
                     }
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
+                }?;
+
+                let context = match &plan {
+                    PhysicalPlanRef::Stream(plan) => plan.ctx(),
+                    PhysicalPlanRef::Batch(plan) => plan.ctx(),
                 };
 
-                let plan = plan?;
-                let context = plan.ctx().clone();
-
-                (Ok(plan) as Result<_>, context)
+                (Ok(plan) as Result<_>, table, context)
             }
         };
 
@@ -214,9 +224,8 @@ pub async fn do_handle_explain(
         match explain_type {
             ExplainType::DistSql => {
                 if let Ok(plan) = &plan {
-                    match plan.convention() {
-                        Convention::Logical => unreachable!(),
-                        Convention::Batch => {
+                    match plan {
+                        PhysicalPlanRef::Batch(plan) => {
                             let worker_node_manager_reader = WorkerNodeSelector::new(
                                 session.env().worker_node_manager_ref(),
                                 session.is_barrier_read(),
@@ -234,12 +243,17 @@ pub async fn do_handle_explain(
                                 ExplainFormat::Json
                             }
                         }
-                        Convention::Stream => {
+                        PhysicalPlanRef::Stream(plan) => {
                             let graph = build_graph(plan.clone(), None)?;
+                            let table = table.map(|x| x.to_prost());
                             if explain_format == ExplainFormat::Dot {
-                                blocks.push(explain_stream_graph_as_dot(&graph, explain_verbose))
+                                blocks.push(explain_stream_graph_as_dot(
+                                    &graph,
+                                    table,
+                                    explain_verbose,
+                                ))
                             } else {
-                                blocks.push(explain_stream_graph(&graph, explain_verbose));
+                                blocks.push(explain_stream_graph(&graph, table, explain_verbose));
                             }
                         }
                     }
@@ -247,7 +261,11 @@ pub async fn do_handle_explain(
             }
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
-                if !explain_trace && let Ok(plan) = &plan {
+                if !explain_trace && let Ok(physical_plan) = &plan {
+                    let plan = match &physical_plan {
+                        PhysicalPlanRef::Stream(plan) => plan as &dyn Explain,
+                        PhysicalPlanRef::Batch(plan) => plan as &dyn Explain,
+                    };
                     match explain_format {
                         ExplainFormat::Text => {
                             blocks.push(plan.explain_to_string());
@@ -256,7 +274,8 @@ pub async fn do_handle_explain(
                         ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
                         ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
                         ExplainFormat::Dot => {
-                            if explain_backfill {
+                            if explain_backfill && let PhysicalPlanRef::Stream(plan) = physical_plan
+                            {
                                 let dot_formatted_backfill_order =
                                     explain_backfill_order_in_dot_format(
                                         &session,

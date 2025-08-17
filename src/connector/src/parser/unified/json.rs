@@ -87,6 +87,12 @@ impl TimestamptzHandling {
 }
 
 #[derive(Clone, Debug)]
+pub enum TimestampHandling {
+    Milli,
+    GuessNumberUnit,
+}
+
+#[derive(Clone, Debug)]
 pub enum JsonValueHandling {
     AsValue,
     AsString,
@@ -135,6 +141,7 @@ pub enum StructHandling {
 pub struct JsonParseOptions {
     pub bytea_handling: ByteaHandling,
     pub time_handling: TimeHandling,
+    pub timestamp_handling: TimestampHandling,
     pub timestamptz_handling: TimestamptzHandling,
     pub json_value_handling: JsonValueHandling,
     pub numeric_handling: NumericHandling,
@@ -154,6 +161,7 @@ impl JsonParseOptions {
     pub const CANAL: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
         time_handling: TimeHandling::Micro,
+        timestamp_handling: TimestampHandling::GuessNumberUnit, // backward-compatible
         timestamptz_handling: TimestamptzHandling::GuessNumberUnit, // backward-compatible
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
@@ -170,6 +178,7 @@ impl JsonParseOptions {
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
         time_handling: TimeHandling::Micro,
+        timestamp_handling: TimestampHandling::GuessNumberUnit, // backward-compatible
         timestamptz_handling: TimestamptzHandling::GuessNumberUnit, // backward-compatible
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
@@ -181,10 +190,15 @@ impl JsonParseOptions {
         ignoring_keycase: true,
     };
 
-    pub fn new_for_debezium(timestamptz_handling: TimestamptzHandling) -> Self {
+    pub fn new_for_debezium(
+        timestamptz_handling: TimestamptzHandling,
+        timestamp_handling: TimestampHandling,
+        time_handling: TimeHandling,
+    ) -> Self {
         Self {
             bytea_handling: ByteaHandling::Base64,
-            time_handling: TimeHandling::Micro,
+            time_handling,
+            timestamp_handling,
             timestamptz_handling,
             json_value_handling: JsonValueHandling::AsString,
             numeric_handling: NumericHandling::Relax {
@@ -483,9 +497,18 @@ impl JsonParseOptions {
             (
                 DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => i64_to_timestamp(value.as_i64().unwrap())
-                .map_err(|_| create_error())?
-                .into(),
+            ) => {
+                match self.timestamp_handling {
+                    // Only when user configures debezium.time.precision.mode = 'connect',
+                    // the Milli branch will be executed
+                    TimestampHandling::Milli => Timestamp::with_millis(value.as_i64().unwrap())
+                        .map_err(|_| create_error())?
+                        .into(),
+                    TimestampHandling::GuessNumberUnit => i64_to_timestamp(value.as_i64().unwrap())
+                        .map_err(|_| create_error())?
+                        .into(),
+                }
+            }
             // ---- Timestamptz -----
             (DataType::Timestamptz, ValueType::String) => match self.timestamptz_handling {
                 TimestamptzHandling::UtcWithoutSuffix => value

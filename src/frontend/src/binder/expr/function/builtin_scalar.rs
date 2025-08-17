@@ -281,7 +281,7 @@ impl Binder {
                     if inputs[0].return_type() != DataType::Varchar {
                         // Support `quote_literal(any)` by converting it to `quote_literal(any::text)`
                         // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4641
-                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                        FunctionCall::cast_mut(&mut inputs[0], &DataType::Varchar, CastContext::Explicit)?;
                     }
                     Ok(FunctionCall::new_unchecked(ExprType::QuoteLiteral, inputs, DataType::Varchar).into())
                 }))),
@@ -289,7 +289,7 @@ impl Binder {
                     if inputs[0].return_type() != DataType::Varchar {
                         // Support `quote_nullable(any)` by converting it to `quote_nullable(any::text)`
                         // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4650
-                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                        FunctionCall::cast_mut(&mut inputs[0], &DataType::Varchar, CastContext::Explicit)?;
                     }
                     Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, inputs, DataType::Varchar).into())
                 }))),
@@ -319,7 +319,7 @@ impl Binder {
                     } else {
                         ""
                     };
-                    inputs[0].cast_implicit_mut(DataType::Bytea).map_err(|e| {
+                    inputs[0].cast_implicit_mut(&DataType::Bytea).map_err(|e| {
                         ErrorCode::BindError(format!("{} in `recv`.{hint}", e.as_report()))
                     })?;
                     Ok(FunctionCall::new_unchecked(ExprType::PgwireRecv, inputs, DataType::Int64).into())
@@ -371,7 +371,7 @@ impl Binder {
                         let (arg0, arg1) = inputs.into_iter().next_tuple().unwrap();
                         // rewrite into `CASE WHEN 0 < arg1 AND arg1 <= array_ndims(arg0) THEN 1 END`
                         let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0], false)?;
-                        let arg1 = arg1.cast_implicit(DataType::Int32)?;
+                        let arg1 = arg1.cast_implicit(&DataType::Int32)?;
 
                         FunctionCall::new(
                             ExprType::Case,
@@ -422,6 +422,7 @@ impl Binder {
                 ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 ("jsonb_set", raw_call(ExprType::JsonbSet)),
                 ("jsonb_populate_map", raw_call(ExprType::JsonbPopulateMap)),
+                ("jsonb_to_array", raw_call(ExprType::JsonbToArray)),
                 // map
                 ("map_from_entries", raw_call(ExprType::MapFromEntries)),
                 ("map_access", raw_call(ExprType::MapAccess)),
@@ -434,6 +435,13 @@ impl Binder {
                 ("map_delete", raw_call(ExprType::MapDelete)),
                 ("map_insert", raw_call(ExprType::MapInsert)),
                 ("map_length", raw_call(ExprType::MapLength)),
+                // vector
+                ("l2_distance", raw_call(ExprType::L2Distance)),
+                ("cosine_distance", raw_call(ExprType::CosineDistance)),
+                ("l1_distance", raw_call(ExprType::L1Distance)),
+                ("inner_product", raw_call(ExprType::InnerProduct)),
+                ("vector_norm", raw_call(ExprType::L2Norm)),
+                ("l2_normalize", raw_call(ExprType::L2Normalize)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -615,7 +623,19 @@ impl Binder {
                 ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
-                ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("has_database_privilege", raw(|binder, mut inputs| {
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        Ok(FunctionCall::new(ExprType::HasDatabasePrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_database_privilege()".into(),
+                        )
+                            .into())
+                    }
+                })),
                 ("has_table_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
@@ -707,7 +727,8 @@ impl Binder {
                 // internal
                 ("rw_vnode", raw_call(ExprType::VnodeUser)),
                 ("rw_license", raw_call(ExprType::License)),
-                ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
+                ("rw_test_paid_tier", raw_call(ExprType::TestFeature)), // deprecated, kept for compatibility
+                ("rw_test_feature", raw_call(ExprType::TestFeature)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
@@ -716,13 +737,27 @@ impl Binder {
                 ("proctime", proctime()),
                 ("pg_sleep", raw_call(ExprType::PgSleep)),
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
+                ("random", raw_call(ExprType::Random)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
 
                 // cast functions
                 // only functions required by the existing PostgreSQL tool are implemented
                 ("date", guard_by_len(1, raw(|_binder, inputs| {
-                    inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
+                    inputs[0].clone().cast_explicit(&DataType::Date).map_err(Into::into)
+                }))),
+
+                // AI model functions
+                ("openai_embedding", guard_by_len(3, raw(|_binder, inputs| {
+                    // check if the first two arguments are constants
+                    if let ExprImpl::Literal(api_key) = &inputs[0] && let Some(ScalarImpl::Utf8(_api_key)) = api_key.get_data()
+                    && let ExprImpl::Literal(model) = &inputs[1] && let Some(ScalarImpl::Utf8(_model)) = model.get_data() {
+                        Ok(FunctionCall::new(ExprType::OpenaiEmbedding, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::InvalidInputSyntax(
+                            "`api_key` and `model` must be constant strings".to_owned(),
+                        ).into())
+                    }
                 }))),
             ]
                 .into_iter()
@@ -858,7 +893,7 @@ fn rewrite_two_bool_inputs(mut inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
     let left = inputs.pop().unwrap();
     let right = inputs.pop().unwrap();
     Ok(vec![
-        left.cast_implicit(DataType::Boolean)?,
-        right.cast_implicit(DataType::Boolean)?,
+        left.cast_implicit(&DataType::Boolean)?,
+        right.cast_implicit(&DataType::Boolean)?,
     ])
 }

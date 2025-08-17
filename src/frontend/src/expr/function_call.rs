@@ -110,7 +110,7 @@ impl FunctionCall {
     /// The input `child` remains unchanged when this returns an error.
     pub fn cast_mut(
         child: &mut ExprImpl,
-        target: DataType,
+        target: &DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
         if let ExprImpl::Parameter(expr) = child
@@ -134,10 +134,10 @@ impl FunctionCall {
             let datum = literal
                 .get_data()
                 .as_ref()
-                .map(|scalar| ScalarImpl::from_text(scalar.as_utf8(), &target))
+                .map(|scalar| ScalarImpl::from_text(scalar.as_utf8(), target))
                 .transpose();
             if let Ok(datum) = datum {
-                *child = Literal::new(datum, target).into();
+                *child = Literal::new(datum, target.clone()).into();
                 return Ok(());
             }
             // else when eager parsing fails, just proceed as normal.
@@ -145,7 +145,7 @@ impl FunctionCall {
         }
 
         let source = child.return_type();
-        if source == target {
+        if &source == target {
             return Ok(());
         }
 
@@ -153,12 +153,12 @@ impl FunctionCall {
             // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
             // in frontend.
         } else {
-            cast(&source, &target, allows)?;
+            cast(&source, target, allows)?;
         }
 
         // Always Ok below. Safe to mutate `child`.
         let owned = std::mem::replace(child, ExprImpl::literal_bool(false));
-        *child = Self::new_unchecked(ExprType::Cast, vec![owned], target).into();
+        *child = Self::new_unchecked(ExprType::Cast, vec![owned], target.clone()).into();
         Ok(())
     }
 
@@ -167,7 +167,7 @@ impl FunctionCall {
     /// is castable to VARCHAR. It's to simply the casting rules.
     fn cast_row_expr(
         func: &mut FunctionCall,
-        target_type: DataType,
+        target_type: &DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
         // Can only cast to a struct type.
@@ -189,8 +189,8 @@ impl FunctionCall {
                 func.inputs
                     .iter_mut()
                     .zip_eq_fast(t.types())
-                    .try_for_each(|(e, t)| Self::cast_mut(e, t.clone(), allows))?;
-                func.return_type = target_type;
+                    .try_for_each(|(e, t)| Self::cast_mut(e, t, allows))?;
+                func.return_type = target_type.clone();
                 Ok(())
             }
             std::cmp::Ordering::Less => bail_cast_error!(
@@ -226,11 +226,13 @@ impl FunctionCall {
                 let return_type = infer_some_all(func_types, &mut inputs)?;
                 Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
             }
-            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(
-                expr_type,
-                vec![Self::new_binary_op_func(func_types, inputs)?],
-            )?
-            .into()),
+            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull | ExprType::Neg => {
+                Ok(FunctionCall::new(
+                    expr_type,
+                    vec![Self::new_binary_op_func(func_types, inputs)?],
+                )?
+                .into())
+            }
             _ => Ok(FunctionCall::new(expr_type, inputs)?.into()),
         }
     }
@@ -296,16 +298,21 @@ impl Expr for FunctionCall {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
-        ExprNode {
+
+        let children = self
+            .inputs()
+            .iter()
+            .map(|input| input.try_to_expr_proto())
+            .try_collect()?;
+
+        Ok(ExprNode {
             function_type: self.func_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: self.inputs().iter().map(Expr::to_expr_proto).collect(),
-            })),
-        }
+            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
+        })
     }
 }
 
@@ -421,10 +428,10 @@ fn explain_verbose_binary_op(
 }
 
 pub fn is_row_function(expr: &ExprImpl) -> bool {
-    if let ExprImpl::FunctionCall(func) = expr {
-        if func.func_type() == ExprType::Row {
-            return true;
-        }
+    if let ExprImpl::FunctionCall(func) = expr
+        && func.func_type() == ExprType::Row
+    {
+        return true;
     }
     false
 }

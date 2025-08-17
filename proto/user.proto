@@ -35,20 +35,20 @@ message UserInfo {
   repeated GrantPrivilege grant_privileges = 8;
 }
 
+enum Action {
+  UNSPECIFIED = 0;
+  SELECT = 1;
+  INSERT = 2;
+  UPDATE = 3;
+  DELETE = 4;
+  CREATE = 5;
+  CONNECT = 6;
+  USAGE = 7;
+  EXECUTE = 8;
+}
+
 // GrantPrivilege defines a privilege granted to a user.
 message GrantPrivilege {
-  enum Action {
-    UNSPECIFIED = 0;
-    SELECT = 1;
-    INSERT = 2;
-    UPDATE = 3;
-    DELETE = 4;
-    CREATE = 5;
-    CONNECT = 6;
-    USAGE = 7;
-    EXECUTE = 8;
-  }
-
   message ActionWithGrantOption {
     Action action = 1;
     bool with_grant_option = 2;
@@ -133,6 +133,34 @@ message RevokePrivilegeResponse {
   uint64 version = 2;
 }
 
+message AlterDefaultPrivilegeRequest {
+  repeated uint32 user_ids = 1;
+  uint32 database_id = 2;
+  repeated uint32 schema_ids = 3;
+
+  message GrantPrivilege {
+    repeated Action actions = 1;
+    common.ObjectType object_type = 2;
+    repeated uint32 grantees = 3;
+    bool with_grant_option = 4;
+  }
+  message RevokePrivilege {
+    repeated Action actions = 1;
+    common.ObjectType object_type = 2;
+    repeated uint32 grantees = 3;
+    bool revoke_grant_option = 4;
+  }
+  oneof operation {
+    GrantPrivilege grant_privilege = 4;
+    RevokePrivilege revoke_privilege = 5;
+  }
+  uint32 granted_by = 6;
+}
+
+message AlterDefaultPrivilegeResponse {
+  common.Status status = 1;
+}
+
 service UserService {
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc DropUser(DropUserRequest) returns (DropUserResponse);
@@ -142,4 +170,6 @@ service UserService {
   rpc GrantPrivilege(GrantPrivilegeRequest) returns (GrantPrivilegeResponse);
   // RevokePrivilege revokes a privilege from a user.
   rpc RevokePrivilege(RevokePrivilegeRequest) returns (RevokePrivilegeResponse);
+  // AlterDefaultPrivilege alters the default privileges.
+  rpc AlterDefaultPrivilege(AlterDefaultPrivilegeRequest) returns (AlterDefaultPrivilegeResponse);
 }

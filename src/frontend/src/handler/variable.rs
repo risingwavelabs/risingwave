@@ -97,14 +97,11 @@ pub(super) fn handle_set_time_zone(
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
 
-pub(super) async fn handle_show(
-    handler_args: HandlerArgs,
-    variable: Vec<Ident>,
-) -> Result<RwPgResponse> {
+pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");
     if name.eq_ignore_ascii_case("PARAMETERS") {
-        handle_show_system_params(handler_args).await
+        handle_show_system_params(handler_args)
     } else if name.eq_ignore_ascii_case("ALL") {
         handle_show_all(handler_args.clone())
     } else {
@@ -132,13 +129,13 @@ fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
         .into())
 }
 
-async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     let params = handler_args
         .session
         .env()
-        .meta_client()
-        .get_system_params()
-        .await?;
+        .system_params_manager()
+        .get_params()
+        .load();
     let rows = params
         .get_all()
         .into_iter()

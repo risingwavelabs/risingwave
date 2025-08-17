@@ -25,12 +25,23 @@ use crate::handler::explain_analyze_stream_job::graph::{
 };
 use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgResponseBuilderExt};
 
+#[macro_export]
+macro_rules! debug_panic_or_warn {
+    ($($arg:tt)*) => {
+        if cfg!(debug_assertions) || cfg!(madsim) {
+            panic!($($arg)*);
+        } else {
+            tracing::warn!($($arg)*);
+        }
+    };
+}
+
 #[derive(Fields)]
 struct ExplainAnalyzeStreamJobOutput {
     identity: String,
     actor_ids: String,
-    output_rows_per_second: String,
-    downstream_backpressure_ratio: String,
+    output_rows_per_second: Option<String>,
+    downstream_backpressure_ratio: Option<String>,
 }
 
 pub async fn handle_explain_analyze_stream_job(
@@ -43,13 +54,19 @@ pub async fn handle_explain_analyze_stream_job(
 
     let meta_client = handler_args.session.env().meta_client();
     let fragments = net::get_fragments(meta_client, job_id).await?;
-    let dispatcher_fragment_ids = fragments.iter().map(|f| f.id).collect::<Vec<_>>();
     let fragment_parallelisms = fragments
         .iter()
         .map(|f| (f.id, f.actors.len()))
         .collect::<HashMap<_, _>>();
-    let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
+    let (root_node, dispatcher_fragment_ids, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
+    tracing::debug!(
+        ?fragment_parallelisms,
+        ?root_node,
+        ?dispatcher_fragment_ids,
+        ?adjacency_list,
+        "explain analyze metadata"
+    );
 
     let worker_nodes = net::list_stream_worker_nodes(handler_args.session.env()).await?;
 
@@ -104,8 +121,7 @@ mod bind {
             | AnalyzeTarget::MaterializedView(name) => {
                 let session = &handler_args.session;
                 let db_name = session.database();
-                let (schema_name, name) =
-                    Binder::resolve_schema_qualified_name(&db_name, name.clone())?;
+                let (schema_name, name) = Binder::resolve_schema_qualified_name(&db_name, name)?;
                 let search_path = session.config().search_path();
                 let user_name = &session.user_name();
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -126,7 +142,7 @@ mod bind {
                     }
                     AnalyzeTarget::Sink(_) => {
                         let (catalog, _schema_name) =
-                            catalog.get_sink_by_name(&db_name, schema_path, &name)?;
+                            catalog.get_any_sink_by_name(&db_name, schema_path, &name)?;
                         catalog.id.sink_id
                     }
                     AnalyzeTarget::MaterializedView(_) => {
@@ -144,6 +160,8 @@ mod bind {
 
 /// Utilities for fetching stats from CN
 mod net {
+    use std::collections::HashSet;
+
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::monitor_service::GetProfileStatsRequest;
@@ -185,48 +203,59 @@ mod net {
     pub(super) async fn get_executor_stats(
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
-        executor_ids: &[ExecutorId],
-        dispatcher_fragment_ids: &[u32],
+        executor_ids: &HashSet<ExecutorId>,
+        dispatcher_fragment_ids: &HashSet<u32>,
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
-        let mut aggregated_stats = ExecutorStats::new();
+        let dispatcher_fragment_ids = dispatcher_fragment_ids.iter().copied().collect::<Vec<_>>();
+        let mut initial_aggregated_stats = ExecutorStats::new();
         for node in worker_nodes {
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
-                    executor_ids: executor_ids.into(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
+                    executor_ids: executor_ids.iter().copied().collect(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.start_record(
+            initial_aggregated_stats.record(
                 executor_ids,
-                dispatcher_fragment_ids,
+                &dispatcher_fragment_ids,
                 &stats.into_inner(),
             );
         }
+        tracing::debug!(?initial_aggregated_stats, "initial aggregated stats");
 
         sleep(profiling_duration).await;
 
+        let mut final_aggregated_stats = ExecutorStats::new();
         for node in worker_nodes {
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
-                    executor_ids: executor_ids.into(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
+                    executor_ids: executor_ids.iter().copied().collect(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.finish_record(
+            final_aggregated_stats.record(
                 executor_ids,
-                dispatcher_fragment_ids,
+                &dispatcher_fragment_ids,
                 &stats.into_inner(),
             );
         }
+        tracing::debug!(?final_aggregated_stats, "final aggregated stats");
 
-        Ok(aggregated_stats)
+        let delta_aggregated_stats = ExecutorStats::get_delta(
+            &initial_aggregated_stats,
+            &final_aggregated_stats,
+            executor_ids,
+            &dispatcher_fragment_ids,
+        );
+
+        Ok(delta_aggregated_stats)
     }
 }
 
@@ -235,13 +264,16 @@ mod net {
 /// 1. Collect the stream node metrics at the **Executor** level.
 /// 2. Merge the stream node metrics into **Operator** level, avg, max, min, etc...
 mod metrics {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
+    use risingwave_common::operator::unique_executor_id_into_parts;
     use risingwave_pb::monitor_service::GetProfileStatsResponse;
 
     use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId};
+    use crate::handler::explain_analyze_stream_job::utils::operator_id_for_dispatch;
 
+    #[expect(dead_code)]
     #[derive(Default, Debug)]
     pub(super) struct ExecutorMetrics {
         pub executor_id: ExecutorId,
@@ -276,90 +308,178 @@ mod metrics {
             self.executor_stats.get(executor_id)
         }
 
-        /// Establish metrics baseline for profiling
-        pub(super) fn start_record<'a>(
+        /// Record metrics for profiling
+        pub(super) fn record<'a>(
             &mut self,
-            executor_ids: &'a [ExecutorId],
+            executor_ids: &'a HashSet<ExecutorId>,
             dispatch_fragment_ids: &'a [FragmentId],
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
-                let stats = self.executor_stats.entry(*executor_id).or_default();
-                stats.executor_id = *executor_id;
-                stats.epoch = 0;
-                stats.total_output_throughput += metrics
-                    .stream_node_output_row_count
-                    .get(executor_id)
-                    .cloned()
-                    .unwrap_or(0);
-                stats.total_output_pending_ns += metrics
+                let Some(total_output_throughput) =
+                    metrics.stream_node_output_row_count.get(executor_id)
+                else {
+                    continue;
+                };
+                let Some(total_output_pending_ns) = metrics
                     .stream_node_output_blocking_duration_ns
                     .get(executor_id)
-                    .cloned()
-                    .unwrap_or(0);
+                else {
+                    continue;
+                };
+                let stats = ExecutorMetrics {
+                    executor_id: *executor_id,
+                    epoch: 0,
+                    total_output_throughput: *total_output_throughput,
+                    total_output_pending_ns: *total_output_pending_ns,
+                };
+                // An executor should be scheduled on a single worker node,
+                // it should not be inserted multiple times.
+                if cfg!(madsim) {
+                    // If madsim is enabled, worker nodes will share the same process.
+                    // The metrics is stored as a global object, so querying each worker node
+                    // will return the same set of executor metrics.
+                    // So we should not assert here.
+                    self.executor_stats.insert(*executor_id, stats);
+                } else {
+                    assert!(self.executor_stats.insert(*executor_id, stats).is_none());
+                }
             }
 
             for fragment_id in dispatch_fragment_ids {
+                let Some(total_output_throughput) =
+                    metrics.dispatch_fragment_output_row_count.get(fragment_id)
+                else {
+                    continue;
+                };
+                let Some(total_output_pending_ns) = metrics
+                    .dispatch_fragment_output_blocking_duration_ns
+                    .get(fragment_id)
+                else {
+                    continue;
+                };
                 let stats = self.dispatch_stats.entry(*fragment_id).or_default();
                 stats.fragment_id = *fragment_id;
                 stats.epoch = 0;
-                stats.total_output_throughput += metrics
-                    .dispatch_fragment_output_row_count
-                    .get(fragment_id)
-                    .cloned()
-                    .unwrap_or(0);
-                stats.total_output_pending_ns += metrics
-                    .dispatch_fragment_output_blocking_duration_ns
-                    .get(fragment_id)
-                    .cloned()
-                    .unwrap_or(0);
+                // do a sum rather than insert
+                // because dispatchers are
+                // distributed across worker nodes.
+                stats.total_output_throughput += *total_output_throughput;
+                stats.total_output_pending_ns += *total_output_pending_ns;
             }
         }
 
-        /// Compute the deltas for reporting
-        pub(super) fn finish_record<'a>(
-            &mut self,
-            executor_ids: &'a [ExecutorId],
-            dispatch_fragment_ids: &'a [FragmentId],
-            metrics: &'a GetProfileStatsResponse,
-        ) {
+        pub(super) fn get_delta(
+            initial: &Self,
+            end: &Self,
+            executor_ids: &HashSet<ExecutorId>,
+            dispatch_fragment_ids: &[FragmentId],
+        ) -> Self {
+            let mut delta_aggregated_stats = Self::new();
             for executor_id in executor_ids {
-                if let Some(stats) = self.executor_stats.get_mut(executor_id) {
-                    stats.total_output_throughput = metrics
-                        .stream_node_output_row_count
-                        .get(executor_id)
-                        .cloned()
-                        .unwrap_or(0)
-                        - stats.total_output_throughput;
-                    stats.total_output_pending_ns = metrics
-                        .stream_node_output_blocking_duration_ns
-                        .get(executor_id)
-                        .cloned()
-                        .unwrap_or(0)
-                        - stats.total_output_pending_ns;
-                } else {
-                    // TODO: warn missing metrics!
-                }
+                let (actor_id, operator_id) = unique_executor_id_into_parts(*executor_id);
+                let Some(initial_stats) = initial.executor_stats.get(executor_id) else {
+                    debug_panic_or_warn!(
+                        "missing initial stats for executor {} (actor {} operator {})",
+                        executor_id,
+                        actor_id,
+                        operator_id
+                    );
+                    continue;
+                };
+                let Some(end_stats) = end.executor_stats.get(executor_id) else {
+                    debug_panic_or_warn!(
+                        "missing final stats for executor {} (actor {} operator {})",
+                        executor_id,
+                        actor_id,
+                        operator_id
+                    );
+                    continue;
+                };
+
+                let initial_throughput = initial_stats.total_output_throughput;
+                let end_throughput = end_stats.total_output_throughput;
+                let Some(delta_throughput) = end_throughput.checked_sub(initial_throughput) else {
+                    debug_panic_or_warn!(
+                        "delta throughput is negative for actor {} operator {} (initial: {}, end: {})",
+                        actor_id,
+                        operator_id,
+                        initial_throughput,
+                        end_throughput
+                    );
+                    continue;
+                };
+
+                let initial_pending_ns = initial_stats.total_output_pending_ns;
+                let end_pending_ns = end_stats.total_output_pending_ns;
+                let Some(delta_pending_ns) = end_pending_ns.checked_sub(initial_pending_ns) else {
+                    debug_panic_or_warn!(
+                        "delta pending ns is negative for actor {} operator {} (initial: {}, end: {})",
+                        actor_id,
+                        operator_id,
+                        initial_pending_ns,
+                        end_pending_ns
+                    );
+                    continue;
+                };
+
+                let delta_stats = ExecutorMetrics {
+                    executor_id: *executor_id,
+                    epoch: 0,
+                    total_output_throughput: delta_throughput,
+                    total_output_pending_ns: delta_pending_ns,
+                };
+                delta_aggregated_stats
+                    .executor_stats
+                    .insert(*executor_id, delta_stats);
             }
 
             for fragment_id in dispatch_fragment_ids {
-                if let Some(stats) = self.dispatch_stats.get_mut(fragment_id) {
-                    stats.total_output_throughput = metrics
-                        .dispatch_fragment_output_row_count
-                        .get(fragment_id)
-                        .cloned()
-                        .unwrap_or(0)
-                        - stats.total_output_throughput;
-                    stats.total_output_pending_ns = metrics
-                        .dispatch_fragment_output_blocking_duration_ns
-                        .get(fragment_id)
-                        .cloned()
-                        .unwrap_or(0)
-                        - stats.total_output_pending_ns;
-                } else {
-                    // TODO: warn missing metrics!
-                }
+                let Some(initial_stats) = initial.dispatch_stats.get(fragment_id) else {
+                    debug_panic_or_warn!("missing initial stats for fragment {}", fragment_id);
+                    continue;
+                };
+                let Some(end_stats) = end.dispatch_stats.get(fragment_id) else {
+                    debug_panic_or_warn!("missing final stats for fragment {}", fragment_id);
+                    continue;
+                };
+
+                let initial_throughput = initial_stats.total_output_throughput;
+                let end_throughput = end_stats.total_output_throughput;
+                let Some(delta_throughput) = end_throughput.checked_sub(initial_throughput) else {
+                    debug_panic_or_warn!(
+                        "delta throughput is negative for fragment {} (initial: {}, end: {})",
+                        fragment_id,
+                        initial_throughput,
+                        end_throughput
+                    );
+                    continue;
+                };
+
+                let initial_pending_ns = initial_stats.total_output_pending_ns;
+                let end_pending_ns = end_stats.total_output_pending_ns;
+                let Some(delta_pending_ns) = end_pending_ns.checked_sub(initial_pending_ns) else {
+                    debug_panic_or_warn!(
+                        "delta pending ns is negative for fragment {} (initial: {}, end: {})",
+                        fragment_id,
+                        initial_pending_ns,
+                        end_pending_ns
+                    );
+                    continue;
+                };
+
+                let delta_stats = DispatchMetrics {
+                    fragment_id: *fragment_id,
+                    epoch: 0,
+                    total_output_throughput: delta_throughput,
+                    total_output_pending_ns: delta_pending_ns,
+                };
+                delta_aggregated_stats
+                    .dispatch_stats
+                    .insert(*fragment_id, delta_stats);
             }
+
+            delta_aggregated_stats
         }
     }
 
@@ -380,12 +500,12 @@ mod metrics {
     impl OperatorStats {
         /// Aggregates executor-level stats into operator-level stats
         pub(super) fn aggregate(
-            operator_map: HashMap<OperatorId, Vec<ExecutorId>>,
+            operator_map: HashMap<OperatorId, HashSet<ExecutorId>>,
             executor_stats: &ExecutorStats,
             fragment_parallelisms: &HashMap<FragmentId, usize>,
         ) -> Self {
             let mut operator_stats = HashMap::new();
-            for (operator_id, executor_ids) in operator_map {
+            'operator_loop: for (operator_id, executor_ids) in operator_map {
                 let num_executors = executor_ids.len() as u64;
                 let mut total_output_throughput = 0;
                 let mut total_output_pending_ns = 0;
@@ -393,6 +513,9 @@ mod metrics {
                     if let Some(stats) = executor_stats.get(&executor_id) {
                         total_output_throughput += stats.total_output_throughput;
                         total_output_pending_ns += stats.total_output_pending_ns;
+                    } else {
+                        // skip this operator if it doesn't have executor stats for any of its executors
+                        continue 'operator_loop;
                     }
                 }
                 let total_output_throughput = total_output_throughput;
@@ -410,14 +533,17 @@ mod metrics {
             }
 
             for (fragment_id, dispatch_metrics) in &executor_stats.dispatch_stats {
-                let operator_id = *fragment_id as OperatorId;
+                let operator_id = operator_id_for_dispatch(*fragment_id);
                 let total_output_throughput = dispatch_metrics.total_output_throughput;
-                let fragment_parallelism = fragment_parallelisms
-                    .get(fragment_id)
-                    .copied()
-                    .expect("should have fragment parallelism");
+                let Some(fragment_parallelism) = fragment_parallelisms.get(fragment_id) else {
+                    debug_panic_or_warn!(
+                        "missing fragment parallelism for fragment {}",
+                        fragment_id
+                    );
+                    continue;
+                };
                 let total_output_pending_ns =
-                    dispatch_metrics.total_output_pending_ns / fragment_parallelism as u64;
+                    dispatch_metrics.total_output_pending_ns / *fragment_parallelism as u64;
 
                 operator_stats.insert(
                     operator_id,
@@ -445,39 +571,57 @@ mod metrics {
 /// rendering, extracting, etc.
 mod graph {
     use std::collections::{HashMap, HashSet};
+    use std::fmt::Debug;
     use std::time::Duration;
 
+    use itertools::Itertools;
     use risingwave_common::operator::{
         unique_executor_id_from_unique_operator_id, unique_operator_id,
+        unique_operator_id_into_parts,
     };
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
-    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::stream_node::{NodeBody, NodeBodyDiscriminants};
     use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
 
+    use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::ExplainAnalyzeStreamJobOutput;
     use crate::handler::explain_analyze_stream_job::metrics::OperatorStats;
-
+    use crate::handler::explain_analyze_stream_job::utils::operator_id_for_dispatch;
     pub(super) type OperatorId = u64;
     pub(super) type ExecutorId = u64;
 
     /// This is an internal struct used ONLY for explain analyze stream job.
-    #[derive(Debug)]
     pub(super) struct StreamNode {
         operator_id: OperatorId,
         fragment_id: u32,
-        identity: String,
-        actor_ids: Vec<u32>,
+        identity: NodeBodyDiscriminants,
+        actor_ids: HashSet<u32>,
         dependencies: Vec<u64>,
+    }
+
+    impl Debug for StreamNode {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let (actor_id, operator_id) = unique_operator_id_into_parts(self.operator_id);
+            let operator_id_str = format!(
+                "{}: (actor_id: {}, operator_id: {})",
+                self.operator_id, actor_id, operator_id
+            );
+            write!(
+                f,
+                "StreamNode {{ operator_id: {}, fragment_id: {}, identity: {:?}, actor_ids: {:?}, dependencies: {:?} }}",
+                operator_id_str, self.fragment_id, self.identity, self.actor_ids, self.dependencies
+            )
+        }
     }
 
     impl StreamNode {
         fn new_for_dispatcher(fragment_id: u32) -> Self {
             StreamNode {
-                operator_id: fragment_id as u64,
+                operator_id: operator_id_for_dispatch(fragment_id),
                 fragment_id,
-                identity: "Dispatcher".to_owned(),
-                actor_ids: vec![],
-                dependencies: vec![],
+                identity: NodeBodyDiscriminants::Exchange,
+                actor_ids: Default::default(),
+                dependencies: Default::default(),
             }
         }
     }
@@ -485,9 +629,14 @@ mod graph {
     /// Extracts the root node of the plan, as well as the adjacency list
     pub(super) fn extract_stream_node_infos(
         fragments: Vec<FragmentInfo>,
-    ) -> (OperatorId, HashMap<OperatorId, StreamNode>) {
-        // Finds root nodes of the graph
+    ) -> (
+        OperatorId,
+        HashSet<FragmentId>,
+        HashMap<OperatorId, StreamNode>,
+    ) {
+        let job_fragment_ids = fragments.iter().map(|f| f.id).collect::<HashSet<_>>();
 
+        // Finds root nodes of the graph
         fn find_root_nodes(stream_nodes: &HashMap<u64, StreamNode>) -> HashSet<u64> {
             let mut all_nodes = stream_nodes.keys().copied().collect::<HashSet<_>>();
             for node in stream_nodes.values() {
@@ -505,14 +654,13 @@ mod graph {
             fragment_id_to_merge_operator_id: &mut HashMap<u32, OperatorId>,
             operator_id_to_stream_node: &mut HashMap<OperatorId, StreamNode>,
             node: &PbStreamNode,
-            actor_id: u32,
+            actor_ids: &HashSet<u32>,
         ) {
             let identity = node
-                .identity
-                .split_ascii_whitespace()
-                .next()
-                .unwrap()
-                .to_owned();
+                .node_body
+                .as_ref()
+                .expect("should have node body")
+                .into();
             let operator_id = unique_operator_id(fragment_id, node.operator_id);
             if let Some(merge_node) = node.node_body.as_ref()
                 && let NodeBody::Merge(box MergeNode {
@@ -523,29 +671,27 @@ mod graph {
                 fragment_id_to_merge_operator_id.insert(*upstream_fragment_id, operator_id);
             }
             let dependencies = &node.input;
-            let entry = operator_id_to_stream_node
-                .entry(operator_id)
-                .or_insert_with(|| {
-                    let dependencies = dependencies
-                        .iter()
-                        .map(|input| unique_operator_id(fragment_id, input.operator_id))
-                        .collect();
-                    StreamNode {
-                        operator_id,
-                        fragment_id,
-                        identity,
-                        actor_ids: vec![],
-                        dependencies,
-                    }
-                });
-            entry.actor_ids.push(actor_id);
+            let dependency_ids = dependencies
+                .iter()
+                .map(|input| unique_operator_id(fragment_id, input.operator_id))
+                .collect::<Vec<_>>();
+            operator_id_to_stream_node.insert(
+                operator_id,
+                StreamNode {
+                    operator_id,
+                    fragment_id,
+                    identity,
+                    actor_ids: actor_ids.clone(),
+                    dependencies: dependency_ids,
+                },
+            );
             for dependency in dependencies {
                 extract_stream_node_info(
                     fragment_id,
                     fragment_id_to_merge_operator_id,
                     operator_id_to_stream_node,
                     dependency,
-                    actor_id,
+                    actor_ids,
                 );
             }
         }
@@ -556,17 +702,20 @@ mod graph {
         let mut fragment_id_to_merge_operator_id = HashMap::new();
         for fragment in fragments {
             let actors = fragment.actors;
-            for actor in actors {
-                let actor_id = actor.id;
-                let node = actor.node.unwrap();
-                extract_stream_node_info(
-                    fragment.id,
-                    &mut fragment_id_to_merge_operator_id,
-                    &mut operator_id_to_stream_node,
-                    &node,
-                    actor_id,
-                );
-            }
+            assert!(
+                !actors.is_empty(),
+                "fragment {} should have at least one actor",
+                fragment.id
+            );
+            let actor_ids = actors.iter().map(|actor| actor.id).collect::<HashSet<_>>();
+            let node = actors[0].node.as_ref().expect("should have stream node");
+            extract_stream_node_info(
+                fragment.id,
+                &mut fragment_id_to_merge_operator_id,
+                &mut operator_id_to_stream_node,
+                node,
+                &actor_ids,
+            );
         }
 
         // find root node, and fill in dispatcher edges + nodes.
@@ -577,40 +726,61 @@ mod graph {
             let fragment_id = node.fragment_id;
             if let Some(merge_operator_id) = fragment_id_to_merge_operator_id.get(&fragment_id) {
                 let mut dispatcher = StreamNode::new_for_dispatcher(fragment_id);
+                let operator_id_for_dispatch = dispatcher.operator_id;
                 dispatcher.dependencies.push(operator_id);
                 assert!(
                     operator_id_to_stream_node
-                        .insert(fragment_id as _, dispatcher)
+                        .insert(operator_id_for_dispatch as _, dispatcher)
                         .is_none()
                 );
                 operator_id_to_stream_node
                     .get_mut(merge_operator_id)
                     .unwrap()
                     .dependencies
-                    .push(fragment_id as _);
+                    .push(operator_id_for_dispatch as _)
             } else {
                 root_node = Some(operator_id);
             }
         }
 
-        (root_node.unwrap(), operator_id_to_stream_node)
+        let mut dispatcher_fragment_ids = HashSet::new();
+        for dispatcher_fragment_id in fragment_id_to_merge_operator_id.keys() {
+            if job_fragment_ids.contains(dispatcher_fragment_id) {
+                dispatcher_fragment_ids.insert(*dispatcher_fragment_id);
+            }
+        }
+
+        (
+            root_node.unwrap(),
+            dispatcher_fragment_ids,
+            operator_id_to_stream_node,
+        )
     }
 
     pub(super) fn extract_executor_infos(
-        adjacency_list: &HashMap<u64, StreamNode>,
-    ) -> (Vec<u64>, HashMap<u64, Vec<u64>>) {
-        let mut executor_ids: Vec<_> = Default::default();
-        let mut operator_to_executor: HashMap<_, _> = Default::default();
-        for node in adjacency_list.values() {
+        adjacency_list: &HashMap<OperatorId, StreamNode>,
+    ) -> (HashSet<u64>, HashMap<u64, HashSet<u64>>) {
+        let mut executor_ids = HashSet::new();
+        let mut operator_to_executor = HashMap::new();
+        for (operator_id, node) in adjacency_list {
+            assert_eq!(*operator_id, node.operator_id);
             let operator_id = node.operator_id;
             for actor_id in &node.actor_ids {
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
-                executor_ids.push(executor_id);
-                operator_to_executor
-                    .entry(operator_id)
-                    .or_insert_with(Vec::new)
-                    .push(executor_id);
+                if node.identity != NodeBodyDiscriminants::BatchPlan
+                // FIXME(kwannoel): Add back after https://github.com/risingwavelabs/risingwave/issues/22775 is resolved.
+                && node.identity != NodeBodyDiscriminants::Merge
+                && node.identity != NodeBodyDiscriminants::Project
+                {
+                    assert!(executor_ids.insert(executor_id));
+                }
+                assert!(
+                    operator_to_executor
+                        .entry(operator_id)
+                        .or_insert_with(HashSet::new)
+                        .insert(executor_id)
+                );
             }
         }
         (executor_ids, operator_to_executor)
@@ -636,7 +806,7 @@ mod graph {
             let is_root = node_id == root_node;
 
             let identity_rendered = if is_root {
-                node.identity.clone()
+                node.identity.to_string()
             } else {
                 let connector = if last_child { "└─ " } else { "├─ " };
                 format!("{}{}{}", prefix, connector, node.identity)
@@ -652,23 +822,32 @@ mod graph {
             let child_prefix = format!("{}{}", prefix, child_prefix);
 
             let stats = stats.get(&node_id);
-            let (output_throughput, output_latency) = stats
-                .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ns))
-                .unwrap_or((0, 0));
+            let (output_rows_per_second, downstream_backpressure_ratio) = match stats {
+                Some(stats) => (
+                    Some(
+                        (stats.total_output_throughput as f64 / profiling_duration_secs)
+                            .to_string(),
+                    ),
+                    Some(
+                        (Duration::from_nanos(stats.total_output_pending_ns).as_secs_f64()
+                            / usize::max(node.actor_ids.len(), 1) as f64
+                            / profiling_duration_secs)
+                            .to_string(),
+                    ),
+                ),
+                None => (None, None),
+            };
             let row = ExplainAnalyzeStreamJobOutput {
                 identity: identity_rendered,
                 actor_ids: node
                     .actor_ids
                     .iter()
+                    .sorted()
                     .map(|id| id.to_string())
                     .collect::<Vec<_>>()
                     .join(","),
-                output_rows_per_second: (output_throughput as f64 / profiling_duration_secs)
-                    .to_string(),
-                downstream_backpressure_ratio: (Duration::from_nanos(output_latency).as_secs_f64()
-                    / usize::max(node.actor_ids.len(), 1) as f64
-                    / profiling_duration_secs)
-                    .to_string(),
+                output_rows_per_second,
+                downstream_backpressure_ratio,
             };
             rows.push(row);
             for (position, dependency) in node.dependencies.iter().enumerate() {
@@ -676,5 +855,15 @@ mod graph {
             }
         }
         rows
+    }
+}
+
+mod utils {
+    use risingwave_common::operator::unique_operator_id;
+
+    use crate::handler::explain_analyze_stream_job::graph::OperatorId;
+
+    pub(super) fn operator_id_for_dispatch(fragment_id: u32) -> OperatorId {
+        unique_operator_id(fragment_id, u32::MAX as u64)
     }
 }

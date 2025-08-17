@@ -57,6 +57,7 @@ struct LogStoreBufferInner {
     consumed_queue: VecDeque<(u64, LogStoreBufferItem)>,
     row_count: usize,
     max_row_count: usize,
+    chunk_size: usize,
 
     truncation_list: VecDeque<ReaderTruncationOffsetType>,
 
@@ -159,14 +160,18 @@ impl LogStoreBufferInner {
         end_seq_id: SeqId,
         new_vnode_bitmap: Bitmap,
     ) {
+        let curr_chunk_size = (end_seq_id - start_seq_id + 1) as usize;
         if let Some((
             item_epoch,
             LogStoreBufferItem::Flushed {
+                start_seq_id: prev_start_seq_id,
                 end_seq_id: prev_end_seq_id,
                 vnode_bitmap,
                 ..
             },
         )) = self.unconsumed_queue.front_mut()
+            && let prev_chunk_size = (*prev_end_seq_id - *prev_start_seq_id + 1) as usize
+            && curr_chunk_size + prev_chunk_size <= self.chunk_size
         {
             assert!(
                 *prev_end_seq_id < start_seq_id,
@@ -436,6 +441,7 @@ impl LogStoreBufferReceiver {
 
 pub(crate) fn new_log_store_buffer(
     max_row_count: usize,
+    chunk_size: usize,
     metrics: KvLogStoreMetrics,
 ) -> (LogStoreBufferSender, LogStoreBufferReceiver) {
     let buffer = SharedMutex::new(LogStoreBufferInner {
@@ -443,6 +449,7 @@ pub(crate) fn new_log_store_buffer(
         consumed_queue: VecDeque::new(),
         row_count: 0,
         max_row_count,
+        chunk_size,
         truncation_list: VecDeque::new(),
         next_chunk_id: 0,
         metrics,

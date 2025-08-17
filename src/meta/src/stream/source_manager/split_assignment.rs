@@ -97,12 +97,15 @@ impl SourceManager {
     }
 
     /// Allocates splits to actors for a newly created source executor.
+    #[await_tree::instrument]
     pub async fn allocate_splits(
         &self,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
 
+        // stream_job_id is used to fetch pre-calculated splits for CDC table.
+        let stream_job_id = table_fragments.stream_job_id;
         let source_fragments = table_fragments.stream_source_fragments();
 
         let mut assigned = HashMap::new();
@@ -129,10 +132,9 @@ impl SourceManager {
                 let actor_hashset: HashSet<u32> = empty_actor_splits.keys().cloned().collect();
                 let splits = handle.discovered_splits(source_id, &actor_hashset).await?;
                 if splits.is_empty() {
-                    tracing::warn!("no splits detected for source {}", source_id);
+                    tracing::warn!(?stream_job_id, source_id, "no splits detected");
                     continue 'loop_source;
                 }
-
                 if let Some(diff) = reassign_splits(
                     fragment_id,
                     empty_actor_splits,
@@ -236,6 +238,7 @@ impl SourceManager {
     ///
     /// Unlike [`Self::allocate_splits`], which creates a new assignment,
     /// this method aligns the splits for backfill fragments with its upstream source fragment ([`align_splits`]).
+    #[await_tree::instrument]
     pub async fn allocate_splits_for_backfill(
         &self,
         table_fragments: &StreamJobFragments,
@@ -244,7 +247,7 @@ impl SourceManager {
     ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
 
-        let source_backfill_fragments = table_fragments.source_backfill_fragments()?;
+        let source_backfill_fragments = table_fragments.source_backfill_fragments();
 
         let mut assigned = HashMap::new();
 

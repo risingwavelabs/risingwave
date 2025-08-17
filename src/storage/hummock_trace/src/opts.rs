@@ -162,6 +162,7 @@ pub struct TracedNewLocalOptions {
     pub table_option: TracedTableOption,
     pub is_replicated: bool,
     pub vnodes: TracedBitmap,
+    pub upload_on_flush: bool,
 }
 
 #[derive(Encode, Decode, PartialEq, Debug, Clone)]
@@ -182,6 +183,7 @@ impl TracedNewLocalOptions {
             },
             is_replicated: false,
             vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            upload_on_flush: true,
         }
     }
 }

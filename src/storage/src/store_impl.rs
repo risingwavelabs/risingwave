@@ -18,7 +18,9 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
-use foyer::{DirectFsDeviceOptions, Engine, FifoPicker, HybridCacheBuilder, LargeEngineOptions};
+use foyer::{
+    CacheBuilder, DirectFsDeviceOptions, Engine, FifoPicker, HybridCacheBuilder, LargeEngineOptions,
+};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
@@ -59,14 +61,17 @@ mod opaque_type {
     pub type MemoryStateStoreType = impl StateStore + AsHummock;
     pub type SledStateStoreType = impl StateStore + AsHummock;
 
+    #[define_opaque(MemoryStateStoreType)]
     pub fn in_memory(state_store: MemoryStateStore) -> MemoryStateStoreType {
         may_dynamic_dispatch(state_store)
     }
 
+    #[define_opaque(HummockStorageType)]
     pub fn hummock(state_store: HummockStorage) -> HummockStorageType {
         may_dynamic_dispatch(may_verify(state_store))
     }
 
+    #[define_opaque(SledStateStoreType)]
     pub fn sled(state_store: SledStateStore) -> SledStateStoreType {
         may_dynamic_dispatch(state_store)
     }
@@ -696,7 +701,21 @@ impl StateStoreImpl {
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
-                .storage(Engine::Large);
+                .storage(Engine::Large(
+                    LargeEngineOptions::new()
+                        .with_indexer_shards(opts.meta_file_cache_indexer_shards)
+                        .with_flushers(opts.meta_file_cache_flushers)
+                        .with_reclaimers(opts.meta_file_cache_reclaimers)
+                        .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                        .with_clean_region_threshold(
+                            opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
+                        )
+                        .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
+                        .with_blob_index_size(16 * KB)
+                        .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                            opts.meta_file_cache_fifo_probation_ratio,
+                        ))]),
+                ));
 
             if !opts.meta_file_cache_dir.is_empty() {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
@@ -711,25 +730,7 @@ impl StateStoreImpl {
                         )
                         .with_recover_mode(opts.meta_file_cache_recover_mode)
                         .with_compression(opts.meta_file_cache_compression)
-                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone())
-                        .with_large_object_disk_cache_options(
-                            LargeEngineOptions::new()
-                                .with_indexer_shards(opts.meta_file_cache_indexer_shards)
-                                .with_flushers(opts.meta_file_cache_flushers)
-                                .with_reclaimers(opts.meta_file_cache_reclaimers)
-                                .with_buffer_pool_size(
-                                    opts.meta_file_cache_flush_buffer_threshold_mb * MB,
-                                ) // 128 MiB
-                                .with_clean_region_threshold(
-                                    opts.meta_file_cache_reclaimers
-                                        + opts.meta_file_cache_reclaimers / 2,
-                                )
-                                .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                                .with_blob_index_size(16 * KB)
-                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                                    opts.meta_file_cache_fifo_probation_ratio,
-                                ))]),
-                        );
+                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone());
                 }
             }
 
@@ -750,7 +751,21 @@ impl StateStoreImpl {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()
                 })
-                .storage(Engine::Large);
+                .storage(Engine::Large(
+                    LargeEngineOptions::new()
+                        .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                        .with_flushers(opts.data_file_cache_flushers)
+                        .with_reclaimers(opts.data_file_cache_reclaimers)
+                        .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                        .with_clean_region_threshold(
+                            opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
+                        )
+                        .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
+                        .with_blob_index_size(16 * KB)
+                        .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                            opts.data_file_cache_fifo_probation_ratio,
+                        ))]),
+                ));
 
             if !opts.data_file_cache_dir.is_empty() {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
@@ -765,30 +780,22 @@ impl StateStoreImpl {
                         )
                         .with_recover_mode(opts.data_file_cache_recover_mode)
                         .with_compression(opts.data_file_cache_compression)
-                        .with_runtime_options(opts.data_file_cache_runtime_config.clone())
-                        .with_large_object_disk_cache_options(
-                            LargeEngineOptions::new()
-                                .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                                .with_flushers(opts.data_file_cache_flushers)
-                                .with_reclaimers(opts.data_file_cache_reclaimers)
-                                .with_buffer_pool_size(
-                                    opts.data_file_cache_flush_buffer_threshold_mb * MB,
-                                ) // 128 MiB
-                                .with_clean_region_threshold(
-                                    opts.data_file_cache_reclaimers
-                                        + opts.data_file_cache_reclaimers / 2,
-                                )
-                                .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                                .with_blob_index_size(16 * KB)
-                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                                    opts.data_file_cache_fifo_probation_ratio,
-                                ))]),
-                        );
+                        .with_runtime_options(opts.data_file_cache_runtime_config.clone());
                 }
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
         };
+
+        let vector_meta_cache = CacheBuilder::new(opts.vector_meta_cache_capacity_mb * MB)
+            .with_shards(opts.vector_meta_cache_shard_num)
+            .with_eviction_config(opts.vector_meta_cache_eviction_config.clone())
+            .build();
+
+        let vector_block_cache = CacheBuilder::new(opts.vector_block_cache_capacity_mb * MB)
+            .with_shards(opts.vector_block_cache_shard_num)
+            .with_eviction_config(opts.vector_block_cache_eviction_config.clone())
+            .build();
 
         let recent_filter = if opts.data_file_cache_dir.is_empty() {
             None
@@ -820,6 +827,8 @@ impl StateStoreImpl {
 
                     meta_cache,
                     block_cache,
+                    vector_meta_cache,
+                    vector_block_cache,
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());

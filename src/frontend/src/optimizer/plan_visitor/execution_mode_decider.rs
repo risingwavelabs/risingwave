@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{DefaultBehavior, Merge};
-use crate::PlanRef;
+use super::{BatchPlanVisitor, DefaultBehavior, Merge};
+use crate::optimizer::BatchPlanRoot;
 use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, BatchValues, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
@@ -22,13 +22,13 @@ pub struct ExecutionModeDecider {}
 
 impl ExecutionModeDecider {
     /// If the plan should run in local mode, return true; otherwise, return false.
-    pub fn run_in_local_mode(plan: PlanRef) -> bool {
+    pub fn run_in_local_mode(batch_plan: &BatchPlanRoot) -> bool {
         let mut decider = ExecutionModeDecider {};
-        decider.visit(plan)
+        decider.visit(batch_plan.plan.clone())
     }
 }
 
-impl PlanVisitor for ExecutionModeDecider {
+impl BatchPlanVisitor for ExecutionModeDecider {
     type Result = bool;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

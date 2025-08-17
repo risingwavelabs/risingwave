@@ -23,7 +23,7 @@ use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
-use risingwave_meta_model::table::TableType;
+use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
@@ -72,7 +72,6 @@ impl DiagnoseCommand {
         }
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     pub async fn report(&self, actor_traces_format: ActorTracesFormat) -> String {
         let mut report = String::new();
         let _ = writeln!(
@@ -97,7 +96,6 @@ impl DiagnoseCommand {
         report
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_catalog(&self, s: &mut String) {
         self.write_catalog_inner(s).await;
         let _ = self.write_table_definition(s).await.inspect_err(|e| {
@@ -108,7 +106,6 @@ impl DiagnoseCommand {
         });
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_catalog_inner(&self, s: &mut String) {
         let guard = self
             .metadata_manager
@@ -132,7 +129,6 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "number of function: {}", stat.function_num);
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_worker_nodes(&self, s: &mut String) {
         let Ok(worker_actor_count) = self.metadata_manager.worker_actor_count().await else {
             tracing::warn!("failed to get worker actor count");
@@ -224,7 +220,6 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "{table}");
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     fn write_event_logs(&self, s: &mut String) {
         let event_logs = self
             .event_log_manager
@@ -322,7 +317,6 @@ impl DiagnoseCommand {
         );
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     fn write_event_logs_impl<'a, F>(
         s: &mut String,
         event_logs: impl Iterator<Item = &'a EventLog>,
@@ -365,7 +359,6 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "{table}");
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_storage(&self, s: &mut String) {
         let mut sst_num = 0;
         let mut sst_total_file_size = 0;
@@ -412,10 +405,10 @@ impl DiagnoseCommand {
         ) {
             if heap.len() < top_k {
                 heap.push(Reverse(e));
-            } else if let Some(mut p) = heap.peek_mut() {
-                if e.delete_ratio > p.0.delete_ratio {
-                    *p = Reverse(e);
-                }
+            } else if let Some(mut p) = heap.peek_mut()
+                && e.delete_ratio > p.0.delete_ratio
+            {
+                *p = Reverse(e);
             }
         }
 
@@ -487,7 +480,6 @@ impl DiagnoseCommand {
         self.write_storage_prometheus(s).await;
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_streaming_prometheus(&self, s: &mut String) {
         let _ = writeln!(s, "top sources by throughput (rows/s)");
         let query = format!(
@@ -516,7 +508,6 @@ impl DiagnoseCommand {
             .await;
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_storage_prometheus(&self, s: &mut String) {
         let _ = writeln!(s, "top Hummock Get by duration (second)");
         let query = format!(
@@ -587,7 +578,6 @@ impl DiagnoseCommand {
             .await;
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_instant_vector_impl(&self, s: &mut String, query: &str, labels: Vec<&str>) {
         let Some(ref client) = self.prometheus_client else {
             return;
@@ -617,7 +607,6 @@ impl DiagnoseCommand {
         }
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_await_tree(&self, s: &mut String, actor_traces_format: ActorTracesFormat) {
         let all = dump_cluster_await_tree(
             &self.metadata_manager,
@@ -642,30 +631,33 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
             .collect::<BTreeMap<_, _>>();
-        let tables = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::Table)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
-        let mvs = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::MaterializedView)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
-        let indexes = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::Index)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
+        let mut user_tables = BTreeMap::new();
+        let mut mvs = BTreeMap::new();
+        let mut indexes = BTreeMap::new();
+        let mut internal_tables = BTreeMap::new();
+        {
+            let grouped = self
+                .metadata_manager
+                .catalog_controller
+                .list_all_state_tables()
+                .await?
+                .into_iter()
+                .chunk_by(|t| t.table_type());
+            for (table_type, tables) in &grouped {
+                let tables = tables
+                    .into_iter()
+                    .map(|t| (t.id, (t.name, t.schema_id, t.definition)));
+                match table_type {
+                    PbTableType::Table => user_tables.extend(tables),
+                    PbTableType::MaterializedView => mvs.extend(tables),
+                    PbTableType::Index => indexes.extend(tables),
+                    PbTableType::Internal => internal_tables.extend(tables),
+                    PbTableType::Unspecified => {
+                        tracing::error!("unspecified table type: {:?}", tables.collect_vec());
+                    }
+                }
+            }
+        }
         let sinks = self
             .metadata_manager
             .catalog_controller
@@ -676,10 +668,11 @@ impl DiagnoseCommand {
             .collect::<BTreeMap<_, _>>();
         let catalogs = [
             ("SOURCE", sources),
-            ("TABLE", tables),
+            ("TABLE", user_tables),
             ("MATERIALIZED VIEW", mvs),
             ("INDEX", indexes),
             ("SINK", sinks),
+            ("INTERNAL TABLE", internal_tables),
         ];
         let mut obj_id_to_name = HashMap::new();
         for (title, items) in catalogs {
@@ -761,7 +754,6 @@ impl DiagnoseCommand {
     }
 }
 
-#[cfg_attr(coverage, coverage(off))]
 fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Option<T>) {
     match t {
         Some(t) => {
@@ -773,7 +765,6 @@ fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Optio
     }
 }
 
-#[cfg_attr(coverage, coverage(off))]
 fn merge_prometheus_selector<'a>(selectors: impl IntoIterator<Item = &'a str>) -> String {
     selectors.into_iter().filter(|s| !s.is_empty()).join(",")
 }

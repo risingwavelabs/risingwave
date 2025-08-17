@@ -23,11 +23,10 @@ use iceberg::spec::Datum as IcebergDatum;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::ScalarImpl;
 
+use super::prelude::*;
 use crate::expr::{Expr, ExprImpl, ExprType, Literal};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{BatchFilter, BatchIcebergScan, PlanTreeNodeUnary};
-use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::utils::Condition;
 
 /// NOTE(kwannoel): We do predicate pushdown to the iceberg-sdk here.
@@ -36,7 +35,7 @@ use crate::utils::Condition;
 /// See: <https://github.com/apache/iceberg-rust/blob/5c1a9e68da346819072a15327080a498ad91c488/crates/iceberg/src/arrow/reader.rs#L229-L235>.
 pub struct BatchIcebergPredicatePushDownRule {}
 
-impl Rule for BatchIcebergPredicatePushDownRule {
+impl Rule<Batch> for BatchIcebergPredicatePushDownRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &BatchFilter = plan.as_batch_filter()?;
         let input = filter.input();

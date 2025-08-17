@@ -931,9 +931,18 @@ impl MigrationTrait for Migration {
                 true.into(),
                 true.into(),
             ])
+            .values_panic([
+                3.into(),
+                "rwadmin".into(),
+                true.into(),
+                true.into(),
+                true.into(),
+                true.into(),
+            ])
             .to_owned();
 
-        // Since User table is newly created, we assume that the initial user id of `root` is 1 and `postgres` is 2.
+        // Since the User table is newly created, we assume that the initial
+        // user id of `root` is 1, `postgres` is 2 and `rwadmin` is 3.
         let insert_objects = Query::insert()
             .into_table(Object::Table)
             .columns([
@@ -999,7 +1008,7 @@ impl MigrationTrait for Migration {
                     .get_connection()
                     .execute(Statement::from_string(
                         DatabaseBackend::Postgres,
-                        "SELECT setval('user_user_id_seq', 2)",
+                        "SELECT setval('user_user_id_seq', 3)",
                     ))
                     .await?;
             }

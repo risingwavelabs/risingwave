@@ -108,6 +108,13 @@ impl Strong {
             | ExprType::Ceil
             | ExprType::Floor
             | ExprType::Extract
+            | ExprType::L2Distance
+            | ExprType::CosineDistance
+            | ExprType::L1Distance
+            | ExprType::InnerProduct
+            | ExprType::VecConcat
+            | ExprType::L2Norm
+            | ExprType::L2Normalize
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
             // ALL: This kind of expression is null if and only if all of its arguments are null.
@@ -162,6 +169,7 @@ impl Strong {
             | ExprType::CharLength
             | ExprType::Repeat
             | ExprType::ConcatOp
+            | ExprType::ByteaConcatOp
             | ExprType::BoolOut
             | ExprType::OctetLength
             | ExprType::BitLength
@@ -296,6 +304,7 @@ impl Strong {
             | ExprType::JsonbPathQueryArray
             | ExprType::JsonbPathQueryFirst
             | ExprType::JsonbPopulateRecord
+            | ExprType::JsonbToArray
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
             | ExprType::JsonbPopulateMap
@@ -308,11 +317,12 @@ impl Strong {
             | ExprType::MapCat
             | ExprType::MapContains
             | ExprType::MapDelete
+            | ExprType::MapFilter
             | ExprType::MapInsert
             | ExprType::MapLength
             | ExprType::Vnode
             | ExprType::VnodeUser
-            | ExprType::TestPaidTier
+            | ExprType::TestFeature
             | ExprType::License
             | ExprType::Proctime
             | ExprType::PgSleep
@@ -338,7 +348,10 @@ impl Strong {
             | ExprType::InetAton
             | ExprType::InetNtoa
             | ExprType::CompositeCast
-            | ExprType::RwEpochToTs => false,
+            | ExprType::RwEpochToTs
+            | ExprType::OpenaiEmbedding
+            | ExprType::HasDatabasePrivilege
+            | ExprType::Random => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

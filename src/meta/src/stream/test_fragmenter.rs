@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::vec;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
@@ -36,10 +36,9 @@ use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentTypeFlag,
-    MaterializeNode, PbDispatchOutputMapping, ProjectNode, SimpleAggNode, SourceNode,
-    StreamContext, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
-    agg_call_state,
+    AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode,
+    PbDispatchOutputMapping, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
 };
 
 use crate::MetaResult;
@@ -276,7 +275,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let simple_agg_node = StreamNode {
         node_body: Some(NodeBody::SimpleAgg(Box::new(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             intermediate_state_table: Some(make_empty_table(1)),
@@ -293,7 +291,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 1,
         node: Some(simple_agg_node),
-        fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
+        fragment_type_mask: 0,
         requires_singleton: false,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -319,7 +317,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let simple_agg_node_1 = StreamNode {
         node_body: Some(NodeBody::SimpleAgg(Box::new(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             intermediate_state_table: Some(make_empty_table(2)),
@@ -366,8 +363,9 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![project_node],
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
-            table_id: 1,
-            table: Some(make_materialize_table(888)),
+            // `table_id` and `table` are left empty when generated from frontend.
+            table_id: TableId::placeholder().table_id(),
+            table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
         }))),
         fields: vec![], // TODO: fill this later

@@ -1248,8 +1248,8 @@ async fn test_clear_shared_buffer() {
 }
 
 /// Test the following behaviours:
-/// 1. LocalStateStore can read replicated ReadVersion.
-/// 2. GlobalStateStore cannot read replicated ReadVersion.
+/// 1. `LocalStateStore` can read replicated `ReadVersion`.
+/// 2. `GlobalStateStore` cannot read replicated `ReadVersion`.
 #[tokio::test]
 async fn test_replicated_local_hummock_storage() {
     use risingwave_storage::store::ReadOptions;
@@ -1274,6 +1274,7 @@ async fn test_replicated_local_hummock_storage() {
             change_log_delta: Default::default(),
             vector_index_delta: Default::default(),
             tables_to_commit: HashMap::from_iter([(TEST_TABLE_ID, epoch0)]),
+            truncate_tables: Default::default(),
         })
         .await
         .unwrap();
@@ -1462,6 +1463,7 @@ async fn test_iter_log() {
             table_option: Default::default(),
             is_replicated: false,
             vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+            upload_on_flush: true,
         })
         .await;
 
@@ -1477,6 +1479,7 @@ async fn test_iter_log() {
             table_option: Default::default(),
             is_replicated: false,
             vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+            upload_on_flush: true,
         })
         .await;
     // flush for about 10 times per epoch
@@ -1602,6 +1605,7 @@ async fn test_read_log_next_epoch() {
             table_option: Default::default(),
             is_replicated: false,
             vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+            upload_on_flush: true,
         })
         .await;
     // flush for about 10 times per epoch

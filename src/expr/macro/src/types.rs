@@ -33,6 +33,7 @@ const TYPE_MATRIX: &str = "
     varchar     Varchar     Utf8Array           Box<str>        &str                _
     bytea       Bytea       BytesArray          Box<[u8]>       &[u8]               _
     jsonb       Jsonb       JsonbArray          JsonbVal        JsonbRef<'_>        _
+    vector      Vector      VectorArray         VectorVal       VectorRef<'_>       _
     anyarray    List        ListArray           ListValue       ListRef<'_>         _
     struct      Struct      StructArray         StructValue     StructRef<'_>       _
     anymap      Map         MapArray            MapValue        MapRef<'_>          _

@@ -21,6 +21,7 @@ use risingwave_sqlparser::ast::{
     Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, ObjectName, OrderByExpr,
 };
 
+use crate::config::Syntax;
 use crate::sql_gen::types::AGG_FUNC_TABLE;
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
@@ -40,7 +41,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             return self.gen_simple_scalar(ret);
         }
 
-        let context = SqlGeneratorContext::new(true);
+        let context = SqlGeneratorContext::new(self.should_generate(Syntax::Agg), true);
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
@@ -56,7 +57,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let distinct = distinct_allowed && self.flip_coin();
 
         let filter = if self.flip_coin() {
-            let context = SqlGeneratorContext::new(false);
+            let context = SqlGeneratorContext::new(false, false);
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/4762
             // Prevent correlated query with `FILTER`
             let old_ctxt = self.new_local_context();

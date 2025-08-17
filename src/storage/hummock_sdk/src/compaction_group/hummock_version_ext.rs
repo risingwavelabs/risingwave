@@ -426,7 +426,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     }
                     GroupDeltaCommon::GroupConstruct(_)
                     | GroupDeltaCommon::GroupDestroy(_)
-                    | GroupDeltaCommon::GroupMerge(_) => {}
+                    | GroupDeltaCommon::GroupMerge(_)
+                    | GroupDeltaCommon::TruncateTables(_) => {}
                 }
             }
 
@@ -628,8 +629,35 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     GroupDeltaCommon::GroupDestroy(_) => {
                         self.levels.remove(compaction_group_id);
                     }
+
+                    GroupDeltaCommon::TruncateTables(table_ids) => {
+                        // iterate all levels and truncate the specified tables with the given table ids
+                        let levels =
+                            self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
+                                panic!("compaction group {} does not exist", compaction_group_id)
+                            });
+
+                        for sub_level in &mut levels.l0.sub_levels {
+                            sub_level.table_infos.iter_mut().for_each(|sstable_info| {
+                                let mut inner = sstable_info.get_inner();
+                                inner.table_ids.retain(|id| !table_ids.contains(id));
+                                sstable_info.set_inner(inner);
+                            });
+                        }
+
+                        for level in &mut levels.levels {
+                            level.table_infos.iter_mut().for_each(|sstable_info| {
+                                let mut inner = sstable_info.get_inner();
+                                inner.table_ids.retain(|id| !table_ids.contains(id));
+                                sstable_info.set_inner(inner);
+                            });
+                        }
+
+                        levels.compaction_group_version_id += 1;
+                    }
                 }
             }
+
             if is_applied_l0_compact && let Some(levels) = self.levels.get_mut(compaction_group_id)
             {
                 levels.post_apply_l0_compact();
@@ -1343,10 +1371,10 @@ pub fn insert_new_sub_level(
     };
     #[cfg(debug_assertions)]
     {
-        if insert_pos > 0 {
-            if let Some(smaller_level) = l0.sub_levels.get(insert_pos - 1) {
-                debug_assert!(smaller_level.sub_level_id < insert_sub_level_id);
-            }
+        if insert_pos > 0
+            && let Some(smaller_level) = l0.sub_levels.get(insert_pos - 1)
+        {
+            debug_assert!(smaller_level.sub_level_id < insert_sub_level_id);
         }
         if let Some(larger_level) = l0.sub_levels.get(insert_pos) {
             debug_assert!(larger_level.sub_level_id > insert_sub_level_id);
@@ -1547,17 +1575,16 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
 
                 // Ensure SSTs in non-overlapping level have non-overlapping key range
                 if level.level_type == PbLevelType::Nonoverlapping {
-                    if let Some(prev) = prev_table_info.take() {
-                        if prev
+                    if let Some(prev) = prev_table_info.take()
+                        && prev
                             .key_range
                             .compare_right_with(&table_info.key_range.left)
                             != Ordering::Less
-                        {
-                            res.push(format!(
-                                "{} SST {}: key range should not overlap. prev={:?}, cur={:?}",
-                                level_identifier, table_info.object_id, prev, table_info
-                            ));
-                        }
+                    {
+                        res.push(format!(
+                            "{} SST {}: key range should not overlap. prev={:?}, cur={:?}",
+                            level_identifier, table_info.object_id, prev, table_info
+                        ));
                     }
                     let _ = prev_table_info.insert(table_info);
                 }

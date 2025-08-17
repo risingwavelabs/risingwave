@@ -14,6 +14,7 @@
 
 pub mod hummock_storage;
 pub mod local_hummock_storage;
+mod vector_writer;
 pub mod version;
 
 pub use hummock_storage::*;

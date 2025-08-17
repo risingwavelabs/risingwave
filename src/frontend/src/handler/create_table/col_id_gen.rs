@@ -109,6 +109,7 @@ impl ColumnIdGenerator {
                     });
                 }
 
+                DataType::Vector(_) => {}
                 data_types::simple!() => {}
             }
 
@@ -196,7 +197,12 @@ impl ColumnIdGenerator {
                 Some((original_column_id, original_data_type)) => {
                     // Only check the type name (discriminant) for compatibility check here.
                     // For nested fields, we will check them recursively later.
-                    if original_data_type.type_name() != data_type.type_name() {
+                    let incompatible = original_data_type.type_name() != data_type.type_name()
+                        || matches!(
+                            (original_data_type, &data_type),
+                            (DataType::Vector(old), DataType::Vector(new)) if old != new,
+                        );
+                    if incompatible {
                         let path = path.iter().join(".");
                         bail!(
                             "incompatible data type change from {:?} to {:?} at path \"{}\"",
@@ -258,6 +264,7 @@ impl ColumnIdGenerator {
                     DataType::Map(MapType::from_kv(new_key, new_value))
                 }
 
+                DataType::Vector(_) => data_type,
                 data_types::simple!() => data_type,
             };
 

@@ -21,7 +21,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([3, 4]) from 1
         └── StreamExchange Hash([3, 4]) from 2
@@ -96,7 +95,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
@@ -173,7 +171,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
@@ -336,7 +333,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([3, 4]) from 1
         ├── StreamExchange Hash([3, 4]) from 2
@@ -437,7 +433,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, null:Decimal(hidden), null:Int64(hidden), t1.a(hidden), null:Serial(hidden), $src(hidden)], stream_key: [t1.a, null:Decimal, null:Int64, null:Serial, $src], pk_columns: [t1.a, null:Decimal, null:Int64, null:Serial, $src], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([5, 3, 4, 6, 7]) from 1
         ├── StreamExchange Hash([5, 3, 4, 6, 7]) from 2
@@ -498,7 +493,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, null:Decimal(hidden), t1.a(hidden), null:Serial(hidden), $src(hidden)], stream_key: [t1.a, null:Decimal, null:Serial, $src], pk_columns: [t1.a, null:Decimal, null:Serial, $src], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([4, 3, 5, 6]) from 1
         ├── StreamExchange Hash([4, 3, 5, 6]) from 2
@@ -564,7 +558,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c, $src(hidden)], stream_key: [a, b, $src], pk_columns: [a, b, $src], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([0, 1, 3]) from 1
         ├── StreamExchange Hash([0, 1, 3]) from 2
@@ -693,7 +686,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [b, t1.b(hidden), t1.a(hidden), null:Serial(hidden), $src(hidden)], stream_key: [t1.a, t1.b, null:Serial, $src], pk_columns: [t1.a, t1.b, null:Serial, $src], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([2, 1, 3, 4]) from 1
         └── StreamExchange Hash([2, 1, 3, 4]) from 5

@@ -193,7 +193,6 @@ impl FakeInnerSideExecutorBuilder {
     }
 }
 
-#[async_trait::async_trait]
 impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
     async fn build_executor(&mut self) -> Result<BoxedExecutor> {
         let mut mock_executor = MockExecutor::new(self.schema.clone());

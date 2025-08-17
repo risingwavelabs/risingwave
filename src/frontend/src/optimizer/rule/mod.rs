@@ -22,8 +22,8 @@ use thiserror_ext::AsReport;
 use super::PlanRef;
 use crate::error::RwError;
 
-/// Result when applying a [`Rule`] to a [`PlanNode`](super::plan_node::PlanNode).
-pub enum ApplyResult<T = PlanRef> {
+/// Result when applying a [`Rule`] to a `PlanNode`
+pub enum ApplyResult<T> {
     /// Successfully applied the rule and returned a new plan.
     Ok(T),
     /// The current rule is not applicable to the input.
@@ -34,9 +34,9 @@ pub enum ApplyResult<T = PlanRef> {
     Err(RwError),
 }
 
-impl ApplyResult {
+impl<T> ApplyResult<T> {
     /// Unwrap the result, panicking if it's not `Ok`.
-    pub fn unwrap(self) -> PlanRef {
+    pub fn unwrap(self) -> T {
         match self {
             ApplyResult::Ok(plan) => plan,
             ApplyResult::NotApplicable => panic!("unwrap ApplyResult::NotApplicable"),
@@ -68,37 +68,38 @@ where
     }
 }
 
-/// An one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode).
+/// An one-to-one transform for the `PlanNode`.
 ///
 /// It's a convenient trait to implement [`FallibleRule`], thus made available only within this module.
-trait InfallibleRule: Send + Sync + Description {
+trait InfallibleRule<C: ConventionMarker>: Send + Sync + Description {
     /// Apply the rule to the plan node.
     ///
     /// - Returns `Some` if the apply is successful.
     /// - Returns `None` if it's not applicable. The optimizer may try other rules.
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef>;
+    fn apply(&self, plan: PlanRef<C>) -> Option<PlanRef<C>>;
 }
+
 use InfallibleRule as Rule;
 
-/// An one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode) that may return an
+/// An one-to-one transform for the `PlanNode` that may return an
 /// unrecoverable error that stops further optimization.
 ///
 /// An [`InfallibleRule`] is always a [`FallibleRule`].
-pub trait FallibleRule: Send + Sync + Description {
+pub trait FallibleRule<C: ConventionMarker>: Send + Sync + Description {
     /// Apply the rule to the plan node, which may return an unrecoverable error.
     ///
     /// - Returns `ApplyResult::Ok` if the apply is successful.
     /// - Returns `ApplyResult::NotApplicable` if it's not applicable. The optimizer may try other rules.
     /// - Returns `ApplyResult::Err` if an unrecoverable error occurred. The optimizer should stop applying
     ///   other rules and report the error to the user.
-    fn apply(&self, plan: PlanRef) -> ApplyResult;
+    fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>>;
 }
 
-impl<T> FallibleRule for T
+impl<C: ConventionMarker, R> FallibleRule<C> for R
 where
-    T: InfallibleRule,
+    R: InfallibleRule<C>,
 {
-    fn apply(&self, plan: PlanRef) -> ApplyResult {
+    fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>> {
         match InfallibleRule::apply(self, plan) {
             Some(plan) => ApplyResult::Ok(plan),
             None => ApplyResult::NotApplicable,
@@ -110,8 +111,9 @@ pub trait Description {
     fn description(&self) -> &str;
 }
 
-pub(super) type BoxedRule = Box<dyn FallibleRule>;
+pub(super) type BoxedRule<C> = Box<dyn FallibleRule<C>>;
 
+mod correlated_expr_rewriter;
 mod logical_filter_expression_simplify_rule;
 pub use logical_filter_expression_simplify_rule::*;
 mod over_window_merge_rule;
@@ -124,6 +126,8 @@ mod project_merge_rule;
 pub use project_merge_rule::*;
 mod pull_up_correlated_predicate_rule;
 pub use pull_up_correlated_predicate_rule::*;
+mod pull_up_correlated_project_value_rule;
+pub use pull_up_correlated_project_value_rule::*;
 mod index_delta_join_rule;
 pub use index_delta_join_rule::*;
 mod left_deep_tree_join_ordering_rule;
@@ -176,6 +180,7 @@ mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
 pub use stream::generate_series_with_now_rule::*;
+pub use stream::separate_consecutive_join_rule::*;
 pub use stream::split_now_and_rule::*;
 pub use stream::split_now_or_rule::*;
 pub use stream::stream_project_merge_rule::*;
@@ -247,6 +252,8 @@ mod pull_up_correlated_predicate_agg_rule;
 mod source_to_iceberg_scan_rule;
 mod source_to_kafka_scan_rule;
 mod table_function_to_file_scan_rule;
+mod table_function_to_internal_backfill_progress;
+mod table_function_to_internal_source_backfill_progress;
 mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
 mod values_extract_project_rule;
@@ -259,9 +266,13 @@ pub use pull_up_correlated_predicate_agg_rule::*;
 pub use source_to_iceberg_scan_rule::*;
 pub use source_to_kafka_scan_rule::*;
 pub use table_function_to_file_scan_rule::*;
+pub use table_function_to_internal_backfill_progress::*;
+pub use table_function_to_internal_source_backfill_progress::*;
 pub use table_function_to_mysql_query_rule::*;
 pub use table_function_to_postgres_query_rule::*;
 pub use values_extract_project_rule::*;
+
+use crate::optimizer::plan_node::ConventionMarker;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -283,6 +294,7 @@ macro_rules! for_all_rules {
             , { ProjectJoinMergeRule }
             , { ProjectMergeRule }
             , { PullUpCorrelatedPredicateRule }
+            , { PullUpCorrelatedProjectValueRule }
             , { LeftDeepTreeJoinOrderingRule }
             , { TranslateApplyRule }
             , { PushCalculationOfJoinRule }
@@ -308,6 +320,7 @@ macro_rules! for_all_rules {
             , { AlwaysFalseFilterRule }
             , { BushyTreeJoinOrderingRule }
             , { StreamProjectMergeRule }
+            , { SeparateConsecutiveJoinRule }
             , { LogicalFilterExpressionSimplifyRule }
             , { JoinProjectTransposeRule }
             , { LimitPushDownRule }
@@ -326,6 +339,8 @@ macro_rules! for_all_rules {
             , { TableFunctionToFileScanRule }
             , { TableFunctionToPostgresQueryRule }
             , { TableFunctionToMySqlQueryRule }
+            , { TableFunctionToInternalBackfillProgressRule }
+            , { TableFunctionToInternalSourceBackfillProgressRule }
             , { ApplyLimitTransposeRule }
             , { CommonSubExprExtractRule }
             , { BatchProjectMergeRule }
@@ -361,3 +376,10 @@ macro_rules! impl_description {
 }
 
 for_all_rules! {impl_description}
+
+mod prelude {
+    pub(super) use crate::optimizer::plan_node::{Logical, LogicalPlanRef as PlanRef};
+    pub(super) use crate::optimizer::rule::Rule;
+
+    pub(super) type BoxedRule = crate::optimizer::rule::BoxedRule<Logical>;
+}

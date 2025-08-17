@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::user::grant_privilege::PbAction;
+use risingwave_pb::user::PbAction;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 

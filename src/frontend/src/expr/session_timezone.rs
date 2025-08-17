@@ -35,7 +35,7 @@ impl ExprRewriter for SessionTimezone {
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        if let Some(expr) = self.with_timezone(func_type, &inputs, ret.clone()) {
+        if let Some(expr) = self.with_timezone(func_type, &inputs, &ret) {
             self.mark_used();
             expr
         } else {
@@ -77,7 +77,7 @@ impl SessionTimezone {
         &self,
         func_type: ExprType,
         inputs: &[ExprImpl],
-        return_type: DataType,
+        return_type: &DataType,
     ) -> Option<ExprImpl> {
         match func_type {
             // `input_timestamptz::varchar`
@@ -98,14 +98,14 @@ impl SessionTimezone {
                 assert_eq!(inputs.len(), 1);
                 let mut input = inputs[0].clone();
                 let input_type = input.return_type();
-                match (input_type, return_type.clone()) {
+                match (input_type, return_type) {
                     (DataType::Timestamptz, DataType::Varchar)
                     | (DataType::Varchar, DataType::Timestamptz) => {
-                        Some(self.cast_with_timezone(input, return_type))
+                        Some(self.cast_with_timezone(input, return_type.clone()))
                     }
                     (DataType::Date, DataType::Timestamptz)
                     | (DataType::Timestamp, DataType::Timestamptz) => {
-                        input = input.cast_explicit(DataType::Timestamp).unwrap();
+                        input = input.cast_explicit(&DataType::Timestamp).unwrap();
                         Some(self.at_timezone(input))
                     }
                     (DataType::Timestamptz, DataType::Date)
@@ -146,10 +146,11 @@ impl SessionTimezone {
                         let mut to_cast = inputs[idx % 2].clone();
                         // Cast to `Timestamp` first, then use `AT TIME ZONE` to convert to
                         // `Timestamptz`
-                        to_cast = to_cast.cast_explicit(DataType::Timestamp).unwrap();
+                        to_cast = to_cast.cast_explicit(&DataType::Timestamp).unwrap();
                         inputs[idx % 2] = self.at_timezone(to_cast);
                         return Some(
-                            FunctionCall::new_unchecked(func_type, inputs, return_type).into(),
+                            FunctionCall::new_unchecked(func_type, inputs, return_type.clone())
+                                .into(),
                         );
                     }
                 }

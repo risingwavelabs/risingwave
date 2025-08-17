@@ -20,8 +20,8 @@ use super::batch::prelude::*;
 use super::generic::{self, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, PlanBase, PlanNodeType, PlanRef, PlanTreeNodeUnary, ToBatchPb,
-    ToDistributedBatch,
+    BatchPlanNodeType, BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary,
+    ToBatchPb, ToDistributedBatch,
 };
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
@@ -59,14 +59,14 @@ impl BatchHashAgg {
     fn to_two_phase_agg(&self, dist_input: PlanRef) -> Result<PlanRef> {
         // partial agg - follows input distribution
         let partial_agg: PlanRef = self.clone_with_input(dist_input).into();
-        debug_assert!(partial_agg.node_type() == PlanNodeType::BatchHashAgg);
+        debug_assert!(partial_agg.node_type() == BatchPlanNodeType::BatchHashAgg);
 
         // insert exchange
         let exchange = RequiredDist::shard_by_key(
             partial_agg.schema().len(),
             &(0..self.group_key().len()).collect_vec(),
         )
-        .enforce_if_not_satisfies(partial_agg, &Order::any())?;
+        .batch_enforce_if_not_satisfies(partial_agg, &Order::any())?;
 
         // insert total agg
         let total_agg_types = self
@@ -99,7 +99,7 @@ impl BatchHashAgg {
 
 impl_distill_by_unit!(BatchHashAgg, core, "BatchHashAgg");
 
-impl PlanTreeNodeUnary for BatchHashAgg {
+impl PlanTreeNodeUnary<Batch> for BatchHashAgg {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -111,7 +111,7 @@ impl PlanTreeNodeUnary for BatchHashAgg {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchHashAgg }
+impl_plan_tree_node_for_unary! { Batch, BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         if self.core.must_try_two_phase_agg() {
@@ -150,13 +150,13 @@ impl ToLocalBatch for BatchHashAgg {
         let new_input = self.input().to_local()?;
 
         let new_input =
-            RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
+            RequiredDist::single().batch_enforce_if_not_satisfies(new_input, &Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
     }
 }
 
-impl ExprRewritable for BatchHashAgg {
+impl ExprRewritable<Batch> for BatchHashAgg {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

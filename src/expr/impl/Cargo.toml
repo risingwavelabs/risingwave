@@ -7,7 +7,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-machete]
 ignored = ["chrono-tz", "futures-async-stream"]
@@ -19,6 +18,7 @@ udf = ["arrow-udf-runtime", "tonic", "ginepro", "zstd"]
 aho-corasick = "1"
 anyhow = "1"
 arrow-udf-runtime = { workspace = true, optional = true }
+async-openai = "0.29.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 bytes = "1"
@@ -30,7 +30,7 @@ chrono = { workspace = true, features = [
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 constant_time_eq = "0.4"
 educe = "0.6"
-fancy-regex = "0.14"
+fancy-regex = "0.16"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
@@ -45,6 +45,7 @@ md5 = "0.7"
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
 openssl = "0.10.72"
+rand = { workspace = true }
 regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
@@ -59,7 +60,7 @@ sha1 = "0.10"
 sha2 = "0.10"
 smallvec = { workspace = true }
 sql-json-path = { version = "0.1", features = ["jsonbb"] }
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 # For arrow-udf-runtime/remote

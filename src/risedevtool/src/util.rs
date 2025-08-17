@@ -81,10 +81,10 @@ pub fn is_env_set(var: &str) -> bool {
     if let Ok(val) = std::env::var(var) {
         if let Ok(true) = val.parse() {
             return true;
-        } else if let Ok(x) = val.parse::<usize>() {
-            if x != 0 {
-                return true;
-            }
+        } else if let Ok(x) = val.parse::<usize>()
+            && x != 0
+        {
+            return true;
         }
     }
     false

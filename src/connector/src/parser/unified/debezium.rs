@@ -570,8 +570,8 @@ pub fn extract_bson_field(
         value: datum.to_string(),
     };
 
-    let datum = if field.is_some() {
-        let Some(bson_doc) = bson_doc.get(field.unwrap()) else {
+    let datum = if let Some(field) = field {
+        let Some(bson_doc) = bson_doc.get(field) else {
             return Err(type_error(bson_doc));
         };
         bson_doc

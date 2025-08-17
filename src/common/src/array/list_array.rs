@@ -197,6 +197,7 @@ impl Array for ListArray {
                 offsets: self.offsets.to_vec(),
                 value: Some(Box::new(value)),
                 value_type: Some(self.value.data_type().to_protobuf()),
+                elem_size: None,
             })),
             null_bitmap: Some(self.bitmap.to_protobuf()),
             values: vec![],
@@ -248,7 +249,8 @@ impl ListArray {
         );
         debug_assert!(
             (array.array_type == PbArrayType::List as i32)
-                || (array.array_type == PbArrayType::Map as i32),
+                || (array.array_type == PbArrayType::Map as i32)
+                || (array.array_type == PbArrayType::Vector as i32),
             "invalid array type for list: {}",
             array.array_type
         );
@@ -584,14 +586,14 @@ impl<'a> ListRef<'a> {
         ListValue::new(builder.finish())
     }
 
+    pub fn as_primitive_slice<T: PrimitiveArrayItemType>(self) -> Option<&'a [T]> {
+        T::try_into_array_ref(self.array)
+            .map(|prim_arr| &prim_arr.as_slice()[self.start as usize..self.end as usize])
+    }
+
     /// Returns a slice if the list is of type `int64[]`.
     pub fn as_i64_slice(&self) -> Option<&[i64]> {
-        match &self.array {
-            ArrayImpl::Int64(array) => {
-                Some(&array.as_slice()[self.start as usize..self.end as usize])
-            }
-            _ => None,
-        }
+        self.as_primitive_slice()
     }
 
     /// # Panics

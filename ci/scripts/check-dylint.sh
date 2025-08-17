@@ -5,6 +5,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 unset RUSTC_WRAPPER # disable sccache, see https://github.com/mozilla/sccache/issues/861
+unset RUSTC_WORKSPACE_WRAPPER
 
 echo "--- List all available lints"
 output=$(cargo dylint list)

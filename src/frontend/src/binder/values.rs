@@ -93,16 +93,16 @@ impl Binder {
     /// If values are shorter than expected, `NULL`s will be filled.
     pub(super) fn bind_values(
         &mut self,
-        values: Values,
-        expected_types: Option<Vec<DataType>>,
+        values: &Values,
+        expected_types: Option<&[DataType]>,
     ) -> Result<BoundValues> {
         assert!(!values.0.is_empty());
 
         self.context.clause = Some(Clause::Values);
-        let vec2d = values.0;
+        let vec2d = &values.0;
         let mut bound = vec2d
-            .into_iter()
-            .map(|vec| vec.into_iter().map(|expr| self.bind_expr(expr)).collect())
+            .iter()
+            .map(|vec| vec.iter().map(|expr| self.bind_expr(expr)).collect())
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
@@ -118,10 +118,10 @@ impl Binder {
             Some(types) => {
                 bound = bound
                     .into_iter()
-                    .map(|vec| Self::cast_on_insert(&types.clone(), vec))
+                    .map(|vec| Self::cast_on_insert(types, vec))
                     .try_collect()?;
 
-                types
+                types.to_vec()
             }
             None => (0..num_columns)
                 .map(|col_index| align_types(bound.iter_mut().map(|row| &mut row[col_index])))
@@ -174,7 +174,7 @@ mod tests {
         let expr1 = Expr::Value(Value::Number("1".to_owned()));
         let expr2 = Expr::Value(Value::Number("1.1".to_owned()));
         let values = Values(vec![vec![expr1], vec![expr2]]);
-        let res = binder.bind_values(values, None).unwrap();
+        let res = binder.bind_values(&values, None).unwrap();
 
         let types = vec![DataType::Decimal];
         let n_cols = types.len();

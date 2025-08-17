@@ -16,7 +16,7 @@
 #![feature(trait_alias)]
 #![feature(exact_size_is_empty)]
 #![feature(type_alias_impl_trait)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(iterator_try_collect)]

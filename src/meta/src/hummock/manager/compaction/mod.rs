@@ -40,7 +40,7 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use rand::rng as thread_rng;
 use rand::seq::SliceRandom;
-use risingwave_common::config::default::compaction_config;
+use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;

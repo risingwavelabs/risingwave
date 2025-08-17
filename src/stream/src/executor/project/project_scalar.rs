@@ -87,21 +87,30 @@ impl Execute for ProjectExecutor {
     }
 }
 
+pub async fn apply_project_exprs(
+    exprs: &[NonStrictExpression],
+    chunk: StreamChunk,
+) -> StreamExecutorResult<StreamChunk> {
+    let (data_chunk, ops) = chunk.into_parts();
+    let mut projected_columns = Vec::new();
+
+    for expr in exprs {
+        let evaluated_expr = expr.eval_infallible(&data_chunk).await;
+        projected_columns.push(evaluated_expr);
+    }
+    let (_, vis) = data_chunk.into_parts();
+
+    let new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
+
+    Ok(new_chunk)
+}
+
 impl Inner {
     async fn map_filter_chunk(
         &self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let (data_chunk, ops) = chunk.into_parts();
-        let mut projected_columns = Vec::new();
-
-        for expr in &self.exprs {
-            let evaluated_expr = expr.eval_infallible(&data_chunk).await;
-            projected_columns.push(evaluated_expr);
-        }
-        let (_, vis) = data_chunk.into_parts();
-
-        let mut new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
+        let mut new_chunk = apply_project_exprs(&self.exprs, chunk).await?;
         if self.noop_update_hint {
             new_chunk = new_chunk.eliminate_adjacent_noop_update();
         }
@@ -151,20 +160,20 @@ impl Inner {
                 }
                 Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
                     Some(new_chunk) => {
-                        if !self.nondecreasing_expr_indices.is_empty() {
-                            if let Some((_, first_visible_row)) = new_chunk.rows().next() {
-                                // it's ok to use the first row here, just one chunk delay
-                                first_visible_row
-                                    .project(&self.nondecreasing_expr_indices)
-                                    .iter()
-                                    .enumerate()
-                                    .for_each(|(idx, value)| {
-                                        self.last_nondec_expr_values[idx] =
-                                            Some(value.to_owned_datum().expect(
-                                                "non-decreasing expression should never be NULL",
-                                            ));
-                                    });
-                            }
+                        if !self.nondecreasing_expr_indices.is_empty()
+                            && let Some((_, first_visible_row)) = new_chunk.rows().next()
+                        {
+                            // it's ok to use the first row here, just one chunk delay
+                            first_visible_row
+                                .project(&self.nondecreasing_expr_indices)
+                                .iter()
+                                .enumerate()
+                                .for_each(|(idx, value)| {
+                                    self.last_nondec_expr_values[idx] =
+                                        Some(value.to_owned_datum().expect(
+                                            "non-decreasing expression should never be NULL",
+                                        ));
+                                });
                         }
                         yield Message::Chunk(new_chunk)
                     }

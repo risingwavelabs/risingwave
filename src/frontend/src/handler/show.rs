@@ -54,7 +54,7 @@ pub fn get_columns_from_table(
     table_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
     let mut binder = Binder::new_for_system(session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None, None, false)?;
+    let relation = binder.bind_relation_by_name(&table_name, None, None, false)?;
     let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
         Relation::BaseTable(t) => t.table_catalog.columns.clone(),
@@ -100,7 +100,7 @@ pub fn get_indexes_from_table(
     table_name: ObjectName,
 ) -> Result<Vec<Arc<IndexCatalog>>> {
     let mut binder = Binder::new_for_system(session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None, None, false)?;
+    let relation = binder.bind_relation_by_name(&table_name, None, None, false)?;
     let indexes = match relation {
         Relation::BaseTable(t) => t.table_indexes,
         _ => {
@@ -126,7 +126,7 @@ fn schema_or_search_path(
                 if s.eq(USER_NAME_WILD_CARD) {
                     session.user_name()
                 } else {
-                    s.to_string()
+                    s.clone()
                 }
             })
             .collect()
@@ -340,6 +340,7 @@ struct ShowClusterRow {
 struct ShowJobRow {
     id: i64,
     statement: String,
+    create_type: String,
     progress: String,
 }
 
@@ -589,7 +590,7 @@ pub async fn handle_show_object(
                         }
                         connection::Info::ConnectionParams(params) => {
                             // todo: show dep relations
-                            print_connection_params(params, schema)
+                            print_connection_params(&session.database(), params, &reader)
                         }
                     };
                     ShowConnectionRow {
@@ -649,6 +650,7 @@ pub async fn handle_show_object(
             let rows = resp.into_iter().map(|job| ShowJobRow {
                 id: job.id as i64,
                 statement: job.statement,
+                create_type: job.create_type,
                 progress: job.progress,
             });
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
@@ -762,8 +764,7 @@ pub fn handle_show_create_object(
     let session = handle_args.session;
     let catalog_reader = session.env().catalog_reader().read_guard();
     let database = session.database();
-    let (schema_name, object_name) =
-        Binder::resolve_schema_qualified_name(&database, name.clone())?;
+    let (schema_name, object_name) = Binder::resolve_schema_qualified_name(&database, &name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -828,7 +829,7 @@ pub fn handle_show_create_object(
         }
         ShowCreateType::Sink => {
             let (sink, schema) =
-                catalog_reader.get_sink_by_name(&database, schema_path, &object_name)?;
+                catalog_reader.get_any_sink_by_name(&database, schema_path, &object_name)?;
             if !has_access_to_object(current_user, schema, sink.id.sink_id, sink.owner.user_id) {
                 return Err(CatalogError::NotFound("sink", name.to_string()).into());
             }

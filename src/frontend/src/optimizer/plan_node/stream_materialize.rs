@@ -15,7 +15,6 @@
 use std::assert_matches::assert_matches;
 use std::num::NonZeroU32;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
@@ -31,10 +30,13 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::derive::derive_columns;
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, reorganize_elements_id};
+use super::{
+    ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, reorganize_elements_id,
+};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::Result;
+use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
@@ -52,20 +54,34 @@ pub struct StreamMaterialize {
 }
 
 impl StreamMaterialize {
-    #[must_use]
-    pub fn new(input: PlanRef, table: TableCatalog) -> Self {
+    pub fn new(input: PlanRef, table: TableCatalog) -> Result<Self> {
+        let kind = match table.conflict_behavior() {
+            ConflictBehavior::NoCheck => {
+                reject_upsert_input!(input, "Materialize without conflict handling")
+            }
+
+            // When conflict handling is enabled, upsert stream can be converted to retract stream.
+            ConflictBehavior::Overwrite
+            | ConflictBehavior::IgnoreConflict
+            | ConflictBehavior::DoUpdateIfNotNull => match input.stream_kind() {
+                StreamKind::AppendOnly | StreamKind::Retract => input.stream_kind(),
+                StreamKind::Upsert => StreamKind::Retract,
+            },
+        };
+
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             Some(table.stream_key.clone()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.append_only(),
+            kind,
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
-        Self { base, input, table }
+
+        Ok(Self { base, input, table })
     }
 
     /// Create a materialize node, for `MATERIALIZED VIEW` and `INDEX`.
@@ -74,14 +90,17 @@ impl StreamMaterialize {
     /// using `user_distributed_by`.
     #[allow(clippy::too_many_arguments)]
     pub fn create(
-        input: PlanRef,
+        StreamOptimizedLogicalPlanRoot {
+            plan: input,
+            required_dist: user_distributed_by,
+            required_order: user_order_by,
+            out_fields: user_cols,
+            out_names,
+            ..
+        }: StreamOptimizedLogicalPlanRoot,
         name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        user_distributed_by: RequiredDist,
-        user_order_by: Order,
-        user_cols: FixedBitSet,
-        out_names: Vec<String>,
         definition: String,
         table_type: TableType,
         cardinality: Cardinality,
@@ -120,9 +139,10 @@ impl StreamMaterialize {
             create_type,
             None,
             Engine::Hummock,
+            false,
         )?;
 
-        Ok(Self::new(input, table))
+        Self::new(input, table)
     }
 
     /// Create a materialize node, for `TABLE`.
@@ -148,6 +168,7 @@ impl StreamMaterialize {
         retention_seconds: Option<NonZeroU32>,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
+        refreshable: bool,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -170,9 +191,10 @@ impl StreamMaterialize {
             CreateType::Foreground,
             webhook_info,
             engine,
+            refreshable,
         )?;
 
-        Ok(Self::new(input, table))
+        Self::new(input, table)
     }
 
     /// Rewrite the input to satisfy the required distribution if necessary, according to the type.
@@ -203,7 +225,7 @@ impl StreamMaterialize {
                         || matches!(input.as_stream_delta_join(), Some(_join));
 
                     if is_stream_join {
-                        return Ok(required_dist.enforce(input, &Order::any()));
+                        return Ok(required_dist.stream_enforce(input));
                     }
 
                     required_dist
@@ -219,7 +241,7 @@ impl StreamMaterialize {
             },
         };
 
-        required_dist.enforce_if_not_satisfies(input, &Order::any())
+        required_dist.streaming_enforce_if_not_satisfies(input)
     }
 
     /// Derive the table catalog with the given arguments.
@@ -246,6 +268,7 @@ impl StreamMaterialize {
         create_type: CreateType,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
+        refreshable: bool,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -275,7 +298,6 @@ impl StreamMaterialize {
             database_id,
             associated_source_id: None,
             name,
-            dependent_relations: vec![],
             columns,
             pk: table_pk,
             stream_key,
@@ -318,6 +340,8 @@ impl StreamMaterialize {
                 }
             },
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            refreshable,
+            vector_index_info: None,
         })
     }
 
@@ -372,13 +396,13 @@ impl Distill for StreamMaterialize {
     }
 }
 
-impl PlanTreeNodeUnary for StreamMaterialize {
+impl PlanTreeNodeUnary<Stream> for StreamMaterialize {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let new = Self::new(input, self.table().clone());
+        let new = Self::new(input, self.table().clone()).unwrap();
         new.base
             .schema()
             .fields
@@ -392,27 +416,29 @@ impl PlanTreeNodeUnary for StreamMaterialize {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamMaterialize }
+impl_plan_tree_node_for_unary! { Stream, StreamMaterialize }
 
 impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
         PbNodeBody::Materialize(Box::new(MaterializeNode {
-            // We don't need table id for materialize node in frontend. The id will be generated on
-            // meta catalog service.
+            // Do not fill `table` and `table_id` here to avoid duplication. It will be filled by
+            // meta service after global information is generated.
             table_id: 0,
+            table: None,
+
             column_orders: self
                 .table()
                 .pk()
                 .iter()
+                .copied()
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
-            table: Some(self.table().to_internal_table_prost()),
         }))
     }
 }
 
-impl ExprRewritable for StreamMaterialize {}
+impl ExprRewritable<Stream> for StreamMaterialize {}
 
 impl ExprVisitable for StreamMaterialize {}

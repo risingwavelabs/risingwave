@@ -106,6 +106,13 @@ impl<T: Float> OrderedFloat<T> {
     pub fn into_inner(self) -> T {
         self.0
     }
+
+    pub fn inner_slice(slice: &[Self]) -> &[T] {
+        let ptr = slice.as_ptr() as *const T;
+
+        // Safety: OrderedFloat is #[repr(transparent)] and has no invalid values.
+        unsafe { std::slice::from_raw_parts(ptr, slice.len()) }
+    }
 }
 
 impl ToSql for OrderedFloat<f32> {
@@ -1111,5 +1118,17 @@ mod tests {
     fn test_ordered_float_estimate_size() {
         let ordered_float = OrderedFloat::<f64>::from(5_i64);
         assert_eq!(ordered_float.estimated_size(), 8);
+    }
+
+    #[test]
+    fn test_inner_slice() {
+        use crate::types::F32;
+
+        assert_eq!(std::mem::size_of::<F32>(), std::mem::size_of::<f32>());
+        assert_eq!(std::mem::align_of::<F32>(), std::mem::align_of::<f32>());
+
+        let slice = &[F32::from(1.0), 2.0.into(), 3.0.into()];
+        let inner = F32::inner_slice(slice);
+        assert_eq!(inner, &[1.0f32, 2.0, 3.0]);
     }
 }
