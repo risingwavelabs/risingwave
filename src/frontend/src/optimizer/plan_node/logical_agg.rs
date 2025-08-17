@@ -777,17 +777,29 @@ impl LogicalAggBuilder {
                 if agg_call.args.len() != 2 {
                     bail!(format!(
                         "{} requires exactly 2 arguments, got {}",
-                        if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) { "arg_min" } else { "arg_max" },
+                        if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) {
+                            "arg_min"
+                        } else {
+                            "arg_max"
+                        },
                         agg_call.args.len()
                     ));
                 }
 
                 let comparison_arg_type = agg_call.args[1].return_type();
                 match comparison_arg_type {
-                    DataType::Struct(_) | DataType::List(_) | DataType::Map(_) | DataType::Vector(_) | DataType::Jsonb => {
+                    DataType::Struct(_)
+                    | DataType::List(_)
+                    | DataType::Map(_)
+                    | DataType::Vector(_)
+                    | DataType::Jsonb => {
                         bail!(format!(
                             "{} does not support struct, array, map, vector, jsonb for comparison argument, got {}",
-                            if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) { "arg_min" } else { "arg_max" },
+                            if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) {
+                                "arg_min"
+                            } else {
+                                "arg_max"
+                            },
                             comparison_arg_type
                         ));
                     }
