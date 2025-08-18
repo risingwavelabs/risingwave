@@ -200,7 +200,7 @@ impl Sink for RedshiftSink {
                 &schema,
                 false,
             )?;
-            client.execute_sql_sync(&vec![build_table_sql])?;
+            client.execute_sql_sync(vec![build_table_sql]).await?;
             if !self.is_append_only {
                 let cdc_table = self.config.cdc_table.as_ref().ok_or_else(|| {
                     SinkError::Config(anyhow!(
@@ -213,7 +213,7 @@ impl Sink for RedshiftSink {
                     &schema,
                     true,
                 )?;
-                client.execute_sql_sync(&vec![build_cdc_table_sql])?;
+                client.execute_sql_sync(vec![build_cdc_table_sql]).await?;
             }
         }
         Ok(())
@@ -550,7 +550,7 @@ impl RedshiftSinkCommitter {
                 // Execute periodic query
                 _ = interval_timer.tick() => {
 
-                    match client.execute_sql_sync(&sql) {
+                    match client.execute_sql_sync(sql.clone()).await {
                         Ok(_) => {
                             tracing::info!("Periodic query executed successfully for table: {}", target_table_name);
                         }
@@ -653,7 +653,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 &s3_inner.assume_role,
             )?;
             // run copy into
-            self.client.execute_sql_sync(&vec![copy_into_sql])?;
+            self.client.execute_sql_sync(vec![copy_into_sql]).await?;
         }
 
         if let Some(add_columns) = add_columns {
@@ -684,7 +684,8 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 Ok(())
             };
             self.client
-                .execute_sql_sync(&vec![sql.clone()])
+                .execute_sql_sync(vec![sql.clone()])
+                .await
                 .or_else(check_column_exists)?;
             if !self.is_append_only {
                 let cdc_table_name = self.config.cdc_table.as_ref().ok_or_else(|| {
@@ -701,7 +702,8 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                         .collect::<Vec<_>>(),
                 );
                 self.client
-                    .execute_sql_sync(&vec![sql.clone()])
+                    .execute_sql_sync(vec![sql.clone()])
+                    .await
                     .or_else(check_column_exists)?;
                 self.all_column_names
                     .extend(add_columns.iter().map(|f| f.name.clone()));
