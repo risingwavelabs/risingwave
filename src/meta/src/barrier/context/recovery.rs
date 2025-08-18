@@ -25,6 +25,7 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::StreamingParallelism;
+use risingwave_pb::catalog::table::PbTableType;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
@@ -35,6 +36,7 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
@@ -249,6 +251,59 @@ impl GlobalBarrierWorkerContextImpl {
         Ok((table_committed_epoch, log_epochs))
     }
 
+    async fn recovery_table_with_upstream_sinks(
+        &self,
+        inflight_jobs: &mut HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
+    ) -> MetaResult<()> {
+        let mut jobs = inflight_jobs.values_mut().try_fold(
+            HashMap::new(),
+            |mut acc, table_map| -> MetaResult<_> {
+                for (tid, job) in table_map {
+                    if acc.insert(tid.table_id, job).is_some() {
+                        return Err(anyhow::anyhow!("Duplicate table id found: {:?}", tid).into());
+                    }
+                }
+                Ok(acc)
+            },
+        )?;
+        let job_ids = jobs.keys().cloned().collect_vec();
+        // Only `Table` will be returned here, ignoring other catalog objects.
+        let tables = self
+            .metadata_manager
+            .get_table_catalog_by_ids(&job_ids)
+            .await?;
+        for table in tables {
+            if table.table_type() != PbTableType::Table {
+                continue;
+            }
+            let fragments = jobs.get_mut(&table.id).unwrap();
+            let mut union_fragment_id = None;
+            for fragment in fragments.fragment_infos.values_mut() {
+                if fragment.has_union_node() {
+                    // Each table should have only one union-fragment.
+                    if let Some(ref union_fragment_id) = union_fragment_id {
+                        assert_eq!(*union_fragment_id, fragment.fragment_id);
+                    } else {
+                        union_fragment_id = Some(fragment.fragment_id);
+                    }
+                }
+            }
+            let union_fragment_id = union_fragment_id.expect("No union fragment found");
+            let union_fragment = fragments
+                .fragment_infos
+                .get_mut(&union_fragment_id)
+                .unwrap();
+            let upstream_infos = self
+                .metadata_manager
+                .catalog_controller
+                .get_all_upstream_sinks(&table, union_fragment_id as _)
+                .await?;
+            refill_upstream_sink_union_in_table(&mut union_fragment.nodes, &upstream_infos);
+        }
+
+        Ok(())
+    }
+
     pub(super) async fn reload_runtime_info_impl(
         &self,
     ) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
@@ -366,6 +421,8 @@ impl GlobalBarrierWorkerContextImpl {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
                     }
+
+                    self.recovery_table_with_upstream_sinks(&mut info).await?;
 
                     let info = info;
 
@@ -497,12 +554,15 @@ impl GlobalBarrierWorkerContextImpl {
             .scheduled_barriers
             .pre_apply_drop_cancel(Some(database_id));
 
-        let info = self
+        let mut info = self
             .resolve_graph_info(Some(database_id))
             .await
             .inspect_err(|err| {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
+
+        self.recovery_table_with_upstream_sinks(&mut info).await?;
+
         assert!(info.len() <= 1);
         let Some(info) = info.into_iter().next().map(|(loaded_database_id, info)| {
             assert_eq!(loaded_database_id, database_id);

@@ -30,12 +30,13 @@ use risingwave_connector::source::cdc::{
 };
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::{SinkId, WorkerId};
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::catalog::table::PbTableType;
-use risingwave_pb::common::ActorInfo;
+use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
@@ -43,8 +44,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
-    Dispatchers, DropSubscriptionsMutation, LoadFinishMutation, PauseMutation, ResumeMutation,
+    AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
+    LoadFinishMutation, PauseMutation, PbUpstreamSinkInfo, ResumeMutation,
     SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
@@ -68,7 +69,8 @@ use crate::model::{
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
-    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, build_actor_connector_splits,
+    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, UpstreamSinkInfo,
+    build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -269,7 +271,7 @@ pub struct SnapshotBackfillInfo {
 #[derive(Debug, Clone)]
 pub enum CreateStreamingJobType {
     Normal,
-    SinkIntoTable(ReplaceStreamJobPlan),
+    SinkIntoTable(UpstreamSinkInfo),
     SnapshotBackfill(SnapshotBackfillInfo),
 }
 
@@ -300,10 +302,13 @@ pub enum Command {
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the job fragments info from meta store.
     DropStreamingJobs {
-        table_fragments_ids: HashSet<TableId>,
+        table_ids: HashSet<TableId>,
         actors: Vec<ActorId>,
         unregistered_state_table_ids: HashSet<TableId>,
         unregistered_fragment_ids: HashSet<FragmentId>,
+        // used to update catalog in existing table
+        dropped_sink_in_existing_table: HashMap<SinkId, risingwave_meta_model::TableId>,
+        dropped_sink_fragments: Vec<FragmentId>,
     },
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
@@ -395,14 +400,11 @@ impl std::fmt::Display for Command {
             Command::Flush => write!(f, "Flush"),
             Command::Pause => write!(f, "Pause"),
             Command::Resume => write!(f, "Resume"),
-            Command::DropStreamingJobs {
-                table_fragments_ids,
-                ..
-            } => {
+            Command::DropStreamingJobs { table_ids, .. } => {
                 write!(
                     f,
                     "DropStreamingJobs: {}",
-                    table_fragments_ids.iter().sorted().join(", ")
+                    table_ids.iter().sorted().join(", ")
                 )
             }
             Command::CreateStreamingJob { info, .. } => {
@@ -454,18 +456,6 @@ impl Command {
         Self::Resume
     }
 
-    pub fn cancel(table_fragments: &StreamJobFragments) -> Self {
-        Self::DropStreamingJobs {
-            table_fragments_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
-            actors: table_fragments.actor_ids(),
-            unregistered_state_table_ids: table_fragments
-                .all_table_ids()
-                .map(TableId::new)
-                .collect(),
-            unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
-        }
-    }
-
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
             Command::Flush => None,
@@ -485,7 +475,7 @@ impl Command {
                     !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)),
                     "should handle fragment changes separately for snapshot backfill"
                 );
-                let mut changes: HashMap<_, _> = info
+                let changes: HashMap<_, _> = info
                     .stream_job_fragments
                     .new_fragment_info()
                     .map(|(fragment_id, fragment_info)| {
@@ -499,11 +489,6 @@ impl Command {
                         )
                     })
                     .collect();
-
-                if let CreateStreamingJobType::SinkIntoTable(plan) = job_type {
-                    let extra_change = plan.fragment_changes();
-                    changes.extend(extra_change);
-                }
 
                 Some(changes)
             }
@@ -797,6 +782,7 @@ impl Command {
         &self,
         is_currently_paused: bool,
         edges: &mut Option<FragmentEdgeBuildResult>,
+        pre_applied_graph_info: &InflightDatabaseInfo,
         control_stream_manager: &ControlStreamManager,
     ) -> Option<Mutation> {
         match self {
@@ -848,9 +834,13 @@ impl Command {
                 }))
             }
 
-            Command::DropStreamingJobs { actors, .. } => Some(Mutation::Stop(StopMutation {
+            Command::DropStreamingJobs {
+                actors,
+                dropped_sink_fragments,
+                ..
+            } => Some(Mutation::Stop(StopMutation {
                 actors: actors.clone(),
-                dropped_sink_fragments: Default::default(),
+                dropped_sink_fragments: dropped_sink_fragments.clone(),
             })),
 
             Command::CreateStreamingJob {
@@ -891,7 +881,7 @@ impl Command {
                     get_nodes_with_backfill_dependencies(fragment_backfill_ordering)
                         .into_iter()
                         .collect();
-                let add = Some(Mutation::Add(AddMutation {
+                let mut add_mutation = AddMutation {
                     actor_dispatchers: edges
                         .dispatchers
                         .extract_if(|fragment_id, _| {
@@ -910,44 +900,48 @@ impl Command {
                         cdc_table_snapshot_split_assignment.clone(),
                     ),
                     new_upstream_sinks: Default::default(),
-                }));
+                };
 
-                if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
-                    old_fragments,
-                    init_split_assignment,
-                    replace_upstream,
-                    upstream_fragment_downstreams,
-                    cdc_table_snapshot_split_assignment,
+                if let CreateStreamingJobType::SinkIntoTable(UpstreamSinkInfo {
+                    sink_fragment_id,
+                    sink_output_fields,
+                    project_exprs,
+                    new_sink_downstream,
                     ..
                 }) = job_type
                 {
-                    let merge_updates = edges
-                        .merge_updates
-                        .extract_if(|fragment_id, _| replace_upstream.contains_key(fragment_id))
-                        .collect();
-                    let dispatchers = edges
-                        .dispatchers
-                        .extract_if(|fragment_id, _| {
-                            upstream_fragment_downstreams.contains_key(fragment_id)
+                    let new_sink_actors = table_fragments
+                        .actors_to_create()
+                        .filter(|(fragment_id, _, _)| *fragment_id == *sink_fragment_id)
+                        .exactly_one()
+                        .map(|(_, _, actors)| {
+                            actors.into_iter().map(|(actor, worker_id)| PbActorInfo {
+                                actor_id: actor.actor_id,
+                                host: Some(control_stream_manager.host_addr(worker_id)),
+                            })
                         })
-                        .collect();
-                    let update = Self::generate_update_mutation_for_replace_table(
-                        old_fragments.actor_ids(),
-                        merge_updates,
-                        dispatchers,
-                        init_split_assignment,
-                        cdc_table_snapshot_split_assignment,
-                    );
-
-                    Some(Mutation::Combined(CombinedMutation {
-                        mutations: vec![
-                            BarrierMutation { mutation: add },
-                            BarrierMutation { mutation: update },
-                        ],
-                    }))
-                } else {
-                    add
+                        .unwrap_or_else(|_| panic!("should have exactly one sink actor"));
+                    let new_upstream_sink = PbNewUpstreamSink {
+                        info: Some(PbUpstreamSinkInfo {
+                            upstream_fragment_id: *sink_fragment_id,
+                            sink_output_schema: sink_output_fields.clone(),
+                            project_exprs: project_exprs.clone(),
+                        }),
+                        upstream_actors: new_sink_actors.collect(),
+                    };
+                    let downstream_actors = pre_applied_graph_info
+                        .fragment(new_sink_downstream.downstream_fragment_id)
+                        .actors
+                        .keys()
+                        .cloned();
+                    let mut new_upstream_sinks = HashMap::new();
+                    for actor_id in downstream_actors {
+                        new_upstream_sinks.insert(actor_id, new_upstream_sink.clone());
+                    }
+                    add_mutation.new_upstream_sinks = new_upstream_sinks;
                 }
+
+                Some(Mutation::Add(add_mutation))
             }
             Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) => {
                 Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
@@ -1105,7 +1099,7 @@ impl Command {
                                             .flat_map(|(worker_id, actors)| {
                                                 let host =
                                                     control_stream_manager.host_addr(*worker_id);
-                                                actors.iter().map(move |actor_id| ActorInfo {
+                                                actors.iter().map(move |actor_id| PbActorInfo {
                                                     actor_id: *actor_id,
                                                     host: Some(host.clone()),
                                                 })
@@ -1245,24 +1239,10 @@ impl Command {
         control_stream_manager: &ControlStreamManager,
     ) -> Option<StreamJobActorsToCreate> {
         match self {
-            Command::CreateStreamingJob { info, job_type, .. } => {
-                let sink_into_table_replace_plan = match job_type {
-                    CreateStreamingJobType::Normal => None,
-                    CreateStreamingJobType::SinkIntoTable(replace_table) => Some(replace_table),
-                    CreateStreamingJobType::SnapshotBackfill(_) => {
-                        // for snapshot backfill, the actors to create is measured separately
-                        return None;
-                    }
-                };
-                let get_actors_to_create = || {
-                    sink_into_table_replace_plan
-                        .map(|plan| plan.new_fragments.actors_to_create())
-                        .into_iter()
-                        .flatten()
-                        .chain(info.stream_job_fragments.actors_to_create())
-                };
+            Command::CreateStreamingJob { info, .. } => {
+                let actors_to_create = info.stream_job_fragments.actors_to_create();
                 let edges = edges.as_mut().expect("should exist");
-                Some(edges.collect_actors_to_create(get_actors_to_create()))
+                Some(edges.collect_actors_to_create(actors_to_create))
             }
             Command::RescheduleFragment {
                 reschedules,
@@ -1372,10 +1352,7 @@ impl Command {
     /// For `CancelStreamingJob`, returns the table id of the target table.
     pub fn tables_to_drop(&self) -> impl Iterator<Item = TableId> + '_ {
         match self {
-            Command::DropStreamingJobs {
-                table_fragments_ids,
-                ..
-            } => Some(table_fragments_ids.iter().cloned()),
+            Command::DropStreamingJobs { table_ids, .. } => Some(table_ids.iter().cloned()),
             _ => None,
         }
         .into_iter()
@@ -1414,7 +1391,7 @@ impl Command {
                         .or_default()
                         .insert(
                             upstream_actor_id,
-                            ActorInfo {
+                            PbActorInfo {
                                 actor_id: upstream_actor_id,
                                 host: Some(upstream_actor_host.clone()),
                             },
@@ -1457,7 +1434,7 @@ impl Command {
                                 .or_default()
                                 .insert(
                                     *upstream_actor_id,
-                                    ActorInfo {
+                                    PbActorInfo {
                                         actor_id: *upstream_actor_id,
                                         host: Some(upstream_actor_host.clone()),
                                     },
