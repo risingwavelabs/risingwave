@@ -13015,7 +13015,6 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "await-tree",
- "base64 0.22.1",
  "bytes",
  "cfg-if",
  "criterion",

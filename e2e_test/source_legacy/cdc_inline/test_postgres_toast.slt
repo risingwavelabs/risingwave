@@ -153,6 +153,19 @@ where id = 3;
 ----
 3 33 20 13 10 10 50 40 30 20 999
 
+# Step 12: Test DELETE with TOAST columns (id=2)
+system ok
+psql -c "DELETE FROM test WHERE id = 2;"
+
+# Wait for DELETE to propagate
+sleep 3s
+
+# Step 13: Verify DELETE was processed correctly
+# The row with id=2 should be removed from RisingWave
+query TTTTT
+select count(*) from test where id = 2;
+----
+0
 
 # Clean up
 statement ok
