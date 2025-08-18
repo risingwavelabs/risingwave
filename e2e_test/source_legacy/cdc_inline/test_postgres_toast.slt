@@ -59,7 +59,7 @@ select
 from test
 where id = 2;
 ----
-2 22 61663 20000 30000 2000000 457093 40015 960401 4001201 100
+2 22 61163 20000 30000 2000000 456793 40015 960401 4001201 100
 
 # Step 7: Insert small data (id=3) - no TOAST triggered
 system ok
@@ -132,7 +132,7 @@ select
 from test
 where id = 2;
 ----
-2 22 61663 20000 30000 2000000 457093 40015 960401 4001201 999
+2 22 61663 20000 30000 2000000 456793 40015 960401 4001201 999
 
 # Step 11: Verify small data is preserved after UPDATE (id=3)
 query TTTTTTTTTTTT

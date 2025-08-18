@@ -1203,7 +1203,7 @@ pub(super) async fn handle_create_table_plan(
                             }
                         }
                         Err(err) => {
-                            tracing::warn!(error = %err, "Failed to connect to external table for TOAST detection, skipping TOAST column detection");
+                            tracing::warn!(error = %err.as_report(), "Failed to connect to external table for TOAST detection, skipping TOAST column detection");
                             None
                         }
                     };
