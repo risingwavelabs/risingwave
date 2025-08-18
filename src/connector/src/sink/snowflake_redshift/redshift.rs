@@ -14,6 +14,7 @@
 
 use core::num::NonZero;
 use std::fmt::Write;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -29,6 +30,7 @@ use serde::Deserialize;
 use serde_json::json;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
+use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::time::{MissedTickBehavior, interval};
 use tonic::async_trait;
@@ -52,6 +54,14 @@ use crate::sink::{
 };
 
 pub const REDSHIFT_SINK: &str = "redshift";
+
+static PERIODIC_TASK_HANDLE: std::sync::OnceLock<Arc<Semaphore>> = std::sync::OnceLock::new();
+
+fn get_semaphore() -> Arc<Semaphore> {
+    PERIODIC_TASK_HANDLE
+        .get_or_init(|| Arc::new(Semaphore::new(1)))
+        .clone()
+}
 
 fn build_full_table_name(schema_name: Option<&str>, table_name: &str) -> String {
     if let Some(schema_name) = schema_name {
@@ -190,7 +200,7 @@ impl Sink for RedshiftSink {
                 &schema,
                 false,
             )?;
-            client.execute_sql_sync(&vec![build_table_sql])?;
+            client.execute_sql_sync(vec![build_table_sql]).await?;
             if !self.is_append_only {
                 let cdc_table = self.config.cdc_table.as_ref().ok_or_else(|| {
                     SinkError::Config(anyhow!(
@@ -203,7 +213,7 @@ impl Sink for RedshiftSink {
                     &schema,
                     true,
                 )?;
-                client.execute_sql_sync(&vec![build_cdc_table_sql])?;
+                client.execute_sql_sync(vec![build_cdc_table_sql]).await?;
             }
         }
         Ok(())
@@ -516,6 +526,11 @@ impl RedshiftSinkCommitter {
         schedule_seconds: u64,
         mut shutdown_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,
     ) {
+        let semaphore = get_semaphore();
+        let _semaphore = semaphore
+            .acquire()
+            .await
+            .expect("Failed to acquire semaphore for periodic task");
         let mut interval_timer = interval(Duration::from_secs(schedule_seconds)); // 1 hour = 3600 seconds
         interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let sql = build_create_merge_into_task_sql(
@@ -535,7 +550,7 @@ impl RedshiftSinkCommitter {
                 // Execute periodic query
                 _ = interval_timer.tick() => {
 
-                    match client.execute_sql_sync(&sql) {
+                    match client.execute_sql_sync(sql.clone()).await {
                         Ok(_) => {
                             tracing::info!("Periodic query executed successfully for table: {}", target_table_name);
                         }
@@ -604,9 +619,9 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
             let s3_inner = self.config.s3_inner.as_ref().ok_or_else(|| {
                 SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
             })?;
-            let s3_operator = FileSink::<S3Sink>::new_s3_sink(&s3_inner)?;
+            let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_inner)?;
             let (mut writer, path) =
-                build_opendal_writer_path(&s3_inner, 0, &s3_operator, &None).await?;
+                build_opendal_writer_path(s3_inner, 0, &s3_operator, &None).await?;
             let manifest_json = json!({
                 "entries": paths
             });
@@ -638,7 +653,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 &s3_inner.assume_role,
             )?;
             // run copy into
-            self.client.execute_sql_sync(&vec![copy_into_sql])?;
+            self.client.execute_sql_sync(vec![copy_into_sql]).await?;
         }
 
         if let Some(add_columns) = add_columns {
@@ -669,7 +684,8 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 Ok(())
             };
             self.client
-                .execute_sql_sync(&vec![sql.clone()])
+                .execute_sql_sync(vec![sql.clone()])
+                .await
                 .or_else(check_column_exists)?;
             if !self.is_append_only {
                 let cdc_table_name = self.config.cdc_table.as_ref().ok_or_else(|| {
@@ -686,7 +702,8 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                         .collect::<Vec<_>>(),
                 );
                 self.client
-                    .execute_sql_sync(&vec![sql.clone()])
+                    .execute_sql_sync(vec![sql.clone()])
+                    .await
                     .or_else(check_column_exists)?;
                 self.all_column_names
                     .extend(add_columns.iter().map(|f| f.name.clone()));

@@ -42,34 +42,40 @@ impl JdbcJniClient {
         Ok(Self { jvm, jdbc_url })
     }
 
-    pub fn execute_sql_sync(&self, sql: &Vec<String>) -> anyhow::Result<()> {
-        execute_with_jni_env(self.jvm, |env| {
-            // get source handler by source id
-            let full_url = env.new_string(&self.jdbc_url).with_context(|| {
-                format!(
-                    "Failed to create jni string from source offset: {}.",
-                    self.jdbc_url
-                )
+    pub async fn execute_sql_sync(&self, sql: Vec<String>) -> anyhow::Result<()> {
+        let jvm = self.jvm;
+        let jdbc_url = self.jdbc_url.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            execute_with_jni_env(jvm, |env| {
+                // get source handler by source id
+                let full_url = env.new_string(&jdbc_url).with_context(|| {
+                    format!(
+                        "Failed to create jni string from source offset: {}.",
+                        jdbc_url
+                    )
+                })?;
+
+                let props =
+                    env.new_object_array((sql.len()) as i32, "java/lang/String", JObject::null())?;
+
+                for (i, sql) in sql.iter().enumerate() {
+                    let sql_j_str = env.new_string(sql)?;
+                    env.set_object_array_element(&props, i as i32, sql_j_str)?;
+                }
+
+                call_static_method!(
+                    env,
+                    { com.risingwave.runner.SnowflakeJDBCRunner },
+                    { void executeSql(String, String[]) },
+                    &full_url,
+                    &props
+                )?;
+                Ok(())
             })?;
-
-            let props =
-                env.new_object_array((sql.len()) as i32, "java/lang/String", JObject::null())?;
-
-            for (i, sql) in sql.iter().enumerate() {
-                let sql_j_str = env.new_string(sql)?;
-                env.set_object_array_element(&props, i as i32, sql_j_str)?;
-            }
-
-            call_static_method!(
-                env,
-                { com.risingwave.runner.SnowflakeJDBCRunner },
-                { void executeSql(String, String[]) },
-                &full_url,
-                &props
-            )?;
             Ok(())
-        })?;
-        Ok(())
+        })
+        .await
+        .context("Failed to execute SQL via JDBC JNI client")?
     }
 }
 

@@ -294,8 +294,8 @@ impl Sink for SnowflakeSink {
             )?
         {
             let client = SnowflakeJniClient::new(client, snowflake_task_ctx);
-            client.execute_create_table()?;
-            client.execute_create_pipe()?;
+            client.execute_create_table().await?;
+            client.execute_create_pipe().await?;
         }
 
         Ok(())
@@ -594,7 +594,7 @@ impl SnowflakeSinkCommitter {
 impl SinkCommitCoordinator for SnowflakeSinkCommitter {
     async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         if let Some(client) = &self.client {
-            client.execute_create_merge_into_task()?;
+            client.execute_create_merge_into_task().await?;
         }
         Ok(None)
     }
@@ -608,15 +608,17 @@ impl SinkCommitCoordinator for SnowflakeSinkCommitter {
         let client = self.client.as_mut().ok_or_else(|| {
             SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
         })?;
-        client.execute_flush_pipe()?;
+        client.execute_flush_pipe().await?;
 
         if let Some(add_columns) = add_columns {
-            client.execute_alter_add_columns(
-                &add_columns
-                    .iter()
-                    .map(|f| (f.name.clone(), f.data_type.to_string()))
-                    .collect::<Vec<_>>(),
-            )?;
+            client
+                .execute_alter_add_columns(
+                    &add_columns
+                        .iter()
+                        .map(|f| (f.name.clone(), f.data_type.to_string()))
+                        .collect::<Vec<_>>(),
+                )
+                .await?;
         }
         Ok(())
     }
@@ -624,9 +626,11 @@ impl SinkCommitCoordinator for SnowflakeSinkCommitter {
 
 impl Drop for SnowflakeSinkCommitter {
     fn drop(&mut self) {
-        if let Some(client) = &self.client {
-            client.execute_drop_task().ok();
-            client.execute_drop_pipe().ok();
+        if let Some(client) = self.client.take() {
+            tokio::spawn(async move {
+                client.execute_drop_task().await.ok();
+                client.execute_drop_pipe().await.ok();
+            });
         }
     }
 }
@@ -644,8 +648,11 @@ impl SnowflakeJniClient {
         }
     }
 
-    pub fn execute_alter_add_columns(&mut self, columns: &Vec<(String, String)>) -> Result<()> {
-        self.execute_drop_task()?;
+    pub async fn execute_alter_add_columns(
+        &mut self,
+        columns: &Vec<(String, String)>,
+    ) -> Result<()> {
+        self.execute_drop_task().await?;
         if let Some(names) = self.snowflake_task_context.all_column_names.as_mut() {
             names.extend(columns.iter().map(|(name, _)| name.clone()));
         }
@@ -657,7 +664,8 @@ impl SnowflakeJniClient {
                 columns,
             );
             self.jdbc_client
-                .execute_sql_sync(&vec![alter_add_column_cdc_table_sql])?;
+                .execute_sql_sync(vec![alter_add_column_cdc_table_sql])
+                .await?;
         }
 
         let alter_add_column_target_table_sql = build_alter_add_column_sql(
@@ -667,26 +675,31 @@ impl SnowflakeJniClient {
             columns,
         );
         self.jdbc_client
-            .execute_sql_sync(&vec![alter_add_column_target_table_sql])?;
+            .execute_sql_sync(vec![alter_add_column_target_table_sql])
+            .await?;
 
-        self.execute_create_merge_into_task()?;
+        self.execute_create_merge_into_task().await?;
         Ok(())
     }
 
-    pub fn execute_create_merge_into_task(&self) -> Result<()> {
+    pub async fn execute_create_merge_into_task(&self) -> Result<()> {
         if self.snowflake_task_context.task_name.is_some() {
             let create_task_sql = build_create_merge_into_task_sql(&self.snowflake_task_context);
             let start_task_sql = build_start_task_sql(&self.snowflake_task_context);
-            self.jdbc_client.execute_sql_sync(&vec![create_task_sql])?;
-            self.jdbc_client.execute_sql_sync(&vec![start_task_sql])?;
+            self.jdbc_client
+                .execute_sql_sync(vec![create_task_sql])
+                .await?;
+            self.jdbc_client
+                .execute_sql_sync(vec![start_task_sql])
+                .await?;
         }
         Ok(())
     }
 
-    pub fn execute_drop_task(&self) -> Result<()> {
+    pub async fn execute_drop_task(&self) -> Result<()> {
         if self.snowflake_task_context.task_name.is_some() {
             let sql = build_drop_task_sql(&self.snowflake_task_context);
-            if let Err(e) = self.jdbc_client.execute_sql_sync(&vec![sql]) {
+            if let Err(e) = self.jdbc_client.execute_sql_sync(vec![sql]).await {
                 tracing::error!(
                     "Failed to drop Snowflake sink task {:?}: {:?}",
                     self.snowflake_task_context.task_name,
@@ -702,7 +715,7 @@ impl SnowflakeJniClient {
         Ok(())
     }
 
-    pub fn execute_create_table(&self) -> Result<()> {
+    pub async fn execute_create_table(&self) -> Result<()> {
         // create target table
         let create_target_table_sql = build_create_table_sql(
             &self.snowflake_task_context.target_table_name,
@@ -712,7 +725,8 @@ impl SnowflakeJniClient {
             false,
         )?;
         self.jdbc_client
-            .execute_sql_sync(&vec![create_target_table_sql])?;
+            .execute_sql_sync(vec![create_target_table_sql])
+            .await?;
         if let Some(cdc_table_name) = &self.snowflake_task_context.cdc_table_name {
             let create_cdc_table_sql = build_create_table_sql(
                 cdc_table_name,
@@ -722,12 +736,13 @@ impl SnowflakeJniClient {
                 true,
             )?;
             self.jdbc_client
-                .execute_sql_sync(&vec![create_cdc_table_sql])?;
+                .execute_sql_sync(vec![create_cdc_table_sql])
+                .await?;
         }
         Ok(())
     }
 
-    pub fn execute_create_pipe(&self) -> Result<()> {
+    pub async fn execute_create_pipe(&self) -> Result<()> {
         if let Some(pipe_name) = &self.snowflake_task_context.pipe_name {
             let table_name =
                 if let Some(table_name) = self.snowflake_task_context.cdc_table_name.as_ref() {
@@ -745,12 +760,14 @@ impl SnowflakeJniClient {
                 pipe_name,
                 &self.snowflake_task_context.target_table_name,
             );
-            self.jdbc_client.execute_sql_sync(&vec![create_pipe_sql])?;
+            self.jdbc_client
+                .execute_sql_sync(vec![create_pipe_sql])
+                .await?;
         }
         Ok(())
     }
 
-    pub fn execute_drop_pipe(&self) -> Result<()> {
+    pub async fn execute_drop_pipe(&self) -> Result<()> {
         if let Some(pipe_name) = &self.snowflake_task_context.pipe_name {
             let drop_pipe_sql = build_drop_pipe_sql(
                 &self.snowflake_task_context.database,
@@ -759,7 +776,8 @@ impl SnowflakeJniClient {
             );
             if self
                 .jdbc_client
-                .execute_sql_sync(&vec![drop_pipe_sql])
+                .execute_sql_sync(vec![drop_pipe_sql])
+                .await
                 .is_err()
             {
                 tracing::warn!("Failed to drop Snowflake sink pipe {:?}", pipe_name);
@@ -770,14 +788,16 @@ impl SnowflakeJniClient {
         Ok(())
     }
 
-    pub fn execute_flush_pipe(&self) -> Result<()> {
+    pub async fn execute_flush_pipe(&self) -> Result<()> {
         if let Some(pipe_name) = &self.snowflake_task_context.pipe_name {
             let flush_pipe_sql = build_flush_pipe_sql(
                 &self.snowflake_task_context.database,
                 &self.snowflake_task_context.schema_name,
                 pipe_name,
             );
-            self.jdbc_client.execute_sql_sync(&vec![flush_pipe_sql])?;
+            self.jdbc_client
+                .execute_sql_sync(vec![flush_pipe_sql])
+                .await?;
         }
         Ok(())
     }
