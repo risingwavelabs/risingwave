@@ -143,11 +143,22 @@ impl std::str::FromStr for JsonbVal {
     type Err = <Value as std::str::FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        println!("parse josnb的时候s: {:?}", s);
+        Ok(Self(s.parse()?))
+    }
+}
+
+impl JsonbVal {
+    pub const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
+
+    /// Create a `JsonbVal` from a string, with special handling for Debezium's unavailable value placeholder.
+    /// Returns a Result to handle parsing errors properly.
+    pub fn from_debezium_unavailable_value(s: &str) -> Result<Self, serde_json::Error> {
         // Special handling for Debezium's unavailable value placeholder
-        if s == "__debezium_unavailable_value" {
+        if s.len() == Self::DEBEZIUM_UNAVAILABLE_VALUE.len()
+            && s == Self::DEBEZIUM_UNAVAILABLE_VALUE
+        {
             let mut builder = jsonbb::Builder::default();
-            builder.add_string("__debezium_unavailable_value");
+            builder.add_string(Self::DEBEZIUM_UNAVAILABLE_VALUE);
             return Ok(Self(builder.finish()));
         }
         Ok(Self(s.parse()?))

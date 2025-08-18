@@ -73,7 +73,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
     is_dummy_table: bool,
 
-    /// Indices of TOAST columns for PostgreSQL CDC tables. None means either non-CDC table or CDC table without TOAST columns.
+    /// Indices of TOAST-able columns for PostgreSQL CDC tables. None means either non-CDC table or CDC table without TOAST-able columns.
     toastable_column_indices: Option<Vec<usize>>,
 }
 
@@ -508,7 +508,6 @@ fn handle_toast_columns_for_cdc(
     for &toast_idx in toastable_indices {
         // Check if the new value is Debezium's unavailable value placeholder
         let is_unavailable = is_debezium_unavailable_value(&new_row.datum_at(toast_idx));
-
         if is_unavailable {
             // Replace with old row value if available
             if let Some(old_datum_ref) = old_row.datum_at(toast_idx) {

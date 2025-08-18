@@ -225,6 +225,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .map(|v| v == "connect")
             .unwrap_or(false)
             .then_some(TimeHandling::Milli);
+        // Only postgres-cdc connector may trigger TOAST.
+        let handle_toast_columns: bool = self
+            .properties
+            .get("connector")
+            .map(|v| v == "postgres-cdc")
+            .unwrap_or(false);
         // Make sure to use mapping_message after transform_upstream.
         let mut upstream = transform_upstream(
             upstream,
@@ -232,6 +238,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            handle_toast_columns,
         )
         .boxed();
         loop {
@@ -824,6 +831,7 @@ pub async fn transform_upstream(
     timestamp_handling: Option<TimestampHandling>,
     timestamptz_handling: Option<TimestamptzHandling>,
     time_handling: Option<TimeHandling>,
+    handle_toast_columns: bool,
 ) {
     let props = SpecificParserConfig {
         encoding_config: EncodingProperties::Json(JsonProperties {
@@ -831,6 +839,7 @@ pub async fn transform_upstream(
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            handle_toast_columns,
         }),
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
@@ -996,7 +1005,7 @@ mod tests {
             ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
         ];
 
-        let parsed_stream = transform_upstream(upstream, columns, None, None, None);
+        let parsed_stream = transform_upstream(upstream, columns, None, None, None, false);
         pin_mut!(parsed_stream);
         // the output chunk must contain the offset column
         if let Some(message) = parsed_stream.next().await {
