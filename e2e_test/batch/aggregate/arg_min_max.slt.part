@@ -95,18 +95,23 @@ statement ok
 drop table window_test;
 
 # Error cases
-statement error
+statement error arg_min requires exactly 2 arguments, got 0
 select arg_min();
 
-statement error
+statement error arg_max requires exactly 2 arguments, got 0
 select arg_max();
 
-statement error
+statement error arg_min requires exactly 2 arguments, got 0
 select arg_min(*);
 
-statement error
+statement error arg_max requires exactly 2 arguments, got 0
 select arg_max(*);
 
+statement error arg_min requires exactly 2 arguments, got 1
+select arg_min(1);
+
+statement error arg_max requires exactly 2 arguments, got 1
+select arg_max(1);
 
 # Corner Cases
 
@@ -130,10 +135,10 @@ create table complex_types (id int, arr int[], obj jsonb);
 statement ok
 insert into complex_types values (1, array[1,2,3], '{"key": "value"}'), (2, array[4,5,6], '{"key2": "value2"}');
 
-statement error
+statement error arg_min does not support struct, array, map, vector, jsonb for comparison argument, got integer\[\]
 select arg_min(id, arr) from complex_types;
 
-statement error
+statement error arg_max does not support struct, array, map, vector, jsonb for comparison argument, got jsonb
 select arg_max(id, obj) from complex_types;
 
 statement ok

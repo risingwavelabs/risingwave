@@ -777,11 +777,7 @@ impl LogicalAggBuilder {
                 if agg_call.args.len() != 2 {
                     bail!(format!(
                         "{} requires exactly 2 arguments, got {}",
-                        if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) {
-                            "arg_min"
-                        } else {
-                            "arg_max"
-                        },
+                        agg_call.agg_type.to_string(),
                         agg_call.args.len()
                     ));
                 }
@@ -795,11 +791,7 @@ impl LogicalAggBuilder {
                     | DataType::Jsonb => {
                         bail!(format!(
                             "{} does not support struct, array, map, vector, jsonb for comparison argument, got {}",
-                            if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) {
-                                "arg_min"
-                            } else {
-                                "arg_max"
-                            },
+                            agg_call.agg_type.to_string(),
                             comparison_arg_type
                         ));
                     }
