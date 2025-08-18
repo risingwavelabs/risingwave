@@ -29,12 +29,12 @@ use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_expr::codegen::try_stream;
-use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
     EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::{can_concat, can_concat_debug};
 use tokio::sync::oneshot::{Receiver, Sender, channel};
 
 use super::{HummockError, HummockResult, SstableStoreRef};
@@ -140,6 +140,49 @@ pub fn prune_nonoverlapping_ssts<'a>(
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
         _ => ssts.len().saturating_sub(1),
     };
+
+    if start_table_idx > end_table_idx {
+        let (can_concat, first_invalid_idx) = can_concat_debug(ssts);
+
+        if !can_concat {
+            if first_invalid_idx + 1 < ssts.len() {
+                tracing::error!(
+                    event = "prune_nonoverlapping_ssts_failed",
+                    reason = "key_range_overlap",
+                    sst_count = ssts.len(),
+                    table_id = table_id,
+                    first_invalid_idx = first_invalid_idx,
+                    left = ?ssts[first_invalid_idx],
+                    right = ?ssts[first_invalid_idx + 1],
+                    start_table_idx = start_table_idx,
+                    end_table_idx = end_table_idx,
+                    user_key_range = ?user_key_range,
+                );
+            } else {
+                tracing::error!(
+                    event = "prune_nonoverlapping_ssts_failed",
+                    reason = "key_range_overlap",
+                    sst_count = ssts.len(),
+                    table_id = table_id,
+                    first_invalid_idx = first_invalid_idx,
+                    start_table_idx = start_table_idx,
+                    end_table_idx = end_table_idx,
+                    user_key_range = ?user_key_range,
+                );
+            }
+        } else {
+            tracing::error!(
+                event = "prune_nonoverlapping_ssts_failed",
+                reason = "invalid_indices",
+                sst_count = ssts.len(),
+                table_id = table_id,
+                start_table_idx = start_table_idx,
+                end_table_idx = end_table_idx,
+                user_key_range = ?user_key_range,
+            );
+        }
+    }
+
     ssts[start_table_idx..=end_table_idx]
         .iter()
         .filter(move |sst| sst.table_ids.binary_search(&table_id).is_ok())

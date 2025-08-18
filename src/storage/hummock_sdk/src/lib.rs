@@ -530,6 +530,21 @@ pub fn can_concat(ssts: &[impl Borrow<SstableInfo>]) -> bool {
     true
 }
 
+pub fn can_concat_debug(ssts: &[impl Borrow<SstableInfo>]) -> (bool, usize) {
+    let len = ssts.len();
+    for i in 1..len {
+        if ssts[i - 1]
+            .borrow()
+            .key_range
+            .compare_right_with(&ssts[i].borrow().key_range.left)
+            != Ordering::Less
+        {
+            return (false, i - 1);
+        }
+    }
+    (true, 0)
+}
+
 pub fn full_key_can_concat(ssts: &[SstableInfo]) -> bool {
     let len = ssts.len();
     for i in 1..len {
