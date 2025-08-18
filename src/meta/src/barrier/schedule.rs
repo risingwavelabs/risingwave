@@ -896,7 +896,7 @@ mod tests {
         // the first barrier should come from database 1 (50ms interval)
         let start_time = Instant::now();
         let barrier = periodic.next_barrier(&context).await;
-        let elapsed = start_time.elapsed();
+        let _elapsed = start_time.elapsed();
 
         // Verify the barrier properties
         assert_eq!(barrier.database_id, DatabaseId::from(1));
