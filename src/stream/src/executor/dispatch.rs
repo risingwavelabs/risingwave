@@ -157,7 +157,7 @@ impl DispatchExecutorInner {
         macro_rules! await_with_metrics {
             ($fut:expr, $metrics:expr, $interval:expr, $start_time:expr) => {{
                 // First tick completes immediately: https://docs.rs/tokio/1.47.1/tokio/time/fn.interval.html.
-                $interval.tick().await;
+                $interval.tick().now_or_never().expect("interval tick should immediately resolve");
 
                 loop {
                     tokio::select! {
@@ -235,10 +235,6 @@ impl DispatchExecutorInner {
                         let mut interval = tokio::time::interval(Duration::from_secs(15));
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
-                        interval
-                            .tick()
-                            .now_or_never()
-                            .expect("interval tick should immediately resolve");
                         let fut = dispatcher_output.dispatch_data(chunk.clone());
                         tokio::pin!(fut);
                         await_with_metrics!(fut, metrics, interval, start_time)
