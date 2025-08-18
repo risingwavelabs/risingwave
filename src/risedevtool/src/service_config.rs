@@ -425,7 +425,6 @@ pub struct LakekeeperConfig {
 
     pub port: u16,
     pub address: String,
-    pub listen_address: String,
 
     pub user_managed: bool,
     pub persist_data: bool,

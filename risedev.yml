@@ -1447,11 +1447,8 @@ template:
     # Id to be picked-up by services
     id: lakekeeper-${port}
 
-    # Advertise address of Lakekeeper
+    # Address of Lakekeeper
     address: "127.0.0.1"
-
-    # Listen address of Lakekeeper
-    listen-address: ${address}
 
     # Listen port of Lakekeeper
     port: 8181

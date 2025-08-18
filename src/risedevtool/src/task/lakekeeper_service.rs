@@ -43,10 +43,15 @@ impl LakekeeperService {
         Ok(Command::new(self.lakekeeper_path()?))
     }
 
+    fn base_uri(&self) -> String {
+        format!("http://{}:{}", &self.config.address, self.config.port)
+    }
+
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &LakekeeperConfig) -> Result<()> {
         // Set basic environment variables
-        cmd.env("LAKEKEEPER__BIND_ADDRESS", &config.listen_address)
+        let base_uri = format!("http://{}:{}", &config.address, config.port);
+        cmd.env("LAKEKEEPER__BASE_URI", &base_uri)
             .env("LAKEKEEPER__LISTEN_PORT", config.port.to_string())
             .env("LAKEKEEPER__PG_ENCRYPTION_KEY", &config.encryption_key);
 
@@ -60,26 +65,6 @@ impl LakekeeperService {
             );
             cmd.env("LAKEKEEPER__PG_DATABASE_URL_READ", &database_url)
                 .env("LAKEKEEPER__PG_DATABASE_URL_WRITE", &database_url);
-        }
-
-        // Configure S3-compatible storage if MinIO is provided
-        if let Some(minio_configs) = &config.provide_minio
-            && let Some(minio_config) = minio_configs.first()
-        {
-            cmd.env(
-                "LAKEKEEPER__STORAGE_S3_ENDPOINT",
-                format!("http://{}:{}", minio_config.address, minio_config.port),
-            )
-            .env(
-                "LAKEKEEPER__STORAGE_S3_ACCESS_KEY_ID",
-                &minio_config.root_user,
-            )
-            .env(
-                "LAKEKEEPER__STORAGE_S3_SECRET_ACCESS_KEY",
-                &minio_config.root_password,
-            )
-            .env("LAKEKEEPER__STORAGE_S3_REGION", "us-east-1")
-            .env("LAKEKEEPER__STORAGE_S3_PATH_STYLE_ACCESS", "true");
         }
 
         Ok(())
@@ -199,10 +184,7 @@ impl LakekeeperService {
             .build()?;
 
         let bootstrap_json = bootstrap_config.to_string();
-        let lakekeeper_url = format!(
-            "http://{}:{}/management/v1/bootstrap",
-            self.config.listen_address, self.config.port
-        );
+        let lakekeeper_url = format!("{}/management/v1/bootstrap", self.base_uri());
 
         rt.block_on(async move {
             use tokio::time::{sleep, Duration};
@@ -324,10 +306,7 @@ impl LakekeeperService {
             .build()?;
 
         let warehouse_json = warehouse_config.to_string();
-        let lakekeeper_url = format!(
-            "http://{}:{}/management/v1/warehouse",
-            self.config.listen_address, self.config.port
-        );
+        let lakekeeper_url = format!("{}/management/v1/warehouse", self.base_uri());
 
         rt.block_on(async move {
             use tokio::time::{Duration, sleep};
