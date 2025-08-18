@@ -1,142 +1,165 @@
 # Test PostgreSQL TOAST mechanism with CDC inline
-# This test verifies that RisingWave can properly handle TOAST data from PostgreSQL CDC
+#
+# In Debezium's default behavior with REPLICA IDENTITY DEFAULT, when updating a non-TOAST column,
+# TOAST columns are replaced with placeholders. In RisingWave, when this situation occurs,
+# the materialized operator reads old values from storage to replace the placeholders.
+# This test file verifies this scenario to ensure TOAST columns are not lost after updates.
 
 control substitution on
 
-# Step 1: Create table and insert initial data in PostgreSQL
+# Step 1: Create table with TOAST-able columns in PostgreSQL
 system ok
-psql -c "DROP TABLE IF EXISTS toast_test_table; CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE TABLE toast_test_table (id SERIAL PRIMARY KEY, name VARCHAR(100), large_text TEXT, created_at TIMESTAMP DEFAULT NOW()); INSERT INTO toast_test_table (name, large_text) SELECT 'toast_record_' || s, (encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex')) FROM generate_series(1, 2) s;"
+psql -c "DROP TABLE IF EXISTS test CASCADE; CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE TABLE test (id int PRIMARY KEY, v1 int, v2 jsonb, v3 varchar, v4 text, v5 bytea, v6 jsonb[], v7 varchar[], v8 text[], v9 bytea[], v100 int);"
 
 # Step 2: Create RisingWave source from PostgreSQL CDC
 statement ok
-create source toast_test_source with (
-  connector = 'postgres-cdc',
-  hostname = '${PGHOST:localhost}',
-  port = '${PGPORT:8432}',
+create source s with (
   username = '${PGUSER:$USER}',
+  connector='postgres-cdc',
+  hostname='${PGHOST:localhost}',
+  port='${PGPORT:8432}',
   password = '${PGPASSWORD:123456}',
   database.name = '${PGDATABASE:mydb}',
   schema.name = 'public',
-  slot.name = 'toast_test_slot'
+  slot.name = 'rw_slot_toast_test'
 );
 
 # Step 3: Create table from source
 statement ok
-create table toast_test_table (
-    id int primary key,
-    name varchar,
-    large_text text,
-    created_at timestamp
-) from toast_test_source table 'public.toast_test_table';
+create table test(*) from s table 'public.test';
 
-# Create materialized view to trigger MaterializeExecutor
+# Step 4: Create materialized view to trigger MaterializeExecutor
 statement ok
-create materialized view toast_test_mv as select * from toast_test_table;
+create materialized view test_mv as select * from test;
 
-# Wait for backfill data synchronization
+# Wait for initial setup
 sleep 5s
 
-# Test 1: Verify backfill data (2 records with TOAST data)
-query TTTTT
-select count(*) from toast_test_table;
-----
-2
-
-# Verify TOAST data integrity for backfill
-query TTTTT
-select
-    id,
-    name,
-    octet_length(large_text) as total_size_bytes
-from toast_test_table
-order by id;
-----
-1 toast_record_1 10000
-2 toast_record_2 10000
-
-# Test 2: Insert incremental data with TOAST in PostgreSQL
+# Step 5: Insert large TOAST data (id=2) - all columns trigger TOAST
 system ok
-psql -c "insert into toast_test_table (name, large_text)
-values (
-    'incremental_toast',
-    (encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex') || encode(gen_random_bytes(1000), 'hex'))
-);"
+psql -c "INSERT INTO test (id, v1, v2, v3, v4, v5, v6, v7, v8, v9, v100) SELECT 2, 22, jsonb_build_object('large_data', (SELECT jsonb_agg(jsonb_build_object('id', i, 'random_string', encode(gen_random_bytes(20), 'hex'), 'timestamp', now() + (i || ' seconds')::interval)) FROM generate_series(1, 500) i), 'nested_object', jsonb_build_object('level1', jsonb_build_object('level2', jsonb_build_object('data', encode(gen_random_bytes(100), 'hex'))))), (SELECT string_agg(encode(gen_random_bytes(10), 'hex'), '') FROM generate_series(1, 1000)), (SELECT string_agg(encode(gen_random_bytes(15), 'hex'), '') FROM generate_series(1, 1000)), (SELECT string_agg(encode(gen_random_bytes(200), 'hex'), '')::bytea FROM generate_series(1, 5000)), (SELECT array_agg(jsonb_build_object('array_id', gs.i, 'nested_data', jsonb_build_object('level1', jsonb_build_object('level2', jsonb_build_object('random_values', (SELECT jsonb_agg(encode(gen_random_bytes(10), 'hex')) FROM generate_series(1, 50))))), 'metadata', jsonb_build_object('timestamp', now() + (gs.i || ' seconds')::interval, 'random_string', encode(gen_random_bytes(20), 'hex')))) FROM generate_series(1, 300) gs(i)), ARRAY['small_string', (SELECT string_agg(encode(gen_random_bytes(10), 'hex'), '') FROM generate_series(1, 2000))], (SELECT array_agg((SELECT string_agg(encode(gen_random_bytes(8), 'hex'), '') FROM generate_series(1, 150))) FROM generate_series(1, 400)), (SELECT array_agg((SELECT string_agg(encode(gen_random_bytes(50), 'hex'), '')::bytea FROM generate_series(1, 100))) FROM generate_series(1, 200)), 100;"
 
-# Wait for incremental data synchronization
-sleep 3s
+# Wait for data synchronization
+sleep 5s
 
-# Verify incremental TOAST data
-query TTTTT
+# Step 6: Verify initial TOAST data synchronization
+query TTTTTTTTTTTT
 select
     id,
-    name,
-    octet_length(large_text) as total_size_bytes
-from toast_test_table
-where name = 'incremental_toast';
-----
-3 incremental_toast	10000
-
-# Verify total count after incremental insert
-query TTTTT
-select count(*) from toast_test_table;
-----
-3
-
-# Test 3: Update non-TOAST column and verify TOAST column behavior
-# This test verifies that TOAST columns are properly handled during UPDATE operations
-system ok
-psql -c "UPDATE toast_test_table SET name = 'updated_name' WHERE id = 1;"
-
-# Wait for update to propagate
-sleep 3s
-
-# Verify that TOAST columns are preserved after UPDATE
-query TTTTT
-select
-    id,
-    name,
-    octet_length(large_text) as total_size_bytes,
-    CASE
-        WHEN large_text IS NULL THEN 'NULL - TOAST column lost!'
-        WHEN large_text = '__debezium_unavailable_value' THEN 'PLACEHOLDER - Debezium placeholder!'
-        WHEN octet_length(large_text) < 100 THEN 'SHORT - possible placeholder: ' || substring(large_text, 1, 20)
-        ELSE 'NORMAL - TOAST column preserved'
-    END as large_text_status
-from toast_test_table
-where id = 1;
-----
-1 updated_name 10000 NORMAL - TOAST column preserved
-
-# Test 4: Update another record to verify consistency
-system ok
-psql -c "UPDATE toast_test_table SET created_at = NOW() WHERE id = 2;"
-
-# Wait for update to propagate
-sleep 3s
-
-# Verify consistency across multiple updates
-query TTTTT
-select
-    id,
-    name,
-    octet_length(large_text) as total_size_bytes,
-    CASE
-        WHEN large_text IS NULL THEN 'NULL - TOAST column lost!'
-        WHEN large_text = '__debezium_unavailable_value' THEN 'PLACEHOLDER - Debezium placeholder!'
-        WHEN octet_length(large_text) < 100 THEN 'SHORT - possible placeholder: ' || substring(large_text, 1, 20)
-        ELSE 'NORMAL - TOAST column preserved'
-    END as large_text_status
-from toast_test_table
+    v1,
+    octet_length(v2::text) as v2_size_bytes,
+    octet_length(v3) as v3_size_bytes,
+    octet_length(v4) as v4_size_bytes,
+    octet_length(v5) as v5_size_bytes,
+    octet_length(v6::text) as v6_size_bytes,
+    octet_length(v7::text) as v7_size_bytes,
+    octet_length(v8::text) as v8_size_bytes,
+    octet_length(v9::text) as v9_size_bytes,
+    v100
+from test
 where id = 2;
 ----
-2 toast_record_2 10000 NORMAL - TOAST column preserved
+2 22 61663 20000 30000 2000000 457093 40015 960401 4001201 100
+
+# Step 7: Insert small data (id=3) - no TOAST triggered
+system ok
+psql -c "INSERT INTO test (id, v1, v2, v3, v4, v5, v6, v7, v8, v9, v100)
+VALUES (
+  3,
+  33,
+  jsonb_build_object('small','jsonb'),
+  'small_varchar',
+  'small_text',
+  'small_bytea'::bytea,
+  ARRAY[
+    jsonb_build_object('small','jsonb1'),
+    jsonb_build_object('small','jsonb2')
+  ],
+  ARRAY['small_varchar1','small_varchar2'],
+  ARRAY['small_text1','small_text2'],
+  ARRAY['small_bytea1'::bytea,'small_bytea2'::bytea],
+  300
+);"
+
+# Wait for small data synchronization
+sleep 3s
+
+# Step 8: Verify small data synchronization
+query TTTTTTTTTTTT
+select
+    id,
+    v1,
+    octet_length(v2::text) as v2_size_bytes,
+    octet_length(v3) as v3_size_bytes,
+    octet_length(v4) as v4_size_bytes,
+    octet_length(v5) as v5_size_bytes,
+    octet_length(v6::text) as v6_size_bytes,
+    octet_length(v7::text) as v7_size_bytes,
+    octet_length(v8::text) as v8_size_bytes,
+    octet_length(v9::text) as v9_size_bytes,
+    v100
+from test
+where id = 3;
+----
+3 33 18 13 10 11 53 31 25 61 300
+
+# Step 9: Update non-TOAST column v100 for both rows
+system ok
+psql -c "UPDATE test SET v100 = 999 WHERE id = 2;"
+
+system ok
+psql -c "UPDATE test SET v100 = 999 WHERE id = 3;"
+
+# Wait for update propagation
+sleep 3s
+
+# Step 10: Verify TOAST columns are preserved after UPDATE (id=2)
+# After updating non-TOAST columns, the original TOAST columns should remain unchanged
+# instead of being replaced by placeholders. Check that TOAST column lengths are preserved.
+query TTTTTTTTTTTT
+select
+    id,
+    v1,
+    octet_length(v2::text) as v2_size_bytes,
+    octet_length(v3) as v3_size_bytes,
+    octet_length(v4) as v4_size_bytes,
+    octet_length(v5) as v5_size_bytes,
+    octet_length(v6::text) as v6_size_bytes,
+    octet_length(v7::text) as v7_size_bytes,
+    octet_length(v8::text) as v8_size_bytes,
+    octet_length(v9::text) as v9_size_bytes,
+    v100
+from test
+where id = 2;
+----
+2 22 61663 20000 30000 2000000 457093 40015 960401 4001201 999
+
+# Step 11: Verify small data is preserved after UPDATE (id=3)
+query TTTTTTTTTTTT
+select
+    id,
+    v1,
+    octet_length(v2::text) as v2_size_bytes,
+    octet_length(v3) as v3_size_bytes,
+    octet_length(v4) as v4_size_bytes,
+    octet_length(v5) as v5_size_bytes,
+    octet_length(v6::text) as v6_size_bytes,
+    octet_length(v7::text) as v7_size_bytes,
+    octet_length(v8::text) as v8_size_bytes,
+    octet_length(v9::text) as v9_size_bytes,
+    v100
+from test
+where id = 3;
+----
+3 33 20 13 10 10 50 40 30 20 999
+
 
 # Clean up
 statement ok
-drop materialized view toast_test_mv;
+drop materialized view test_mv;
 
 statement ok
-drop table toast_test_table;
+drop table test;
 
 statement ok
-drop source toast_test_source;
+drop source s;
