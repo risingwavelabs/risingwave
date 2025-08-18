@@ -514,7 +514,7 @@ impl HummockStorageReadSnapshot {
                         id: imm.batch_id(),
                         epochs: imm.epochs(),
                     }
-                };
+                }
                 #[derive(Debug)]
                 struct SstInfo<'a> {
                     id: u64,
@@ -524,12 +524,12 @@ impl HummockStorageReadSnapshot {
                 }
                 fn get_sst_info(sst: &SstableInfo) -> SstInfo<'_> {
                     SstInfo {
-                        id: sst.sst_id,
+                        id: sst.sst_id.inner(),
                         min_epoch: sst.min_epoch,
                         max_epoch: sst.max_epoch,
                         table_ids: &sst.table_ids,
                     }
-                };
+                }
                 let table_committed_epoch = info.map(|info| info.committed_epoch);
                 let imm_infos = imms.iter().map(&get_imm_info).collect_vec();
                 let sst_infos = ssts.iter().map(&get_sst_info).collect_vec();
@@ -537,7 +537,8 @@ impl HummockStorageReadSnapshot {
                 let staging = read_version.staging();
                 #[derive(Debug)]
                 struct ReadVersionInfo<'a> {
-                    imm_infos: Vec<ImmInfo<'a>>,
+                    uploading_imm_infos: Vec<ImmInfo<'a>>,
+                    pending_imm_infos: Vec<ImmInfo<'a>>,
                     sst_infos: Vec<(
                         Vec<SstInfo<'a>>,
                         &'a HashMap<LocalInstanceId, Vec<ImmId>>,
@@ -545,7 +546,12 @@ impl HummockStorageReadSnapshot {
                     )>,
                 }
                 let read_version_info = ReadVersionInfo {
-                    imm_infos: staging.imm.iter().map(&get_imm_info).collect_vec(),
+                    uploading_imm_infos: staging
+                        .uploading_imms
+                        .iter()
+                        .map(&get_imm_info)
+                        .collect_vec(),
+                    pending_imm_infos: staging.pending_imms.iter().map(&get_imm_info).collect_vec(),
                     sst_infos: staging
                         .sst
                         .iter()
