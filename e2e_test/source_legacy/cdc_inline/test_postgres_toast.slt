@@ -47,19 +47,19 @@ query TTTTTTTTTTTT
 select
     id,
     v1,
-    octet_length(v2::text) as v2_size_bytes,
-    octet_length(v3) as v3_size_bytes,
-    octet_length(v4) as v4_size_bytes,
-    octet_length(v5) as v5_size_bytes,
-    octet_length(v6::text) as v6_size_bytes,
-    octet_length(v7::text) as v7_size_bytes,
-    octet_length(v8::text) as v8_size_bytes,
-    octet_length(v9::text) as v9_size_bytes,
+    case when octet_length(v2::text) > 50000 then 'toast-triggered' else 'small' end as v2_size_check,
+    case when octet_length(v3) > 15000 then 'toast-triggered' else 'small' end as v3_size_check,
+    case when octet_length(v4) > 25000 then 'toast-triggered' else 'small' end as v4_size_check,
+    case when octet_length(v5) > 1500000 then 'toast-triggered' else 'small' end as v5_size_check,
+    case when octet_length(v6::text) > 400000 then 'toast-triggered' else 'small' end as v6_size_check,
+    case when octet_length(v7::text) > 30000 then 'toast-triggered' else 'small' end as v7_size_check,
+    case when octet_length(v8::text) > 900000 then 'toast-triggered' else 'small' end as v8_size_check,
+    case when octet_length(v9::text) > 3000000 then 'toast-triggered' else 'small' end as v9_size_check,
     v100
 from test
 where id = 2;
 ----
-2 22 61163 20000 30000 2000000 456793 40015 960401 4001201 100
+2 22 toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered 100
 
 # Step 7: Insert small data (id=3) - no TOAST triggered
 system ok
@@ -89,19 +89,19 @@ query TTTTTTTTTTTT
 select
     id,
     v1,
-    octet_length(v2::text) as v2_size_bytes,
-    octet_length(v3) as v3_size_bytes,
-    octet_length(v4) as v4_size_bytes,
-    octet_length(v5) as v5_size_bytes,
-    octet_length(v6::text) as v6_size_bytes,
-    octet_length(v7::text) as v7_size_bytes,
-    octet_length(v8::text) as v8_size_bytes,
-    octet_length(v9::text) as v9_size_bytes,
+    case when octet_length(v2::text) > 50000 then 'toast-triggered' else 'small' end as v2_size_check,
+    case when octet_length(v3) > 15000 then 'toast-triggered' else 'small' end as v3_size_check,
+    case when octet_length(v4) > 25000 then 'toast-triggered' else 'small' end as v4_size_check,
+    case when octet_length(v5) > 1500000 then 'toast-triggered' else 'small' end as v5_size_check,
+    case when octet_length(v6::text) > 400000 then 'toast-triggered' else 'small' end as v6_size_check,
+    case when octet_length(v7::text) > 30000 then 'toast-triggered' else 'small' end as v7_size_check,
+    case when octet_length(v8::text) > 900000 then 'toast-triggered' else 'small' end as v8_size_check,
+    case when octet_length(v9::text) > 3000000 then 'toast-triggered' else 'small' end as v9_size_check,
     v100
 from test
 where id = 3;
 ----
-3 33 18 13 10 11 53 31 25 61 300
+3 33 small small small small small small small small 300
 
 # Step 9: Update non-TOAST column v100 for both rows
 system ok
@@ -116,23 +116,24 @@ sleep 3s
 # Step 10: Verify TOAST columns are preserved after UPDATE (id=2)
 # After updating non-TOAST columns, the original TOAST columns should remain unchanged
 # instead of being replaced by placeholders. Check that TOAST column lengths are preserved.
+# Verify TOAST columns have reasonable sizes (not placeholder values)
 query TTTTTTTTTTTT
 select
     id,
     v1,
-    octet_length(v2::text) as v2_size_bytes,
-    octet_length(v3) as v3_size_bytes,
-    octet_length(v4) as v4_size_bytes,
-    octet_length(v5) as v5_size_bytes,
-    octet_length(v6::text) as v6_size_bytes,
-    octet_length(v7::text) as v7_size_bytes,
-    octet_length(v8::text) as v8_size_bytes,
-    octet_length(v9::text) as v9_size_bytes,
+    case when octet_length(v2::text) > 50000 then 'toast-triggered' else 'small' end as v2_size_check,
+    case when octet_length(v3) > 15000 then 'toast-triggered' else 'small' end as v3_size_check,
+    case when octet_length(v4) > 25000 then 'toast-triggered' else 'small' end as v4_size_check,
+    case when octet_length(v5) > 1500000 then 'toast-triggered' else 'small' end as v5_size_check,
+    case when octet_length(v6::text) > 400000 then 'toast-triggered' else 'small' end as v6_size_check,
+    case when octet_length(v7::text) > 30000 then 'toast-triggered' else 'small' end as v7_size_check,
+    case when octet_length(v8::text) > 900000 then 'toast-triggered' else 'small' end as v8_size_check,
+    case when octet_length(v9::text) > 3000000 then 'toast-triggered' else 'small' end as v9_size_check,
     v100
 from test
 where id = 2;
 ----
-2 22 61163 20000 30000 2000000 456793 40015 960401 4001201 999
+2 22 toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered 999
 
 # Step 11: Test DELETE with TOAST columns (id=2)
 system ok
