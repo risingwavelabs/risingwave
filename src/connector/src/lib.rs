@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 #![feature(array_chunks)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
