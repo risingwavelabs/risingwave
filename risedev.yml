@@ -367,6 +367,8 @@ profile:
         compactor-mode: "dedicated-iceberg"
         port: 6661
         exporter-port: 1261
+      - use: lakekeeper
+        port: 8181
 
   meta-1cn-1fe-sqlite-with-recovery:
     config-path: src/config/ci-recovery.toml
