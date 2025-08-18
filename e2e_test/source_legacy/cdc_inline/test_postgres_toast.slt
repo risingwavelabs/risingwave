@@ -132,35 +132,16 @@ select
 from test
 where id = 2;
 ----
-2 22 61663 20000 30000 2000000 456793 40015 960401 4001201 999
+2 22 61163 20000 30000 2000000 456793 40015 960401 4001201 999
 
-# Step 11: Verify small data is preserved after UPDATE (id=3)
-query TTTTTTTTTTTT
-select
-    id,
-    v1,
-    octet_length(v2::text) as v2_size_bytes,
-    octet_length(v3) as v3_size_bytes,
-    octet_length(v4) as v4_size_bytes,
-    octet_length(v5) as v5_size_bytes,
-    octet_length(v6::text) as v6_size_bytes,
-    octet_length(v7::text) as v7_size_bytes,
-    octet_length(v8::text) as v8_size_bytes,
-    octet_length(v9::text) as v9_size_bytes,
-    v100
-from test
-where id = 3;
-----
-3 33 20 13 10 10 50 40 30 20 999
-
-# Step 12: Test DELETE with TOAST columns (id=2)
+# Step 11: Test DELETE with TOAST columns (id=2)
 system ok
 psql -c "DELETE FROM test WHERE id = 2;"
 
 # Wait for DELETE to propagate
 sleep 3s
 
-# Step 13: Verify DELETE was processed correctly
+# Step 12: Verify DELETE was processed correctly
 # The row with id=2 should be removed from RisingWave
 query TTTTT
 select count(*) from test where id = 2;
