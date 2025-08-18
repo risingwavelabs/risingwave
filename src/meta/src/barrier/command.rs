@@ -848,6 +848,7 @@ impl Command {
 
             Command::DropStreamingJobs { actors, .. } => Some(Mutation::Stop(StopMutation {
                 actors: actors.clone(),
+                dropped_upstream_sinks: Default::default(),
             })),
 
             Command::CreateStreamingJob {
@@ -906,6 +907,7 @@ impl Command {
                     actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
                         cdc_table_snapshot_split_assignment.clone(),
                     ),
+                    new_upstream_sinks: Default::default(),
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -1184,6 +1186,7 @@ impl Command {
                 }],
                 backfill_nodes_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: Default::default(),
+                new_upstream_sinks: Default::default(),
             })),
             Command::DropSubscription {
                 upstream_mv_table_id,
