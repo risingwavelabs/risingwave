@@ -403,7 +403,10 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
-                    with_version_columns.first().map(|col| col.real_value()),
+                    with_version_columns
+                        .iter()
+                        .map(|col| col.real_value())
+                        .collect(),
                     engine,
                 )
                 .await;
