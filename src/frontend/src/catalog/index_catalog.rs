@@ -57,8 +57,14 @@ pub struct TableIndex {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct VectorIndex {
+    pub index_table: Arc<TableCatalog>,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum IndexType {
     Table(Arc<TableIndex>),
+    Vector(Arc<VectorIndex>),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -138,6 +144,12 @@ impl IndexCatalog {
                     function_mapping,
                 }))
             }
+            TableType::VectorIndex => {
+                assert_eq!(index_prost.index_columns_len, 1);
+                IndexType::Vector(Arc::new(VectorIndex {
+                    index_table: index_table.clone(),
+                }))
+            }
             TableType::Table | TableType::MaterializedView | TableType::Internal => {
                 unreachable!()
             }
@@ -203,6 +215,7 @@ impl IndexCatalog {
     pub fn index_table(&self) -> &Arc<TableCatalog> {
         match &self.index_type {
             IndexType::Table(index) => &index.index_table,
+            IndexType::Vector(index) => &index.index_table,
         }
     }
 
@@ -210,6 +223,17 @@ impl IndexCatalog {
     pub fn get_column_properties(&self, column_idx: usize) -> Option<PbIndexColumnProperties> {
         match &self.index_type {
             IndexType::Table(index) => index.index_column_properties.get(column_idx).cloned(),
+            IndexType::Vector { .. } => {
+                if column_idx == 0 {
+                    // return with the default value defined in [https://www.postgresql.org/docs/current/sql-createindex.html]
+                    Some(PbIndexColumnProperties {
+                        is_desc: false,
+                        nulls_first: false,
+                    })
+                } else {
+                    None
+                }
+            }
         }
     }
 

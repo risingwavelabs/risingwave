@@ -42,19 +42,19 @@ import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
-import api from "../lib/api/api"
 import useFetch from "../lib/api/fetch"
 import {
   getFragmentsByJobId,
   getRelationIdInfos,
   getStreamingJobs,
 } from "../lib/api/streaming"
+import { createStreamingStatsRefresh } from "../lib/api/streamingStats"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import {
+  ChannelDeltaStats,
   ChannelStats,
   FragmentStats,
-  GetStreamingStatsResponse,
 } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
@@ -73,17 +73,6 @@ export interface PlanNodeDatum {
   operatorId: string | number
   node: StreamNode | DispatcherNode
   actorIds?: string[]
-}
-
-// Derived stats from ChannelStats, majorly by dividing the stats by duration.
-export interface ChannelStatsDerived {
-  actorCount: number
-  /** Rate of blocking duration of all actors */
-  backPressure: number
-  /** Rate of received row count of all actors */
-  recvThroughput: number
-  /** Rate of sent row count of all actors */
-  sendThroughput: number
 }
 
 function buildPlanNodeDependency(
@@ -209,15 +198,15 @@ export class ChannelStatsSnapshot {
     this.time = time
   }
 
-  getRate(initial: ChannelStatsSnapshot): Map<string, ChannelStatsDerived> {
-    const result = new Map<string, ChannelStatsDerived>()
+  getRate(initial: ChannelStatsSnapshot): Map<string, ChannelDeltaStats> {
+    const result = new Map<string, ChannelDeltaStats>()
     for (const [key, s] of this.metrics) {
       const init = initial.metrics.get(key)
       if (init) {
         const delta = this.time - initial.time // in microseconds
         result.set(key, {
           actorCount: s.actorCount,
-          backPressure:
+          backpressureRate:
             (s.outputBlockingDuration - init.outputBlockingDuration) /
             init.actorCount /
             delta /
@@ -342,38 +331,25 @@ export default function Streaming() {
 
   // Keep the initial snapshot to calculate the rate of back pressure
   const [channelStats, setChannelStats] =
-    useState<Map<string, ChannelStatsDerived>>()
+    useState<Map<string, ChannelDeltaStats>>()
 
   const [fragmentStats, setFragmentStats] = useState<{
     [key: number]: FragmentStats
   }>()
 
   useEffect(() => {
-    // The initial snapshot is used to calculate the rate of back pressure
-    // It's not used to render the page directly, so we don't need to set it in the state
     let initialSnapshot: ChannelStatsSnapshot | undefined
 
-    function refresh() {
-      api.get("/metrics/streaming_stats").then(
-        (res) => {
-          let response = GetStreamingStatsResponse.fromJSON(res)
-          let snapshot = new ChannelStatsSnapshot(
-            new Map(Object.entries(response.channelStats)),
-            Date.now()
-          )
-          if (!initialSnapshot) {
-            initialSnapshot = snapshot
-          } else {
-            setChannelStats(snapshot.getRate(initialSnapshot))
-          }
-          setFragmentStats(response.fragmentStats)
-        },
-        (e) => {
-          console.error(e)
-          toast(e, "error")
-        }
-      )
-    }
+    const refresh = createStreamingStatsRefresh(
+      {
+        setChannelStats,
+        setFragmentStats,
+        toast,
+      },
+      initialSnapshot,
+      "fragment"
+    )
+
     refresh() // run once immediately
     const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
     return () => {

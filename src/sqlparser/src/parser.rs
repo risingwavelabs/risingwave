@@ -2492,6 +2492,12 @@ impl Parser<'_> {
         let index_name = self.parse_object_name()?;
         self.expect_keyword(Keyword::ON)?;
         let table_name = self.parse_object_name()?;
+        let method = if self.parse_keyword(Keyword::USING) {
+            let method = self.parse_identifier()?;
+            Some(method)
+        } else {
+            None
+        };
         self.expect_token(&Token::LParen)?;
         let columns = self.parse_comma_separated(Parser::parse_order_by_expr)?;
         self.expect_token(&Token::RParen)?;
@@ -2507,14 +2513,18 @@ impl Parser<'_> {
             distributed_by = self.parse_comma_separated(Parser::parse_expr)?;
             self.expect_token(&Token::RParen)?;
         }
+        let with_properties = WithProperties(self.parse_with_properties()?);
+
         Ok(Statement::CreateIndex {
             name: index_name,
             table_name,
+            method,
             columns,
             include,
             distributed_by,
             unique,
             if_not_exists,
+            with_properties,
         })
     }
 

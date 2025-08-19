@@ -103,7 +103,7 @@ impl LogicalAgg {
                 agg_call.partial_to_total_agg_call(partial_output_idx)
             })
             .collect_vec();
-        let local_agg = StreamStatelessSimpleAgg::new(core);
+        let local_agg = StreamStatelessSimpleAgg::new(core)?;
         let exchange =
             RequiredDist::single().streaming_enforce_if_not_satisfies(local_agg.into())?;
 
@@ -111,7 +111,7 @@ impl LogicalAgg {
         let global_agg = new_stream_simple_agg(
             Agg::new(total_agg_calls, IndexSet::empty(), exchange),
             must_output_per_barrier,
-        );
+        )?;
 
         // ====== Merge approx percentile and normal aggs
         Self::add_row_merge_if_needed(
@@ -158,7 +158,7 @@ impl LogicalAgg {
         let local_agg = new_stream_hash_agg(
             Agg::new(core.agg_calls.to_vec(), local_group_key, project.into()),
             Some(vnode_col_idx),
-        );
+        )?;
         // Global group key excludes vnode.
         let local_agg_group_key_cardinality = local_agg.group_key().len();
         let local_group_key_without_vnode =
@@ -187,7 +187,7 @@ impl LogicalAgg {
                     exchange,
                 ),
                 must_output_per_barrier,
-            );
+            )?;
             global_agg.into()
         } else {
             // the `RowMergeExec` has not supported keyed merge
@@ -210,7 +210,7 @@ impl LogicalAgg {
                     exchange,
                 ),
                 None,
-            );
+            )?;
             global_agg.into()
         };
         Self::add_row_merge_if_needed(
@@ -224,7 +224,7 @@ impl LogicalAgg {
     fn gen_single_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
         let input = RequiredDist::single().streaming_enforce_if_not_satisfies(stream_input)?;
         let core = self.core.clone_with_input(input);
-        Ok(new_stream_simple_agg(core, false).into())
+        Ok(new_stream_simple_agg(core, false)?.into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
@@ -232,7 +232,7 @@ impl LogicalAgg {
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
                 .streaming_enforce_if_not_satisfies(stream_input)?;
         let core = self.core.clone_with_input(input);
-        Ok(new_stream_hash_agg(core, None).into())
+        Ok(new_stream_hash_agg(core, None)?.into())
     }
 
     /// Generates distributed stream plan.
@@ -432,7 +432,7 @@ impl LogicalAgg {
         approx_percentile_agg_call: &PlanAggCall,
     ) -> Result<StreamPlanRef> {
         let local_approx_percentile =
-            StreamLocalApproxPercentile::new(input, approx_percentile_agg_call);
+            StreamLocalApproxPercentile::new(input, approx_percentile_agg_call)?;
         let exchange = RequiredDist::single()
             .streaming_enforce_if_not_satisfies(local_approx_percentile.into())?;
         let global_approx_percentile =
@@ -474,8 +474,7 @@ impl LogicalAgg {
                 plan,
                 ColIndexMapping::identity_or_none(current_size, new_size),
                 ColIndexMapping::new(vec![Some(current_size)], new_size),
-            )
-            .expect("failed to build row merge");
+            )?;
             acc = row_merge.into();
         }
         Ok(Some(acc))
@@ -1344,12 +1343,15 @@ fn find_or_append_row_count(mut logical: Agg<StreamPlanRef>) -> (Agg<StreamPlanR
 fn new_stream_simple_agg(
     core: Agg<StreamPlanRef>,
     must_output_per_barrier: bool,
-) -> StreamSimpleAgg {
+) -> Result<StreamSimpleAgg> {
     let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamSimpleAgg::new(logical, row_count_idx, must_output_per_barrier)
 }
 
-fn new_stream_hash_agg(core: Agg<StreamPlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
+fn new_stream_hash_agg(
+    core: Agg<StreamPlanRef>,
+    vnode_col_idx: Option<usize>,
+) -> Result<StreamHashAgg> {
     let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }

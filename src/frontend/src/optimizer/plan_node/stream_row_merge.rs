@@ -28,7 +28,7 @@ use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
-use crate::optimizer::property::{FunctionalDependencySet, WatermarkColumns};
+use crate::optimizer::property::{FunctionalDependencySet, WatermarkColumns, reject_upsert_input};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamRowMerge` is used for merging two streams with the same stream key and distribution.
@@ -87,7 +87,7 @@ impl StreamRowMerge {
             lhs_input.stream_key().map(|k| k.to_vec()),
             functional_dependency,
             lhs_input.distribution().clone(),
-            lhs_input.stream_kind(), // TODO(kind): reject upsert input
+            reject_upsert_input!(lhs_input),
             lhs_input.emit_on_window_close(),
             watermark_columns,
             lhs_input.columns_monotonicity().clone(),

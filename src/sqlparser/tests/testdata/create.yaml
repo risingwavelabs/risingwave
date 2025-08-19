@@ -228,3 +228,6 @@
     sql parser error: Unterminated string literal at line 1, column 76
     LINE 1: CREATE SECRET IF NOT EXISTS secret2 WITH (backend = 'meta') AS 'demo-secret
                                                                                        ^
+- input: CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test USING hnsw (name, age DESC) INCLUDE(other) DISTRIBUTED BY(name) WITH (m = 16)
+  formatted_sql: CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test USING hnsw (name, age DESC) INCLUDE(other) DISTRIBUTED BY(name) WITH (m = 16)
+  formatted_ast: 'CreateIndex { name: ObjectName([Ident { value: "idx_name", quote_style: None }]), table_name: ObjectName([Ident { value: "test", quote_style: None }]), columns: [OrderByExpr { expr: Identifier(Ident { value: "name", quote_style: None }), asc: None, nulls_first: None }, OrderByExpr { expr: Identifier(Ident { value: "age", quote_style: None }), asc: Some(false), nulls_first: None }], method: Some(Ident { value: "hnsw", quote_style: None }), include: [Ident { value: "other", quote_style: None }], distributed_by: [Identifier(Ident { value: "name", quote_style: None })], unique: true, if_not_exists: true, with_properties: WithProperties([SqlOption { name: ObjectName([Ident { value: "m", quote_style: None }]), value: Value(Number("16")) }]) }'
