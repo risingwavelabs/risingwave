@@ -1448,7 +1448,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         if self.is_empty() {
-            return Poll::Pending;
+            return Poll::Ready(None);
         }
 
         loop {

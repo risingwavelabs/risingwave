@@ -26,6 +26,7 @@ use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::expr::PbExprNode;
 use risingwave_pb::plan_common::PbField;
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
+use rw_futures_util::pending_on_none;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::executor::exchange::input::{Input, assert_equal_dispatcher_barrier, new_input};
@@ -436,7 +437,9 @@ impl UpstreamSinkUnionExecutor {
                 tokio::select! {
                     biased;
 
-                    Some(msg) = upstreams.next() => {
+                    // If None is returned, it means upstreams is empty, which
+                    // means we should continue pending and wait on the second branch.
+                    msg = pending_on_none(upstreams.next()) => {
                         let msg = msg.context("UpstreamSinkUnionExecutor pull upstream failed")?;
                         if let Message::Barrier(barrier) = &msg {
                             let current_barrier = buffered_barriers.pop_front().unwrap();
@@ -446,7 +449,8 @@ impl UpstreamSinkUnionExecutor {
                         return Ok(msg);
                     }
 
-                    Some(barrier) = self.barrier_rx.recv() => {
+                    barrier = self.barrier_rx.recv() => {
+                        let barrier = barrier.context("Failed to receive barrier from barrier_rx")?;
                         // Here, if there's no upstream, we should process the barrier directly and send it out.
                         // Otherwise, we need to forward the barrier to the upstream and then wait in the first branch
                         // until the upstreams have processed the barrier.
@@ -461,13 +465,6 @@ impl UpstreamSinkUnionExecutor {
                             buffered_barriers.push_back(barrier);
                             continue;
                         }
-                    }
-
-                    else => {
-                        // No more messages or barriers, break the loop.
-                        return Err(StreamExecutorError::from(
-                            anyhow::anyhow!("No more messages or barriers from upstream sink union executor"),
-                        ));
                     }
                 }
             }
