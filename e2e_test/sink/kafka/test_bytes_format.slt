@@ -1,0 +1,151 @@
+statement ok
+set rw_implicit_flush=true;
+
+statement ok
+set sink_decouple = false;
+
+# Test bytes format - single column bytea requirement
+statement ok
+create table t_single_bytea (
+    data bytea
+);
+
+# Test that bytes format works with single bytea column
+statement ok
+create sink sink_bytes_format from t_single_bytea with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test-rw-sink-bytes-format',
+    force_append_only = 'true'
+) format plain encode bytes;
+
+# Test that bytes format fails with multiple columns
+statement ok
+create table t_multi_columns (
+    id integer,
+    data bytea
+);
+
+statement error BYTES format requires exactly one column, got 2 columns
+create sink sink_bytes_format_error from t_multi_columns with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test-rw-sink-bytes-format-error',
+    force_append_only = 'true'
+) format plain encode bytes;
+
+# Test that bytes format fails with non-bytea column
+statement ok
+create table t_non_bytea (
+    data varchar
+);
+
+statement error BYTES format requires the column to be of type BYTEA, but got type character varying
+create sink sink_bytes_format_error2 from t_non_bytea with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test-rw-sink-bytes-format-error2',
+    force_append_only = 'true'
+) format plain encode bytes;
+
+# Test upsert with bytes format
+statement ok
+create table t_upsert_bytea (
+    id integer primary key,
+    data bytea
+);
+
+statement error BYTES format requires exactly one column, got 2 columns
+create sink sink_upsert_bytes_error from t_upsert_bytea with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test-rw-sink-upsert-bytes-error',
+    primary_key = 'id'
+) format upsert encode bytes;
+
+# Test single column upsert with bytes format
+statement ok
+create table t_single_bytea_pk (
+    data bytea primary key
+);
+
+statement ok
+create sink sink_upsert_bytes from t_single_bytea_pk with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test-rw-sink-upsert-bytes',
+    primary_key = 'data'
+) format upsert encode bytes;
+
+# Test bytes format with key encoding
+statement ok
+create table t_bytea_with_key (
+    key_data bytea primary key,
+    value_data bytea
+);
+
+statement error BYTES format requires exactly one column, got 2 columns
+create sink sink_bytes_with_key_error from t_bytea_with_key with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test-rw-sink-bytes-with-key',
+    primary_key = 'key_data'
+) format plain encode bytes key encode bytes;
+
+# Insert test data
+statement ok
+insert into t_single_bytea values ('\xDEADBEEF'), ('\xCAFEBABE'), ('\x00112233');
+
+statement ok
+insert into t_single_bytea_pk values ('\xFEEDBEEF'), ('\xBADCODE');
+
+# Update test for upsert
+statement ok
+insert into t_single_bytea_pk values ('\xFEEDBEEF') on conflict(data) do update set data = excluded.data;
+
+# Test source reading from bytes format sink
+statement ok
+create table t_source_bytes (data bytea)
+with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-bytes-format',
+) format plain encode bytes;
+
+sleep 2s
+
+# Verify data roundtrip
+query T
+select data from t_source_bytes order by data;
+----
+\x00112233
+\xcafebabe
+\xdeadbeef
+
+# Clean up
+statement ok
+drop table t_source_bytes;
+
+statement ok
+drop sink sink_bytes_format;
+
+statement ok
+drop sink sink_upsert_bytes;
+
+statement ok
+drop table t_single_bytea;
+
+statement ok
+drop table t_multi_columns;
+
+statement ok
+drop table t_non_bytea;
+
+statement ok
+drop table t_upsert_bytea;
+
+statement ok
+drop table t_single_bytea_pk;
+
+statement ok
+drop table t_bytea_with_key;
