@@ -13,23 +13,34 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::hash::Hash;
+use std::slice;
 
+use bytes::{Buf, BufMut};
+use itertools::{Itertools, repeat_n};
+use memcomparable::Error;
+use risingwave_common::types::F32;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_pb::data::PbArray;
+use risingwave_pb::common::PbBuffer;
+use risingwave_pb::common::buffer::PbCompressionType;
+use risingwave_pb::data::{PbArray, PbArrayType, PbListArrayData};
+use serde::{Deserialize, Serialize};
 
-use super::{Array, ArrayBuilder, ListArray, ListArrayBuilder, ListRef, ListValue};
-use crate::array::ArrayError;
-use crate::bitmap::Bitmap;
-use crate::types::{DataType, Scalar, ScalarRef, ScalarRefImpl, ToText};
+use super::{Array, ArrayBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
+use crate::types::{DataType, Scalar, ScalarRef, ToText};
+use crate::vector::{decode_vector_payload, encode_vector_payload};
 
-pub type VectorItemType = f32;
+pub type VectorItemType = F32;
 pub type VectorDistanceType = f64;
 pub const VECTOR_ITEM_TYPE: DataType = DataType::Float32;
 pub const VECTOR_DISTANCE_TYPE: DataType = DataType::Float64;
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct VectorArrayBuilder {
-    inner: ListArrayBuilder,
+    bitmap: BitmapBuilder,
+    offsets: Vec<u32>,
+    inner: Vec<VectorItemType>,
     elem_size: usize,
 }
 
@@ -50,35 +61,86 @@ impl ArrayBuilder for VectorArrayBuilder {
         let DataType::Vector(elem_size) = ty else {
             panic!("VectorArrayBuilder only supports Vector type");
         };
+        let mut offsets = Vec::with_capacity(capacity + 1);
+        offsets.push(0);
         Self {
-            inner: ListArrayBuilder::with_type(capacity, DataType::List(DataType::Float32.into())),
+            bitmap: BitmapBuilder::with_capacity(capacity),
+            offsets,
+            inner: Vec::with_capacity(capacity * elem_size),
             elem_size,
         }
     }
 
     fn append_n(&mut self, n: usize, value: Option<VectorRef<'_>>) {
+        let last = self
+            .offsets
+            .last()
+            .cloned()
+            .expect("non-empty with an initial 0");
         if let Some(value) = value {
             assert_eq!(self.elem_size, value.inner.len());
+            self.inner.reserve(self.elem_size * n);
+            for _ in 0..n {
+                self.inner.extend_from_slice(value.inner);
+            }
+            self.offsets.reserve(n);
+            self.offsets.extend((1..=n).map(|i| {
+                last.checked_add((i * self.elem_size) as _)
+                    .expect("overflow")
+            }));
+            self.bitmap.append_n(n, true);
+        } else {
+            self.offsets.reserve(n);
+            self.offsets.extend(repeat_n(last, n));
+            self.bitmap.append_n(n, false);
         }
-        self.inner.append_n(n, value.map(|v| v.inner))
     }
 
     fn append_array(&mut self, other: &VectorArray) {
         assert_eq!(self.elem_size, other.elem_size);
-        self.inner.append_array(&other.inner)
+        self.bitmap.append_bitmap(&other.bitmap);
+        let last = self
+            .offsets
+            .last()
+            .cloned()
+            .expect("non-empty with an initial 0");
+        let other_offsets = &other.offsets[1..];
+        self.offsets.reserve(other_offsets.len());
+        self.offsets.extend(
+            other_offsets
+                .iter()
+                .map(|offset| last.checked_add(*offset).expect("overflow")),
+        );
+        self.inner.reserve(other.inner.len());
+        self.inner.extend_from_slice(&other.inner);
     }
 
     fn pop(&mut self) -> Option<()> {
-        self.inner.pop()
+        if self.bitmap.pop().is_some() {
+            self.offsets
+                .pop()
+                .expect("non-empty when bitmap popped Some");
+            let last = self
+                .offsets
+                .last()
+                .cloned()
+                .expect("non-empty with initial 0");
+            self.inner.truncate(last as _);
+            Some(())
+        } else {
+            None
+        }
     }
 
     fn len(&self) -> usize {
-        self.inner.len()
+        self.bitmap.len()
     }
 
     fn finish(self) -> VectorArray {
         VectorArray {
-            inner: self.inner.finish(),
+            bitmap: self.bitmap.finish(),
+            offsets: self.offsets,
+            inner: self.inner,
             elem_size: self.elem_size,
         }
     }
@@ -86,7 +148,11 @@ impl ArrayBuilder for VectorArrayBuilder {
 
 #[derive(Debug, Clone)]
 pub struct VectorArray {
-    inner: ListArray,
+    bitmap: Bitmap,
+    /// Of size as `bitmap.len() + 1`. `(self.offsets[i]..self.offsets[i+1])` is the slice range of the i-th vector
+    /// if it's not null.
+    offsets: Vec<u32>,
+    inner: Vec<VectorItemType>,
     elem_size: usize,
 }
 
@@ -103,31 +169,50 @@ impl Array for VectorArray {
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         VectorRef {
-            inner: unsafe { self.inner.raw_value_at_unchecked(idx) },
+            inner: unsafe {
+                let start = self.inner.as_ptr().add(self.offsets[idx] as usize);
+                slice::from_raw_parts(start, self.elem_size)
+            },
         }
     }
 
     fn len(&self) -> usize {
-        self.inner.len()
+        self.bitmap.len()
     }
 
     fn to_protobuf(&self) -> PbArray {
-        let mut pb_array = self.inner.to_protobuf();
-        pb_array.set_array_type(risingwave_pb::data::PbArrayType::Vector);
-        pb_array.list_array_data.as_mut().unwrap().elem_size = Some(self.elem_size as _);
-        pb_array
+        let mut payload = Vec::with_capacity(self.inner.len() * size_of::<VectorItemType>());
+        encode_vector_payload(F32::inner_slice(self.inner.as_slice()), &mut payload);
+        PbArray {
+            array_type: PbArrayType::Vector as _,
+            null_bitmap: Some(self.bitmap.to_protobuf()),
+            values: vec![PbBuffer {
+                compression: PbCompressionType::None as _,
+                body: payload,
+            }],
+            struct_array_data: None,
+            list_array_data: Some(
+                PbListArrayData {
+                    offsets: self.offsets.clone(),
+                    value: None,
+                    value_type: Some(DataType::Float32.to_protobuf()),
+                    elem_size: Some(self.elem_size as _),
+                }
+                .into(),
+            ),
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
-        self.inner.null_bitmap()
+        &self.bitmap
     }
 
     fn into_null_bitmap(self) -> Bitmap {
-        self.inner.into_null_bitmap()
+        self.bitmap
     }
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
-        self.inner.set_bitmap(bitmap)
+        self.bitmap = bitmap;
     }
 
     fn data_type(&self) -> DataType {
@@ -137,26 +222,53 @@ impl Array for VectorArray {
 
 impl VectorArray {
     pub fn from_protobuf(
-        pb_array: &risingwave_pb::data::PbArray,
+        array: &risingwave_pb::data::PbArray,
     ) -> super::ArrayResult<super::ArrayImpl> {
-        let inner = ListArray::from_protobuf(pb_array)?.into_list();
-        let elem_size = pb_array
-            .list_array_data
-            .as_ref()
-            .unwrap()
-            .elem_size
-            .unwrap() as _;
-        Ok(Self { inner, elem_size }.into())
+        // reversing to_protobuf
+        assert_eq!(
+            array.array_type,
+            PbArrayType::Vector as i32,
+            "invalid array type for vector: {}",
+            array.array_type
+        );
+        let bitmap: Bitmap = array.get_null_bitmap()?.into();
+        let encoded_payload = &array.values[0].body;
+        let payload = decode_vector_payload(
+            encoded_payload
+                .len()
+                .checked_exact_div(size_of::<VectorItemType>())
+                .unwrap_or_else(|| {
+                    panic!("invalid payload len {} for vector", encoded_payload.len(),)
+                }),
+            array.values[0].body.as_slice(),
+        );
+        let array_data = array.get_list_array_data()?;
+        let elem_size = array_data.elem_size.expect("should exist for Vector") as usize;
+        let offsets = array_data.offsets.clone();
+        debug_assert_eq!(array_data.value_type, Some(DataType::Float32.to_protobuf()));
+        debug_assert_eq!(array_data.value, None);
+
+        Ok(VectorArray {
+            bitmap,
+            offsets,
+            inner: F32::from_inner_vec(payload),
+            elem_size,
+        }
+        .into())
     }
 
-    pub fn inner(&self) -> &ListArray {
-        &self.inner
+    pub fn as_raw_slice(&self) -> &[f32] {
+        F32::inner_slice(&self.inner)
+    }
+
+    pub fn offsets(&self) -> &[u32] {
+        &self.offsets
     }
 }
 
 #[derive(Clone, EstimateSize)]
 pub struct VectorVal {
-    inner: ListValue,
+    pub(crate) inner: Box<[VectorItemType]>,
 }
 
 impl Debug for VectorVal {
@@ -186,9 +298,7 @@ impl Scalar for VectorVal {
     type ScalarRefType<'a> = VectorRef<'a>;
 
     fn as_scalar_ref(&self) -> VectorRef<'_> {
-        VectorRef {
-            inner: self.inner.as_scalar_ref(),
-        }
+        VectorRef { inner: &self.inner }
     }
 }
 
@@ -211,37 +321,19 @@ impl VectorVal {
                     .map_err(|_| format!("invalid f32: {s}"))
                     .and_then(|f| {
                         if f.is_finite() {
-                            Ok(crate::types::F32::from(f))
+                            Ok(f.into())
                         } else {
                             Err(format!("{f} not allowed in vector"))
                         }
                     })
             })
-            .collect::<Result<ListValue, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         if inner.len() != size {
             return Err(format!("expected {} dimensions, not {}", size, inner.len()));
         }
-        Ok(Self { inner })
-    }
-
-    /// Create a new vector from inner [`ListValue`].
-    ///
-    /// This is leak of implementation. Prefer [`VectorVal::from_iter`] below.
-    pub fn from_inner(inner: ListValue) -> Result<Self, ArrayError> {
-        for element in inner.iter() {
-            let Some(scalar) = element else {
-                return Err(ArrayError::internal("NULL not allowed in vector"));
-            };
-            let ScalarRefImpl::Float32(val) = scalar else {
-                return Err(ArrayError::internal(format!(
-                    "vector element must be f32 but found {scalar:?}"
-                )));
-            };
-            if !val.0.is_finite() {
-                return Err(ArrayError::internal(format!("{val} not allowed in vector")));
-            }
-        }
-        Ok(Self { inner })
+        Ok(Self {
+            inner: inner.into(),
+        })
     }
 
     #[cfg(test)]
@@ -252,6 +344,7 @@ impl VectorVal {
 
 /// A `f32` without nan/inf/-inf. Added as intermediate type to `try_collect` `f32` values into a `VectorVal`.
 #[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
 pub struct Finite32(f32);
 
 impl TryFrom<f32> for Finite32 {
@@ -266,16 +359,26 @@ impl TryFrom<f32> for Finite32 {
     }
 }
 
+impl From<Vec<Finite32>> for VectorVal {
+    fn from(value: Vec<Finite32>) -> Self {
+        let (ptr, len, cap) = value.into_raw_parts();
+        // Safety: OrderedFloat is #[repr(transparent)] and has no invalid values.
+        Self {
+            inner: unsafe { Vec::from_raw_parts(ptr as *mut F32, len, cap).into_boxed_slice() },
+        }
+    }
+}
+
 impl FromIterator<Finite32> for VectorVal {
     fn from_iter<I: IntoIterator<Item = Finite32>>(iter: I) -> Self {
-        let inner = ListValue::from_iter(iter.into_iter().map(|v| crate::types::F32::from(v.0)));
-        Self { inner }
+        let inner = iter.into_iter().collect_vec();
+        Self::from(inner)
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct VectorRef<'a> {
-    inner: ListRef<'a>,
+    inner: &'a [VectorItemType],
 }
 
 impl Debug for VectorRef<'_> {
@@ -297,7 +400,7 @@ impl PartialOrd for VectorRef<'_> {
 }
 impl Ord for VectorRef<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.inner.cmp(&other.inner)
+        self.inner.cmp(other.inner)
     }
 }
 
@@ -312,7 +415,7 @@ impl ToText for VectorRef<'_> {
             if i > 0 {
                 write!(f, ",")?;
             }
-            item.write_with_type(&DataType::Float32, f)?;
+            write!(f, "{}", item)?;
         }
         write!(f, "]")
     }
@@ -323,25 +426,45 @@ impl<'a> ScalarRef<'a> for VectorRef<'a> {
 
     fn to_owned_scalar(&self) -> VectorVal {
         VectorVal {
-            inner: self.inner.to_owned_scalar(),
+            inner: self.inner.to_vec().into_boxed_slice(),
         }
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.inner.hash_scalar(state)
+        self.inner.hash(state);
     }
 }
 
 impl<'a> VectorRef<'a> {
-    /// Get the inner [`ListRef`].
-    ///
-    /// This is leak of implementation. Prefer [`Self::into_slice`] below.
-    pub fn into_inner(self) -> ListRef<'a> {
+    /// Get the slice of floats in this vector.
+    pub fn into_slice(self) -> &'a [f32] {
+        F32::inner_slice(self.inner)
+    }
+
+    pub fn inner(&self) -> &[VectorItemType] {
         self.inner
     }
 
-    /// Get the slice of floats in this vector.
-    pub fn into_slice(self) -> &'a [f32] {
-        crate::types::F32::inner_slice(self.inner.as_primitive_slice().unwrap())
+    pub fn memcmp_serialize(
+        self,
+        serializer: &mut memcomparable::Serializer<impl BufMut>,
+    ) -> memcomparable::Result<()> {
+        for item in self.inner {
+            item.serialize(&mut *serializer)?;
+        }
+        Ok(())
+    }
+}
+
+impl VectorVal {
+    pub fn memcmp_deserialize(
+        dimension: usize,
+        de: &mut memcomparable::Deserializer<impl Buf>,
+    ) -> memcomparable::Result<Self> {
+        let mut value = Vec::with_capacity(dimension);
+        for _ in 0..dimension {
+            value.push(Finite32::try_from(f32::deserialize(&mut *de)?).map_err(Error::Message)?)
+        }
+        Ok(VectorVal::from(value))
     }
 }
