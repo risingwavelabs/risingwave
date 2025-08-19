@@ -185,12 +185,17 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         Self::with_out_col_idx(input, out_fields.ones())
     }
 
+    pub fn out_col_idx_exprs<'a>(
+        input: &'a PlanRef,
+        out_fields: impl Iterator<Item = usize> + 'a,
+    ) -> impl Iterator<Item = ExprImpl> + 'a {
+        let input_schema = input.schema();
+        out_fields.map(move |index| InputRef::new(index, input_schema[index].data_type()).into())
+    }
+
     /// Creates a `Project` which select some columns from the input.
     pub fn with_out_col_idx(input: PlanRef, out_fields: impl Iterator<Item = usize>) -> Self {
-        let input_schema = input.schema();
-        let exprs = out_fields
-            .map(|index| InputRef::new(index, input_schema[index].data_type()).into())
-            .collect();
+        let exprs = Self::out_col_idx_exprs(&input, out_fields).collect();
         Self::new(exprs, input)
     }
 
