@@ -3396,12 +3396,12 @@ fn parse_create_table_on_conflict_with_version_column() {
         Statement::CreateTable {
             name,
             on_conflict,
-            with_version_column,
+            with_version_columns,
             ..
         } => {
             assert_eq!("t", name.to_string());
             assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
-            assert_eq!(with_version_column.unwrap().real_value(), "v2");
+            assert_eq!(with_version_columns, vec![Ident::new_unchecked("v2")]);
         }
         _ => unreachable!(),
     }
