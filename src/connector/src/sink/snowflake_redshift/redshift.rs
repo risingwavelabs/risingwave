@@ -42,6 +42,9 @@ use crate::sink::file_sink::opendal_sink::FileSink;
 use crate::sink::file_sink::s3::{S3Common, S3Sink};
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::remote::CoordinatedRemoteSinkWriter;
+use crate::sink::snowflake_redshift::file_manager_util::{
+    delete_row_by_sink_id_and_end_epoch, get_file_paths_by_sink_id, insert_file_paths_with_sink_id,
+};
 use crate::sink::snowflake_redshift::{
     __OP, __ROW_ID, AugmentedChunk, SnowflakeRedshiftSinkS3Writer, build_opendal_writer_path,
 };
@@ -101,6 +104,11 @@ pub struct RedShiftConfig {
     #[serde(rename = "write.target.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
     pub schedule_seconds: u64,
+
+    #[serde(default = "default_schedule")]
+    #[serde(rename = "copy_into_schedule_seconds")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub copy_into_schedule_seconds: u64,
 
     #[serde(default = "default_batch_insert_rows")]
     #[serde(rename = "batch.insert.rows")]
@@ -243,7 +251,7 @@ impl Sink for RedshiftSink {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
+        db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
         let pk_column_names: Vec<_> = self
@@ -266,10 +274,12 @@ impl Sink for RedshiftSink {
             .map(|field| field.name.clone())
             .collect();
         let coordinator = RedshiftSinkCommitter::new(
+            db,
             self.config.clone(),
             self.is_append_only,
             &pk_column_names,
             &all_column_names,
+            self.param.sink_id.sink_id(),
         )?;
         Ok(coordinator)
     }
@@ -372,6 +382,7 @@ impl RedShiftSinkJdbcWriter {
         let column_descs = &mut param.columns;
         param.properties.remove("create_table_if_not_exists");
         param.properties.remove("write.target.interval.seconds");
+        param.properties.remove("copy_into_schedule_seconds");
         let full_table_name = if is_append_only {
             config.table
         } else {
@@ -446,9 +457,12 @@ impl RedShiftSinkJdbcWriter {
 pub struct RedshiftSinkCommitter {
     config: RedShiftConfig,
     client: JdbcJniClient,
+    db: DatabaseConnection,
+    sink_id: u32,
     pk_column_names: Vec<String>,
     all_column_names: Vec<String>,
-    schedule_seconds: u64,
+    merge_into_schedule_seconds: u64,
+    copy_into_schedule_seconds: u64,
     is_append_only: bool,
     periodic_task_handle: Option<tokio::task::JoinHandle<()>>,
     shutdown_sender: Option<tokio::sync::mpsc::UnboundedSender<()>>,
@@ -456,101 +470,199 @@ pub struct RedshiftSinkCommitter {
 
 impl RedshiftSinkCommitter {
     pub fn new(
+        db: DatabaseConnection,
         config: RedShiftConfig,
         is_append_only: bool,
         pk_column_names: &Vec<String>,
         all_column_names: &Vec<String>,
+        sink_id: u32,
     ) -> Result<Self> {
         let client = config.build_client()?;
-        let schedule_seconds = config.schedule_seconds;
-        let (periodic_task_handle, shutdown_sender) = if !is_append_only {
-            let schema_name = config.schema.clone();
-            let target_table_name = config.table.clone();
-            let cdc_table_name = config.cdc_table.clone().ok_or_else(|| {
-                SinkError::Config(anyhow!(
-                    "intermediate.table.name is required for non-append-only sink"
-                ))
-            })?;
-            // Create shutdown channel
-            let (shutdown_sender, shutdown_receiver) = unbounded_channel();
+        let merge_into_schedule_seconds = config.schedule_seconds;
+        let copy_into_schedule_seconds = config.copy_into_schedule_seconds;
 
-            // Clone client for the periodic task
-            let task_client = config.build_client()?;
-
-            let pk_column_names = pk_column_names.clone();
-            let all_column_names = all_column_names.clone();
-            // Start periodic task that runs every hour
-            let periodic_task_handle = tokio::spawn(async move {
-                Self::run_periodic_query_task(
-                    task_client,
-                    schema_name.as_deref(),
-                    &cdc_table_name,
-                    &target_table_name,
-                    pk_column_names,
-                    all_column_names,
-                    schedule_seconds,
-                    shutdown_receiver,
-                )
-                .await;
-            });
-            (Some(periodic_task_handle), Some(shutdown_sender))
-        } else {
-            (None, None)
+        let (periodic_task_handle, shutdown_sender) = match (is_append_only, config.with_s3) {
+            (true, true) | (false, _) => {
+                let task_client = config.build_client()?;
+                let config = config.clone();
+                let db = db.clone();
+                let (shutdown_sender, shutdown_receiver) = unbounded_channel();
+                let merge_into_sql = if !is_append_only {
+                    Some(build_create_merge_into_task_sql(
+                        config.schema.as_deref(),
+                        config.cdc_table.as_ref().ok_or_else(|| {
+                            SinkError::Config(anyhow!(
+                                "intermediate.table.name is required for non-append-only sink"
+                            ))
+                        })?,
+                        &config.table,
+                        pk_column_names,
+                        all_column_names,
+                    ))
+                } else {
+                    None
+                };
+                let periodic_task_handle = tokio::spawn(async move {
+                    Self::run_periodic_query_task(
+                        task_client,
+                        merge_into_sql,
+                        merge_into_schedule_seconds,
+                        copy_into_schedule_seconds,
+                        sink_id,
+                        config,
+                        db,
+                        shutdown_receiver,
+                    )
+                    .await;
+                });
+                (Some(periodic_task_handle), Some(shutdown_sender))
+            }
+            _ => (None, None),
         };
 
         Ok(Self {
             client,
             config,
+            db,
+            sink_id,
             pk_column_names: pk_column_names.clone(),
             all_column_names: all_column_names.clone(),
             is_append_only,
-            schedule_seconds,
+            merge_into_schedule_seconds,
+            copy_into_schedule_seconds,
             periodic_task_handle,
             shutdown_sender,
         })
     }
 
-    /// Runs a periodic query task every hour
+    pub async fn copy_into_from_s3_to_redshift(
+        client: &JdbcJniClient,
+        config: &RedShiftConfig,
+        is_append_only: bool,
+        sink_id: u32,
+        paths: Vec<String>,
+    ) -> Result<()> {
+        if paths.is_empty() {
+            tracing::info!("No files to copy into Redshift for sink id = {}", sink_id);
+            return Ok(());
+        }
+        let manifest_entries: Vec<_> = paths
+            .into_iter()
+            .map(|path| json!({ "url": path, "mandatory": true }))
+            .collect();
+        let s3_inner = config.s3_inner.as_ref().ok_or_else(|| {
+            SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
+        })?;
+        let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_inner)?;
+        let (mut writer, manifest_path) =
+            build_opendal_writer_path(s3_inner, 0, &s3_operator, &None).await?;
+        let manifest_json = json!({ "entries": manifest_entries });
+        let mut chunk_buf = BytesMut::new();
+        writeln!(chunk_buf, "{}", manifest_json).unwrap();
+        writer.write(chunk_buf.freeze()).await?;
+        writer
+            .close()
+            .await
+            .map_err(|e| SinkError::File(e.to_report_string()))?;
+        let table = if is_append_only {
+            &config.table
+        } else {
+            config.cdc_table.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "intermediate.table.name is required for non-append-only sink"
+                ))
+            })?
+        };
+        let copy_into_sql = build_copy_into_sql(
+            config.schema.as_deref(),
+            table,
+            &manifest_path,
+            &s3_inner.access,
+            &s3_inner.secret,
+            &s3_inner.assume_role,
+        )?;
+        client.execute_sql_sync(vec![copy_into_sql]).await?;
+        Ok(())
+    }
+
     async fn run_periodic_query_task(
         client: JdbcJniClient,
-        schema_name: Option<&str>,
-        cdc_table_name: &str,
-        target_table_name: &str,
-        pk_column_names: Vec<String>,
-        all_column_names: Vec<String>,
-        schedule_seconds: u64,
+        merge_into_sql: Option<Vec<String>>,
+        merge_into_schedule_seconds: u64,
+        copy_into_schedule_seconds: u64,
+        sink_id: u32,
+        config: RedShiftConfig,
+        db: DatabaseConnection,
         mut shutdown_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,
     ) {
-        let mut interval_timer = interval(Duration::from_secs(schedule_seconds)); // 1 hour = 3600 seconds
-        interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        let sql = build_create_merge_into_task_sql(
-            schema_name,
-            cdc_table_name,
-            target_table_name,
-            &pk_column_names,
-            &all_column_names,
-        );
-        loop {
-            tokio::select! {
-                // Check for shutdown signal
-                _ = shutdown_receiver.recv() => {
-                    tracing::info!("Periodic query task received shutdown signal, stopping");
-                    break;
-                }
-                // Execute periodic query
-                _ = interval_timer.tick() => {
+        // <<<<<<< HEAD
+        //         let mut interval_timer = interval(Duration::from_secs(schedule_seconds)); // 1 hour = 3600 seconds
+        //         interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        //         let sql = build_create_merge_into_task_sql(
+        //             schema_name,
+        //             cdc_table_name,
+        //             target_table_name,
+        //             &pk_column_names,
+        //             &all_column_names,
+        //         );
+        //         loop {
+        //             tokio::select! {
+        //                 // Check for shutdown signal
+        //                 _ = shutdown_receiver.recv() => {
+        //                     tracing::info!("Periodic query task received shutdown signal, stopping");
+        //                     break;
+        //                 }
+        //                 // Execute periodic query
+        //                 _ = interval_timer.tick() => {
+        // =======
+        let mut copy_timer = interval(Duration::from_secs(copy_into_schedule_seconds));
+        copy_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-                    match client.execute_sql_sync(sql.clone()).await {
-                        Ok(_) => {
-                            tracing::info!("Periodic query executed successfully for table: {}", target_table_name);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to execute periodic query for table {}: {}", target_table_name, e.as_report());
+        if let Some(sql) = merge_into_sql {
+            let mut merge_timer = interval(Duration::from_secs(merge_into_schedule_seconds));
+            merge_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                                    _ = shutdown_receiver.recv() => break,
+                                    _ = merge_timer.tick() => {
+                                        if let Err(e) = client.execute_sql_sync(sql.clone()).await {
+                                            tracing::warn!("Failed to execute periodic query for table {}: {}", config.table, e.as_report());
+                                        }
+                // <<<<<<< HEAD
+                //                         Err(e) => {
+                //                             tracing::warn!("Failed to execute periodic query for table {}: {}", target_table_name, e.as_report());
+                // =======
+                                    }
+                                    _ = copy_timer.tick() => {
+                                        if let Err(e) = async {
+                                            let (paths, epoch) = get_file_paths_by_sink_id(&db, sink_id).await?;
+                                            Self::copy_into_from_s3_to_redshift(&client, &config, false, sink_id, paths).await?;
+                                            delete_row_by_sink_id_and_end_epoch(&db, sink_id, epoch).await?;
+                                            Ok::<(),SinkError>(())
+                                        }.await {
+                                            tracing::error!("Failed to execute copy into task for sink id {}: {}", sink_id, e.as_report());
+                                        }
+                                    }
+                                }
+            }
+        } else {
+            loop {
+                tokio::select! {
+                    _ = shutdown_receiver.recv() => break,
+                    _ = copy_timer.tick() => {
+                        if let Err(e) = async {
+                            let (paths, epoch) = get_file_paths_by_sink_id(&db, sink_id).await?;
+                            Self::copy_into_from_s3_to_redshift(&client, &config, true, sink_id, paths).await?;
+                            delete_row_by_sink_id_and_end_epoch(&db, sink_id, epoch).await?;
+                            Ok::<(),SinkError>(())
+                        }.await {
+                            tracing::error!("Failed to execute copy into task for sink id {}: {}", sink_id, e.as_report());
                         }
                     }
                 }
             }
         }
+        tracing::info!("Periodic query task stopped for sink id {}", sink_id);
     }
 }
 
@@ -572,12 +684,24 @@ impl Drop for RedshiftSinkCommitter {
 #[async_trait]
 impl SinkCommitCoordinator for RedshiftSinkCommitter {
     async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+        let (paths, epoch) = get_file_paths_by_sink_id(&self.db, self.sink_id).await?;
+        Self::copy_into_from_s3_to_redshift(
+            &self.client,
+            &self.config,
+            self.is_append_only,
+            self.sink_id,
+            paths,
+        )
+        .await?;
+
+        delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch).await?;
+
         Ok(None)
     }
 
     async fn commit(
         &mut self,
-        _epoch: u64,
+        epoch: u64,
         metadata: Vec<SinkMetadata>,
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
@@ -601,60 +725,15 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 } else {
                     Err(SinkError::Config(anyhow!("Invalid metadata format")))
                 }?;
-                Ok(json!({
-                    "url": path,
-                    "mandatory": true
-                }))
+                Ok(path)
             })
             .collect::<Result<Vec<_>>>()?;
+
         if !paths.is_empty() {
-            let s3_inner = self.config.s3_inner.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
-            })?;
-            let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_inner)?;
-            let (mut writer, path) =
-                build_opendal_writer_path(s3_inner, 0, &s3_operator, &None).await?;
-            let manifest_json = json!({
-                "entries": paths
-            });
-            let mut chunk_buf = BytesMut::new();
-            writeln!(chunk_buf, "{}", manifest_json).unwrap();
-            writer.write(chunk_buf.freeze()).await?;
-            writer
-                .close()
-                .await
-                .map_err(|e| SinkError::File(e.to_report_string()))?;
-            let table = if self.is_append_only {
-                &self.config.table
-            } else {
-                self.config.cdc_table.as_ref().ok_or_else(|| {
-                    SinkError::Config(anyhow!(
-                        "intermediate.table.name is required for non-append-only sink"
-                    ))
-                })?
-            };
-            let s3_inner = self.config.s3_inner.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
-            })?;
-            let copy_into_sql = build_copy_into_sql(
-                self.config.schema.as_deref(),
-                table,
-                &path,
-                &s3_inner.access,
-                &s3_inner.secret,
-                &s3_inner.assume_role,
-            )?;
-            // run copy into
-            self.client.execute_sql_sync(vec![copy_into_sql]).await?;
+            insert_file_paths_with_sink_id(self.sink_id, self.db.clone(), epoch, paths).await?;
         }
 
         if let Some(add_columns) = add_columns {
-            if let Some(shutdown_sender) = &self.shutdown_sender {
-                // Send shutdown signal to the periodic task before altering the table
-                shutdown_sender
-                    .send(())
-                    .map_err(|e| SinkError::Config(anyhow!(e)))?;
-            }
             let sql = build_alter_add_column_sql(
                 self.config.schema.as_deref(),
                 &self.config.table,
@@ -709,21 +788,31 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
 
                 let (shutdown_sender, shutdown_receiver) = unbounded_channel();
                 let client = self.client.clone();
-                let schema_name = self.config.schema.clone();
-                let cdc_table_name = self.config.cdc_table.clone().unwrap();
-                let target_table_name = self.config.table.clone();
-                let pk_column_names = self.pk_column_names.clone();
-                let all_column_names = self.all_column_names.clone();
-                let schedule_seconds = self.schedule_seconds;
+                let merge_into_sql = build_create_merge_into_task_sql(
+                    self.config.schema.as_deref(),
+                    self.config.cdc_table.as_ref().ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "intermediate.table.name is required for non-append-only sink"
+                        ))
+                    })?,
+                    &self.config.table,
+                    &self.pk_column_names,
+                    &self.all_column_names,
+                );
+                let merge_into_schedule_seconds = self.merge_into_schedule_seconds;
+                let copy_into_schedule_seconds = self.copy_into_schedule_seconds;
+                let config = self.config.clone();
+                let db = self.db.clone();
+                let sink_id = self.sink_id;
                 let periodic_task_handle = tokio::spawn(async move {
                     Self::run_periodic_query_task(
                         client,
-                        schema_name.as_deref(),
-                        &cdc_table_name,
-                        &target_table_name,
-                        pk_column_names,
-                        all_column_names,
-                        schedule_seconds,
+                        Some(merge_into_sql),
+                        merge_into_schedule_seconds,
+                        copy_into_schedule_seconds,
+                        sink_id,
+                        config,
+                        db,
                         shutdown_receiver,
                     )
                     .await;
