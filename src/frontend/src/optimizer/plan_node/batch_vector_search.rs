@@ -13,52 +13,60 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::array::VectorVal;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::types::{DataType, Scalar};
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::batch_plan::PbVectorIndexNearestNode;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::PbDistanceType;
 
 use crate::OptimizerContextRef;
 use crate::catalog::TableId;
+use crate::expr::{ExprDisplay, ExprImpl, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
-    Batch, BatchPlanRef as PlanRef, ExprRewritable, PlanBase, ToBatchPb, ToDistributedBatch,
-    ToLocalBatch,
+    Batch, BatchPlanRef as PlanRef, BatchPlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary,
+    ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 
 #[derive(Debug, Clone, educe::Educe)]
 #[educe(Hash, PartialEq, Eq)]
 pub struct BatchVectorSearchCore {
+    pub input: BatchPlanRef,
     pub top_n: u64,
     pub distance_type: PbDistanceType,
     pub index_name: String,
     pub index_table_id: TableId,
-    #[educe(Hash(ignore))]
-    pub vector_literal: VectorVal,
     pub info_column_desc: Vec<ColumnDesc>,
+    pub vector_column_idx: usize,
     #[educe(Hash(ignore), Eq(ignore))]
     pub ctx: OptimizerContextRef,
 }
 
 impl GenericPlanNode for BatchVectorSearchCore {
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        FunctionalDependencySet::new(self.info_column_desc.len())
+        // FunctionalDependencySet::new(self.info_column_desc.len())
+        // TODO: include dependency derived from info columns
+        self.input.functional_dependency().clone()
     }
 
     fn schema(&self) -> Schema {
-        let fields = self
-            .info_column_desc
-            .iter()
-            .map(|col| Field::new(col.name.clone(), col.data_type.clone()))
-            .chain([Field::new("__distance", DataType::Float64)])
-            .collect();
-        Schema { fields }
+        let mut schema = self.input.schema().clone();
+        schema.fields.push(Field::new(
+            "vector_info",
+            DataType::List(
+                DataType::Struct(StructType::new(
+                    self.info_column_desc
+                        .iter()
+                        .map(|col| (col.name.clone(), col.data_type.clone()))
+                        .chain([("__distance".to_owned(), DataType::Float64)]),
+                ))
+                .into(),
+            ),
+        ));
+        schema
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
@@ -77,7 +85,6 @@ pub struct BatchVectorSearch {
 }
 
 impl BatchVectorSearch {
-    #[expect(dead_code)]
     pub(super) fn with_core(core: BatchVectorSearchCore) -> Self {
         Self::with_core_inner(core, Distribution::Single)
     }
@@ -87,11 +94,8 @@ impl BatchVectorSearch {
     }
 
     fn with_core_inner(core: BatchVectorSearchCore, distribution: Distribution) -> Self {
-        let column_index = core.info_column_desc.len();
-        let order = Order::new(vec![ColumnOrder {
-            column_index,
-            order_type: OrderType::ascending(),
-        }]);
+        // TODO: support specifying order in nested struct to avoid unnecessary sort
+        let order = Order::any();
         let base = PlanBase::new_batch_with_core(&core, distribution, order);
         Self { base, core }
     }
@@ -99,7 +103,7 @@ impl BatchVectorSearch {
 
 impl Distill for BatchVectorSearch {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let mut fields = vec![
+        let fields = vec![
             (
                 "schema",
                 Pretty::Array(self.schema().fields.iter().map(Pretty::debug).collect()),
@@ -107,15 +111,37 @@ impl Distill for BatchVectorSearch {
             ("top_n", Pretty::debug(&self.core.top_n)),
             ("distance_type", Pretty::debug(&self.core.distance_type)),
             ("index_name", Pretty::debug(&self.core.index_name)),
+            (
+                "vector",
+                Pretty::debug(&ExprDisplay {
+                    expr: &ExprImpl::InputRef(
+                        InputRef::new(
+                            self.core.vector_column_idx,
+                            self.core.input.schema()[self.core.vector_column_idx].data_type(),
+                        )
+                        .into(),
+                    ),
+                    input_schema: self.core.input.schema(),
+                }),
+            ),
         ];
-        if self.core.ctx.is_explain_verbose() {
-            fields.push(("vector", Pretty::debug(&self.core.vector_literal)));
-        }
         childless_record("BatchVectorSearch", fields)
     }
 }
 
-impl_plan_tree_node_for_leaf!(Batch, BatchVectorSearch);
+impl PlanTreeNodeUnary<Batch> for BatchVectorSearch {
+    fn input(&self) -> crate::PlanRef<Batch> {
+        self.core.input.clone()
+    }
+
+    fn clone_with_input(&self, input: crate::PlanRef<Batch>) -> Self {
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::with_core(core)
+    }
+}
+
+impl_plan_tree_node_for_unary!(Batch, BatchVectorSearch);
 
 impl ToBatchPb for BatchVectorSearch {
     fn to_batch_prost_body(&self) -> NodeBody {
@@ -127,12 +153,7 @@ impl ToBatchPb for BatchVectorSearch {
                 .iter()
                 .map(|col| col.to_protobuf())
                 .collect(),
-            query_vector: self
-                .core
-                .vector_literal
-                .as_scalar_ref()
-                .into_slice()
-                .to_vec(),
+            vector_column_idx: self.core.vector_column_idx as _,
             top_n: self.core.top_n as _,
             distance_type: self.core.distance_type as _,
         })

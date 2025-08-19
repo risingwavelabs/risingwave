@@ -1215,7 +1215,7 @@ impl BatchPlanFragmenter {
     }
 
     fn collect_stage_vector_search(node: PlanRef) -> bool {
-        if node.node_type() == PlanNodeType::BatchExchange {
+        if node.node_type() == BatchPlanNodeType::BatchExchange {
             // Do not visit next stage.
             return false;
         }
