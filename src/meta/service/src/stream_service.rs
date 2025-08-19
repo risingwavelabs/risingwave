@@ -217,56 +217,57 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         request: Request<ListTableFragmentsRequest>,
     ) -> Result<Response<ListTableFragmentsResponse>, Status> {
-        let req = request.into_inner();
-        let table_ids = HashSet::<u32>::from_iter(req.table_ids);
-
-        let mut info = HashMap::new();
-        for job_id in table_ids {
-            let table_fragments = self
-                .metadata_manager
-                .catalog_controller
-                .get_job_fragments_by_id(job_id as _)
-                .await?;
-            let mut dispatchers = self
-                .metadata_manager
-                .catalog_controller
-                .get_fragment_actor_dispatchers(
-                    table_fragments.fragment_ids().map(|id| id as _).collect(),
-                )
-                .await?;
-            let ctx = table_fragments.ctx.to_protobuf();
-            info.insert(
-                table_fragments.stream_job_id().table_id,
-                TableFragmentInfo {
-                    fragments: table_fragments
-                        .fragments
-                        .into_iter()
-                        .map(|(id, fragment)| FragmentInfo {
-                            id,
-                            actors: fragment
-                                .actors
-                                .into_iter()
-                                .map(|actor| ActorInfo {
-                                    id: actor.actor_id,
-                                    node: Some(fragment.nodes.clone()),
-                                    dispatcher: dispatchers
-                                        .get_mut(&(fragment.fragment_id as _))
-                                        .and_then(|dispatchers| {
-                                            dispatchers.remove(&(actor.actor_id as _))
-                                        })
-                                        .unwrap_or_default(),
-                                })
-                                .collect_vec(),
-                        })
-                        .collect_vec(),
-                    ctx: Some(ctx),
-                },
-            );
-        }
-
-        Ok(Response::new(ListTableFragmentsResponse {
-            table_fragments: info,
-        }))
+        // let req = request.into_inner();
+        // let table_ids = HashSet::<u32>::from_iter(req.table_ids);
+        //
+        // let mut info = HashMap::new();
+        // for job_id in table_ids {
+        //     let table_fragments = self
+        //         .metadata_manager
+        //         .catalog_controller
+        //         .get_job_fragments_by_id(job_id as _)
+        //         .await?;
+        //     let mut dispatchers = self
+        //         .metadata_manager
+        //         .catalog_controller
+        //         .get_fragment_actor_dispatchers(
+        //             table_fragments.fragment_ids().map(|id| id as _).collect(),
+        //         )
+        //         .await?;
+        //     let ctx = table_fragments.ctx.to_protobuf();
+        //     info.insert(
+        //         table_fragments.stream_job_id().table_id,
+        //         TableFragmentInfo {
+        //             fragments: table_fragments
+        //                 .fragments
+        //                 .into_iter()
+        //                 .map(|(id, fragment)| FragmentInfo {
+        //                     id,
+        //                     actors: fragment
+        //                         .actors
+        //                         .into_iter()
+        //                         .map(|actor| ActorInfo {
+        //                             id: actor.actor_id,
+        //                             node: Some(fragment.nodes.clone()),
+        //                             dispatcher: dispatchers
+        //                                 .get_mut(&(fragment.fragment_id as _))
+        //                                 .and_then(|dispatchers| {
+        //                                     dispatchers.remove(&(actor.actor_id as _))
+        //                                 })
+        //                                 .unwrap_or_default(),
+        //                         })
+        //                         .collect_vec(),
+        //                 })
+        //                 .collect_vec(),
+        //             ctx: Some(ctx),
+        //         },
+        //     );
+        // }
+        //
+        // Ok(Response::new(ListTableFragmentsResponse {
+        //     table_fragments: info,
+        // }))
+        todo!()
     }
 
     async fn list_streaming_job_states(
