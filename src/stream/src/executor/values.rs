@@ -204,14 +204,8 @@ mod tests {
         // Init barrier
         let first_message =
             Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
-                adds: Default::default(),
                 added_actors: maplit::hashset! {actor_id},
-                splits: Default::default(),
-                pause: false,
-                subscriptions_to_add: vec![],
-                backfill_nodes_to_pause: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
-                new_upstream_sinks: Default::default(),
+                ..Default::default()
             }));
         tx.send(first_message).unwrap();
 

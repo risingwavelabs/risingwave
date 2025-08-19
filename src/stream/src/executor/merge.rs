@@ -597,12 +597,8 @@ mod tests {
                 (*epoch, barrier)
             })
             .collect();
-        let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch).with_mutation(
-            Mutation::Stop(StopMutation {
-                dropped_actors: Default::default(),
-                dropped_upstream_sinks: Default::default(),
-            }),
-        );
+        let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch)
+            .with_mutation(Mutation::Stop(StopMutation::default()));
         barrier_test_env.inject_barrier(&b2, [actor_id]);
         barrier_test_env.flush_all_events().await;
 

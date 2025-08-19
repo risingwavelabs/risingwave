@@ -975,8 +975,6 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use maplit::{btreemap, convert_args, hashmap};
     use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -1053,8 +1051,6 @@ mod tests {
 
         let init_barrier =
             Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
-                adds: HashMap::new(),
-                added_actors: HashSet::new(),
                 splits: hashmap! {
                     ActorId::default() => vec![
                         SplitImpl::Datagen(DatagenSplit {
@@ -1064,11 +1060,7 @@ mod tests {
                         }),
                     ],
                 },
-                pause: false,
-                subscriptions_to_add: vec![],
-                backfill_nodes_to_pause: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
-                new_upstream_sinks: Default::default(),
+                ..Default::default()
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -1149,8 +1141,6 @@ mod tests {
         let mut epoch = test_epoch(1);
         let init_barrier =
             Barrier::new_test_barrier(epoch).with_mutation(Mutation::Add(AddMutation {
-                adds: HashMap::new(),
-                added_actors: HashSet::new(),
                 splits: hashmap! {
                     ActorId::default() => vec![
                         SplitImpl::Datagen(DatagenSplit {
@@ -1160,11 +1150,7 @@ mod tests {
                         }),
                     ],
                 },
-                pause: false,
-                subscriptions_to_add: vec![],
-                backfill_nodes_to_pause: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
-                new_upstream_sinks: Default::default(),
+                ..Default::default()
             }));
         barrier_tx.send(init_barrier).unwrap();
 

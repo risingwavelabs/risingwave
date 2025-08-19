@@ -848,7 +848,7 @@ impl Command {
 
             Command::DropStreamingJobs { actors, .. } => Some(Mutation::Stop(StopMutation {
                 actors: actors.clone(),
-                dropped_upstream_sinks: Default::default(),
+                dropped_sink_fragments: Default::default(),
             })),
 
             Command::CreateStreamingJob {

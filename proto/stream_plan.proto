@@ -50,8 +50,8 @@ message AddMutation {
 
 message StopMutation {
   repeated uint32 actors = 1;
-  // Use actor_id as keys.
-  map<uint32, common.Uint32Vector> dropped_upstream_sinks = 2;
+  // Only sink-fragment in the sink job is recorded.
+  repeated uint32 dropped_sink_fragments = 2;
 }
 
 message UpdateMutation {
@@ -956,8 +956,9 @@ message VectorIndexWriteNode {
   catalog.Table table = 1;
 }
 
-// This is just for creating. Upstreams may be added and removed dynamically at runtime.
 message UpstreamSinkUnionNode {
+  // It is always empty in the persisted metadata, and get filled before we spawn the actors.
+  // The actual upstream info may be added and removed dynamically at runtime.
   repeated UpstreamSinkInfo init_upstreams = 1;
 }
 

@@ -285,7 +285,7 @@ async fn test_merger_sum_aggr() {
     }
     let b = Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(StopMutation {
         dropped_actors: actors.clone().into_iter().collect(),
-        dropped_upstream_sinks: Default::default(),
+        ..Default::default()
     }));
     barrier_test_env.inject_barrier(&b, actors);
     input

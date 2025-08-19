@@ -15,7 +15,7 @@
 #![feature(let_chains)]
 #![feature(coroutines)]
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -308,14 +308,8 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     );
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
             splits,
-            pause: false,
-            subscriptions_to_add: vec![],
-            backfill_nodes_to_pause: Default::default(),
-            actor_cdc_table_snapshot_splits: Default::default(),
-            new_upstream_sinks: Default::default(),
+            ..Default::default()
         }));
 
     tx.send_barrier(init_barrier);
@@ -646,14 +640,9 @@ async fn test_parallelized_cdc_backfill() {
     .collect();
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
             splits: source_splits,
-            pause: false,
-            subscriptions_to_add: vec![],
-            backfill_nodes_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits,
-            new_upstream_sinks: Default::default(),
+            ..Default::default()
         }));
     tx.send_barrier(init_barrier);
     assert!(matches!(
@@ -823,14 +812,9 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     .collect();
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
             splits: source_splits.clone(),
-            pause: false,
-            subscriptions_to_add: vec![],
-            backfill_nodes_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits,
-            new_upstream_sinks: Default::default(),
+            ..Default::default()
         }));
     tx.send_barrier(init_barrier);
     assert!(matches!(
@@ -905,13 +889,8 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     curr_epoch.inc_epoch();
     let reschedule_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Update(UpdateMutation {
-            dispatchers: Default::default(),
-            merges: Default::default(),
-            vnode_bitmaps: Default::default(),
-            dropped_actors: Default::default(),
-            actor_splits: Default::default(),
-            actor_new_dispatchers: Default::default(),
             actor_cdc_table_snapshot_splits,
+            ..Default::default()
         }));
     tx.send_barrier(reschedule_barrier);
 

@@ -253,7 +253,7 @@ impl StreamActorManager {
             identity: info.identity.clone().into(),
         };
 
-        let mut upstream_infos = Vec::with_capacity(merge_projects.len());
+        let mut initial_upstream_infos = Vec::with_capacity(merge_projects.len());
         for (merge_node, project_node) in merge_projects {
             let upstream_fragment_id = merge_node
                 .get_node_body()
@@ -274,7 +274,7 @@ impl StreamActorManager {
                 project_exprs,
                 eval_error_report.clone(),
             )?;
-            upstream_infos.push(info);
+            initial_upstream_infos.push(info);
         }
 
         let upstream_sink_union_executor = UpstreamSinkUnionExecutor::new(
@@ -282,7 +282,7 @@ impl StreamActorManager {
             local_barrier_manager.clone(),
             self.streaming_metrics.clone(),
             env.config().developer.chunk_size,
-            upstream_infos,
+            initial_upstream_infos,
             eval_error_report,
         );
         let executor = (info, upstream_sink_union_executor).into();
