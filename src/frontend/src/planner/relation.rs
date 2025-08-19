@@ -33,9 +33,9 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalPlanRef as PlanRef,
-    LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction,
-    LogicalValues,
+    LogicalApply, LogicalCdcScan, LogicalCteRef, LogicalHopWindow, LogicalJoin,
+    LogicalPlanRef as PlanRef, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
+    LogicalSysScan, LogicalTableFunction, LogicalValues,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
@@ -216,6 +216,23 @@ impl Planner {
             Err(ErrorCode::InternalError(
                 "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_owned(),
             )
+            .into())
+        } else if source.is_etl_source() {
+            match self.plan_for() {
+                PlanFor::Stream => {}
+                PlanFor::BatchDql | PlanFor::Batch | PlanFor::StreamIcebergEngineInternal => {
+                    return Err(ErrorCode::NotSupported(
+                        "Querying a CDC ETL source is not supported in batch mode".to_owned(),
+                        "HINT: create TABLE from the source instead".to_owned(),
+                    )
+                    .into());
+                }
+            }
+            Ok(LogicalCdcScan::with_catalog(
+                Rc::new(source.catalog),
+                SourceNodeKind::CreateMViewOrBatch,
+                self.ctx(),
+            )?
             .into())
         } else {
             let as_of = source.as_of.clone();

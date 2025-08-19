@@ -61,11 +61,15 @@ pub struct BoundSource {
 
 impl BoundSource {
     pub fn is_shareable_cdc_connector(&self) -> bool {
-        self.catalog.with_properties.is_shareable_cdc_connector()
+        self.catalog.with_properties.is_shareable_cdc_connector() && !self.is_etl_source()
     }
 
     pub fn is_shared(&self) -> bool {
         self.catalog.info.is_shared()
+    }
+
+    pub fn is_etl_source(&self) -> bool {
+        self.catalog.cdc_etl_info.is_some()
     }
 }
 

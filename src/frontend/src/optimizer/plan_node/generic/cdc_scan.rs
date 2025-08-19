@@ -18,7 +18,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use educe::Educe;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::CdcTableType;
@@ -29,7 +29,7 @@ use risingwave_connector::source::cdc::{
     CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX, CdcScanOptions,
 };
 
-use super::GenericPlanNode;
+use super::{GenericPlanNode, SourceNodeKind};
 use crate::WithOptions;
 use crate::catalog::ColumnId;
 use crate::error::Result;
@@ -43,6 +43,7 @@ use crate::optimizer::property::{FunctionalDependencySet, MonotonicityMap, Water
 pub struct CdcScan {
     pub table_name: String,
     /// Include `output_col_idx` and columns required in `predicate`
+    /// Currently not in use, but needed when we push the column pruning to the source node.
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the external table for CDC
     pub cdc_table_desc: Rc<CdcTableDesc>,
@@ -51,6 +52,7 @@ pub struct CdcScan {
     pub ctx: OptimizerContextRef,
 
     pub options: CdcScanOptions,
+    pub kind: SourceNodeKind,
 }
 
 pub fn build_cdc_scan_options_with_options(
@@ -185,6 +187,7 @@ impl CdcScan {
         cdc_table_desc: Rc<CdcTableDesc>,
         ctx: OptimizerContextRef,
         options: CdcScanOptions,
+        kind: SourceNodeKind,
     ) -> Self {
         Self {
             table_name,
@@ -192,6 +195,7 @@ impl CdcScan {
             cdc_table_desc,
             ctx,
             options,
+            kind,
         }
     }
 
@@ -216,7 +220,7 @@ impl GenericPlanNode for CdcScan {
             .iter()
             .map(|tb_idx| {
                 let col = &self.get_table_columns()[*tb_idx];
-                Field::from_with_table_name_prefix(col, &self.table_name)
+                col.into()
             })
             .collect();
         Schema { fields }
