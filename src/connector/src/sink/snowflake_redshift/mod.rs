@@ -31,6 +31,7 @@ use crate::sink::file_sink::opendal_sink::FileSink;
 use crate::sink::file_sink::s3::{S3Common, S3Sink};
 use crate::sink::{Result, SinkError, SinkWriterParam};
 
+pub mod file_manager_util;
 pub mod redshift;
 pub mod snowflake;
 

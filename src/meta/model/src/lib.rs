@@ -57,6 +57,7 @@ pub mod secret;
 pub mod serde_seaql_migration;
 pub mod session_parameter;
 pub mod sink;
+pub mod snowflake_redshift_sink_file;
 pub mod source;
 pub mod streaming_job;
 pub mod subscription;
