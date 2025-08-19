@@ -682,7 +682,7 @@ impl IndexSelectionRule {
         table_scan_io_estimator.estimate(&Condition::true_cond())
     }
 
-    fn create_null_safe_equal_expr(
+    pub fn create_null_safe_equal_expr(
         left: usize,
         left_data_type: DataType,
         right: usize,
