@@ -1,0 +1,49 @@
+# Test for GAP FILL with EOWC (Event-time Oriented Window Computing) syntax.
+# This requires watermark definition and EMIT ON WINDOW CLOSE.
+
+statement ok
+CREATE TABLE gap_table (
+    device_id VARCHAR,
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (ts),
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+INSERT INTO gap_table VALUES
+    ('device1', '2024-05-21 10:00:00', 10.0),
+    ('device1', '2024-05-21 10:02:00', 12.0),
+    ('device1', '2024-05-21 10:05:00', 15.0);
+
+# Use EOWC syntax with EMIT ON WINDOW CLOSE
+statement ok
+CREATE MATERIALIZED VIEW gap_filled AS
+SELECT device_id, ts, value
+FROM GAP_FILL(gap_table, ts, INTERVAL '1' MINUTE)
+EMIT ON WINDOW CLOSE;
+
+# Insert some more data with later timestamps to trigger watermark advancement
+statement ok
+INSERT INTO gap_table VALUES
+    ('device1', '2024-05-21 10:08:00', 20.0);
+
+# Wait longer for processing and watermark advancement
+sleep 6s
+
+# Check the result - GAP_FILL uses LOCF (Last Observation Carried Forward) by default
+query TTR
+SELECT device_id, ts, value FROM gap_filled ORDER BY device_id, ts;
+----
+device1 2024-05-21 10:00:00 10
+device1 2024-05-21 10:01:00 10
+device1 2024-05-21 10:02:00 12
+device1 2024-05-21 10:03:00 12
+device1 2024-05-21 10:04:00 12
+device1 2024-05-21 10:05:00 15
+
+statement ok
+DROP MATERIALIZED VIEW gap_filled;
+
+statement ok
+DROP TABLE gap_table;

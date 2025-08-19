@@ -12,10 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod eowc_gap_fill;
-mod sort;
-mod sort_buffer;
+use risingwave_common::gap_fill_types::FillStrategy;
 
-pub use eowc_gap_fill::{EowcGapFillExecutor, EowcGapFillExecutorArgs};
-pub use sort::{SortExecutor, SortExecutorArgs};
-pub use sort_buffer::SortBuffer;
+use crate::expr::InputRef;
+
+/// Bound fill strategy that associates a strategy with a target column.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BoundFillStrategy {
+    /// The fill strategy to use
+    pub strategy: FillStrategy,
+    /// The target column to apply the strategy to
+    pub target_col: InputRef,
+}
