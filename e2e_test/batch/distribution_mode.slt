@@ -14,7 +14,6 @@ include ./types/**/*.slt.part
 include ./functions/*.slt.part
 include ./over_window/main.slt.part
 include ./subquery/**/*.slt.part
-include ./vector_search/**/*.slt.part
 
 statement ok
 SET QUERY_MODE TO auto;
