@@ -1419,10 +1419,9 @@ mod tests {
                     DataType::List(Box::new(DataType::Int64)),
                 ),
                 DataTypeName::Vector => (
-                    ScalarImpl::Vector(VectorVal::from(
+                    ScalarImpl::Vector(VectorVal::from_iter(
                         (0..VectorVal::TEST_VECTOR_DIMENSION)
-                            .map(|i| ((i + 1) as f32).try_into().unwrap())
-                            .collect_vec(),
+                            .map(|i| ((i + 1) as f32).try_into().unwrap()),
                     )),
                     DataType::Vector(VectorVal::TEST_VECTOR_DIMENSION),
                 ),

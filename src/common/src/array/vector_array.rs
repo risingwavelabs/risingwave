@@ -268,7 +268,7 @@ impl VectorArray {
 
 #[derive(Clone, EstimateSize)]
 pub struct VectorVal {
-    inner: Box<[VectorItemType]>,
+    pub(crate) inner: Box<[VectorItemType]>,
 }
 
 impl Debug for VectorVal {

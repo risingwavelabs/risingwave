@@ -21,7 +21,7 @@ use either::{Either, for_both};
 use enum_as_inner::EnumAsInner;
 use risingwave_pb::data::PbDatum;
 
-use crate::array::{ArrayImpl, Finite32};
+use crate::array::ArrayImpl;
 use crate::row::Row;
 use crate::types::*;
 
@@ -32,6 +32,7 @@ use self::column_aware_row_encoding::ColumnAwareSerde;
 pub mod column_aware_row_encoding;
 
 pub use crate::row::RowDeserializer as BasicDeserializer;
+use crate::vector::{decode_vector_payload, encode_vector_payload};
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
@@ -284,10 +285,7 @@ fn estimate_serialize_list_size(list: ListRef<'_>) -> usize {
 
 fn serialize_vector(value: VectorRef<'_>, buf: &mut impl BufMut) {
     let elems = value.into_slice();
-    elems.iter().for_each(|v| {
-        // follow the `put_f32_le` in `serialize_scalar`
-        buf.put_f32_le(*v);
-    });
+    encode_vector_payload(elems, buf);
 }
 fn estimate_serialize_vector_size(v: VectorRef<'_>) -> usize {
     size_of_val(v.into_slice())
@@ -400,13 +398,11 @@ fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarI
 }
 
 fn deserialize_vector(dimension: usize, data: &mut impl Buf) -> Result<ScalarImpl> {
-    let mut value = Vec::with_capacity(dimension);
-    for _ in 0..dimension {
-        // follow the `get_f32_le` in `deserialize_value`
-        let i = data.get_f32_le();
-        value.push(Finite32::try_from(i).map_err(|e| ValueEncodingError::InvalidVectorItem(i, e))?)
+    let payload = decode_vector_payload(dimension, data);
+    Ok(VectorVal {
+        inner: F32::from_inner_vec(payload).into_boxed_slice(),
     }
-    Ok(VectorVal::from(value).to_scalar_value())
+    .to_scalar_value())
 }
 
 fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
