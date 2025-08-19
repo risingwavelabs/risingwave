@@ -452,15 +452,6 @@ fn array_to_vector(array: ListRef<'_>, ctx: &Context) -> Result<VectorVal> {
     Ok(result)
 }
 
-#[inline(always)]
-fn l2_norm_internal(vector: &[f32]) -> f64 {
-    let mut sum = 0.0f64;
-    for v in vector {
-        sum += (*v as f64) * (*v as f64);
-    }
-    sum.sqrt()
-}
-
 /// ```slt
 /// query R
 /// SELECT round(vector_norm('[1,1]'::vector(2))::numeric, 5);
@@ -494,8 +485,7 @@ fn l2_norm_internal(vector: &[f32]) -> f64 {
 /// ```
 #[function("l2_norm(vector) -> float8")]
 fn l2_norm(vector: VectorRef<'_>) -> F64 {
-    let vector = vector.into_slice();
-    l2_norm_internal(vector).into()
+    (vector.l2_norm() as f64).into()
 }
 
 /// ```slt
@@ -528,18 +518,6 @@ fn l2_norm(vector: VectorRef<'_>) -> F64 {
     "l2_normalize(vector) -> vector",
     type_infer = "|args| Ok(args[0].clone())"
 )]
-fn l2_normalize(vector: VectorRef<'_>) -> Result<VectorVal> {
-    let vector = vector.into_slice();
-    let norm = l2_norm_internal(vector);
-
-    if norm == 0.0 {
-        return Ok(std::iter::repeat_n(Finite32::try_from(0.0).unwrap(), vector.len()).collect());
-    }
-
-    let result = vector
-        .iter()
-        .map(|v| Finite32::try_from(((*v as f64) / norm) as f32))
-        .try_collect()
-        .map_err(|_| ExprError::NumericOverflow)?;
-    Ok(result)
+fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
+    vector.normalized()
 }

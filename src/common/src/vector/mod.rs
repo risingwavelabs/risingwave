@@ -18,6 +18,7 @@ use std::slice;
 
 use bytes::{Buf, BufMut};
 use risingwave_common_estimate_size::EstimateSize;
+use tracing::warn;
 
 use crate::array::{VectorDistanceType, VectorItemType, VectorRef, VectorVal};
 use crate::types::F32;
@@ -90,6 +91,12 @@ impl<T: AsRef<[VectorItemType]>> VectorInner<T> {
         let len = slice.len();
         let mut inner = Vec::with_capacity(len);
         let l2_norm = self.l2_norm();
+        if l2_norm < f32::MIN_POSITIVE {
+            warn!("normalize 0-norm vector. return original value");
+            return VectorVal {
+                inner: self.inner.as_ref().to_vec().into_boxed_slice(),
+            };
+        }
         // TODO: vectorize it
         inner.extend((0..len).map(|i| {
             // safety: 0 <= i < len
