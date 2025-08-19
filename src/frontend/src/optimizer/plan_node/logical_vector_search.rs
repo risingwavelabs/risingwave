@@ -17,14 +17,15 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::array::VectorVal;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::common::PbDistanceType;
 
 use crate::OptimizerContextRef;
 use crate::expr::{
-    ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, collect_input_refs,
+    ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal, TableFunction,
+    TableFunctionType, collect_input_refs,
 };
 use crate::optimizer::plan_node::batch_vector_search::BatchVectorSearchCore;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -33,10 +34,11 @@ use crate::optimizer::plan_node::generic::{
 };
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
-    BatchPlanRef, BatchProject, BatchTopN, BatchVectorSearch, ColPrunable, ColumnPruningContext,
-    ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject, LogicalScan, PlanBase,
-    PlanTreeNodeUnary, PredicatePushdown, PredicatePushdownContext, RewriteStreamContext,
-    StreamPlanRef, ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
+    BatchPlanRef, BatchProject, BatchProjectSet, BatchTopN, BatchValues, BatchVectorSearch,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    LogicalProject, LogicalScan, LogicalValues, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    PredicatePushdownContext, RewriteStreamContext, StreamPlanRef, ToBatch, ToStream,
+    ToStreamContext, gen_filter_and_pushdown, generic,
 };
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
@@ -354,7 +356,7 @@ impl ToBatch for LogicalVectorSearch {
 
                 let primary_table_cols_idx = self
                     .core
-                    .output_input_idx
+                    .output_indices
                     .iter()
                     .map(|input_idx| scan.output_col_idx()[*input_idx])
                     .collect_vec();
@@ -374,20 +376,86 @@ impl ToBatch for LogicalVectorSearch {
                 if !non_covered_table_cols_idx.is_empty() {
                     continue;
                 }
+                let dimension = vector_literal.as_scalar_ref().into_slice().len();
+                let literal_vector_input = BatchValues::new(LogicalValues::new(
+                    vec![vec![ExprImpl::Literal(
+                        Literal::new(
+                            Some(ScalarImpl::Vector(vector_literal)),
+                            DataType::Vector(dimension),
+                        )
+                        .into(),
+                    )]],
+                    Schema::from_iter([Field::unnamed(DataType::Vector(dimension))]),
+                    self.core.ctx(),
+                ))
+                .into();
                 let core = BatchVectorSearchCore {
+                    input: literal_vector_input,
                     top_n: self.core.top_n,
                     distance_type: self.core.distance_type,
                     index_name: index.index_table.name.clone(),
                     index_table_id: index.index_table.id,
-                    vector_literal,
                     info_column_desc: index.index_table.columns
                         [1..=index.included_info_columns.len()]
                         .iter()
                         .map(|col| col.column_desc.clone())
                         .collect(),
+                    vector_column_idx: 0,
                     ctx: self.core.ctx(),
                 };
-                let vector_search: BatchPlanRef = BatchVectorSearch::with_core(core).into();
+                let vector_search: BatchPlanRef = {
+                    let vector_search: BatchPlanRef = BatchVectorSearch::with_core(core).into();
+                    let unnested_array: BatchPlanRef = BatchProjectSet::new(generic::ProjectSet {
+                        select_list: vec![ExprImpl::TableFunction(
+                            TableFunction::new(
+                                TableFunctionType::Unnest,
+                                vec![ExprImpl::InputRef(
+                                    InputRef::new(1, vector_search.schema()[1].data_type()).into(),
+                                )],
+                            )?
+                            .into(),
+                        )],
+                        input: vector_search,
+                    })
+                    .into();
+                    let DataType::Struct(struct_type) = &unnested_array.schema()[1].data_type
+                    else {
+                        panic!("{:?}", unnested_array.schema()[1].data_type);
+                    };
+                    let unnest_struct = BatchProject::new(generic::Project::new(
+                        struct_type
+                            .types()
+                            .enumerate()
+                            .map(|(idx, data_type)| {
+                                ExprImpl::FunctionCall(
+                                    FunctionCall::new_unchecked(
+                                        ExprType::Field,
+                                        vec![
+                                            ExprImpl::InputRef(
+                                                InputRef::new(
+                                                    1,
+                                                    DataType::Struct(struct_type.clone()),
+                                                )
+                                                .into(),
+                                            ),
+                                            ExprImpl::Literal(
+                                                Literal::new(
+                                                    Some(ScalarImpl::Int32(idx as _)),
+                                                    DataType::Int32,
+                                                )
+                                                .into(),
+                                            ),
+                                        ],
+                                        data_type.clone(),
+                                    )
+                                    .into(),
+                                )
+                            })
+                            .collect(),
+                        unnested_array,
+                    ));
+                    unnest_struct.into()
+                };
                 return Ok(BatchProject::new(generic::Project::with_out_col_idx(
                     vector_search,
                     covered_table_cols_idx
