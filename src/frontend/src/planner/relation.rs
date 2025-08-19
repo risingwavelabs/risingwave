@@ -26,15 +26,17 @@ use risingwave_common::{bail, bail_not_implemented};
 use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
-    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBackCteRef, BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput,
+    BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
+    WindowTableFunctionKind,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
-    LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalApply, LogicalCteRef, LogicalGapFill, LogicalHopWindow, LogicalJoin, LogicalProject,
+    LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues,
+    PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
@@ -62,6 +64,7 @@ impl Planner {
             // note that rcte (i.e., RecursiveUnion) is included *implicitly* in share.
             Relation::Share(share) => self.plan_share(*share),
             Relation::BackCteRef(cte_ref) => self.plan_cte_ref(*cte_ref),
+            Relation::GapFill(bound_gap_fill) => self.plan_gap_fill(*bound_gap_fill),
         }
     }
 
@@ -417,6 +420,17 @@ source: {:?}",
         // TODO: this is actually duplicated from `plan_recursive_union`, refactor?
         let base = self.plan_set_expr(cte_ref.base, vec![], &[])?;
         Ok(LogicalCteRef::create(cte_ref.share_id, base))
+    }
+
+    pub(super) fn plan_gap_fill(&mut self, gap_fill: BoundGapFill) -> Result<PlanRef> {
+        let input = self.plan_relation(gap_fill.input)?;
+        Ok(LogicalGapFill::new(
+            input,
+            gap_fill.time_col,
+            gap_fill.interval,
+            gap_fill.fill_strategies,
+        )
+        .into())
     }
 
     fn collect_col_data_types_for_tumble_window(relation: &Relation) -> Result<Vec<DataType>> {

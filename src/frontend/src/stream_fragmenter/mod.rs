@@ -16,6 +16,7 @@ mod graph;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod parallelism;
 mod rewrite;
@@ -71,6 +72,7 @@ pub struct BuildFragmentGraphState {
     has_source_backfill: bool,
     has_snapshot_backfill: bool,
     has_cross_db_snapshot_backfill: bool,
+    tables: HashMap<TableId, Table>,
 }
 
 impl BuildFragmentGraphState {
@@ -376,6 +378,13 @@ fn build_fragment(
                 .add(FragmentTypeFlag::Sink),
 
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
+
+            NodeBody::GapFill(node) => {
+                let table = Table::from(node.buffer_table.as_ref().unwrap().clone());
+                state.tables.insert(TableId::new(table.id), table);
+                let table = Table::from(node.prev_row_table.as_ref().unwrap().clone());
+                state.tables.insert(TableId::new(table.id), table);
+            }
 
             NodeBody::StreamScan(node) => {
                 current_fragment

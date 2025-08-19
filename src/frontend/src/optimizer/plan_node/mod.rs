@@ -996,6 +996,7 @@ mod logical_delete;
 mod logical_except;
 mod logical_expand;
 mod logical_filter;
+mod logical_gap_fill;
 mod logical_hop_window;
 mod logical_insert;
 mod logical_intersect;
@@ -1029,6 +1030,7 @@ mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
 mod stream_fs_fetch;
+mod stream_gap_fill;
 mod stream_global_approx_percentile;
 mod stream_group_topn;
 mod stream_hash_agg;
@@ -1053,6 +1055,7 @@ mod stream_stateless_simple_agg;
 mod stream_sync_log_store;
 mod stream_table_scan;
 mod stream_topn;
+mod stream_union;
 mod stream_values;
 mod stream_watermark_filter;
 
@@ -1071,7 +1074,6 @@ mod logical_mysql_query;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
-mod stream_union;
 pub mod utils;
 
 pub use batch_delete::BatchDelete;
@@ -1118,6 +1120,7 @@ pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
 pub use logical_file_scan::LogicalFileScan;
 pub use logical_filter::LogicalFilter;
+pub use logical_gap_fill::LogicalGapFill;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
@@ -1155,6 +1158,7 @@ pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
 pub use stream_fs_fetch::StreamFsFetch;
+pub use stream_gap_fill::StreamGapFill;
 pub use stream_global_approx_percentile::StreamGlobalApproxPercentile;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
@@ -1246,6 +1250,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
+            , { Logical, GapFill }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1319,6 +1324,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, AsOfJoin }
             , { Stream, SyncLogStore }
             , { Stream, MaterializedExprs }
+            , { Stream, GapFill }
             $(,$rest)*
         }
     };

@@ -34,6 +34,7 @@ mod delete;
 mod expr;
 pub mod fetch_cursor;
 mod for_system;
+mod gap_fill_binder;
 mod insert;
 mod query;
 mod relation;
@@ -48,14 +49,17 @@ pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
 pub use expr::bind_data_type;
+pub use gap_fill_binder::BoundFillStrategy;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
-    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
+    BoundBackCteRef, BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput,
+    BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
     ResolveQualifiedNameError, WindowTableFunctionKind,
 };
+// Re-export common types
+pub use risingwave_common::gap_fill_types::FillStrategy;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;

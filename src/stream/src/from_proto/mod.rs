@@ -26,6 +26,7 @@ mod dynamic_filter;
 mod eowc_over_window;
 mod expand;
 mod filter;
+mod gap_fill;
 mod group_top_n;
 mod hash_agg;
 mod hash_join;
@@ -79,6 +80,7 @@ use self::dynamic_filter::*;
 use self::eowc_over_window::*;
 use self::expand::*;
 use self::filter::*;
+use self::gap_fill::GapFillExecutorBuilder;
 use self::group_top_n::GroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
@@ -195,5 +197,6 @@ pub async fn create_executor(
         NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
         NodeBody::SyncLogStore => SyncLogStoreExecutorBuilder,
         NodeBody::MaterializedExprs => MaterializedExprsExecutorBuilder,
+        NodeBody::GapFill => GapFillExecutorBuilder,
     }
 }
