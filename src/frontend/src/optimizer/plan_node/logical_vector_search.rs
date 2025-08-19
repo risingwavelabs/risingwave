@@ -19,7 +19,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
@@ -27,8 +27,8 @@ use risingwave_pb::plan_common::JoinType;
 use crate::OptimizerContextRef;
 use crate::error::ErrorCode;
 use crate::expr::{
-    ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal, TableFunction,
-    TableFunctionType, collect_input_refs,
+    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    TableFunction, TableFunctionType, collect_input_refs,
 };
 use crate::optimizer::plan_node::batch_vector_search::BatchVectorSearchCore;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -344,29 +344,56 @@ impl LogicalVectorSearch {
         Ok(BatchTopN::new(top_n).into())
     }
 
-    fn as_vector_table_scan(&self) -> Option<(&LogicalScan, VectorVal, usize)> {
+    fn as_vector_table_scan(&self) -> Option<(&LogicalScan, VectorVal, &ExprImpl)> {
         let scan = self.core.input.as_logical_scan()?;
-        let (vector_input, vector_literal) = match (&self.core.left, &self.core.right) {
-            (ExprImpl::InputRef(input), ExprImpl::Literal(vector_literal))
-            | (ExprImpl::Literal(vector_literal), ExprImpl::InputRef(input)) => {
-                (input, vector_literal)
+        let (vector_expr, vector_literal) = match (&self.core.left, &self.core.right) {
+            (ExprImpl::Literal(_), ExprImpl::Literal(_)) => {
+                return None;
             }
+            (vector_expr, ExprImpl::Literal(vector_literal))
+            | (ExprImpl::Literal(vector_literal), vector_expr) => (vector_expr, vector_literal),
             _ => return None,
         };
         let ScalarImpl::Vector(vec) = vector_literal.get_data().as_ref()? else {
             unreachable!("input of vector search must be of vector type")
         };
-        Some((scan, vec.clone(), vector_input.index))
+        Some((scan, vec.clone(), vector_expr))
+    }
+
+    fn is_matched_vector_column_expr(
+        index_expr: &ExprImpl,
+        column_expr: &ExprImpl,
+        scan_output_col_idx: &[usize],
+    ) -> bool {
+        match (index_expr, column_expr) {
+            (ExprImpl::Literal(l1), ExprImpl::Literal(l2)) => l1 == l2,
+            (ExprImpl::InputRef(i1), ExprImpl::InputRef(i2)) => {
+                i1.index == scan_output_col_idx[i2.index]
+            }
+            (ExprImpl::FunctionCall(f1), ExprImpl::FunctionCall(f2)) => {
+                f1.func_type() == f2.func_type()
+                    && f1.return_type() == f2.return_type()
+                    && f1.inputs().len() == f2.inputs().len()
+                    && f1.inputs().iter().zip_eq_fast(f2.inputs()).all(|(e1, e2)| {
+                        Self::is_matched_vector_column_expr(e1, e2, scan_output_col_idx)
+                    })
+            }
+            _ => false,
+        }
     }
 }
 
 impl ToBatch for LogicalVectorSearch {
     fn to_batch(&self) -> crate::error::Result<BatchPlanRef> {
-        if let Some((scan, vector_literal, vector_input_idx)) = self.as_vector_table_scan()
+        if let Some((scan, vector_literal, vector_column_expr)) = self.as_vector_table_scan()
             && !scan.vector_indexes().is_empty()
         {
             for index in scan.vector_indexes() {
-                if index.vector_column_idx != scan.output_col_idx()[vector_input_idx] {
+                if !Self::is_matched_vector_column_expr(
+                    &index.vector_expr,
+                    vector_column_expr,
+                    scan.output_col_idx(),
+                ) {
                     continue;
                 }
                 if index
