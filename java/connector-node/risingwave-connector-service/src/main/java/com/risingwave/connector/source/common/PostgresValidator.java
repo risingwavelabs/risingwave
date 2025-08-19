@@ -667,7 +667,10 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private boolean isDataTypeCompatible(ColumnInfo colInfo, Data.DataType.TypeName typeName) {
         int val = typeName.getNumber();
-
+        LOG.info(
+                "Data type compatibility check: PostgreSQL type '{}', colInfo.udtName: {}",
+                colInfo.dataType,
+                colInfo.udtName);
         switch (colInfo.dataType) {
             case "boolean":
                 // BOOLEAN -> BOOLEAN
@@ -682,32 +685,29 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     return false;
                 }
             case "smallint":
-            case "smallserial":
-                // SMALLINT, SMALLSERIAL -> SMALLINT
+                // SMALLINT -> SMALLINT
                 return val == Data.DataType.TypeName.INT16_VALUE;
             case "integer":
-            case "serial":
-                // INTEGER, SERIAL -> INTEGER
+                // INTEGER -> INTEGER
                 return val == Data.DataType.TypeName.INT32_VALUE;
             case "bigint":
-            case "bigserial":
             case "oid":
-                // BIGINT, BIGSERIAL, OID -> BIGINT
+                // BIGINT, OID -> BIGINT
                 return val == Data.DataType.TypeName.INT64_VALUE;
             case "real":
                 // REAL -> REAL
                 return val == Data.DataType.TypeName.FLOAT_VALUE;
-            case "double":
             case "double precision":
                 // DOUBLE PRECISION -> DOUBLE PRECISION
                 return val == Data.DataType.TypeName.DOUBLE_VALUE;
-            case "char":
-            case "character":
-            case "varchar":
             case "character varying":
+            case "character":
+            case "char":
+                // CHARACTER VARYING, CHARACTER, CHAR -> CHARACTER VARYING
+                return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "text":
             case "xml":
             case "uuid":
-            case "text":
             case "inet":
             case "cidr":
             case "macaddr":
@@ -718,19 +718,24 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             case "tsrange":
             case "tstzrange":
             case "daterange":
-            case "enum":
-                // CHARACTER, CHARACTER VARYING, VARCHAR, CHAR, XML, UUID, CITEXT, INET, CIDR,
-                // MACADDR, MACADDR8, INT4RANGE, INT8RANGE, NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE,
-                // ENUM -> CHARACTER VARYING
+                // TEXT, XML, UUID, INET, CIDR, MACADDR, MACADDR8, INT4RANGE, INT8RANGE,
+                // NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE -> CHARACTER VARYING
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
-            case "timestamptz":
             case "timestamp with time zone":
+            case "timestamptz":
                 // TIMESTAMPTZ, TIMESTAMP WITH TIME ZONE -> TIMESTAMP WITH TIME ZONE
                 return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
-            case "timetz":
+            case "timestamp without time zone":
+            case "timestamp":
+                // TIMESTAMP WITHOUT TIME ZONE, TIMESTAMP -> TIMESTAMP WITHOUT TIME ZONE
+                return val == Data.DataType.TypeName.TIMESTAMP_VALUE;
             case "time with time zone":
-            case "time without time zone":
+            case "timetz":
                 // TIMETZ, TIME WITH TIME ZONE -> TIME WITHOUT TIME ZONE (assume UTC)
+                return val == Data.DataType.TypeName.TIME_VALUE;
+            case "time without time zone":
+            case "time":
+                // TIME WITHOUT TIME ZONE, TIME -> TIME WITHOUT TIME ZONE
                 return val == Data.DataType.TypeName.TIME_VALUE;
             case "interval":
                 // INTERVAL [P] -> INTERVAL
@@ -745,25 +750,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             case "date":
                 // DATE -> DATE
                 return val == Data.DataType.TypeName.DATE_VALUE;
-            case "time":
-            case "time(1)":
-            case "time(2)":
-            case "time(3)":
-            case "time(4)":
-            case "time(5)":
-            case "time(6)":
-                // TIME(N) -> TIME WITHOUT TIME ZONE
-                return val == Data.DataType.TypeName.TIME_VALUE;
-            case "timestamp":
-            case "timestamp without time zone":
-            case "timestamp(1)":
-            case "timestamp(2)":
-            case "timestamp(3)":
-            case "timestamp(4)":
-            case "timestamp(5)":
-            case "timestamp(6)":
-                // TIMESTAMP(N) -> TIMESTAMP WITHOUT TIME ZONE
-                return val == Data.DataType.TypeName.TIMESTAMP_VALUE;
             case "numeric":
             case "decimal":
                 // NUMERIC, DECIMAL -> DECIMAL, INT256, VARCHAR
@@ -778,7 +764,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 return val == Data.DataType.TypeName.STRUCT_VALUE;
             case "ARRAY":
                 // ARRAY -> LIST
-
                 return val == Data.DataType.TypeName.LIST_VALUE;
             case "USER-DEFINED":
                 // Handle user-defined types like enum, citext, etc.
