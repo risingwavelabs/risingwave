@@ -89,3 +89,169 @@ drop materialized view mv2;
 
 statement ok
 drop table t2;
+
+# Test multiple version columns functionality
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Test multiple version columns - basic functionality
+statement ok
+create table t3 (id int, name varchar, version1 int, version2 int, data varchar, primary key(id))
+on conflict do update if not null with version column(version1, version2);
+
+# Insert initial data
+statement ok
+insert into t3 values (1, 'alice', 1, 1, 'data1'), (2, 'bob', 2, 1, 'data2');
+
+# Test conflict resolution with multiple version columns - higher version1
+statement ok
+insert into t3 values (1, 'alice_new', 2, 1, 'data1_new');
+
+# Test conflict resolution with multiple version columns - same version1, higher version2
+statement ok
+insert into t3 values (1, 'alice_newer', 2, 2, 'data1_newer');
+
+# Test conflict resolution with multiple version columns - lower version should be ignored
+statement ok
+insert into t3 values (1, 'alice_old', 1, 5, 'data1_old');
+
+query IIIII rowsort
+select id, name, version1, version2, data from t3;
+----
+1 alice_newer 2 2 data1_newer
+2 bob 2 1 data2
+
+statement ok
+drop table t3;
+
+# Test multiple version columns with different data types
+statement ok
+create table t4 (id int, timestamp_ver timestamp, string_ver varchar, int_ver int, data varchar, primary key(id))
+on conflict do update if not null with version column(timestamp_ver, string_ver, int_ver);
+
+# Insert initial data
+statement ok
+insert into t4 values (1, '2023-01-01 10:00:00', 'v1', 1, 'initial');
+
+# Test lexicographic comparison - higher timestamp
+statement ok
+insert into t4 values (1, '2023-01-02 10:00:00', 'v1', 1, 'newer_timestamp');
+
+# Test lexicographic comparison - same timestamp, higher string
+statement ok
+insert into t4 values (1, '2023-01-02 10:00:00', 'v2', 1, 'newer_string');
+
+# Test lexicographic comparison - same timestamp and string, higher int
+statement ok
+insert into t4 values (1, '2023-01-02 10:00:00', 'v2', 2, 'newer_int');
+
+# Test lexicographic comparison - lower version should be ignored
+statement ok
+insert into t4 values (1, '2023-01-01 10:00:00', 'v3', 10, 'should_be_ignored');
+
+query I?II? rowsort
+select id, timestamp_ver, string_ver, int_ver, data from t4;
+----
+1 2023-01-02 10:00:00 v2 2 newer_int
+
+statement ok
+drop table t4;
+
+# Test error cases for multiple version columns
+statement error
+create table t_error1 (id int, v1 bool, v2 int, primary key(id))
+on conflict do update if not null with version column(v1, v2);
+
+statement error
+create table t_error2 (id int, v1 jsonb, v2 int, primary key(id))
+on conflict do update if not null with version column(v1, v2);
+
+statement error
+create table t_error3 (id int, v1 int, primary key(id))
+on conflict do update if not null with version column(non_existent_column);
+
+statement error
+create table t_error4 (id int, v1 int, primary key(id))
+on conflict do nothing with version column(v1);
+
+# Test multiple version columns with on conflict do update full
+statement ok
+create table t5 (id int, name varchar, version1 int, version2 int, data varchar, primary key(id))
+on conflict do update full with version column(version1, version2);
+
+# Insert initial data
+statement ok
+insert into t5 values (1, 'alice', 1, 1, 'data1'), (2, 'bob', 2, 1, 'data2');
+
+# Test with higher version - should update
+statement ok
+insert into t5 values (1, 'alice_updated', 2, 1, 'data1_updated');
+
+# Test with lower version - should not update (do update full means replace all fields)
+statement ok
+insert into t5 values (1, 'alice_old', 1, 5, 'data1_old');
+
+query IIIII rowsort
+select id, name, version1, version2, data from t5;
+----
+1 alice_updated 2 1 data1_updated
+2 bob 2 1 data2
+
+statement ok
+drop table t5;
+
+# Test multiple version columns with materialized view
+statement ok
+create table t6 (id int, version1 int, version2 varchar, data varchar, primary key(id))
+on conflict do update if not null with version column(version1, version2);
+
+statement ok
+create materialized view mv6 as select * from t6;
+
+# Insert data with version conflicts
+statement ok
+insert into t6 values (1, 1, 'a', 'data1'), (2, 1, 'b', 'data2');
+
+statement ok
+insert into t6 values (1, 1, 'b', 'data1_updated');  -- higher version2
+
+statement ok
+insert into t6 values (1, 2, 'a', 'data1_newer');    -- higher version1
+
+statement ok
+insert into t6 values (1, 1, 'z', 'data1_old');      -- should be ignored
+
+query III? rowsort
+select id, version1, version2, data from mv6;
+----
+1 2 a data1_newer
+2 1 b data2
+
+statement ok
+drop materialized view mv6;
+
+statement ok
+drop table t6;
+
+# Test single version column still works (backward compatibility)
+statement ok
+create table t7 (id int, version int, data varchar, primary key(id))
+on conflict do update if not null with version column(version);
+
+statement ok
+insert into t7 values (1, 1, 'data1'), (2, 2, 'data2');
+
+statement ok
+insert into t7 values (1, 2, 'data1_updated');
+
+statement ok
+insert into t7 values (1, 1, 'data1_old');  -- should be ignored
+
+query II? rowsort
+select id, version, data from t7;
+----
+1 2 data1_updated
+2 2 data2
+
+statement ok
+drop table t7;

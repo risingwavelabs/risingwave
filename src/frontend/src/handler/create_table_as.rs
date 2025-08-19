@@ -124,7 +124,7 @@ pub async fn handle_create_as(
                 definition: "".to_owned(),
                 append_only,
                 on_conflict: on_conflict.into(),
-                with_version_column,
+                with_version_columns: with_version_column.map(|col| vec![col]).unwrap_or_default(),
                 webhook_info: None,
                 engine,
             },

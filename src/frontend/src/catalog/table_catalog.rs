@@ -143,7 +143,7 @@ pub struct TableCatalog {
     /// `No Check`.
     pub conflict_behavior: ConflictBehavior,
 
-    pub version_column_index: Option<usize>,
+    pub version_column_indices: Vec<usize>,
 
     pub read_prefix_len_hint: usize,
 
@@ -572,7 +572,11 @@ impl TableCatalog {
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
-            version_column_index: self.version_column_index.map(|value| value as u32),
+            version_column_indices: self
+                .version_column_indices
+                .iter()
+                .map(|&idx| idx as u32)
+                .collect(),
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
@@ -741,7 +745,11 @@ impl From<PbTable> for TableCatalog {
         let mut col_index: HashMap<i32, usize> = HashMap::new();
 
         let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
-        let version_column_index = tb.version_column_index.map(|value| value as usize);
+        let version_column_indices: Vec<usize> = tb
+            .version_column_indices
+            .iter()
+            .map(|&idx| idx as usize)
+            .collect();
         let mut columns: Vec<ColumnCatalog> =
             tb.columns.into_iter().map(ColumnCatalog::from).collect();
         if columns.iter().all(|c| !c.is_rw_timestamp_column()) {
@@ -789,7 +797,7 @@ impl From<PbTable> for TableCatalog {
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
@@ -900,7 +908,7 @@ mod tests {
             incoming_sinks: vec![],
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
-            version_column_index: None,
+            version_column_indices: Vec::new(),
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
             webhook_info: None,
@@ -970,7 +978,7 @@ mod tests {
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
-                version_column_index: None,
+                version_column_indices: Vec::new(),
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
                 webhook_info: None,

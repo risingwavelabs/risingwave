@@ -60,7 +60,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     conflict_behavior: ConflictBehavior,
 
-    version_column_index: Option<u32>,
+    version_column_indices: Vec<u32>,
 
     may_have_downstream: bool,
 
@@ -104,7 +104,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
-        version_column_index: Option<u32>,
+        version_column_indices: Vec<u32>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -161,10 +161,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 watermark_epoch,
                 metrics_info,
                 row_serde,
-                version_column_index,
+                version_column_indices.clone(),
             ),
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             is_dummy_table,
             may_have_downstream,
             depended_subscription_ids,
@@ -207,7 +207,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false,
                     // and the conflict behavior is overwrite.
                     let do_not_handle_conflict = !self.state_table.is_consistent_op()
-                        && self.version_column_index.is_none()
+                        && self.version_column_indices.is_empty()
                         && self.conflict_behavior == ConflictBehavior::Overwrite;
                     match self.conflict_behavior {
                         checked_conflict_behaviors!() if !do_not_handle_conflict => {
@@ -413,10 +413,10 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 watermark_epoch,
                 MetricsInfo::for_test(),
                 row_serde,
-                None,
+                vec![],
             ),
             conflict_behavior,
-            version_column_index: None,
+            version_column_indices: vec![],
             is_dummy_table: false,
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
@@ -565,7 +565,7 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 struct MaterializeCache<SD> {
     lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
     row_serde: BasicSerde,
-    version_column_index: Option<u32>,
+    version_column_indices: Vec<u32>,
     _serde: PhantomData<SD>,
 }
 
@@ -576,14 +576,14 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
-        version_column_index: Option<u32>,
+        version_column_indices: Vec<u32>,
     ) -> Self {
         let lru_cache: ManagedLruCache<Vec<u8>, CacheValue> =
             ManagedLruCache::unbounded(watermark_sequence, metrics_info.clone());
         Self {
             lru_cache,
             row_serde,
-            version_column_index,
+            version_column_indices,
             _serde: PhantomData,
         }
     }
@@ -614,7 +614,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
         let mut change_buffer = ChangeBuffer::new();
         let row_serde = self.row_serde.clone();
-        let version_column_index = self.version_column_index;
+        let version_column_indices = self.version_column_indices.clone();
         for (op, key, row) in row_ops {
             match op {
                 Op::Insert | Op::UpdateInsert => {
@@ -628,15 +628,16 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     // now conflict happens, handle it according to the specified behavior
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            let need_overwrite = if let Some(idx) = version_column_index {
+                            let need_overwrite = if !version_column_indices.is_empty() {
                                 let old_row_deserialized =
                                     row_serde.deserializer.deserialize(old_row.row.clone())?;
                                 let new_row_deserialized =
                                     row_serde.deserializer.deserialize(row.clone())?;
 
-                                version_is_newer_or_equal(
-                                    old_row_deserialized.index(idx as usize),
-                                    new_row_deserialized.index(idx as usize),
+                                versions_are_newer_or_equal(
+                                    &old_row_deserialized,
+                                    &new_row_deserialized,
+                                    &version_column_indices,
                                 )
                             } else {
                                 // no version column specified, just overwrite
@@ -658,10 +659,11 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 row_serde.deserializer.deserialize(old_row.row.clone())?;
                             let new_row_deserialized =
                                 row_serde.deserializer.deserialize(row.clone())?;
-                            let need_overwrite = if let Some(idx) = version_column_index {
-                                version_is_newer_or_equal(
-                                    old_row_deserialized.index(idx as usize),
-                                    new_row_deserialized.index(idx as usize),
+                            let need_overwrite = if !version_column_indices.is_empty() {
+                                versions_are_newer_or_equal(
+                                    &old_row_deserialized,
+                                    &new_row_deserialized,
+                                    &version_column_indices,
                                 )
                             } else {
                                 true
@@ -790,13 +792,31 @@ fn replace_if_not_null(row: &mut Vec<Option<ScalarImpl>>, replacement: OwnedRow)
     }
 }
 
-/// Determines whether pk conflict handling should update an existing row with newly-received value,
-/// according to the value of version column of the new and old rows.
-fn version_is_newer_or_equal(
-    old_version: &Option<ScalarImpl>,
-    new_version: &Option<ScalarImpl>,
+/// Compare multiple version columns lexicographically.
+/// Returns true if `new_row` has a newer or equal version compared to `old_row`.
+fn versions_are_newer_or_equal(
+    old_row: &OwnedRow,
+    new_row: &OwnedRow,
+    version_column_indices: &[u32],
 ) -> bool {
-    cmp_datum(old_version, new_version, OrderType::ascending_nulls_first()).is_le()
+    if version_column_indices.is_empty() {
+        // No version columns specified, always consider new version as newer
+        return true;
+    }
+
+    for &idx in version_column_indices {
+        let old_value = old_row.index(idx as usize);
+        let new_value = new_row.index(idx as usize);
+
+        match cmp_datum(old_value, new_value, OrderType::ascending_nulls_first()) {
+            std::cmp::Ordering::Less => return true,     // new is newer
+            std::cmp::Ordering::Greater => return false, // old is newer
+            std::cmp::Ordering::Equal => continue,       // equal, check next column
+        }
+    }
+
+    // All version columns are equal, consider new version as equal (should overwrite)
+    true
 }
 
 #[cfg(test)]

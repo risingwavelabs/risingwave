@@ -691,7 +691,7 @@ impl LogicalPlanRoot {
             definition,
             append_only,
             on_conflict,
-            with_version_column,
+            with_version_columns,
             webhook_info,
             engine,
         }: CreateTableProps,
@@ -785,10 +785,10 @@ impl LogicalPlanRoot {
             }
         }
 
-        let version_column_index = if let Some(version_column) = with_version_column {
-            find_version_column_index(&columns, version_column)?
+        let version_column_indices = if !with_version_columns.is_empty() {
+            find_version_column_indices(&columns, with_version_columns)?
         } else {
-            None
+            vec![]
         };
 
         let with_external_source = source_catalog.is_some();
@@ -892,7 +892,7 @@ impl LogicalPlanRoot {
         let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;
 
         if let ConflictBehavior::IgnoreConflict = conflict_behavior
-            && version_column_index.is_some()
+            && !version_column_indices.is_empty()
         {
             Err(ErrorCode::InvalidParameterValue(
                 "The with version column syntax cannot be used with the ignore behavior of on conflict".to_owned(),
@@ -941,7 +941,7 @@ impl LogicalPlanRoot {
             columns,
             definition,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             pk_column_indices,
             row_id_index,
             version,
@@ -1112,28 +1112,41 @@ impl<P: PlanPhase> PlanRoot<P> {
     }
 }
 
-fn find_version_column_index(
+fn find_version_column_indices(
     column_catalog: &Vec<ColumnCatalog>,
-    version_column_name: String,
-) -> Result<Option<usize>> {
-    for (index, column) in column_catalog.iter().enumerate() {
-        if column.column_desc.name == version_column_name {
-            if let &DataType::Jsonb
-            | &DataType::List(_)
-            | &DataType::Struct(_)
-            | &DataType::Bytea
-            | &DataType::Boolean = column.data_type()
-            {
-                Err(ErrorCode::InvalidParameterValue(
-                    "The specified version column data type is invalid.".to_owned(),
-                ))?
+    version_column_names: Vec<String>,
+) -> Result<Vec<usize>> {
+    let mut indices = Vec::new();
+    for version_column_name in version_column_names {
+        let mut found = false;
+        for (index, column) in column_catalog.iter().enumerate() {
+            if column.column_desc.name == version_column_name {
+                if let &DataType::Jsonb
+                | &DataType::List(_)
+                | &DataType::Struct(_)
+                | &DataType::Bytea
+                | &DataType::Boolean = column.data_type()
+                {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Version column {} must be of a comparable data type",
+                        version_column_name
+                    ))
+                    .into());
+                }
+                indices.push(index);
+                found = true;
+                break;
             }
-            return Ok(Some(index));
+        }
+        if !found {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Version column {} not found",
+                version_column_name
+            ))
+            .into());
         }
     }
-    Err(ErrorCode::InvalidParameterValue(
-        "The specified version column name is not in the current columns.".to_owned(),
-    ))?
+    Ok(indices)
 }
 
 fn const_eval_exprs<C: ConventionMarker>(plan: PlanRef<C>) -> Result<PlanRef<C>> {

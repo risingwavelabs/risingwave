@@ -1349,8 +1349,8 @@ pub enum Statement {
         append_only: bool,
         /// On conflict behavior
         on_conflict: Option<OnConflict>,
-        /// with_version_column behind on conflict
-        with_version_column: Option<Ident>,
+        /// with_version_columns behind on conflict - supports multiple version columns
+        with_version_columns: Vec<Ident>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
@@ -2042,7 +2042,7 @@ impl Statement {
                 source_watermarks,
                 append_only,
                 on_conflict,
-                with_version_column,
+                with_version_columns,
                 query,
                 cdc_table_info,
                 include_column_options,
@@ -2081,8 +2081,12 @@ impl Statement {
                 if let Some(on_conflict_behavior) = on_conflict {
                     write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
                 }
-                if let Some(version_column) = with_version_column {
-                    write!(f, " WITH VERSION COLUMN({})", version_column)?;
+                if !with_version_columns.is_empty() {
+                    write!(
+                        f,
+                        " WITH VERSION COLUMN({})",
+                        display_comma_separated(with_version_columns)
+                    )?;
                 }
                 if !include_column_options.is_empty() {
                     write!(f, " {}", display_separated(include_column_options, " "))?;
@@ -3916,7 +3920,7 @@ impl Statement {
             source_watermarks: Vec::new(),
             append_only: false,
             on_conflict: None,
-            with_version_column: None,
+            with_version_columns: Vec::new(),
             query: None,
             cdc_table_info: None,
             include_column_options: Vec::new(),

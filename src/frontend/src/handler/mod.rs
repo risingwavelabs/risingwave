@@ -382,7 +382,7 @@ pub async fn handle(
             source_watermarks,
             append_only,
             on_conflict,
-            with_version_column,
+            with_version_columns,
             cdc_table_info,
             include_column_options,
             webhook_info,
@@ -403,7 +403,7 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
-                    with_version_column.map(|x| x.real_value()),
+                    with_version_columns.first().map(|col| col.real_value()),
                     engine,
                 )
                 .await;
@@ -420,7 +420,10 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
-                with_version_column.map(|x| x.real_value()),
+                with_version_columns
+                    .iter()
+                    .map(|col| col.real_value())
+                    .collect(),
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
