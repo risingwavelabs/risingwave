@@ -1172,7 +1172,7 @@ impl Command {
                     actor_new_dispatchers,
                     actor_cdc_table_snapshot_splits,
                 });
-                tracing::debug!("update mutation: {mutation:?}");
+                tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
             }
 

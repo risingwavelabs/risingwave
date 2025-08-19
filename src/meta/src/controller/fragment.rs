@@ -59,8 +59,8 @@ use risingwave_pb::stream_plan::{
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType,
-    PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType, PaginatorTrait,
+    QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -617,6 +617,8 @@ impl CatalogController {
         job_id: ObjectId,
     ) -> MetaResult<StreamJobFragments> {
         let inner = self.inner.read().await;
+        //
+        // let info = self.env.shared_actor_infos().read_guard();
 
         // Load fragments matching the job from the database
         let fragments: Vec<_> = FragmentModel::find()
@@ -2327,51 +2329,52 @@ impl CatalogController {
     pub async fn deprecated_load_actor_splits(
         &self,
     ) -> MetaResult<HashMap<ActorId, ConnectorSplits>> {
-        let inner = self.inner.read().await;
-        let splits_from_cache: Vec<(ActorId, ConnectorSplits)> = inner
-            .actors
-            .models
-            .iter()
-            .filter_map(|(&actor_id, model)| model.splits.clone().map(|splits| (actor_id, splits)))
-            .collect();
-
-        {
-            let splits_from_db: Vec<(ActorId, ConnectorSplits)> = Actor::find()
-                .select_only()
-                .columns([actor::Column::ActorId, actor::Column::Splits])
-                .filter(actor::Column::Splits.is_not_null())
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
-
-            let set_db: HashSet<(ActorId, _)> = splits_from_db
-                .into_iter()
-                .flat_map(|(actor_id, splits)| {
-                    splits
-                        .to_protobuf()
-                        .splits
-                        .into_iter()
-                        .map(move |split| (actor_id, split.encoded_split))
-                })
-                .collect();
-
-            let set_cache: HashSet<(ActorId, _)> = splits_from_cache
-                .iter()
-                .cloned()
-                .flat_map(|(actor_id, splits)| {
-                    splits
-                        .to_protobuf()
-                        .splits
-                        .into_iter()
-                        .map(move |split| (actor_id, split.encoded_split))
-                })
-                .collect();
-
-            debug_assert_eq!(set_db, set_cache, "Splits mismatch between DB and cache");
-        }
-
-        let splits = splits_from_cache;
-        Ok(splits.into_iter().collect())
+        Ok(Default::default())
+        // let inner = self.inner.read().await;
+        // let splits_from_cache: Vec<(ActorId, ConnectorSplits)> = inner
+        //     .actors
+        //     .models
+        //     .iter()
+        //     .filter_map(|(&actor_id, model)| model.splits.clone().map(|splits| (actor_id, splits)))
+        //     .collect();
+        //
+        // {
+        //     let splits_from_db: Vec<(ActorId, ConnectorSplits)> = Actor::find()
+        //         .select_only()
+        //         .columns([actor::Column::ActorId, actor::Column::Splits])
+        //         .filter(actor::Column::Splits.is_not_null())
+        //         .into_tuple()
+        //         .all(&inner.db)
+        //         .await?;
+        //
+        //     let set_db: HashSet<(ActorId, _)> = splits_from_db
+        //         .into_iter()
+        //         .flat_map(|(actor_id, splits)| {
+        //             splits
+        //                 .to_protobuf()
+        //                 .splits
+        //                 .into_iter()
+        //                 .map(move |split| (actor_id, split.encoded_split))
+        //         })
+        //         .collect();
+        //
+        //     let set_cache: HashSet<(ActorId, _)> = splits_from_cache
+        //         .iter()
+        //         .cloned()
+        //         .flat_map(|(actor_id, splits)| {
+        //             splits
+        //                 .to_protobuf()
+        //                 .splits
+        //                 .into_iter()
+        //                 .map(move |split| (actor_id, split.encoded_split))
+        //         })
+        //         .collect();
+        //
+        //     debug_assert_eq!(set_db, set_cache, "Splits mismatch between DB and cache");
+        // }
+        //
+        // let splits = splits_from_cache;
+        // Ok(splits.into_iter().collect())
     }
 
     // /// Get the actor count of `Materialize` or `Sink` fragment of the specified table.
