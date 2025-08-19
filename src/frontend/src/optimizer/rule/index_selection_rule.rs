@@ -558,6 +558,7 @@ impl IndexSelectionRule {
                 .collect_vec(),
             logical_scan.table().clone(),
             vec![],
+            vec![],
             logical_scan.ctx(),
             Condition {
                 conjunctions: conjunctions.to_vec(),
@@ -598,6 +599,7 @@ impl IndexSelectionRule {
                     .map(|x| x.column_index)
                     .collect_vec(),
                 index.index_table.clone(),
+                vec![],
                 vec![],
                 ctx,
                 new_predicate,
