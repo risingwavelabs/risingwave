@@ -281,7 +281,9 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
                 "MAP is not supported for Starrocks sink.".to_owned(),
             )),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::Starrocks(
+                "VECTOR is not supported for Starrocks sink.".to_owned(),
+            )),
         }
     }
 }
