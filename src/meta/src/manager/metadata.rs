@@ -603,20 +603,20 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn get_job_fragments_by_ids(
-        &self,
-        ids: &[TableId],
-    ) -> MetaResult<Vec<StreamJobFragments>> {
-        let mut table_fragments = vec![];
-        for id in ids {
-            table_fragments.push(
-                self.catalog_controller
-                    .get_job_fragments_by_id(id.table_id as _)
-                    .await?,
-            );
-        }
-        Ok(table_fragments)
-    }
+    // pub async fn get_job_fragments_by_ids(
+    //     &self,
+    //     ids: &[TableId],
+    // ) -> MetaResult<Vec<StreamJobFragments>> {
+    //     let mut table_fragments = vec![];
+    //     for id in ids {
+    //         table_fragments.push(
+    //             self.catalog_controller
+    //                 .get_job_fragments_by_id(id.table_id as _)
+    //                 .await?,
+    //         );
+    //     }
+    //     Ok(table_fragments)
+    // }
 
     // pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
     //     let table_fragments = self.catalog_controller.table_fragments().await?;

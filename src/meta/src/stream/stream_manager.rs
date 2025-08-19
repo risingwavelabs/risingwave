@@ -876,10 +876,12 @@ impl GlobalStreamManager {
             .reschedule_x(HashMap::from([(job_id.table_id as _, target)]), workers)
             .await?;
 
+        println!("before run command");
         self.barrier_scheduler
             .run_command(database_id, command)
             .await?;
 
+        println!("after run command");
         // if reschedule_plan.reschedules.is_empty() {
         //     tracing::debug!(
         //         "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
@@ -1045,13 +1047,7 @@ impl GlobalStreamManager {
                 resource_group_change,
             );
             self.scale_controller
-                .post_apply_reschedule(
-                    &HashMap::new(),
-                    &JobReschedulePostUpdates {
-                        parallelism_updates: table_parallelism_assignment,
-                        resource_group_updates: resource_group_assignment,
-                    },
-                )
+                .post_apply_reschedule(&HashMap::new())
                 .await?;
         } else {
             // let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
@@ -1190,9 +1186,9 @@ impl GlobalStreamManager {
                 post_updates = ?reschedule_plan.post_updates,
                 "Empty reschedule plan generated for job.",
             );
-            self.scale_controller
-                .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
-                .await?;
+            // self.scale_controller
+            //     .post_apply_reschedule(&HashMap::new())
+            //     .await?;
         } else {
             self.reschedule_actors(
                 database_id,

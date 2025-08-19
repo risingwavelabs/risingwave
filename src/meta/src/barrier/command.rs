@@ -1175,7 +1175,7 @@ impl Command {
                     actor_cdc_table_snapshot_splits,
                     sink_add_columns: Default::default(),
                 });
-                tracing::debug!("update mutation: {mutation:?}");
+                tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
             }
 

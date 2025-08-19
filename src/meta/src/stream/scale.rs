@@ -96,9 +96,7 @@ use risingwave_meta_model::prelude::{FragmentRelation, StreamingJob};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait};
 
 use super::SourceChange;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -1770,12 +1768,13 @@ impl ScaleController {
     pub async fn post_apply_reschedule(
         &self,
         reschedules: &HashMap<FragmentId, Reschedule>,
-        post_updates: &JobReschedulePostUpdates,
     ) -> MetaResult<()> {
         // Update fragment info after rescheduling in meta store.
-        self.metadata_manager
-            .post_apply_reschedules(reschedules.clone(), post_updates)
-            .await?;
+        // self.metadata_manager
+        //     .post_apply_reschedules(reschedules.clone(), post_updates)
+        //     .await?;
+
+        println!("post apply");
 
         // Update serving fragment info after rescheduling in meta store.
         if !reschedules.is_empty() {
@@ -2427,6 +2426,9 @@ impl ScaleController {
                 .remove(&(*fragment_id as u32))
                 .unwrap_or_default();
 
+            println!("fragment {} down {:?}", fragment_id, downstream_fragments);
+            println!("fragment {} up {:?}", fragment_id, upstream_fragments);
+
             let fragment_actors: HashMap<_, _> = upstream_fragments
                 .keys()
                 .chain(downstream_fragments.keys())
@@ -2449,11 +2451,16 @@ impl ScaleController {
             let mut all_actor_dispatchers: HashMap<_, Vec<_>> = HashMap::new();
 
             for (downstream_fragment_id, dispatcher_type) in &downstream_fragments {
+                println!("for down {}", downstream_fragment_id);
                 let target_fragment_actors =
                     match all_fragments.get(&(*downstream_fragment_id as _)) {
                         None => {
+                            println!(
+                                "no more downstream_fragments for {}",
+                                downstream_fragment_id
+                            );
                             let external_fragment =
-                                read_gurad.get_fragment(*fragment_id as FragmentId).unwrap();
+                                read_gurad.get_fragment(*downstream_fragment_id as FragmentId).unwrap();
 
                             external_fragment
                                 .actors
@@ -2461,12 +2468,17 @@ impl ScaleController {
                                 .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
                                 .collect()
                         }
-                        Some(downstream_rendered) => downstream_rendered
-                            .actors
-                            .iter()
-                            .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-                            .collect(),
+                        Some(downstream_rendered) => {
+                            println!("down frag actors found for {}", downstream_fragment_id);
+                            downstream_rendered
+                                .actors
+                                .iter()
+                                .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
+                                .collect()
+                        }
                     };
+
+                println!("down frag actors {:#?}", target_fragment_actors);
 
                 let target_fragment_distribution = *distribution_type;
 
@@ -2510,6 +2522,7 @@ impl ScaleController {
                         .push(dispatcher);
                 }
             }
+            println!("aap {:#?}", all_actor_dispatchers);
 
             let reschedule = self.diff_fragment(
                 prev_fragment,
@@ -2519,16 +2532,19 @@ impl ScaleController {
                 all_actor_dispatchers,
             )?;
 
-            println!("res {:#?}", reschedule);
             reschedules.insert(*fragment_id as _, reschedule);
         }
 
         txn.commit().await?;
 
+        println!("all frag actors {:#?}", all_fragment_actors);
+
         let command = Command::RescheduleFragment {
             reschedules,
             fragment_actors: all_fragment_actors,
         };
+
+        println!("command {:#?}", command);
 
         Ok(command)
     }

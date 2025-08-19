@@ -658,7 +658,7 @@ impl<S: Hash + Copy> AssignerBuilder<S> {
             salt,
             actor_capacity: CapacityMode::Weighted,
             balance_strategy: BalancedBy::RawWorkerWeights,
-            vnode_chunking_strategy: VnodeChunkingStrategy::NoChunking,
+            vnode_chunking_strategy: VnodeChunkingStrategy::MaximizeContiguity,
         }
     }
 
