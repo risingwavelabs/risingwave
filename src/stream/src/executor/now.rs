@@ -596,12 +596,12 @@ mod tests {
             )
         );
 
-        // Send next barrier at epoch 5 (timestamp 2021-04-01T00:00:00.005Z)
+        // Send next barrier at epoch 5000 (timestamp 2021-04-01T00:00:00.005Z)
         // With progress_ratio = 2.0 and barrier_interval_ms = 1000,
         // adjusted timestamp should be: 1 + (1000 * 2.0) = 2001ms = 2021-04-01T00:00:02.001Z
-        // Since 2001 < 5, the adjusted timestamp should be used
+        // Since 2001 < 5000, the adjusted timestamp should be used
         tx.send(Barrier::with_prev_epoch_for_test(
-            test_epoch(5),
+            test_epoch(5000),
             test_epoch(1),
         ))
         .unwrap();
@@ -633,12 +633,12 @@ mod tests {
             )
         );
 
-        // Send another barrier at epoch 10 (timestamp 2021-04-01T00:00:00.010Z)
+        // Send another barrier at epoch 10000 (timestamp 2021-04-01T00:00:00.010Z)
         // With progress_ratio = 2.0, adjusted timestamp should be: 2001 + (1000 * 2.0) = 4001ms
-        // Since 4001 < 10, the adjusted timestamp should be used again
+        // Since 4001 < 10000, the adjusted timestamp should be used again
         tx.send(Barrier::with_prev_epoch_for_test(
-            test_epoch(10),
-            test_epoch(5),
+            test_epoch(10000),
+            test_epoch(5000),
         ))
         .unwrap();
 
@@ -657,12 +657,24 @@ mod tests {
             )
         );
 
+        // Consume the watermark
+        let watermark = now.next_unwrap_ready_watermark()?;
+
+        assert_eq!(
+            watermark,
+            Watermark::new(
+                0,
+                DataType::Timestamptz,
+                ScalarImpl::Timestamptz("2021-04-01T00:00:04.001Z".parse().unwrap())
+            )
+        );
+
         // Send another barrier at epoch 15 (timestamp 2021-04-01T00:00:00.015Z)
         // With progress_ratio = 2.0, adjusted timestamp should be: 4001 + (1000 * 2.0) = 6001ms
         // Since 6001 < 15, the adjusted timestamp should be used
         tx.send(Barrier::with_prev_epoch_for_test(
-            test_epoch(15),
-            test_epoch(10),
+            test_epoch(15000),
+            test_epoch(10000),
         ))
         .unwrap();
 
@@ -681,12 +693,24 @@ mod tests {
             )
         );
 
+        // Consume the watermark
+        let watermark = now.next_unwrap_ready_watermark()?;
+
+        assert_eq!(
+            watermark,
+            Watermark::new(
+                0,
+                DataType::Timestamptz,
+                ScalarImpl::Timestamptz("2021-04-01T00:00:06.001Z".parse().unwrap())
+            )
+        );
+
         // Now send a barrier at epoch 20 (timestamp 2021-04-01T00:00:00.020Z)
         // With progress_ratio = 2.0, adjusted timestamp should be: 6001 + (1000 * 2.0) = 8001ms
         // Since 8001 < 20, the adjusted timestamp should be used
         tx.send(Barrier::with_prev_epoch_for_test(
-            test_epoch(20),
-            test_epoch(15),
+            test_epoch(20000),
+            test_epoch(15000),
         ))
         .unwrap();
 
@@ -705,13 +729,25 @@ mod tests {
             )
         );
 
+        // Consume the watermark
+        let watermark = now.next_unwrap_ready_watermark()?;
+
+        assert_eq!(
+            watermark,
+            Watermark::new(
+                0,
+                DataType::Timestamptz,
+                ScalarImpl::Timestamptz("2021-04-01T00:00:08.001Z".parse().unwrap())
+            )
+        );
+
         // Test case where epoch timestamp is smaller than adjusted timestamp
         // Send barrier at epoch 25 (timestamp 2021-04-01T00:00:00.025Z)
         // Adjusted timestamp would be: 8001 + (1000 * 2.0) = 10001ms = 2021-04-01T00:00:10.001Z
         // Since 10001 < 25, use adjusted timestamp
         tx.send(Barrier::with_prev_epoch_for_test(
-            test_epoch(25),
-            test_epoch(20),
+            test_epoch(25000),
+            test_epoch(20000),
         ))
         .unwrap();
 
@@ -730,13 +766,25 @@ mod tests {
             )
         );
 
+        // Consume the watermark
+        let watermark = now.next_unwrap_ready_watermark()?;
+
+        assert_eq!(
+            watermark,
+            Watermark::new(
+                0,
+                DataType::Timestamptz,
+                ScalarImpl::Timestamptz("2021-04-01T00:00:10.001Z".parse().unwrap())
+            )
+        );
+
         // Finally test when epoch timestamp is larger than adjusted timestamp
         // Send barrier at epoch 30 (timestamp 2021-04-01T00:00:00.030Z)
         // Adjusted timestamp would be: 10001 + (1000 * 2.0) = 12001ms = 2021-04-01T00:00:12.001Z
         // Since 12001 < 30, use adjusted timestamp
         tx.send(Barrier::with_prev_epoch_for_test(
-            test_epoch(30),
-            test_epoch(25),
+            test_epoch(30000),
+            test_epoch(25000),
         ))
         .unwrap();
 
@@ -752,6 +800,18 @@ mod tests {
                 " TZ
                 - 2021-04-01T00:00:10.001Z
                 + 2021-04-01T00:00:12.001Z" // adjusted timestamp
+            )
+        );
+
+        // Consume the watermark
+        let watermark = now.next_unwrap_ready_watermark()?;
+
+        assert_eq!(
+            watermark,
+            Watermark::new(
+                0,
+                DataType::Timestamptz,
+                ScalarImpl::Timestamptz("2021-04-01T00:00:12.001Z".parse().unwrap())
             )
         );
 
