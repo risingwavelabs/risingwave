@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
 use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
+use risingwave_common::types::postgres_type::DEBEZIUM_UNAVAILABLE_VALUE;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
@@ -445,9 +446,6 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     }
 }
 
-/// Debezium's default unavailable value placeholder for TOAST columns.
-const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
-
 /// Fast string comparison to check if a string equals `DEBEZIUM_UNAVAILABLE_VALUE`.
 /// Optimized by checking length first to avoid expensive string comparison.
 fn is_unavailable_value_str(s: &str) -> bool {
@@ -506,6 +504,14 @@ fn handle_toast_columns_for_cdc(
     let mut fixed_row_data = new_row.as_inner().to_vec();
 
     for &toast_idx in toastable_indices {
+        println!(
+            "old_row.datum_at(toast_idx): {:?}",
+            old_row.datum_at(toast_idx)
+        );
+        println!(
+            "new_row.datum_at(toast_idx): {:?}",
+            new_row.datum_at(toast_idx)
+        );
         // Check if the new value is Debezium's unavailable value placeholder
         let is_unavailable = is_debezium_unavailable_value(&new_row.datum_at(toast_idx));
         if is_unavailable {
@@ -514,6 +520,10 @@ fn handle_toast_columns_for_cdc(
                 fixed_row_data[toast_idx] = Some(old_datum_ref.into_scalar_impl());
             }
         }
+        println!(
+            "处理toast_idx: {}, is_unavailable: {}",
+            toast_idx, is_unavailable
+        );
     }
 
     OwnedRow::new(fixed_row_data)

@@ -161,3 +161,5 @@ impl DataType {
         PgType::from_oid(oid as u32).unwrap()
     }
 }
+
+pub const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";

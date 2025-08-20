@@ -21,11 +21,18 @@ use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::EstimateSize;
 use thiserror_ext::AsReport;
 
+use super::postgres_type::DEBEZIUM_UNAVAILABLE_VALUE;
 use super::{
     Datum, F64, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum,
 };
 use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
 use crate::util::iter_util::ZipEqDebug;
+// Pre-built JSON value for Debezium unavailable value to avoid rebuilding it every time
+static DEBEZIUM_UNAVAILABLE_JSON: std::sync::LazyLock<JsonbVal> = std::sync::LazyLock::new(|| {
+    let mut builder = jsonbb::Builder::default();
+    builder.add_string(DEBEZIUM_UNAVAILABLE_VALUE);
+    JsonbVal(builder.finish())
+});
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbVal(pub(crate) Value);
@@ -148,18 +155,12 @@ impl std::str::FromStr for JsonbVal {
 }
 
 impl JsonbVal {
-    pub const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
-
     /// Create a `JsonbVal` from a string, with special handling for Debezium's unavailable value placeholder.
     /// Returns a Result to handle parsing errors properly.
     pub fn from_debezium_unavailable_value(s: &str) -> Result<Self, serde_json::Error> {
         // Special handling for Debezium's unavailable value placeholder
-        if s.len() == Self::DEBEZIUM_UNAVAILABLE_VALUE.len()
-            && s == Self::DEBEZIUM_UNAVAILABLE_VALUE
-        {
-            let mut builder = jsonbb::Builder::default();
-            builder.add_string(Self::DEBEZIUM_UNAVAILABLE_VALUE);
-            return Ok(Self(builder.finish()));
+        if s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE {
+            return Ok(DEBEZIUM_UNAVAILABLE_JSON.clone());
         }
         Ok(Self(s.parse()?))
     }
