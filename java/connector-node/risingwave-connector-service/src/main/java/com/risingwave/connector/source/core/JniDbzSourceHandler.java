@@ -60,29 +60,42 @@ public class JniDbzSourceHandler {
             throws Exception {
 
         var channel = CdcSourceChannel.fromOwnedPointer(channelPtr);
+        try {
+            var request =
+                    ConnectorServiceProto.GetEventStreamRequest.parseFrom(
+                            getEventStreamRequestBytes);
+            // userProps extracted from request, underlying implementation is
+            // UnmodifiableMap
+            Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
+            mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
+            boolean isCdcSourceJob = request.getIsSourceJob();
 
-        var request =
-                ConnectorServiceProto.GetEventStreamRequest.parseFrom(getEventStreamRequestBytes);
-        // userProps extracted from request, underlying implementation is UnmodifiableMap
-        Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
-        mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
-        boolean isCdcSourceJob = request.getIsSourceJob();
+            if (request.getSourceType() == POSTGRES) {
+                DbzSourceUtils.createPostgresPublicationInSourceExecutor(
+                        request.getPropertiesMap(), request.getSourceId());
+            }
 
-        if (request.getSourceType() == POSTGRES) {
-            DbzSourceUtils.createPostgresPublicationInSourceExecutor(
-                    request.getPropertiesMap(), request.getSourceId());
+            var config =
+                    new DbzConnectorConfig(
+                            SourceTypeE.valueOf(request.getSourceType()),
+                            request.getSourceId(),
+                            request.getStartOffset(),
+                            mutableUserProps,
+                            request.getSnapshotDone(),
+                            isCdcSourceJob);
+            JniDbzSourceHandler handler = new JniDbzSourceHandler(config, channel);
+            handler.start();
+        } catch (Throwable t) {
+            LOG.error("runJniDbzSourceThread throws an exception.", t);
+
+            // The receiver in rust `CdcSplitReader` is relying on the Err to be sent for
+            // correct error propagation.
+            channel.sendError(t.getMessage());
+
+            // re-throw the exception to provide the correct error message and stop the JNI
+            // thread
+            throw t;
         }
-
-        var config =
-                new DbzConnectorConfig(
-                        SourceTypeE.valueOf(request.getSourceType()),
-                        request.getSourceId(),
-                        request.getStartOffset(),
-                        mutableUserProps,
-                        request.getSnapshotDone(),
-                        isCdcSourceJob);
-        JniDbzSourceHandler handler = new JniDbzSourceHandler(config, channel);
-        handler.start();
     }
 
     public void commitOffset(String encodedOffset) throws InterruptedException {
@@ -137,8 +150,8 @@ public class JniDbzSourceHandler {
                     // If resp is null means just check whether channel is closed.
                     success = channel.send(null);
                 }
-                // When user drops the connector, the channel rx will be dropped and we fail to send
-                // the message. We should stop the engine in this case.
+                // When user drops the connector, the channel rx will be dropped and we fail to
+                // send the message. We should stop the engine in this case.
                 if (!success) {
                     LOG.info(
                             "Engine#{}: JNI receiver closed, stop the engine",
@@ -149,6 +162,11 @@ public class JniDbzSourceHandler {
             }
         } catch (Throwable t) {
             LOG.error("Cdc engine failed.", t);
+
+            // The receiver in rust `CdcSplitReader` is relying on the Err to be sent for
+            // correct error propagation.
+            channel.sendError(t.getMessage());
+
             try {
                 runner.stop();
             } catch (Exception e) {
@@ -163,7 +181,8 @@ public class JniDbzSourceHandler {
     private boolean sendHandshakeMessage(
             DbzCdcEngineRunner runner, CdcSourceChannel channel, boolean startOk) throws Exception {
         // send a handshake message to notify the Source executor
-        // if the handshake is not ok, the split reader will return error to source actor
+        // if the handshake is not ok, the split reader will return error to source
+        // actor
         var controlInfo =
                 GetEventStreamResponse.ControlInfo.newBuilder().setHandshakeOk(startOk).build();
 

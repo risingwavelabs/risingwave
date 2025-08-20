@@ -23,9 +23,9 @@ use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 impl Binder {
     pub(super) fn bind_binary_op(
         &mut self,
-        left: Expr,
-        op: BinaryOperator,
-        mut right: Expr,
+        left: &Expr,
+        op: &BinaryOperator,
+        mut right: &Expr,
     ) -> Result<ExprImpl> {
         let bound_left = self.bind_expr_inner(left)?;
 
@@ -34,24 +34,26 @@ impl Binder {
         right = match right {
             Expr::SomeOp(expr) => {
                 func_types.push(ExprType::Some);
-                *expr
+                expr
             }
             Expr::AllOp(expr) => {
                 func_types.push(ExprType::All);
-                *expr
+                expr
             }
             right => right,
         };
 
         let bound_right = self.bind_expr_inner(right)?;
 
-        if matches!(op, BinaryOperator::PathMatch | BinaryOperator::PathExists) {
+        if let BinaryOperator::Custom(name) = &op
+            && matches!(name.as_str(), "@?" | "@@")
+        {
             // jsonb @? jsonpath => jsonb_path_exists(jsonb, jsonpath, '{}', silent => true)
             // jsonb @@ jsonpath => jsonb_path_match(jsonb, jsonpath, '{}', silent => true)
             return Ok(FunctionCall::new_unchecked(
-                match op {
-                    BinaryOperator::PathMatch => ExprType::JsonbPathMatch,
-                    BinaryOperator::PathExists => ExprType::JsonbPathExists,
+                match name.as_str() {
+                    "@?" => ExprType::JsonbPathExists,
+                    "@@" => ExprType::JsonbPathMatch,
                     _ => unreachable!(),
                 },
                 vec![
@@ -75,7 +77,7 @@ impl Binder {
     }
 
     fn resolve_binary_operator(
-        op: BinaryOperator,
+        op: &BinaryOperator,
         bound_left: &ExprImpl,
         bound_right: &ExprImpl,
     ) -> Result<Vec<ExprType>> {
@@ -94,29 +96,8 @@ impl Binder {
             BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
-            BinaryOperator::PGLikeMatch => ExprType::Like,
-            BinaryOperator::PGNotLikeMatch => {
-                func_types.push(ExprType::Not);
-                ExprType::Like
-            }
-            BinaryOperator::PGILikeMatch => ExprType::ILike,
-            BinaryOperator::PGNotILikeMatch => {
-                func_types.push(ExprType::Not);
-                ExprType::ILike
-            }
-            BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
-            BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
-            BinaryOperator::BitwiseXor => ExprType::Pow,
-            BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
-            BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
-            BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::Arrow => ExprType::JsonbAccess,
-            BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
-            BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
-            BinaryOperator::HashArrow => ExprType::JsonbExtractPathVariadic,
-            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathTextVariadic,
-            BinaryOperator::Prefix => ExprType::StartsWith,
-            BinaryOperator::Contains => {
+            BinaryOperator::Pow => ExprType::Pow,
+            BinaryOperator::Custom(name) if name == "@>" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -136,7 +117,7 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::Contained => {
+            BinaryOperator::Custom(name) if name == "<@" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -156,12 +137,15 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::Exists => ExprType::JsonbExists,
-            BinaryOperator::ExistsAny => ExprType::JsonbExistsAny,
-            BinaryOperator::ExistsAll => ExprType::JsonbExistsAll,
-            BinaryOperator::Concat => {
+            BinaryOperator::Custom(name) if name == "||" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                // Dispatching order following PostgreSQL:
+                // 1. array
+                // 2. explicitly string
+                // 3. `T || T` for any T with its own `||` operator
+                // 4. implicitly string (i.e. unknown)
+                // 5. invalid
                 match (left_type, right_type) {
                     // array concatenation
                     (Some(DataType::List { .. }), Some(DataType::List { .. }))
@@ -175,14 +159,23 @@ impl Binder {
                         ExprType::ConcatOp
                     }
 
+                    // jsonb concatenation
                     (Some(DataType::Jsonb), Some(DataType::Jsonb))
                     | (Some(DataType::Jsonb), None)
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbConcat,
 
-                    // bytea (and varbit, tsvector, tsquery)
+                    // bytea concatenation
                     (Some(DataType::Bytea), Some(DataType::Bytea))
                     | (Some(DataType::Bytea), None)
                     | (None, Some(DataType::Bytea)) => ExprType::ByteaConcatOp,
+
+                    // vector/halfvec concatenation
+                    (Some(DataType::Vector(_)), Some(DataType::Vector(_)))
+                    | (Some(DataType::Vector(_)), None)
+                    | (None, Some(DataType::Vector(_))) => ExprType::VecConcat,
+
+                    // TODO: varbit, tsvector, tsquery
+                    // Once these types are supported, they shall go before the unknown-as-string case below.
 
                     // string concatenation
                     (None, _) | (_, None) => ExprType::ConcatOp,
@@ -197,12 +190,52 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
-            BinaryOperator::PGRegexNotMatch => {
-                func_types.push(ExprType::Not);
-                ExprType::RegexpEq
+            BinaryOperator::Custom(name) => match name.as_str() {
+                // number
+                "&" => ExprType::BitwiseAnd,
+                "|" => ExprType::BitwiseOr,
+                "#" => ExprType::BitwiseXor,
+                "<<" => ExprType::BitwiseShiftLeft,
+                ">>" => ExprType::BitwiseShiftRight,
+                // string
+                "^@" => ExprType::StartsWith,
+                "~" => ExprType::RegexpEq,
+                "~~" => ExprType::Like,
+                "~~*" => ExprType::ILike,
+                "!~" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::RegexpEq
+                }
+                "!~~" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::Like
+                }
+                "!~~*" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::ILike
+                }
+                // jsonb
+                "->" => ExprType::JsonbAccess,
+                "->>" => ExprType::JsonbAccessStr,
+                "#-" => ExprType::JsonbDeletePath,
+                "#>" => ExprType::JsonbExtractPathVariadic,
+                "#>>" => ExprType::JsonbExtractPathTextVariadic,
+                "?" => ExprType::JsonbExists,
+                "?|" => ExprType::JsonbExistsAny,
+                "?&" => ExprType::JsonbExistsAll,
+                // vector
+                "<->" => ExprType::L2Distance,
+                "<=>" => ExprType::CosineDistance,
+                "<+>" => ExprType::L1Distance,
+                "<#>" => {
+                    func_types.push(ExprType::Neg);
+                    ExprType::InnerProduct
+                }
+                _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
+            },
+            BinaryOperator::Xor | BinaryOperator::PGQualified(_) => {
+                bail_not_implemented!(issue = 112, "binary op: {:?}", op)
             }
-            _ => bail_not_implemented!(issue = 112, "binary op: {:?}", op),
         };
         func_types.push(final_type);
         Ok(func_types)

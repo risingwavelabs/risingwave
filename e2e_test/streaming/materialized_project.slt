@@ -1,0 +1,42 @@
+# Test streaming support for impure functions with MaterializedExprs operator
+# This tests the implementation of https://github.com/risingwavelabs/risingwave/issues/22254
+
+# Test with a simple case using openai_embedding function which is impure
+statement ok
+create table impure_test_table (id int, value varchar);
+
+statement ok
+insert into impure_test_table values (1, 'hello'), (2, 'world');
+
+# Test explain to verify that impure expressions are materialized
+query T
+explain create materialized view mv_impure_test as
+select id, value, openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding from impure_test_table;
+----
+StreamMaterialize { columns: [id, value, embedding, impure_test_table._row_id(hidden)], stream_key: [impure_test_table._row_id], pk_columns: [impure_test_table._row_id], pk_conflict: NoCheck }
+└─StreamProject { exprs: [impure_test_table.id, impure_test_table.value, $expr1, impure_test_table._row_id] }
+  └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, impure_test_table.value) as $expr1] }
+    └─StreamTableScan { table: impure_test_table, columns: [id, value, _row_id] }
+
+# Test with mixed pure and impure expressions
+query T
+explain create materialized view mv_mixed_test as
+select id, value, id + 1 as id_plus_one, openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding, upper(value) as upper_value from impure_test_table;
+----
+StreamMaterialize { columns: [id, value, id_plus_one, embedding, upper_value, impure_test_table._row_id(hidden)], stream_key: [impure_test_table._row_id], pk_columns: [impure_test_table._row_id], pk_conflict: NoCheck }
+└─StreamProject { exprs: [impure_test_table.id, impure_test_table.value, (impure_test_table.id + 1:Int32) as $expr2, $expr1, Upper(impure_test_table.value) as $expr3, impure_test_table._row_id] }
+  └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, impure_test_table.value) as $expr1] }
+    └─StreamTableScan { table: impure_test_table, columns: [id, value, _row_id] }
+
+# Test with only pure functions - should NOT use MaterializedExprs
+query T
+explain create materialized view mv_pure_test as
+select id, value, id + 1 as id_plus_one, upper(value) as upper_value from impure_test_table;
+----
+StreamMaterialize { columns: [id, value, id_plus_one, upper_value, impure_test_table._row_id(hidden)], stream_key: [impure_test_table._row_id], pk_columns: [impure_test_table._row_id], pk_conflict: NoCheck }
+└─StreamProject { exprs: [impure_test_table.id, impure_test_table.value, (impure_test_table.id + 1:Int32) as $expr1, Upper(impure_test_table.value) as $expr2, impure_test_table._row_id] }
+  └─StreamTableScan { table: impure_test_table, columns: [id, value, _row_id] }
+
+# Clean up
+statement ok
+drop table impure_test_table;

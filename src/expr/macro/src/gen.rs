@@ -503,7 +503,7 @@ impl FunctionAttr {
             match self.args.len() {
                 0 => quote! {
                     let c = #ret_array_type::from_iter_bitmap(
-                        std::iter::repeat_with(|| #fn_name()).take(input.capacity())
+                        std::iter::repeat_with(|| #fn_name()).take(input.capacity()),
                         Bitmap::ones(input.capacity()),
                     );
                     Arc::new(c.into())
@@ -1308,6 +1308,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
         "any" => quote! { SigDataType::Any },
         "anyarray" => quote! { SigDataType::AnyArray },
         "anymap" => quote! { SigDataType::AnyMap },
+        "vector" => quote! { SigDataType::Vector },
         "struct" => quote! { SigDataType::AnyStruct },
         _ if ty.starts_with("struct") && ty.contains("any") => quote! { SigDataType::AnyStruct },
         _ => {

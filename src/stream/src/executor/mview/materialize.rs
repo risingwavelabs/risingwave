@@ -310,10 +310,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // Update the vnode bitmap for the state table if asked.
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                        && cache_may_stale
                     {
-                        if cache_may_stale {
-                            self.materialize_cache.lru_cache.clear();
-                        }
+                        self.materialize_cache.lru_cache.clear();
                     }
 
                     self.metrics
@@ -728,6 +727,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             metrics.materialize_cache_total_count.inc();
 
             if self.lru_cache.contains(key) {
+                if self.lru_cache.get(key).unwrap().is_some() {
+                    metrics.materialize_data_exist_count.inc();
+                }
                 metrics.materialize_cache_hit_count.inc();
                 continue;
             }
@@ -741,6 +743,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
             let (key, row) = result?;
+            if row.is_some() {
+                metrics.materialize_data_exist_count.inc();
+            }
             // for keys that are not in the table, `value` is None
             match conflict_behavior {
                 checked_conflict_behaviors!() => self.lru_cache.put(key, row),

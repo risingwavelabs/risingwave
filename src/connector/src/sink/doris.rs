@@ -39,7 +39,7 @@ use super::{
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
+use crate::sink::{Sink, SinkParam, SinkWriter, SinkWriterParam};
 
 pub const DORIS_SINK: &str = "doris";
 
@@ -165,7 +165,7 @@ impl DorisSink {
                     i.name
                 ))
             })?;
-            if !Self::check_and_correct_column_type(&i.data_type, value.to_string())? {
+            if !Self::check_and_correct_column_type(&i.data_type, value.clone())? {
                 return Err(SinkError::Doris(format!(
                     "Column type don't match, column name is {:?}. doris type is {:?} risingwave type is {:?} ",
                     i.name, value, i.data_type
@@ -192,7 +192,7 @@ impl DorisSink {
                 Ok(doris_data_type.contains("STRING") | doris_data_type.contains("VARCHAR"))
             }
             risingwave_common::types::DataType::Time => {
-                Err(SinkError::Doris("doris can not support Time".to_owned()))
+                Err(SinkError::Doris("TIME is not supported for Doris sink. Please convert to VARCHAR or other supported types.".to_owned()))
             }
             risingwave_common::types::DataType::Timestamp => {
                 Ok(doris_data_type.contains("DATETIME"))
@@ -201,27 +201,29 @@ impl DorisSink {
                 "TIMESTAMP WITH TIMEZONE is not supported for Doris sink as Doris doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_owned(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Doris(
-                "doris can not support Interval".to_owned(),
+                "INTERVAL is not supported for Doris sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Struct(_) => Ok(doris_data_type.contains("STRUCT")),
             risingwave_common::types::DataType::List(_) => Ok(doris_data_type.contains("ARRAY")),
             risingwave_common::types::DataType::Bytea => {
-                Err(SinkError::Doris("doris can not support Bytea".to_owned()))
+                Err(SinkError::Doris("BYTEA is not supported for Doris sink. Please convert to VARCHAR or other supported types.".to_owned()))
             }
             risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSON")),
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => {
-                Err(SinkError::Doris("doris can not support Int256".to_owned()))
+                Err(SinkError::Doris("INT256 is not supported for Doris sink.".to_owned()))
             }
             risingwave_common::types::DataType::Map(_) => {
-                Err(SinkError::Doris("doris can not support Map".to_owned()))
+                Err(SinkError::Doris("MAP is not supported for Doris sink.".to_owned()))
             }
+            DataType::Vector(_) => {
+                Err(SinkError::Doris("VECTOR is not supported for Doris sink.".to_owned()))
+            },
         }
     }
 }
 
 impl Sink for DorisSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = LogSinkerOf<DorisSinkWriter>;
 
     const SINK_NAME: &'static str = DORIS_SINK;

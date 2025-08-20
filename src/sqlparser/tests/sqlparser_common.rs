@@ -858,7 +858,7 @@ fn parse_string_concat() {
     assert_eq!(
         SelectItem::UnnamedExpr(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
-            op: BinaryOperator::Concat,
+            op: BinaryOperator::Custom("||".to_owned()),
             right: Box::new(Expr::Identifier(Ident::new_unchecked("b"))),
         }),
         select.projection[0]
@@ -868,9 +868,8 @@ fn parse_string_concat() {
 #[test]
 fn parse_bitwise_ops() {
     let bitwise_ops = &[
-        ("^", BinaryOperator::BitwiseXor),
-        ("|", BinaryOperator::BitwiseOr),
-        ("&", BinaryOperator::BitwiseAnd),
+        ("|", BinaryOperator::Custom("|".to_owned())),
+        ("&", BinaryOperator::Custom("&".to_owned())),
     ];
 
     for (str_op, op) in bitwise_ops {
@@ -3861,7 +3860,7 @@ fn parse_rollback() {
 
 #[test]
 fn parse_create_index() {
-    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name, age DESC) INCLUDE(other) DISTRIBUTED BY(name)";
+    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test USING hnsw (name, age DESC) INCLUDE(other) DISTRIBUTED BY(name) WITH (m = 16)";
     let indexed_columns = vec![
         OrderByExpr {
             expr: Expr::Identifier(Ident::new_unchecked("name")),
@@ -3882,21 +3881,37 @@ fn parse_create_index() {
             name,
             table_name,
             columns,
+            method,
             include,
             distributed_by,
             unique,
             if_not_exists,
+            with_properties,
         } => {
             assert_eq!("idx_name", name.to_string());
             assert_eq!("test", table_name.to_string());
             assert_eq!(indexed_columns, columns);
+            assert_eq!(method, Some(Ident::new_unchecked("hnsw")));
             assert_eq!(include_columns, include);
             assert_eq!(distributed_columns, distributed_by);
             assert!(unique);
-            assert!(if_not_exists)
+            assert!(if_not_exists);
+            assert_eq!(
+                with_properties.0,
+                vec![SqlOption {
+                    name: ObjectName::from_test_str("m"),
+                    value: SqlOptionValue::Value(Value::Number("16".to_owned())),
+                }]
+            )
         }
         _ => unreachable!(),
     }
+    verified_stmt(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name, age DESC) INCLUDE(other) DISTRIBUTED BY(name)",
+    );
+    verified_stmt(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name, age DESC) INCLUDE(other) DISTRIBUTED BY(name) WITH (m = 16)",
+    );
 }
 
 #[test]

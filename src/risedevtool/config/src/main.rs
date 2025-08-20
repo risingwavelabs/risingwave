@@ -59,6 +59,7 @@ enum Commands {
 pub enum Components {
     #[clap(name = "minio")]
     Minio,
+    Lakekeeper,
     Hdfs,
     PrometheusAndGrafana,
     Pubsub,
@@ -82,6 +83,7 @@ impl Components {
     pub fn title(&self) -> String {
         match self {
             Self::Minio => "[Component] Hummock: MinIO + MinIO-CLI",
+            Self::Lakekeeper => "[Component] Apache Iceberg: Lakekeeper REST Catalog",
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Pubsub => "[Component] Google Pubsub",
@@ -108,6 +110,11 @@ impl Components {
             Self::Minio => {
                 "
 Required by Hummock state store."
+            }
+            Self::Lakekeeper => {
+                "
+Required if you want to use Apache Iceberg REST Catalog.
+Provides catalog and metadata management for Apache Iceberg tables."
             }
             Self::Hdfs => {
                 "
@@ -215,6 +222,7 @@ Currently, default features are: rw-static-link, all-connectors
     pub fn from_env(env: impl AsRef<str>) -> Option<Self> {
         match env.as_ref() {
             "ENABLE_MINIO" => Some(Self::Minio),
+            "ENABLE_LAKEKEEPER" => Some(Self::Lakekeeper),
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_PUBSUB" => Some(Self::Pubsub),
@@ -239,6 +247,7 @@ Currently, default features are: rw-static-link, all-connectors
     pub fn env(&self) -> String {
         match self {
             Self::Minio => "ENABLE_MINIO",
+            Self::Lakekeeper => "ENABLE_LAKEKEEPER",
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Pubsub => "ENABLE_PUBSUB",

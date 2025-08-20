@@ -14,7 +14,7 @@
 
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 use risingwave_meta::*;
 

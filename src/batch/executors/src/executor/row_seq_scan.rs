@@ -247,15 +247,14 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             let table = table.clone();
             if let Some(row) =
                 Self::execute_point_get(table, point_get, query_epoch, histogram).await?
+                && let Some(chunk) = data_chunk_builder.append_one_row(row)
             {
-                if let Some(chunk) = data_chunk_builder.append_one_row(row) {
-                    returned += chunk.cardinality() as u64;
-                    yield chunk;
-                    if let Some(limit) = &limit
-                        && returned >= *limit
-                    {
-                        return Ok(());
-                    }
+                returned += chunk.cardinality() as u64;
+                yield chunk;
+                if let Some(limit) = &limit
+                    && returned >= *limit
+                {
+                    return Ok(());
                 }
             }
         }

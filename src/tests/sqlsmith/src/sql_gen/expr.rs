@@ -18,9 +18,8 @@ use rand::seq::IndexedRandom;
 use risingwave_common::types::{DataType, DataTypeName, StructType};
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_frontend::expr::cast_sigs;
-use risingwave_sqlparser::ast::{Expr, Ident, OrderByExpr, Value};
+use risingwave_sqlparser::ast::{Expr, OrderByExpr, Value};
 
-use crate::config::Feature;
 use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
@@ -91,11 +90,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         // - `a1 >= a2 IN b`
         // ...
         // We just nest compound expressions to avoid this.
-        let range = if !context.is_inside_agg() && self.should_generate(Feature::Agg) {
-            100
-        } else {
-            50
-        };
+        let range = if context.can_gen_agg() { 100 } else { 50 };
         match self.rng.random_range(0..=range) {
             0..=35 => Expr::Nested(Box::new(self.gen_func(typ, context))),
             36..=40 => self.gen_exists(typ, context),
@@ -208,7 +203,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             self.gen_simple_scalar(typ)
         } else {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
-            Expr::Identifier(Ident::new_unchecked(&col_def.name))
+            col_def.name_expr()
         }
     }
 
@@ -223,9 +218,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_exists(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        if *ret != DataType::Boolean
-            || (!context.is_inside_agg() && self.should_generate(Feature::Agg))
-        {
+        if *ret != DataType::Boolean || context.can_gen_agg() {
             return self.gen_simple_scalar(ret);
         };
         // Generating correlated subquery tends to create queries which cannot be unnested.
@@ -246,7 +239,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         while self.flip_coin() {
             let column = self.bound_columns.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
-                expr: Expr::Identifier(Ident::new_unchecked(&column.name)),
+                expr: column.name_expr(),
                 asc: if self.rng.random_bool(0.3) {
                     None
                 } else {

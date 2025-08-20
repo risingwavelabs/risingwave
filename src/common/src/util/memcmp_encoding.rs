@@ -20,7 +20,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use serde::{Deserialize, Serialize};
 
 use super::iter_util::{ZipEqDebug, ZipEqFast};
-use crate::array::{ArrayImpl, DataChunk};
+use crate::array::{ArrayImpl, DataChunk, VectorItemType};
 use crate::row::{OwnedRow, Row};
 use crate::types::{
     DataType, Date, Datum, F32, F64, Int256, ScalarImpl, Serial, Time, Timestamp, Timestamptz,
@@ -154,6 +154,7 @@ fn calculate_encoded_size_inner(
             // these types are var-length and should only be determine at runtime.
             // TODO: need some test for this case (e.g. e2e test)
             DataType::List { .. } | DataType::Map(_) => deserializer.skip_bytes()?,
+            DataType::Vector(d) => d * size_of::<VectorItemType>(),
             DataType::Struct(t) => t
                 .types()
                 .map(|field| {

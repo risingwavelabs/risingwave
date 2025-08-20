@@ -20,10 +20,10 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{self, PlanWindowFunction};
 use super::stream::prelude::*;
 use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,7 +55,7 @@ impl StreamEowcOverWindow {
         let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
-            true,
+            StreamKind::AppendOnly,
             true,
             watermark_columns,
             // we cannot derive monotonicity for any column for the same reason as watermark columns
@@ -117,7 +117,7 @@ impl StreamEowcOverWindow {
 
 impl_distill_by_unit!(StreamEowcOverWindow, core, "StreamEowcOverWindow");
 
-impl PlanTreeNodeUnary for StreamEowcOverWindow {
+impl PlanTreeNodeUnary<Stream> for StreamEowcOverWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -128,7 +128,7 @@ impl PlanTreeNodeUnary for StreamEowcOverWindow {
         Self::new(core)
     }
 }
-impl_plan_tree_node_for_unary! { StreamEowcOverWindow }
+impl_plan_tree_node_for_unary! { Stream, StreamEowcOverWindow }
 
 impl StreamNode for StreamEowcOverWindow {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -163,6 +163,6 @@ impl StreamNode for StreamEowcOverWindow {
     }
 }
 
-impl ExprRewritable for StreamEowcOverWindow {}
+impl ExprRewritable<Stream> for StreamEowcOverWindow {}
 
 impl ExprVisitable for StreamEowcOverWindow {}

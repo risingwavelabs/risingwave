@@ -145,8 +145,11 @@ mod type_mapping {
         }
 
         match (from_type, into_type) {
+            (DataType::Vector(dim1), DataType::Vector(dim2)) => {
+                assert_eq!(dim1, dim2);
+                DatumCow::Borrowed(Some(scalar))
+            }
             (data_types::simple!(), data_types::simple!()) => DatumCow::Borrowed(Some(scalar)),
-
             (DataType::List(from_inner_type), DataType::List(into_inner_type)) => {
                 let list = scalar.into_list();
 

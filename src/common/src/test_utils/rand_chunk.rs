@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::BytesArray;
+
 use crate::array::{
     BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-    I64Array, Int256Array, IntervalArray, SerialArray, TimeArray, TimestampArray, TimestamptzArray,
-    Utf8Array,
+    I64Array, Int256Array, IntervalArray, JsonbArray, SerialArray, TimeArray, TimestampArray,
+    TimestamptzArray, Utf8Array,
 };
 use crate::test_utils::rand_array::seed_rand_array_ref;
 use crate::types::DataType;
@@ -43,11 +45,9 @@ pub fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f6
             }
             DataType::Interval => seed_rand_array_ref::<IntervalArray>(size, seed, null_ratio),
             DataType::Int256 => seed_rand_array_ref::<Int256Array>(size, seed, null_ratio),
-            DataType::Struct(_)
-            | DataType::Bytea
-            | DataType::Jsonb
-            | DataType::List(_)
-            | DataType::Map(_) => {
+            DataType::Bytea => seed_rand_array_ref::<BytesArray>(size, seed, null_ratio),
+            DataType::Jsonb => seed_rand_array_ref::<JsonbArray>(size, seed, null_ratio),
+            DataType::Vector(_) | DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 todo!()
             }
         });

@@ -104,7 +104,6 @@ where
 {
     url.path_segments_mut()
         .expect("constructor validated URL can be a base")
-        .clear()
         .extend(&ctx.path);
     tracing::debug!("request to url: {}, method {}", &url, &method);
     let mut request_builder = ctx.client.request(method, url);

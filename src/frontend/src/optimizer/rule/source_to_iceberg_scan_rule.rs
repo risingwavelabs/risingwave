@@ -20,17 +20,17 @@ use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
-use super::{ApplyResult, BoxedRule, FallibleRule};
+use super::prelude::{PlanRef, *};
 use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
-use crate::optimizer::plan_node::{LogicalIcebergScan, LogicalJoin, LogicalSource};
+use crate::optimizer::plan_node::{Logical, LogicalIcebergScan, LogicalJoin, LogicalSource};
+use crate::optimizer::rule::{ApplyResult, FallibleRule};
 use crate::utils::{Condition, FRONTEND_RUNTIME};
 
 pub struct SourceToIcebergScanRule {}
-impl FallibleRule for SourceToIcebergScanRule {
+impl FallibleRule<Logical> for SourceToIcebergScanRule {
     fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
         let source: &LogicalSource = match plan.as_logical_source() {
             Some(s) => s,

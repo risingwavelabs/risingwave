@@ -35,7 +35,6 @@
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]
-#![feature(result_flattening)] // required by `capture_context`
 
 use std::sync::Arc;
 
@@ -60,7 +59,7 @@ tokio::task_local! {
 }
 
 mod config {
-    use risingwave_common::config::default;
+    use risingwave_common::config::streaming::default;
 
     pub(crate) fn chunk_size() -> usize {
         let res = crate::CONFIG.try_with(|config| config.developer.chunk_size);
@@ -76,7 +75,7 @@ mod consistency {
 
     use std::sync::LazyLock;
 
-    use risingwave_common::config::default;
+    use risingwave_common::config::streaming::default;
     use risingwave_common::util::env_var::env_var_is_true;
 
     static INSANE_MODE: LazyLock<bool> =

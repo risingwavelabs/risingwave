@@ -76,7 +76,7 @@ SELECT age FROM mv_user_gen;
 
 # Test that generated column works before schema refresh
 query II rowsort retry 3 backoff 5s
-SELECT id, t FROM mv_user_gen LIMIT 5;
+SELECT id, t FROM mv_user_gen ORDER BY id LIMIT 5;
 ----
 0 1
 1 2

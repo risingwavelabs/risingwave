@@ -73,16 +73,16 @@ struct InnerSideExecutorBuilder {
 }
 
 /// Used to build the executor for the inner side
-#[async_trait::async_trait]
-pub trait LookupExecutorBuilder: Send {
+pub trait LookupExecutorBuilder: Send + 'static {
     fn reset(&mut self);
 
-    async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()>;
+    fn add_scan_range(
+        &mut self,
+        key_datums: Vec<Datum>,
+    ) -> impl Future<Output = Result<()>> + Send + '_;
 
-    async fn build_executor(&mut self) -> Result<BoxedExecutor>;
+    fn build_executor(&mut self) -> impl Future<Output = Result<BoxedExecutor>> + Send + '_;
 }
-
-pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
 
 impl InnerSideExecutorBuilder {
     /// Gets the virtual node based on the given `scan_range`
@@ -162,7 +162,6 @@ impl InnerSideExecutorBuilder {
     }
 }
 
-#[async_trait::async_trait]
 impl LookupExecutorBuilder for InnerSideExecutorBuilder {
     fn reset(&mut self) {
         self.worker_slot_to_scan_range_mapping = HashMap::new();
@@ -259,12 +258,11 @@ impl LookupExecutorBuilder for InnerSideExecutorBuilder {
 /// `ExchangeExecutors`. This is done by grouping rows with the same key datums together, and also
 /// by grouping together scan ranges that point to the same partition (and can thus be easily
 /// scanned by the same worker node).
-pub struct LocalLookupJoinExecutor<K> {
-    base: LookupJoinBase<K>,
-    _phantom: PhantomData<K>,
+pub struct LocalLookupJoinExecutor<K, B: LookupExecutorBuilder> {
+    base: LookupJoinBase<K, B>,
 }
 
-impl<K: HashKey> Executor for LocalLookupJoinExecutor<K> {
+impl<K: HashKey, B: LookupExecutorBuilder> Executor for LocalLookupJoinExecutor<K, B> {
     fn schema(&self) -> &Schema {
         &self.base.schema
     }
@@ -278,12 +276,9 @@ impl<K: HashKey> Executor for LocalLookupJoinExecutor<K> {
     }
 }
 
-impl<K> LocalLookupJoinExecutor<K> {
-    pub fn new(base: LookupJoinBase<K>) -> Self {
-        Self {
-            base,
-            _phantom: PhantomData,
-        }
+impl<K, B: LookupExecutorBuilder> LocalLookupJoinExecutor<K, B> {
+    pub fn new(base: LookupJoinBase<K, B>) -> Self {
+        Self { base }
     }
 }
 
@@ -444,7 +439,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             outer_side_input,
             outer_side_data_types,
             outer_side_key_idxs,
-            inner_side_builder: Box::new(inner_side_builder),
+            inner_side_builder,
             inner_side_key_types,
             inner_side_key_idxs,
             null_safe,
@@ -462,13 +457,13 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
     }
 }
 
-struct LocalLookupJoinExecutorArgs {
+struct LocalLookupJoinExecutorArgs<B: LookupExecutorBuilder> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     outer_side_input: BoxedExecutor,
     outer_side_data_types: Vec<DataType>,
     outer_side_key_idxs: Vec<usize>,
-    inner_side_builder: Box<dyn LookupExecutorBuilder>,
+    inner_side_builder: B,
     inner_side_key_types: Vec<DataType>,
     inner_side_key_idxs: Vec<usize>,
     null_safe: Vec<bool>,
@@ -483,11 +478,11 @@ struct LocalLookupJoinExecutorArgs {
     mem_ctx: MemoryContext,
 }
 
-impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
+impl<B: LookupExecutorBuilder> HashKeyDispatcher for LocalLookupJoinExecutorArgs<B> {
     type Output = BoxedExecutor;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        Box::new(LocalLookupJoinExecutor::<K>::new(LookupJoinBase::<K> {
+        Box::new(LocalLookupJoinExecutor::<K, B>::new(LookupJoinBase {
             join_type: self.join_type,
             condition: self.condition,
             outer_side_input: self.outer_side_input,
@@ -528,12 +523,12 @@ mod tests {
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::{BoxedExpression, build_from_pretty};
 
-    use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{
         FakeInnerSideExecutorBuilder, MockExecutor, diff_executor_output,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
+    use crate::local_lookup_join::LocalLookupJoinExecutorArgs;
     use crate::monitor::BatchSpillMetrics;
     use crate::task::ShutdownToken;
 
@@ -597,7 +592,7 @@ mod tests {
             outer_side_input,
             outer_side_data_types,
             outer_side_key_idxs: vec![0],
-            inner_side_builder: Box::new(FakeInnerSideExecutorBuilder::new(inner_side_schema)),
+            inner_side_builder: FakeInnerSideExecutorBuilder::new(inner_side_schema),
             inner_side_key_types: vec![inner_side_data_types[0].clone()],
             inner_side_key_idxs: vec![0],
             null_safe: vec![null_safe],

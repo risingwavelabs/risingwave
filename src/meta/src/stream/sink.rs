@@ -20,6 +20,7 @@ use risingwave_pb::catalog::PbSink;
 
 use crate::MetaResult;
 
+#[await_tree::instrument(boxed)]
 pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
     let param = SinkParam::try_from_sink_catalog(sink_catalog)?;

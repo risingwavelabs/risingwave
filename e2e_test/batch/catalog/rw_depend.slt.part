@@ -27,7 +27,7 @@ create sink sink2 into t2 as select a from t1;
 
 # equivalent to:
 # select objid::regclass, refobjid::regclass from rw_depend;
-query TT rowsort
+query TT rowsort retry 3 backoff 1s
 select r1.name, r2.name relname
 from rw_depend d
 join rw_relations r1 on d.objid = r1.id

@@ -151,6 +151,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             }
         };
         let first_recv_barrier_epoch = first_recv_barrier.epoch;
+        let initial_backfill_paused =
+            first_recv_barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id);
         yield Message::Barrier(first_recv_barrier);
         let mut backfill_state = BackfillState::new(
             self.progress_state_table,
@@ -207,6 +209,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             &mut self.progress,
                             &mut backfill_state,
                             first_recv_barrier_epoch,
+                            initial_backfill_paused,
+                            &self.actor_ctx,
                         );
 
                         pin_mut!(snapshot_stream);
@@ -825,6 +829,8 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     progress: &'a mut CreateMviewProgressReporter,
     backfill_state: &'a mut BackfillState<S>,
     first_recv_barrier_epoch: EpochPair,
+    initial_backfill_paused: bool,
+    actor_ctx: &'a ActorContextRef,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
@@ -842,12 +848,13 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         barrier_rx: &mut UnboundedReceiver<Barrier>,
         snapshot_stream: &mut (impl Stream<Item = StreamExecutorResult<StreamChunk>> + Unpin),
         throttle_snapshot_stream: bool,
+        backfill_paused: bool,
     ) -> StreamExecutorResult<Either<Barrier, Option<StreamChunk>>> {
         select!(
             result = receive_next_barrier(barrier_rx) => {
                 Ok(Either::Left(result?))
             },
-            result = snapshot_stream.try_next(), if !throttle_snapshot_stream => {
+            result = snapshot_stream.try_next(), if !throttle_snapshot_stream && !backfill_paused => {
                 Ok(Either::Right(result?))
             }
         )
@@ -855,12 +862,14 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
 
     let mut count = 0;
     let mut epoch_row_count = 0;
+    let mut backfill_paused = initial_backfill_paused;
     loop {
         let throttle_snapshot_stream = epoch_row_count as u64 > rate_limit.to_u64();
         match select_barrier_and_snapshot_stream(
             barrier_rx,
             &mut snapshot_stream,
             throttle_snapshot_stream,
+            backfill_paused,
         )
         .await?
         {
@@ -869,6 +878,15 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 barrier_epoch = barrier.epoch;
                 if barrier_epoch.curr >= snapshot_epoch {
                     return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
+                }
+                if barrier.should_start_fragment_backfill(actor_ctx.fragment_id) {
+                    if backfill_paused {
+                        backfill_paused = false;
+                    } else {
+                        tracing::error!(
+                            "received start fragment backfill mutation, but backfill is not paused"
+                        );
+                    }
                 }
                 if let Some(chunk) = snapshot_stream.consume_builder() {
                     count += chunk.cardinality();
@@ -898,6 +916,11 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 post_commit.post_yield_barrier(None).await?;
             }
             Either::Right(Some(chunk)) => {
+                if backfill_paused {
+                    return Err(
+                        anyhow!("snapshot backfill paused, but received snapshot chunk").into(),
+                    );
+                }
                 count += chunk.cardinality();
                 epoch_row_count += chunk.cardinality();
                 yield Message::Chunk(chunk);

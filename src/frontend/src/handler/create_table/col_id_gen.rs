@@ -196,7 +196,12 @@ impl ColumnIdGenerator {
                 Some((original_column_id, original_data_type)) => {
                     // Only check the type name (discriminant) for compatibility check here.
                     // For nested fields, we will check them recursively later.
-                    if original_data_type.type_name() != data_type.type_name() {
+                    let incompatible = original_data_type.type_name() != data_type.type_name()
+                        || matches!(
+                            (original_data_type, &data_type),
+                            (DataType::Vector(old), DataType::Vector(new)) if old != new,
+                        );
+                    if incompatible {
                         let path = path.iter().join(".");
                         bail!(
                             "incompatible data type change from {:?} to {:?} at path \"{}\"",

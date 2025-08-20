@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 
 use enumflags2::{BitFlags, bitflags, make_bitflags};
 use parse_display::Display;
-use risingwave_pb::user::grant_privilege::PbAction;
+use risingwave_pb::user::PbAction;
 
 #[bitflags]
 #[repr(u64)]

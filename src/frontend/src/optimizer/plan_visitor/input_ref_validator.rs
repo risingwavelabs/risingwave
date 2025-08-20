@@ -15,10 +15,10 @@
 use paste::paste;
 use risingwave_common::catalog::{Field, Schema};
 
-use super::{DefaultBehavior, Merge};
+use super::{BatchPlanVisitor, DefaultBehavior, LogicalPlanVisitor, Merge, StreamPlanVisitor};
 use crate::expr::ExprVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Explain, PlanRef, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{ConventionMarker, Explain, PlanRef, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 struct ExprVis<'a> {
@@ -45,7 +45,10 @@ pub struct InputRefValidator;
 
 impl InputRefValidator {
     #[track_caller]
-    pub fn validate(mut self, plan: PlanRef) {
+    pub fn validate<C: ConventionMarker>(mut self, plan: PlanRef<C>)
+    where
+        Self: PlanVisitor<C, Result = Option<String>>,
+    {
         if let Some(err) = self.visit(plan.clone()) {
             panic!(
                 "Input references are inconsistent with the input schema: {}, plan:\n{}",
@@ -68,7 +71,7 @@ macro_rules! visit_filter {
                     };
                     plan.predicate().visit_expr(&mut vis);
                     vis.string.or_else(|| {
-                        self.visit(input)
+                        self.[<visit_$convention>](input)
                     })
                 }
             }
@@ -92,21 +95,49 @@ macro_rules! visit_project {
                             return vis.string;
                         }
                     }
-                    self.visit(input)
+                    self.[<visit_$convention>](input)
                 }
             }
         )*
     };
 }
 
-impl PlanVisitor for InputRefValidator {
+impl StreamPlanVisitor for InputRefValidator {
     type Result = Option<String>;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
-    visit_filter!(logical, batch, stream);
+    visit_filter!(stream);
 
-    visit_project!(logical, batch, stream);
+    visit_project!(stream);
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a: Option<String>, b| a.or(b))
+    }
+}
+
+impl BatchPlanVisitor for InputRefValidator {
+    type Result = Option<String>;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
+
+    visit_filter!(batch);
+
+    visit_project!(batch);
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a: Option<String>, b| a.or(b))
+    }
+}
+
+impl LogicalPlanVisitor for InputRefValidator {
+    type Result = Option<String>;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
+
+    visit_filter!(logical);
+
+    visit_project!(logical);
 
     fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a: Option<String>, b| a.or(b))
@@ -117,7 +148,7 @@ impl PlanVisitor for InputRefValidator {
         plan: &crate::optimizer::plan_node::LogicalScan,
     ) -> Option<String> {
         let fields = plan
-            .table_desc()
+            .table()
             .columns
             .iter()
             .map(|col| Field::from_with_table_name_prefix(col, plan.table_name()))

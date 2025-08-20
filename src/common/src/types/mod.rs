@@ -39,7 +39,9 @@ use crate::array::{
     ArrayBuilderImpl, ArrayError, ArrayResult, NULL_VAL_FOR_HASH, PrimitiveArrayItemType,
 };
 // Complex type's value is based on the array
-pub use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
+pub use crate::array::{
+    ListRef, ListValue, MapRef, MapValue, StructRef, StructValue, VectorRef, VectorVal,
+};
 use crate::cast::{str_to_bool, str_to_bytea};
 use crate::catalog::ColumnId;
 use crate::error::BoxedError;
@@ -176,6 +178,9 @@ pub enum DataType {
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Map(MapType),
+    #[display("vector({0})")]
+    #[from_str(regex = "(?i)^vector\\((?P<0>.+)\\)$")]
+    Vector(usize),
 }
 
 impl !PartialOrd for DataType {}
@@ -213,8 +218,11 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Time => Ok(DataType::Time),
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
-            DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => Err(
-                "Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.",
+            DataTypeName::Struct
+            | DataTypeName::List
+            | DataTypeName::Map
+            | DataTypeName::Vector => Err(
+                "Functions returning parameterized types can not be inferred. Please use `FunctionCall::new_unchecked`.",
             ),
         }
     }
@@ -267,6 +275,7 @@ impl From<&PbDataType> for DataType {
                 let list_entries_type: DataType = (&proto.field_type[0]).into();
                 DataType::Map(MapType::from_entries(list_entries_type))
             }
+            PbTypeName::Vector => DataType::Vector(proto.precision as _),
             PbTypeName::Int256 => DataType::Int256,
         }
     }
@@ -301,6 +310,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::List => PbTypeName::List,
             DataTypeName::Int256 => PbTypeName::Int256,
             DataTypeName::Map => PbTypeName::Map,
+            DataTypeName::Vector => PbTypeName::Vector,
         }
     }
 }
@@ -357,6 +367,7 @@ pub mod data_types {
                 | DataType::Jsonb
                 | DataType::Serial
                 | DataType::Int256
+                | DataType::Vector(_)
         };
     }
     pub use _simple_data_types as simple;
@@ -380,6 +391,10 @@ pub mod data_types {
 }
 
 impl DataType {
+    /// Same as pgvector; unsure how it was chosen there
+    /// <https://github.com/pgvector/pgvector/blob/v0.8.0/README.md#vector-type>
+    pub const VEC_MAX_SIZE: usize = 16000;
+
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
 
@@ -420,6 +435,9 @@ impl DataType {
             DataType::Map(datatype) => {
                 // Same as List<Struct<K,V>>
                 pb.field_type = vec![datatype.clone().into_struct().to_protobuf()];
+            }
+            DataType::Vector(size) => {
+                pb.precision = *size as _;
             }
             DataType::Boolean
             | DataType::Int16
@@ -587,7 +605,6 @@ impl DataType {
     pub fn can_alter(&self) -> Option<bool> {
         match self {
             data_types::simple!() => None,
-
             DataType::Struct(struct_type) => {
                 // As long as we meet a struct type, we can check its `ids` field to determine if
                 // it can be altered.
@@ -1025,7 +1042,7 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
-            DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
+            DataType::Vector(_) | DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
         };
@@ -1058,6 +1075,7 @@ impl ScalarImpl {
             DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
+            DataType::Vector(size) => VectorVal::from_text(s, *size)?.into(),
             DataType::Map(_m) => return Err("map from text is not supported".into()),
         })
     }
@@ -1164,6 +1182,7 @@ impl ScalarRefImpl<'_> {
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
             Self::Map(v) => v.memcmp_serialize(ser)?,
+            Self::Vector(v) => v.memcmp_serialize(ser)?,
         };
         Ok(())
     }
@@ -1219,6 +1238,9 @@ impl ScalarImpl {
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
             Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
+            Ty::Vector(dimension) => {
+                VectorVal::memcmp_deserialize(*dimension, de)?.to_scalar_value()
+            }
         })
     }
 
@@ -1395,6 +1417,13 @@ mod tests {
                 DataTypeName::List => (
                     ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
+                ),
+                DataTypeName::Vector => (
+                    ScalarImpl::Vector(VectorVal::from_iter(
+                        (0..VectorVal::TEST_VECTOR_DIMENSION)
+                            .map(|i| ((i + 1) as f32).try_into().unwrap()),
+                    )),
+                    DataType::Vector(VectorVal::TEST_VECTOR_DIMENSION),
                 ),
                 DataTypeName::Map => {
                     // map is not hashable

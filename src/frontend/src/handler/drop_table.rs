@@ -36,7 +36,7 @@ pub async fn handle_drop_table(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let db_name = &session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
 
@@ -89,7 +89,7 @@ pub async fn handle_drop_table(
                 .env()
                 .catalog_reader()
                 .read_guard()
-                .get_sink_by_name(
+                .get_created_sink_by_name(
                     db_name,
                     schema_path,
                     &(ICEBERG_SINK_PREFIX.to_owned() + &table_name),

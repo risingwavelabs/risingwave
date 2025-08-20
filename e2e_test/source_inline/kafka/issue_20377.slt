@@ -1,0 +1,42 @@
+control substitution on
+
+system ok
+rpk topic create dummy_topic
+
+system ok
+mkdir -p schema_registry_root/apis/ccompat/v6/subjects/dummy_topic-value/versions
+
+system ok
+echo '{"type":"record","name":"Root","fields":[{"name":"f1","type":"boolean"}]}' | jq -Rs '{"subject":"dummy_topic-value","version":1,"id":7,"schema":.}' > schema_registry_root/apis/ccompat/v6/subjects/dummy_topic-value/versions/1
+
+system ok
+ln -s 1 schema_registry_root/apis/ccompat/v6/subjects/dummy_topic-value/versions/latest
+
+system ok
+python3 -m http.server -d schema_registry_root/ 9000 > /dev/null 2>&1 < /dev/null &
+
+sleep 1s
+
+system ok retry 3 backoff 2s
+curl --fail-with-body 'http://localhost:9000/apis/ccompat/v6/subjects/dummy_topic-value/versions/latest'
+
+statement ok
+CREATE SOURCE s WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'dummy_topic',
+)
+FORMAT PLAIN ENCODE AVRO(
+    schema.registry = 'http://localhost:9000/apis/ccompat/v6'
+);
+
+statement ok
+drop source s;
+
+system ok
+pkill -f schema_registry_root
+
+system ok
+rm -r schema_registry_root/
+
+system ok
+rpk topic delete dummy_topic

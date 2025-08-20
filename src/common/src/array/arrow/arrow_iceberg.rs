@@ -26,6 +26,7 @@ pub use super::arrow_54::{
 };
 use crate::array::{
     Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
+    VECTOR_ITEM_TYPE,
 };
 use crate::types::StructType;
 
@@ -113,6 +114,7 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
+            DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
     }
@@ -279,6 +281,7 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
+            DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
         };
 
         let mut arrow_field = arrow_schema::Field::new(name, data_type, true);

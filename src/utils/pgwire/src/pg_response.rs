@@ -78,6 +78,7 @@ pub enum StatementType {
     DROP_CONNECTION,
     DROP_SECRET,
     ALTER_DATABASE,
+    ALTER_DEFAULT_PRIVILEGES,
     ALTER_SCHEMA,
     ALTER_INDEX,
     ALTER_VIEW,
@@ -101,6 +102,7 @@ pub enum StatementType {
     UPDATE_USER,
     ABORT,
     FLUSH,
+    REFRESH_TABLE,
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").
     EMPTY,
@@ -114,6 +116,9 @@ pub enum StatementType {
     KILL,
     RECOVER,
     USE,
+    PREPARE,
+    DEALLOCATE,
+    VACUUM,
 }
 
 impl std::fmt::Display for StatementType {
@@ -324,6 +329,7 @@ impl StatementType {
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
             Statement::Use { .. } => Ok(StatementType::USE),
+            Statement::Vacuum { .. } => Ok(StatementType::VACUUM),
             _ => Err("unsupported statement type".to_owned()),
         }
     }

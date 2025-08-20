@@ -565,10 +565,10 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
             }
             let ptr = Box::into_raw(handle);
             let old = self.table.insert(hash, ptr);
-            if !old.is_null() {
-                if let Some(data) = self.try_remove_cache_handle(old) {
-                    last_reference_list.push(data);
-                }
+            if !old.is_null()
+                && let Some(data) = self.try_remove_cache_handle(old)
+            {
+                last_reference_list.push(data);
             }
             self.usage.fetch_add(charge, Ordering::Relaxed);
             (*ptr).add_ref();

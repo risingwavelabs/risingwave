@@ -19,14 +19,14 @@ mod tests {
     use expect_test::expect;
     use thiserror_ext::AsReport as _;
 
-    use crate::{Feature, LicenseKey, LicenseManager, TEST_PAID_LICENSE_KEY_CONTENT};
+    use crate::{Feature, LicenseKey, LicenseManager, TEST_ALL_LICENSE_KEY_CONTENT};
 
     fn do_test(key: &str, cpu_core_count: usize, expect: expect_test::Expect) {
         let manager = LicenseManager::new();
         manager.refresh(LicenseKey(key));
         manager.update_cpu_core_count(cpu_core_count);
 
-        match Feature::TestPaid.check_available_with(&manager) {
+        match Feature::TestDummy.check_available_with(&manager) {
             Ok(_) => expect.assert_eq("ok"),
             Err(error) => expect.assert_eq(&error.to_report_string()),
         }
@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_no_limit() {
-        do_test(TEST_PAID_LICENSE_KEY_CONTENT, 114514, expect!["ok"]);
+        do_test(TEST_ALL_LICENSE_KEY_CONTENT, 114514, expect!["ok"]);
     }
 
     #[test]
@@ -45,14 +45,14 @@ mod tests {
             KEY,
             0,
             expect![
-                "feature TestPaid is not available due to license error: invalid license key: InvalidToken"
+                "feature TestDummy is not available due to license error: invalid license key: InvalidToken"
             ],
         );
         do_test(
             KEY,
             114514,
             expect![
-                "feature TestPaid is not available due to license error: invalid license key: InvalidToken"
+                "feature TestDummy is not available due to license error: invalid license key: InvalidToken"
             ],
         );
     }
@@ -69,7 +69,7 @@ mod tests {
             KEY,
             33,
             expect![
-                "feature TestPaid is not available due to license error: the license key is currently not effective because the CPU core in the cluster (33) exceeds the maximum allowed by the license key (32); consider removing some nodes or acquiring a new license key with a higher limit"
+                "feature TestDummy is not available due to license error: a valid license key is set, but it is currently not effective because the CPU core in the cluster (33) exceeds the maximum allowed by the license key (32); consider removing some nodes or acquiring a new license key with a higher limit"
             ],
         );
     }

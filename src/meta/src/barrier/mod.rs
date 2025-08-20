@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_connector::source::SplitImpl;
+use risingwave_pb::catalog::Database;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
@@ -40,17 +41,20 @@ mod notifier;
 mod progress;
 mod rpc;
 mod schedule;
+#[cfg(test)]
+mod tests;
 mod trace;
 mod utils;
 mod worker;
 
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignment;
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
 };
-pub use self::info::InflightSubscriptionInfo;
+pub(crate) use self::info::{InflightSubscriptionInfo, SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
@@ -99,6 +103,12 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
 pub(crate) enum BarrierManagerRequest {
     GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
     AdhocRecovery(Sender<()>),
+    UpdateDatabaseBarrier {
+        database_id: DatabaseId,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
+        sender: Sender<()>,
+    },
 }
 
 #[derive(Debug)]
@@ -114,6 +124,8 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
     hummock_version_stats: HummockVersionStats,
+    database_infos: Vec<Database>,
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
@@ -212,6 +224,7 @@ struct DatabaseRuntimeInfoSnapshot {
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 }
 
 impl DatabaseRuntimeInfoSnapshot {

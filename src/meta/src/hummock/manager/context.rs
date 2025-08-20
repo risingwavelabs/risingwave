@@ -219,16 +219,16 @@ impl HummockManager {
 
         // sanity check on monotonically increasing table committed epoch
         for (table_id, committed_epoch) in tables_to_commit {
-            if let Some(info) = current_version.state_table_info.info().get(table_id) {
-                if *committed_epoch <= info.committed_epoch {
-                    return Err(anyhow::anyhow!(
-                        "table {} Epoch {} <= committed_epoch {}",
-                        table_id,
-                        committed_epoch,
-                        info.committed_epoch,
-                    )
-                    .into());
-                }
+            if let Some(info) = current_version.state_table_info.info().get(table_id)
+                && *committed_epoch <= info.committed_epoch
+            {
+                return Err(anyhow::anyhow!(
+                    "table {} Epoch {} <= committed_epoch {}",
+                    table_id,
+                    committed_epoch,
+                    info.committed_epoch,
+                )
+                .into());
             }
         }
 
@@ -303,7 +303,7 @@ impl HummockManager {
             object_timestamps.iter().map(|(k, v)| (*k, *v)),
         )?;
         if self.env.opts.gc_history_retention_time_sec != 0 {
-            let ids = object_timestamps.iter().map(|(id, _)| *id).collect_vec();
+            let ids = object_timestamps.keys().copied().collect_vec();
             check_gc_history(&self.meta_store_ref().conn, ids).await?;
         }
         Ok(())

@@ -681,11 +681,7 @@ impl fmt::Display for Expr {
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
             Expr::UnaryOp { op, expr } => {
-                if op == &UnaryOperator::PGPostfixFactorial {
-                    write!(f, "{}{}", expr, op)
-                } else {
-                    write!(f, "{} {}", op, expr)
-                }
+                write!(f, "{} {}", op, expr)
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
             Expr::TryCast { expr, data_type } => write!(f, "TRY_CAST({} AS {})", expr, data_type),
@@ -1273,6 +1269,10 @@ pub enum Statement {
     Truncate {
         table_name: ObjectName,
     },
+    /// Refresh table
+    Refresh {
+        table_name: ObjectName,
+    },
     /// SELECT
     Query(Box<Query>),
     /// INSERT
@@ -1368,10 +1368,12 @@ pub enum Statement {
         name: ObjectName,
         table_name: ObjectName,
         columns: Vec<OrderByExpr>,
+        method: Option<Ident>,
         include: Vec<Ident>,
         distributed_by: Vec<Expr>,
         unique: bool,
         if_not_exists: bool,
+        with_properties: WithProperties,
     },
     /// CREATE SOURCE
     CreateSource {
@@ -1504,6 +1506,13 @@ pub enum Statement {
     AlterFragment {
         fragment_id: u32,
         operation: AlterFragmentOperation,
+    },
+    /// DESCRIBE relation
+    /// ALTER DEFAULT PRIVILEGES
+    AlterDefaultPrivileges {
+        target_users: Option<Vec<Ident>>,
+        schema_names: Option<Vec<ObjectName>>,
+        operation: DefaultPrivilegeOperation,
     },
     /// DESCRIBE relation
     Describe {
@@ -1640,7 +1649,7 @@ pub enum Statement {
     ///
     /// Note: this is a PostgreSQL-specific statement.
     Deallocate {
-        name: Ident,
+        name: Option<Ident>,
         prepare: bool,
     },
     /// `EXECUTE name [ ( parameter [, ...] ) ]`
@@ -1698,6 +1707,12 @@ pub enum Statement {
     /// Note: this is a RisingWave specific statement and used to switch the current database.
     Use {
         db_name: ObjectName,
+    },
+    /// `VACUUM [database_name][schema_name][object_name]`
+    ///
+    /// Note: this is a RisingWave specific statement for iceberg table/sink compaction.
+    Vacuum {
+        object_name: ObjectName,
     },
 }
 
@@ -1789,6 +1804,10 @@ impl Statement {
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {
                 write!(f, "TRUNCATE TABLE {}", table_name)?;
+                Ok(())
+            }
+            Statement::Refresh { table_name } => {
+                write!(f, "REFRESH TABLE {}", table_name)?;
                 Ok(())
             }
             Statement::Analyze { table_name } => {
@@ -2103,17 +2122,24 @@ impl Statement {
                 name,
                 table_name,
                 columns,
+                method,
                 include,
                 distributed_by,
                 unique,
                 if_not_exists,
+                with_properties,
             } => write!(
                 f,
-                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}({columns}){include}{distributed_by}",
+                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}{method}({columns}){include}{distributed_by}{with_properties}",
                 unique = if *unique { "UNIQUE " } else { "" },
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
                 table_name = table_name,
+                method = if let Some(method) = method {
+                    format!(" USING {} ", method)
+                } else {
+                    "".to_owned()
+                },
                 columns = display_comma_separated(columns),
                 include = if include.is_empty() {
                     "".to_owned()
@@ -2127,7 +2153,12 @@ impl Statement {
                         " DISTRIBUTED BY({})",
                         display_separated(distributed_by, ",")
                     )
-                }
+                },
+                with_properties = if !with_properties.0.is_empty() {
+                    format!(" {}", with_properties)
+                } else {
+                    "".to_owned()
+                },
             ),
             Statement::CreateSource { stmt } => write!(f, "CREATE SOURCE {}", stmt,),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
@@ -2351,12 +2382,22 @@ impl Statement {
                 write!(f, " {}", if *cascade { "CASCADE" } else { "RESTRICT" })?;
                 Ok(())
             }
-            Statement::Deallocate { name, prepare } => write!(
-                f,
-                "DEALLOCATE {prepare}{name}",
-                prepare = if *prepare { "PREPARE " } else { "" },
-                name = name,
-            ),
+            Statement::Deallocate { name, prepare } => {
+                if let Some(name) = name {
+                    write!(
+                        f,
+                        "DEALLOCATE {prepare}{name}",
+                        prepare = if *prepare { "PREPARE " } else { "" },
+                        name = name,
+                    )
+                } else {
+                    write!(
+                        f,
+                        "DEALLOCATE {prepare}ALL",
+                        prepare = if *prepare { "PREPARE " } else { "" },
+                    )
+                }
+            }
             Statement::Execute { name, parameters } => {
                 write!(f, "EXECUTE {}", name)?;
                 if !parameters.is_empty() {
@@ -2427,11 +2468,29 @@ impl Statement {
                 write!(f, "USE {}", db_name)?;
                 Ok(())
             }
+            Statement::Vacuum { object_name } => {
+                write!(f, "VACUUM {}", object_name)?;
+                Ok(())
+            }
             Statement::AlterFragment {
                 fragment_id,
                 operation,
             } => {
                 write!(f, "ALTER FRAGMENT {} {}", fragment_id, operation)
+            }
+            Statement::AlterDefaultPrivileges {
+                target_users,
+                schema_names,
+                operation,
+            } => {
+                write!(f, "ALTER DEFAULT PRIVILEGES")?;
+                if let Some(target_users) = target_users {
+                    write!(f, " FOR {}", display_comma_separated(target_users))?;
+                }
+                if let Some(schema_names) = schema_names {
+                    write!(f, " IN SCHEMA {}", display_comma_separated(schema_names))?;
+                }
+                write!(f, " {}", operation)
             }
         }
     }
@@ -2741,6 +2800,115 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Secrets(secrets) => {
                 write!(f, "SECRET {}", display_comma_separated(secrets))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum PrivilegeObjectType {
+    Tables,
+    Sources,
+    Sinks,
+    Mviews,
+    Views,
+    Functions,
+    Connections,
+    Secrets,
+    Subscriptions,
+    Schemas,
+}
+
+impl fmt::Display for PrivilegeObjectType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PrivilegeObjectType::Tables => f.write_str("TABLES")?,
+            PrivilegeObjectType::Sources => f.write_str("SOURCES")?,
+            PrivilegeObjectType::Sinks => f.write_str("SINKS")?,
+            PrivilegeObjectType::Mviews => f.write_str("MATERIALIZED VIEWS")?,
+            PrivilegeObjectType::Views => f.write_str("VIEWS")?,
+            PrivilegeObjectType::Functions => f.write_str("FUNCTIONS")?,
+            PrivilegeObjectType::Connections => f.write_str("CONNECTIONS")?,
+            PrivilegeObjectType::Secrets => f.write_str("SECRETS")?,
+            PrivilegeObjectType::Subscriptions => f.write_str("SUBSCRIPTIONS")?,
+            PrivilegeObjectType::Schemas => f.write_str("SCHEMAS")?,
+        };
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DefaultPrivilegeOperation {
+    Grant {
+        privileges: Privileges,
+        object_type: PrivilegeObjectType,
+        grantees: Vec<Ident>,
+        with_grant_option: bool,
+    },
+    Revoke {
+        privileges: Privileges,
+        object_type: PrivilegeObjectType,
+        grantees: Vec<Ident>,
+        revoke_grant_option: bool,
+        cascade: bool,
+    },
+}
+
+impl fmt::Display for DefaultPrivilegeOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DefaultPrivilegeOperation::Grant {
+                privileges,
+                object_type,
+                grantees,
+                with_grant_option,
+            } => {
+                write!(
+                    f,
+                    "GRANT {} ON {} TO {}",
+                    privileges,
+                    object_type,
+                    display_comma_separated(grantees)
+                )?;
+                if *with_grant_option {
+                    write!(f, " WITH GRANT OPTION")?;
+                }
+            }
+            DefaultPrivilegeOperation::Revoke {
+                privileges,
+                object_type,
+                grantees,
+                revoke_grant_option,
+                cascade,
+            } => {
+                write!(f, "REVOKE")?;
+                if *revoke_grant_option {
+                    write!(f, " GRANT OPTION FOR")?;
+                }
+                write!(
+                    f,
+                    " {} ON {} FROM {}",
+                    privileges,
+                    object_type,
+                    display_comma_separated(grantees)
+                )?;
+                write!(f, " {}", if *cascade { "CASCADE" } else { "RESTRICT" })?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl DefaultPrivilegeOperation {
+    pub fn for_schemas(&self) -> bool {
+        match &self {
+            DefaultPrivilegeOperation::Grant { object_type, .. } => {
+                object_type == &PrivilegeObjectType::Schemas
+            }
+            DefaultPrivilegeOperation::Revoke { object_type, .. } => {
+                object_type == &PrivilegeObjectType::Schemas
             }
         }
     }

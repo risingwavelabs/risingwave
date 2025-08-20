@@ -38,9 +38,10 @@
         └─BatchScan { table: t, columns: [t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [(PgSleep(t.v2) + 1:Int32) as $expr2, (PgSleep(t.v2) + 1:Int32) as $expr3, $expr1, $expr1, t._row_id] }
-      └─StreamProject { exprs: [t.v2, (t.v2 + 1:Float64) as $expr1, t._row_id] }
-        └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [$expr2, $expr3, $expr1, $expr1, t._row_id] }
+      └─StreamMaterializedExprs { exprs: [(PgSleep(t.v2) + 1:Int32) as $expr2, (PgSleep(t.v2) + 1:Int32) as $expr3] }
+        └─StreamProject { exprs: [t.v2, (t.v2 + 1:Float64) as $expr1, t._row_id] }
+          └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression shouldn't extract const
   sql: |
     SELECT x,
@@ -69,7 +70,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [stddev_pop, stddev_samp, var_pop, var_samp], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [Case((sum0(count(t.v)) = 0:Int32), null:Decimal, Sqrt((Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v))::Decimal * sum(sum(t.v))::Decimal) / sum0(count(t.v))::Decimal)), 0:Decimal) / sum0(count(t.v))::Decimal))) as $expr2, Case((sum0(count(t.v)) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v))::Decimal * sum(sum(t.v))::Decimal) / sum0(count(t.v))::Decimal)), 0:Decimal) / (sum0(count(t.v)) - 1:Int32)::Decimal))) as $expr3, Case((sum0(count(t.v)) = 0:Int32), null:Decimal, (Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v))::Decimal * sum(sum(t.v))::Decimal) / sum0(count(t.v))::Decimal)), 0:Decimal) / sum0(count(t.v))::Decimal)) as $expr4, Case((sum0(count(t.v)) <= 1:Int32), null:Decimal, (Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v))::Decimal * sum(sum(t.v))::Decimal) / sum0(count(t.v))::Decimal)), 0:Decimal) / (sum0(count(t.v)) - 1:Int32)::Decimal)) as $expr5] }
-      └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum(sum(t.v)), sum0(count(t.v)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v), count(t.v)] }
             └─StreamProject { exprs: [(t.v * t.v) as $expr1, t.v, t._row_id] }

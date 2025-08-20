@@ -26,7 +26,7 @@ easy-ext = "1"
 educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
-fancy-regex = "0.14.0"
+fancy-regex = "0.16.1"
 fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
@@ -41,6 +41,9 @@ memcomparable = "0.2"
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
+mysql_common = { version = "0.32", default-features = false, features = [
+    "chrono",
+] }
 num-integer = "0.1"
 parking_lot = { workspace = true }
 parse-display = "0.10"
@@ -54,7 +57,7 @@ pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
-quick-xml = { version = "0.37", features = ["serialize"] }
+quick-xml = { version = "0.38", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
@@ -78,7 +81,7 @@ sha2 = "0.10.7"
 smallvec = { workspace = true, features = ["serde"] }
 speedate = "0.15.0"
 tempfile = "3"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

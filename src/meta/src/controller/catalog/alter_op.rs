@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::AlterDatabaseParam;
+use risingwave_common::system_param::{OverrideValidate, Validate};
 use sea_orm::DatabaseTransaction;
 
 use super::*;
@@ -852,7 +853,7 @@ impl CatalogController {
         &self,
         database_id: DatabaseId,
         param: AlterDatabaseParam,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(NotificationVersion, risingwave_meta_model::database::Model)> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -862,9 +863,17 @@ impl CatalogController {
         };
         match param {
             AlterDatabaseParam::BarrierIntervalMs(interval) => {
+                if let Some(ref interval) = interval {
+                    OverrideValidate::barrier_interval_ms(interval)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
                 database.barrier_interval_ms = Set(interval.map(|i| i as i32));
             }
             AlterDatabaseParam::CheckpointFrequency(frequency) => {
+                if let Some(ref frequency) = frequency {
+                    OverrideValidate::checkpoint_frequency(frequency)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
                 database.checkpoint_frequency = Set(frequency.map(|f| f as i64));
             }
         }
@@ -880,9 +889,9 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::Database(ObjectModel(database, obj).into()),
+                NotificationInfo::Database(ObjectModel(database.clone(), obj).into()),
             )
             .await;
-        Ok(version)
+        Ok((version, database))
     }
 }

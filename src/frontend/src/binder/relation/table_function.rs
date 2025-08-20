@@ -35,9 +35,9 @@ impl Binder {
     /// `with_ordinality` is only supported for the `TableFunction` case now.
     pub(super) fn bind_table_function(
         &mut self,
-        name: ObjectName,
-        alias: Option<TableAlias>,
-        args: Vec<FunctionArg>,
+        name: &ObjectName,
+        alias: Option<&TableAlias>,
+        args: &[FunctionArg],
         with_ordinality: bool,
     ) -> Result<Relation> {
         let func_name = &name.0[0].real_value();
@@ -82,10 +82,10 @@ impl Binder {
         self.push_context();
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);
-        let func = self.bind_function(Function {
+        let func = self.bind_function(&Function {
             scalar_as_agg: false,
-            name,
-            arg_list: FunctionArgList::args_only(args),
+            name: name.clone(),
+            arg_list: FunctionArgList::args_only(args.to_vec()),
             over: None,
             filter: None,
             within_group: None,
@@ -94,14 +94,14 @@ impl Binder {
         self.pop_context()?;
         let func = func?;
 
-        if let ExprImpl::TableFunction(func) = &func {
-            if func.args.iter().any(|arg| arg.has_subquery()) {
-                // Same error reports as DuckDB.
-                return Err(ErrorCode::InvalidInputSyntax(
+        if let ExprImpl::TableFunction(func) = &func
+            && func.args.iter().any(|arg| arg.has_subquery())
+        {
+            // Same error reports as DuckDB.
+            return Err(ErrorCode::InvalidInputSyntax(
                     format!("Only table-in-out functions can have subquery parameters. The table function has subquery parameters is {}", func.name()),
                 )
                     .into());
-            }
         }
 
         // bool indicates if the field is hidden

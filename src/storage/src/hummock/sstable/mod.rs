@@ -50,11 +50,10 @@ mod filter;
 mod utils;
 
 pub use filter::FilterBuilder;
-pub use utils::CompressionAlgorithm;
+pub use utils::{CompressionAlgorithm, xxhash64_checksum, xxhash64_verify};
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
-use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
 use crate::store::ReadOptions;

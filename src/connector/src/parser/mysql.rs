@@ -195,7 +195,8 @@ pub fn mysql_datum_to_rw_datum(
                 JsonbVal
             )
         }
-        DataType::Interval
+        DataType::Vector(_)
+        | DataType::Interval
         | DataType::Struct(_)
         | DataType::List(_)
         | DataType::Int256

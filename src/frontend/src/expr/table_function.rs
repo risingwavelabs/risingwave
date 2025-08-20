@@ -259,7 +259,7 @@ impl TableFunction {
                         let mut rw_types = vec![];
                         for field in &fields {
                             rw_types.push((
-                                field.name().to_string(),
+                                field.name().clone(),
                                 IcebergArrowConvert.type_from_field(field)?,
                             ));
                         }
@@ -308,7 +308,7 @@ impl TableFunction {
             INLINE_ARG_LEN => {
                 let mut cast_args = Vec::with_capacity(INLINE_ARG_LEN);
                 for arg in args {
-                    let arg = arg.cast_implicit(DataType::Varchar)?;
+                    let arg = arg.cast_implicit(&DataType::Varchar)?;
                     cast_args.push(arg);
                 }
                 cast_args
@@ -338,7 +338,7 @@ impl TableFunction {
                     args.get(1)
                         .unwrap()
                         .clone()
-                        .cast_implicit(DataType::Varchar)?,
+                        .cast_implicit(&DataType::Varchar)?,
                 ]
             }
             _ => {
@@ -539,9 +539,20 @@ impl TableFunction {
                             MySqlColumnType::MYSQL_TYPE_TIMESTAMP2 => DataType::Timestamptz,
 
                             // String types
-                            MySqlColumnType::MYSQL_TYPE_VARCHAR
-                            | MySqlColumnType::MYSQL_TYPE_STRING
-                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => DataType::Varchar,
+                            MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
+                            // mysql_async does not have explicit `varbinary` and `binary` types,
+                            // we need to check the `ColumnFlags` to distinguish them.
+                            MySqlColumnType::MYSQL_TYPE_STRING
+                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => {
+                                if column
+                                    .flags()
+                                    .contains(mysql_common::constants::ColumnFlags::BINARY_FLAG)
+                                {
+                                    DataType::Bytea
+                                } else {
+                                    DataType::Varchar
+                                }
+                            }
 
                             // JSON types
                             MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
@@ -580,6 +591,37 @@ impl TableFunction {
                 function_type: TableFunctionType::MysqlQuery,
                 user_defined: None,
             })
+        }
+    }
+
+    /// This is a highly specific _internal_ table function meant to scan and aggregate
+    /// `backfill_table_id`, `row_count` for all MVs which are still being created.
+    pub fn new_internal_backfill_progress() -> Self {
+        TableFunction {
+            args: vec![],
+            return_type: DataType::Struct(StructType::new(vec![
+                ("job_id".to_owned(), DataType::Int32),
+                ("fragment_id".to_owned(), DataType::Int32),
+                ("backfill_state_table_id".to_owned(), DataType::Int32),
+                ("current_row_count".to_owned(), DataType::Int64),
+                ("min_epoch".to_owned(), DataType::Int64),
+            ])),
+            function_type: TableFunctionType::InternalBackfillProgress,
+            user_defined: None,
+        }
+    }
+
+    pub fn new_internal_source_backfill_progress() -> Self {
+        TableFunction {
+            args: vec![],
+            return_type: DataType::Struct(StructType::new(vec![
+                ("job_id".to_owned(), DataType::Int32),
+                ("fragment_id".to_owned(), DataType::Int32),
+                ("backfill_state_table_id".to_owned(), DataType::Int32),
+                ("backfill_progress".to_owned(), DataType::Jsonb),
+            ])),
+            function_type: TableFunctionType::InternalSourceBackfillProgress,
+            user_defined: None,
         }
     }
 
@@ -636,8 +678,8 @@ impl Expr for TableFunction {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Table function should not be converted to ExprNode")
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
+        Err("Table function should not be converted to ExprNode".to_owned())
     }
 }
 

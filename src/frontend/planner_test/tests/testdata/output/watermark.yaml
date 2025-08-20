@@ -15,7 +15,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [SubtractWithTimeZone(v1, '00:00:02':Interval, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [[$expr1]] }
         └── StreamRowIdGen { row_id_index: 1 }
             └── StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }], output_watermarks: [[v1]] }

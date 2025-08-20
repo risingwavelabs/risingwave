@@ -217,14 +217,14 @@ pub fn storage_memory_config(
         .data_file_cache
         .flush_buffer_threshold_mb
         .unwrap_or(
-            risingwave_common::config::default::storage::block_file_cache_flush_buffer_threshold_mb(
+            risingwave_common::config::storage::default::storage::block_file_cache_flush_buffer_threshold_mb(
             ),
         );
     let meta_file_cache_flush_buffer_threshold_mb = storage_config
         .meta_file_cache
         .flush_buffer_threshold_mb
         .unwrap_or(
-            risingwave_common::config::default::storage::meta_file_cache_flush_buffer_threshold_mb(
+            risingwave_common::config::storage::default::storage::meta_file_cache_flush_buffer_threshold_mb(
             ),
         );
 
@@ -270,14 +270,15 @@ pub fn storage_memory_config(
             1 << shard_bits
         });
 
-    let get_eviction_config = |c: &CacheEvictionConfig| match c {
+    let get_eviction_config = |c: &CacheEvictionConfig| {
+        match c {
         CacheEvictionConfig::Lru {
             high_priority_ratio_in_percent,
         } => EvictionConfig::Lru(LruConfig {
             high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
                 // adapt to old version
                 storage_config.high_priority_ratio_in_percent.unwrap_or(
-                    risingwave_common::config::default::storage::high_priority_ratio_in_percent(),
+                    risingwave_common::config::storage::default::storage::high_priority_ratio_in_percent(),
                 ),
             ) as f64
                 / 100.0,
@@ -289,17 +290,17 @@ pub fn storage_memory_config(
             cmsketch_confidence,
         } => EvictionConfig::Lfu(LfuConfig {
             window_capacity_ratio: window_capacity_ratio_in_percent.unwrap_or(
-                risingwave_common::config::default::storage::window_capacity_ratio_in_percent(),
+                risingwave_common::config::storage::default::storage::window_capacity_ratio_in_percent(),
             ) as f64
                 / 100.0,
             protected_capacity_ratio: protected_capacity_ratio_in_percent.unwrap_or(
-                risingwave_common::config::default::storage::protected_capacity_ratio_in_percent(),
+                risingwave_common::config::storage::default::storage::protected_capacity_ratio_in_percent(),
             ) as f64
                 / 100.0,
             cmsketch_eps: cmsketch_eps
-                .unwrap_or(risingwave_common::config::default::storage::cmsketch_eps()),
+                .unwrap_or(risingwave_common::config::storage::default::storage::cmsketch_eps()),
             cmsketch_confidence: cmsketch_confidence
-                .unwrap_or(risingwave_common::config::default::storage::cmsketch_confidence()),
+                .unwrap_or(risingwave_common::config::storage::default::storage::cmsketch_confidence()),
         }),
         CacheEvictionConfig::S3Fifo {
             small_queue_capacity_ratio_in_percent,
@@ -307,35 +308,46 @@ pub fn storage_memory_config(
             small_to_main_freq_threshold,
         } => EvictionConfig::S3Fifo(S3FifoConfig {
             small_queue_capacity_ratio: small_queue_capacity_ratio_in_percent.unwrap_or(
-                risingwave_common::config::default::storage::small_queue_capacity_ratio_in_percent(
+                risingwave_common::config::storage::default::storage::small_queue_capacity_ratio_in_percent(
                 ),
             ) as f64
                 / 100.0,
             ghost_queue_capacity_ratio: ghost_queue_capacity_ratio_in_percent.unwrap_or(
-                risingwave_common::config::default::storage::ghost_queue_capacity_ratio_in_percent(
+                risingwave_common::config::storage::default::storage::ghost_queue_capacity_ratio_in_percent(
                 ),
             ) as f64
                 / 100.0,
             small_to_main_freq_threshold: small_to_main_freq_threshold.unwrap_or(
-                risingwave_common::config::default::storage::small_to_main_freq_threshold(),
+                risingwave_common::config::storage::default::storage::small_to_main_freq_threshold(),
             ),
         }),
+    }
     };
 
     let block_cache_eviction_config =
         get_eviction_config(&storage_config.cache.block_cache_eviction);
     let meta_cache_eviction_config = get_eviction_config(&storage_config.cache.meta_cache_eviction);
+    let vector_block_cache_eviction_config =
+        get_eviction_config(&storage_config.cache.vector_block_cache_eviction_config);
+    let vector_meta_cache_eviction_config =
+        get_eviction_config(&storage_config.cache.vector_meta_cache_eviction_config);
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
         block_cache_shard_num,
         meta_cache_capacity_mb,
         meta_cache_shard_num,
+        vector_block_cache_capacity_mb: storage_config.cache.vector_block_cache_capacity_mb,
+        vector_block_cache_shard_num: storage_config.cache.vector_block_cache_shard_num,
+        vector_meta_cache_capacity_mb: storage_config.cache.vector_meta_cache_capacity_mb,
+        vector_meta_cache_shard_num: storage_config.cache.vector_meta_cache_shard_num,
         shared_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
+        vector_block_cache_eviction_config,
+        vector_meta_cache_eviction_config,
         block_file_cache_flush_buffer_threshold_mb,
         meta_file_cache_flush_buffer_threshold_mb,
     }

@@ -17,18 +17,17 @@ use std::collections::HashSet;
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_expr_visitor::strong::Strong;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, PlanTreeNodeUnary};
-use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::utils::Condition;
 
 /// Specially for the predicate and sub-nodes under `LogicalFilter`
 /// note that we will rewrite everything for the `LogicalFilter`
 /// include `input` and `predicate`
 pub struct LogicalFilterExpressionSimplifyRule {}
-impl Rule for LogicalFilterExpressionSimplifyRule {
+impl Rule<Logical> for LogicalFilterExpressionSimplifyRule {
     /// The pattern we aim to optimize, e.g.,
     /// 1. (NOT (e)) OR (e) => True
     /// 2. (NOT (e)) AND (e) => False
@@ -181,16 +180,16 @@ fn check_special_pattern(e1: ExprImpl, e2: ExprImpl, op: ExprType) -> Option<boo
         }
     }
 
-    if e1.is_const() {
-        if let Some(res) = check_special_pattern_inner(e1, op) {
-            return Some(res);
-        }
+    if e1.is_const()
+        && let Some(res) = check_special_pattern_inner(e1, op)
+    {
+        return Some(res);
     }
 
-    if e2.is_literal() {
-        if let Some(res) = check_special_pattern_inner(e2, op) {
-            return Some(res);
-        }
+    if e2.is_literal()
+        && let Some(res) = check_special_pattern_inner(e2, op)
+    {
+        return Some(res);
     }
 
     None
