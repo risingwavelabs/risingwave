@@ -504,14 +504,6 @@ fn handle_toast_columns_for_cdc(
     let mut fixed_row_data = new_row.as_inner().to_vec();
 
     for &toast_idx in toastable_indices {
-        println!(
-            "old_row.datum_at(toast_idx): {:?}",
-            old_row.datum_at(toast_idx)
-        );
-        println!(
-            "new_row.datum_at(toast_idx): {:?}",
-            new_row.datum_at(toast_idx)
-        );
         // Check if the new value is Debezium's unavailable value placeholder
         let is_unavailable = is_debezium_unavailable_value(&new_row.datum_at(toast_idx));
         if is_unavailable {
@@ -520,10 +512,6 @@ fn handle_toast_columns_for_cdc(
                 fixed_row_data[toast_idx] = Some(old_datum_ref.into_scalar_impl());
             }
         }
-        println!(
-            "处理toast_idx: {}, is_unavailable: {}",
-            toast_idx, is_unavailable
-        );
     }
 
     OwnedRow::new(fixed_row_data)
