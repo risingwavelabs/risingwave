@@ -15,9 +15,8 @@ statement ok
 create sink sink_bytes_format from t_single_bytea with (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
-    topic = 'test-rw-sink-bytes-format',
-    force_append_only = 'true'
-) format plain encode bytes;
+    topic = 'test-rw-sink-bytes-format'
+) format plain encode bytes ( force_append_only = 'true' );
 
 # Test that bytes format fails with multiple columns
 statement ok
@@ -31,8 +30,7 @@ create sink sink_bytes_format_error from t_multi_columns with (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-bytes-format-error',
-    force_append_only = 'true'
-) format plain encode bytes;
+) format plain encode bytes (force_append_only = 'true');
 
 # Test that bytes format fails with non-bytea column
 statement ok
