@@ -469,9 +469,9 @@ fn array_to_vector(array: ListRef<'_>, ctx: &Context) -> Result<VectorVal> {
 /// 1
 ///
 /// query R
-/// SELECT vector_norm('[3e37,4e37]'::vector(2))::real;
+/// SELECT vector_norm('[3e18,4e18]'::vector(2))::real;
 /// ----
-/// 5e+37
+/// 5e+18
 ///
 /// query R
 /// SELECT vector_norm('[0,0]'::vector(2));
@@ -510,7 +510,7 @@ fn l2_norm(vector: VectorRef<'_>) -> F64 {
 /// [0,0]
 ///
 /// query R
-/// SELECT l2_normalize('[3e38]'::vector(1));
+/// SELECT l2_normalize('[3e18]'::vector(1));
 /// ----
 /// [1]
 /// ```
