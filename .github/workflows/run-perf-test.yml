@@ -1,0 +1,75 @@
+name: Run Perf Test
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: 'Performance test namespace (date-time will be appended)'
+        required: true
+        type: string
+        default: 'Untitled'
+      rw_image_tag:
+        description: 'RisingWave Image Tag (docker image tag, e.g. v2.6.0-alpha--bench--e7ca9bb--kwannoel-enhance-backpressure-graph6)'
+        required: true
+        type: string
+        default: 'latest'
+      nexmark_queries:
+        description: 'Nexmark Queries to Benchmark'
+        required: true
+        type: string
+        default: 'q0,q4,q6,q15,q20,q101'
+
+jobs:
+  run-perf-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        run: |
+          echo "Running perf test"
+          # Get current datetime in a safe format for environment variables
+          DATETIME=$(date +"%Y%m%d-%H%M%S")
+          echo "DATE_TIME=${DATETIME}"
+
+          # Replace underscores with hyphens in the label and add datetime
+          CLEAN_LABEL=$(echo "${{ inputs.label }}" | tr '_' '-')
+          BENCH_NAMESPACE="${CLEAN_LABEL}-${DATETIME}"
+          echo "BENCH_NAMESPACE=${BENCH_NAMESPACE}"
+          echo "BENCH_NAMESPACE=${BENCH_NAMESPACE}" >> $GITHUB_ENV
+
+          BENCH_TESTBED="8c32g-1cn"
+          echo "BENCH_TESTBED=${BENCH_TESTBED}"
+          echo "BENCH_TESTBED=${BENCH_TESTBED}" >> $GITHUB_ENV
+
+          RW_VERSION=${{ inputs.rw_image_tag }}
+          echo "RW_VERSION=${RW_VERSION}"
+          echo "RW_VERSION=${RW_VERSION}" >> $GITHUB_ENV
+
+          NEXMARK_QUERY=${{ inputs.nexmark_queries }}
+          echo "NEXMARK_QUERY=${NEXMARK_QUERY}"
+          echo "NEXMARK_QUERY=${NEXMARK_QUERY}" >> $GITHUB_ENV
+
+          KAFKA_EVENTS="1000000000"
+          echo "KAFKA_EVENTS=${KAFKA_EVENTS}"
+          echo "KAFKA_EVENTS=${KAFKA_EVENTS}" >> $GITHUB_ENV
+
+          KAFKA_PARTITION="8"
+          echo "KAFKA_PARTITION=${KAFKA_PARTITION}"
+          echo "KAFKA_PARTITION=${KAFKA_PARTITION}" >> $GITHUB_ENV
+
+          ENABLE_BLACKHOLE="true"
+          echo "ENABLE_BLACKHOLE=${ENABLE_BLACKHOLE}"
+          echo "ENABLE_BLACKHOLE=${ENABLE_BLACKHOLE}" >> $GITHUB_ENV
+
+          SKIP_DASHBOARD=false
+          echo "SKIP_DASHBOARD=${SKIP_DASHBOARD}"
+          echo "SKIP_DASHBOARD=${SKIP_DASHBOARD}" >> $GITHUB_ENV
+      - name: 'Trigger Nexmark Benchmark via Buildkite'
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        with:
+          buildkite_api_access_token: ${{ secrets.RISINGWAVE_TEST_BUILDKITE_TOKEN }}
+          pipeline: 'risingwave-test/nexmark-benchmark'
+          branch: main
+          commit: HEAD
+          message: ':github: Triggering Nexmark Benchmark with image tag: ${{ env.RW_VERSION }}'
+          build_env_vars: '{ "BENCH_NAMESPACE": "${{ env.BENCH_NAMESPACE }}", "BENCH_TESTBED": "${{ env.BENCH_TESTBED }}", "RW_VERSION": "${{ env.RW_VERSION }}", "NEXMARK_QUERY": "${{ env.NEXMARK_QUERY }}", "KAFKA_EVENTS": "${{ env.KAFKA_EVENTS }}", "KAFKA_PARTITION": "${{ env.KAFKA_PARTITION }}", "ENABLE_BLACKHOLE": "${{ env.ENABLE_BLACKHOLE }}", "SKIP_DASHBOARD": "${{ env.SKIP_DASHBOARD }}" }'
