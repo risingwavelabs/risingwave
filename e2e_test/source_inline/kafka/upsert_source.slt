@@ -6,6 +6,7 @@ rpk topic delete 'test_include_key' || true;
 system ok
 rpk topic create 'test_include_key'
 
+# TODO: test batch query from upsert source.
 statement ok
 CREATE SOURCE upsert_students (
     primary key (rw_key),
