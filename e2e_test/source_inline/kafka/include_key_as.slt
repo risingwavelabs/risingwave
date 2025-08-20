@@ -25,6 +25,7 @@ cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\n"
 {"ID": 8}^
 EOF
 
+# Can create upsert source since #22856, but the key must be included and used as pk
 statement error
 CREATE SOURCE upsert_students (
     "ID" INT,
@@ -42,9 +43,7 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Bind error: can't CREATE SOURCE with FORMAT UPSERT.
-
-Hint: use CREATE TABLE instead
+  Protocol error: INCLUDE KEY clause not set
 
 Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
 example:
@@ -112,8 +111,9 @@ example:
     FORMAT UPSERT ENCODE JSON
 
 
-statement error
-CREATE SOURCE upsert_students (
+# Tests for upsert source are located at e2e_test/source_inline/kafka/upsert_source.slt
+statement ok
+CREATE SOURCE upsert_students_src (
     primary key (rw_key),
     "ID" INT,
     "firstName" VARCHAR,
@@ -126,21 +126,7 @@ INCLUDE KEY AS rw_key
 WITH (
 	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
 	topic = 'test_include_key')
-FORMAT UPSERT ENCODE JSON
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Bind error: can't CREATE SOURCE with FORMAT UPSERT.
-
-Hint: use CREATE TABLE instead
-
-Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
-example:
-    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
-    INCLUDE KEY [AS <key_name>]
-    WITH (...)
-    FORMAT UPSERT ENCODE JSON
+FORMAT UPSERT ENCODE JSON;
 
 
 statement ok
@@ -296,6 +282,9 @@ query ????
 select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns limit 1
 ----
 \x7631	\x7632	v2	NULL
+
+statement ok
+drop source upsert_students_src;
 
 statement ok
 drop table upsert_students
