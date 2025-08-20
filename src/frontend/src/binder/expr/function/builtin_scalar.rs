@@ -434,6 +434,8 @@ impl Binder {
                 ("inner_product", raw_call(ExprType::InnerProduct)),
                 ("vector_norm", raw_call(ExprType::L2Norm)),
                 ("l2_normalize", raw_call(ExprType::L2Normalize)),
+                ("vector_dims",raw_call(ExprType::VectorDims)),
+                ("subvector", raw_call(ExprType::Subvector)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

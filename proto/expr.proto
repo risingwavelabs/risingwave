@@ -321,6 +321,8 @@ message ExprNode {
     VEC_CONCAT = 754;
     L2_NORM = 755;
     L2_NORMALIZE = 756;
+    VECTOR_DIMS = 757;
+    SUBVECTOR = 758;
 
     // Internal function for schema change
     COMPOSITE_CAST = 800;

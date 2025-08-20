@@ -521,3 +521,107 @@ fn l2_norm(vector: VectorRef<'_>) -> F64 {
 fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
     vector.normalized()
 }
+
+/// ```slt
+/// query R
+/// SELECT vector_dims('[1,2,3]'::vector(3));
+/// ----
+/// 3
+///
+/// query R
+/// SELECT vector_dims('[10,20,30,40]'::vector(4));
+/// ----
+/// 4
+///
+/// query error dimensions
+/// SELECT vector_dims('[]'::vector(0));
+/// ```
+#[function("vector_dims(vector) -> int4")]
+fn vector_dim(v: VectorRef<'_>) -> Result<i32> {
+    let vector = v.into_slice();
+    check_dim("vector_dim", vector.len() as i32)?;
+    Ok(vector.len() as i32)
+}
+
+fn check_dim(name: &'static str, dim: i32) -> Result<()> {
+    if dim < 1 {
+        return Err(ExprError::InvalidParam {
+            name,
+            reason: "vector must have at least 1 dimension".into(),
+        });
+    }
+    if dim > (DataType::VEC_MAX_SIZE as i32) {
+        return Err(ExprError::InvalidParam {
+            name,
+            reason: format!("vector cannot have more than {} dimensions", dim).into(),
+        });
+    }
+    Ok(())
+}
+
+/// ```slt
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 1, 3);
+/// ----
+/// [1,2,3]
+///
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 3, 2);
+/// ----
+/// [3, 4]
+///
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), -1, 3);
+/// ----
+/// [1]
+///
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 3, 9);
+/// ----
+/// [3,4,5]
+///
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector, -2147483644, 2147483647);
+/// ----
+/// [1,2]
+///
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector, 3, 2147483647);
+/// ----
+/// [3,4,5]
+/// ```
+#[function("subvector(vector, int4, int4) -> vector", type_infer = "unreachable")]
+fn subvector(v: VectorRef<'_>, start: i32, count: i32) -> Result<VectorVal> {
+    let vector = v.into_slice();
+    let length = vector.len() as i32;
+    if count < 1 {
+        return Err(ExprError::InvalidParam {
+            name: "count",
+            reason: "vector must have at least 1 dimension".into(),
+        });
+    }
+    let mut start = start;
+    let end = if start > length - count {
+        length + 1
+    } else {
+        start + count
+    };
+
+    if start < 1 {
+        start = 1
+    } else if start > length {
+        return Err(ExprError::InvalidParam {
+            name: "start",
+            reason: "vector must have at least 1 dimension".into(),
+        });
+    }
+    check_dim("subvector", end - start)?;
+
+    let result = vector[(start - 1) as usize..(end - 1) as usize]
+        .iter()
+        .copied()
+        .map(|v| Finite32::try_from(v as f32))
+        .try_collect()
+        .map_err(|_| ExprError::NumericOverflow)?;
+    Ok(result)
+}
