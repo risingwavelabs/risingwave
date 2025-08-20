@@ -1,11 +1,14 @@
+# Get the repository root directory from the script's location
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 export CARGO_TERM_COLOR=always
 export PROTOC_NO_VENDOR=true
-export CARGO_HOME="${PWD}/.cargo"
+export CARGO_HOME="${REPO_ROOT}/.cargo"
 export RISINGWAVE_CI=true
 export RUST_BACKTRACE=1
 export ENABLE_TELEMETRY=false
 export RUSTC_WRAPPER=sccache
-export RUSTC_WORKSPACE_WRAPPER="${PWD}/ci/scripts/rustc-workspace-wrapper.sh"
+export RUSTC_WORKSPACE_WRAPPER="${REPO_ROOT}/ci/scripts/rustc-workspace-wrapper.sh"
 export SCCACHE_BUCKET=rw-ci-sccache-bucket
 export SCCACHE_REGION=us-east-2
 export SCCACHE_IDLE_TIMEOUT=0
@@ -20,10 +23,10 @@ export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 export SLT_FAIL_FAST=true
 export SLT_KEEP_DB_ON_FAILURE=true
 export SLT_SHUTDOWN_TIMEOUT=10
-export LLVM_PROFILE_FILE="${PWD}/target/risingwave-%p.profraw"
+export LLVM_PROFILE_FILE="${REPO_ROOT}/target/risingwave-%p.profraw"
 export CARGO_LLVM_COV=1
 export CARGO_LLVM_COV_SHOW_ENV=1
-export CARGO_LLVM_COV_TARGET_DIR="${PWD}/target"
+export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target"
 
 unset LANG
 
