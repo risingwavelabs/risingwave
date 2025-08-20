@@ -302,7 +302,8 @@ pub const INVALID_EPOCH: u64 = 0;
 type UpstreamFragmentId = FragmentId;
 type SplitAssignments = HashMap<ActorId, Vec<SplitImpl>>;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct UpdateMutation {
     pub dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
     pub merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
@@ -313,7 +314,8 @@ pub struct UpdateMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignment,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct AddMutation {
     pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
     pub added_actors: HashSet<ActorId>,
@@ -325,13 +327,14 @@ pub struct AddMutation {
     /// nodes which should start backfill
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignment,
-    pub new_upstream_sinks: HashMap<ActorId, PbNewUpstreamSink>,
+    pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct StopMutation {
     pub dropped_actors: HashSet<ActorId>,
-    pub dropped_sink_fragments: Vec<FragmentId>,
+    pub dropped_sink_fragments: HashSet<FragmentId>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
@@ -632,18 +635,21 @@ impl Barrier {
             })
     }
 
-    pub fn as_new_upstream_sink(&self, actor_id: ActorId) -> Option<&PbNewUpstreamSink> {
+    /// Returns the new upstream sink information if this barrier is to add a new upstream sink for
+    /// the specified downstream fragment.
+    pub fn as_new_upstream_sink(&self, fragment_id: FragmentId) -> Option<&PbNewUpstreamSink> {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
                 Mutation::Add(AddMutation {
                     new_upstream_sinks, ..
-                }) => new_upstream_sinks.get(&actor_id),
+                }) => new_upstream_sinks.get(&fragment_id),
                 _ => None,
             })
     }
 
-    pub fn as_dropped_upstream_sinks(&self) -> Option<&Vec<FragmentId>> {
+    /// Returns the dropped upstream sink-fragment if this barrier is to drop any sink.
+    pub fn as_dropped_upstream_sinks(&self) -> Option<&HashSet<FragmentId>> {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
@@ -742,8 +748,8 @@ impl Mutation {
                 dropped_actors,
                 dropped_sink_fragments,
             }) => PbMutation::Stop(PbStopMutation {
-                actors: dropped_actors.iter().cloned().collect(),
-                dropped_sink_fragments: dropped_sink_fragments.clone(),
+                actors: dropped_actors.iter().copied().collect(),
+                dropped_sink_fragments: dropped_sink_fragments.iter().copied().collect(),
             }),
             Mutation::Update(UpdateMutation {
                 dispatchers,
@@ -904,7 +910,7 @@ impl Mutation {
         let mutation = match prost {
             PbMutation::Stop(stop) => Mutation::Stop(StopMutation {
                 dropped_actors: stop.actors.iter().copied().collect(),
-                dropped_sink_fragments: stop.dropped_sink_fragments.clone(),
+                dropped_sink_fragments: stop.dropped_sink_fragments.iter().copied().collect(),
             }),
 
             PbMutation::Update(update) => Mutation::Update(UpdateMutation {
@@ -1511,7 +1517,10 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
                 None => {
                     assert!(!self.blocked.is_empty());
 
-                    let start_ts = self.start_ts.take().unwrap();
+                    let start_ts = self
+                        .start_ts
+                        .take()
+                        .expect("should have received at least one barrier");
                     if let Some(barrier_align_duration) = &self.barrier_align_duration {
                         barrier_align_duration.inc_by(start_ts.elapsed().as_nanos() as u64);
                     }
@@ -1586,16 +1595,20 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
 
     /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state
     /// right after a barrier.
-    pub fn add_upstreams_from(&mut self, other: Self) {
+    pub fn add_upstreams_from(
+        &mut self,
+        new_inputs: impl IntoIterator<Item = BoxedMessageInput<InputId, M>>,
+    ) {
         assert!(self.blocked.is_empty() && self.barrier.is_none());
-        assert!(other.blocked.is_empty() && other.barrier.is_none());
 
-        // Add buffers to the buffered watermarks for all cols
+        let new_inputs: Vec<_> = new_inputs.into_iter().collect();
+        let input_ids = new_inputs.iter().map(|input| input.id());
         self.buffered_watermarks.values_mut().for_each(|buffers| {
-            buffers.add_buffers(other.upstream_input_ids());
+            // Add buffers to the buffered watermarks for all cols
+            buffers.add_buffers(input_ids.clone());
         });
-
-        self.active.extend(other.active);
+        self.active
+            .extend(new_inputs.into_iter().map(|s| s.into_future()));
     }
 
     /// Remove upstreams from `self` in `upstream_input_ids`. The current stream must be at the

@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use std::collections::{HashMap, VecDeque};
+use std::iter;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::Context as _;
+use futures::future::try_join_all;
 use pin_project::pin_project;
-use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::catalog::Field;
-use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::expr::PbExprNode;
@@ -287,20 +287,17 @@ impl UpstreamSinkUnionExecutor {
     ) -> StreamExecutorResult<MergeExecutor> {
         let barrier_rx = self.subscribe_local_barrier(upstream_fragment_id);
 
-        let mut inputs = Vec::with_capacity(upstream_actors.len());
-        for actor in upstream_actors {
-            let input = new_input(
+        let inputs = try_join_all(upstream_actors.iter().map(|actor| {
+            new_input(
                 &self.local_barrier_manager,
                 self.executor_stats.clone(),
                 self.actor_context.id,
                 self.actor_context.fragment_id,
-                &actor,
+                actor,
                 upstream_fragment_id,
             )
-            .await?;
-
-            inputs.push(input);
-        }
+        }))
+        .await?;
 
         let upstreams =
             MergeExecutor::new_select_receiver(inputs, &self.executor_stats, &self.actor_context);
@@ -356,11 +353,10 @@ impl UpstreamSinkUnionExecutor {
     async fn handle_update(
         &mut self,
         upstreams: &mut DynamicReceivers<FragmentId, BarrierMutationType>,
-        barrier_align: &LabelGuardedMetric<GenericCounter<AtomicU64>>,
         barrier: &Barrier,
     ) -> StreamExecutorResult<()> {
-        let actor_id = self.actor_context.id;
-        if let Some(new_upstream_sink) = barrier.as_new_upstream_sink(actor_id) {
+        let fragment_id = self.actor_context.fragment_id;
+        if let Some(new_upstream_sink) = barrier.as_new_upstream_sink(fragment_id) {
             // Create new inputs for the newly added upstream sinks.
             let info = new_upstream_sink.get_info().unwrap();
             let merge_schema = info
@@ -374,7 +370,7 @@ impl UpstreamSinkUnionExecutor {
                 .map(|e| build_non_strict_from_prost(e, self.eval_error_report.clone()))
                 .try_collect()
                 .map_err(|err| anyhow::anyhow!(err))?;
-            let new_input = self
+            let mut new_input = self
                 .new_sink_input(UpstreamFragmentInfo {
                     upstream_fragment_id: info.get_upstream_fragment_id(),
                     upstream_actors: new_upstream_sink.get_upstream_actors().clone(),
@@ -388,22 +384,19 @@ impl UpstreamSinkUnionExecutor {
                 .send(barrier.clone())
                 .map_err(|e| StreamExecutorError::from(anyhow::anyhow!(e)))?;
 
-            let mut new_receivers =
-                DynamicReceivers::new(vec![new_input], Some(barrier_align.clone()), None);
-            let new_barrier = expect_first_barrier(&mut new_receivers).await?;
+            let new_barrier = expect_first_barrier(&mut new_input).await?;
             assert_equal_dispatcher_barrier(barrier, &new_barrier);
 
-            upstreams.add_upstreams_from(new_receivers);
+            upstreams.add_upstreams_from(iter::once(new_input));
         }
 
         if let Some(dropped_upstream_sinks) = barrier.as_dropped_upstream_sinks()
             && !dropped_upstream_sinks.is_empty()
         {
             // Remove the upstream sinks that are no longer needed.
-            let dropped_upstream_sinks = dropped_upstream_sinks.iter().cloned().collect();
-            upstreams.remove_upstreams(&dropped_upstream_sinks);
+            upstreams.remove_upstreams(dropped_upstream_sinks);
             for upstream_fragment_id in dropped_upstream_sinks {
-                self.barrier_tx_map.remove(&upstream_fragment_id).unwrap();
+                self.barrier_tx_map.remove(upstream_fragment_id).unwrap();
             }
         }
 
@@ -444,7 +437,7 @@ impl UpstreamSinkUnionExecutor {
                         if let Message::Barrier(barrier) = &msg {
                             let current_barrier = buffered_barriers.pop_front().unwrap();
                             assert_equal_dispatcher_barrier(&current_barrier, barrier);
-                            self.handle_update(&mut upstreams, &barrier_align, barrier).await?;
+                            self.handle_update(&mut upstreams, barrier).await?;
                         }
                         return Ok(msg);
                     }
@@ -455,7 +448,7 @@ impl UpstreamSinkUnionExecutor {
                         // Otherwise, we need to forward the barrier to the upstream and then wait in the first branch
                         // until the upstreams have processed the barrier.
                         if upstreams.is_empty() {
-                            self.handle_update(&mut upstreams, &barrier_align, &barrier).await?;
+                            self.handle_update(&mut upstreams, &barrier).await?;
                             return Ok(Message::Barrier(barrier.clone()));
                         } else {
                             for tx in self.barrier_tx_map.values() {
@@ -471,16 +464,15 @@ impl UpstreamSinkUnionExecutor {
         };
 
         loop {
-            match select_once().await {
-                Ok(msg) => yield msg,
-                Err(e) => return Err(e), // Propagate the error.
-            }
+            yield select_once().await?;
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use futures::FutureExt;
     use risingwave_common::array::{Op, StreamChunkTestExt};
     use risingwave_common::catalog::Field;
@@ -654,6 +646,7 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let actor_id = 2;
+        let fragment_id = 0; // from ActorContext::for_test
         let upstream_fragment_id = 11;
         let upstream_actor_id = 101;
 
@@ -671,13 +664,13 @@ mod tests {
         let b1 = Barrier::new_test_barrier(test_epoch(1));
         let b2 =
             Barrier::new_test_barrier(test_epoch(2)).with_mutation(Mutation::Add(AddMutation {
-                new_upstream_sinks: HashMap::from([(actor_id, add_upstream)]),
+                new_upstream_sinks: HashMap::from([(fragment_id, add_upstream)]),
                 ..Default::default()
             }));
         let b3 = Barrier::new_test_barrier(test_epoch(3));
         let b4 =
             Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Stop(StopMutation {
-                dropped_sink_fragments: vec![upstream_fragment_id],
+                dropped_sink_fragments: HashSet::from([upstream_fragment_id]),
                 ..Default::default()
             }));
         for barrier in [&b1, &b2, &b3, &b4] {

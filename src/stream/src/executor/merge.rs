@@ -293,7 +293,7 @@ impl MergeExecutor {
 
                         if !update.added_upstream_actors.is_empty() {
                             // Create new upstreams receivers.
-                            let new_upstreams: Vec<_> = try_join_all(
+                            let mut new_upstreams: Vec<_> = try_join_all(
                                 update.added_upstream_actors.iter().map(|upstream_actor| {
                                     new_input(
                                         &self.local_barrier_manager,
@@ -310,16 +310,13 @@ impl MergeExecutor {
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.
-                            let mut select_new = SelectReceivers::new(
-                                new_upstreams,
-                                None,
-                                select_all.merge_barrier_align_duration(),
-                            );
-                            let new_barrier = expect_first_barrier(&mut select_new).await?;
-                            assert_equal_dispatcher_barrier(barrier, &new_barrier);
+                            for upstream in &mut new_upstreams {
+                                let new_barrier = expect_first_barrier(upstream).await?;
+                                assert_equal_dispatcher_barrier(barrier, &new_barrier);
+                            }
 
                             // Add the new upstreams to select.
-                            select_all.add_upstreams_from(select_new);
+                            select_all.add_upstreams_from(new_upstreams);
                         }
 
                         if !removed_upstream_actor_id.is_empty() {

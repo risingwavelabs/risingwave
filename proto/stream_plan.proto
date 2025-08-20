@@ -44,7 +44,7 @@ message AddMutation {
   repeated uint32 backfill_nodes_to_pause = 6;
   // CDC table snapshot splits
   map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
-  // Use actor_id as keys.
+  // Use downstream_fragment_id as keys.
   map<uint32, NewUpstreamSink> new_upstream_sinks = 8;
 }
 
