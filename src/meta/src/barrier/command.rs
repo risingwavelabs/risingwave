@@ -782,7 +782,6 @@ impl Command {
         &self,
         is_currently_paused: bool,
         edges: &mut Option<FragmentEdgeBuildResult>,
-        pre_applied_graph_info: &InflightDatabaseInfo,
         control_stream_manager: &ControlStreamManager,
     ) -> Option<Mutation> {
         match self {
@@ -929,15 +928,10 @@ impl Command {
                         }),
                         upstream_actors: new_sink_actors.collect(),
                     };
-                    let downstream_actors = pre_applied_graph_info
-                        .fragment(new_sink_downstream.downstream_fragment_id)
-                        .actors
-                        .keys()
-                        .cloned();
-                    let mut new_upstream_sinks = HashMap::new();
-                    for actor_id in downstream_actors {
-                        new_upstream_sinks.insert(actor_id, new_upstream_sink.clone());
-                    }
+                    let new_upstream_sinks = HashMap::from([(
+                        new_sink_downstream.downstream_fragment_id,
+                        new_upstream_sink.clone(),
+                    )]);
                     add_mutation.new_upstream_sinks = new_upstream_sinks;
                 }
 

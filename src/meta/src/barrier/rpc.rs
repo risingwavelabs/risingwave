@@ -785,8 +785,7 @@ impl ControlStreamManager {
         applied_graph_info: &InflightDatabaseInfo,
         edges: &mut Option<FragmentEdgeBuildResult>,
     ) -> MetaResult<NodeToCollect> {
-        let mutation =
-            command.and_then(|c| c.to_mutation(is_paused, edges, pre_applied_graph_info, self));
+        let mutation = command.and_then(|c| c.to_mutation(is_paused, edges, self));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {
