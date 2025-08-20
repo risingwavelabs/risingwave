@@ -15,19 +15,19 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
-use risingwave_pb::catalog::PbFlatIndexConfig;
 use risingwave_pb::catalog::vector_index_info::Config;
+use risingwave_pb::catalog::{PbFlatIndexConfig, PbHnswFlatIndexConfig};
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::hummock::vector_index::PbVariant;
 use risingwave_pb::hummock::vector_index_delta::{
     PbVectorIndexAdd, PbVectorIndexInit, vector_index_add,
 };
 use risingwave_pb::hummock::{
-    PbFlatIndex, PbFlatIndexAdd, PbVectorFileInfo, PbVectorIndex, PbVectorIndexDelta,
-    vector_index_delta,
+    PbFlatIndex, PbFlatIndexAdd, PbHnswFlatIndex, PbHnswFlatIndexAdd, PbHnswGraphFileInfo,
+    PbVectorFileInfo, PbVectorIndex, PbVectorIndexDelta, vector_index_delta,
 };
 
-use crate::{HummockObjectId, HummockVectorFileId};
+use crate::{HummockHnswGraphFileId, HummockObjectId, HummockVectorFileId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VectorFileInfo {
@@ -161,14 +161,102 @@ impl From<FlatIndex> for PbFlatIndex {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct HnswGraphFileInfo {
+    pub object_id: HummockHnswGraphFileId,
+    pub file_size: u64,
+}
+
+impl From<PbHnswGraphFileInfo> for HnswGraphFileInfo {
+    fn from(pb: PbHnswGraphFileInfo) -> Self {
+        Self {
+            object_id: pb.object_id.into(),
+            file_size: pb.file_size,
+        }
+    }
+}
+
+impl From<HnswGraphFileInfo> for PbHnswGraphFileInfo {
+    fn from(info: HnswGraphFileInfo) -> Self {
+        Self {
+            object_id: info.object_id.inner(),
+            file_size: info.file_size,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HnswFlatIndex {
+    pub config: PbHnswFlatIndexConfig,
+    pub vector_store_info: VectorStoreInfo,
+    pub graph_file: Option<HnswGraphFileInfo>,
+}
+
+impl HnswFlatIndex {
+    fn new(config: &PbHnswFlatIndexConfig) -> HnswFlatIndex {
+        HnswFlatIndex {
+            config: *config,
+            vector_store_info: VectorStoreInfo::empty(),
+            graph_file: None,
+        }
+    }
+
+    fn apply_hnsw_flat_index_add(&mut self, add: &HnswFlatIndexAdd) {
+        self.vector_store_info
+            .apply_vector_store_delta(&add.vector_store_info_delta);
+        self.graph_file = Some(add.graph_file.clone());
+        if self.graph_file.is_some() {
+            assert!(
+                !self.vector_store_info.vector_files.is_empty(),
+                "HNSW Flat Index must have at least one vector file when a graph file is present"
+            );
+        }
+    }
+}
+
+impl From<PbHnswFlatIndex> for HnswFlatIndex {
+    fn from(pb: PbHnswFlatIndex) -> Self {
+        Self {
+            config: pb.config.unwrap(),
+            vector_store_info: VectorStoreInfo {
+                next_vector_id: pb.next_vector_id.try_into().unwrap(),
+                vector_files: pb
+                    .vector_files
+                    .into_iter()
+                    .map(VectorFileInfo::from)
+                    .collect(),
+            },
+            graph_file: pb.graph_file.map(Into::into),
+        }
+    }
+}
+
+impl From<HnswFlatIndex> for PbHnswFlatIndex {
+    fn from(index: HnswFlatIndex) -> Self {
+        Self {
+            config: Some(index.config),
+            vector_files: index
+                .vector_store_info
+                .vector_files
+                .into_iter()
+                .map(PbVectorFileInfo::from)
+                .collect(),
+            next_vector_id: index.vector_store_info.next_vector_id.try_into().unwrap(),
+            graph_file: index.graph_file.map(Into::into),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum VectorIndexImpl {
     Flat(FlatIndex),
+    HnswFlat(HnswFlatIndex),
 }
 
 impl From<PbVariant> for VectorIndexImpl {
     fn from(variant: PbVariant) -> Self {
         match variant {
             PbVariant::Flat(flat_index) => Self::Flat(flat_index.into()),
+            PbVariant::HnswFlat(hnsw_flat_index) => Self::HnswFlat(hnsw_flat_index.into()),
         }
     }
 }
@@ -177,6 +265,9 @@ impl From<VectorIndexImpl> for PbVariant {
     fn from(index: VectorIndexImpl) -> Self {
         match index {
             VectorIndexImpl::Flat(flat_index) => PbVariant::Flat(flat_index.into()),
+            VectorIndexImpl::HnswFlat(hnsw_flat_index) => {
+                PbVariant::HnswFlat(hnsw_flat_index.into())
+            }
         }
     }
 }
@@ -196,14 +287,25 @@ impl VectorIndex {
         match HummockObjectId::Sstable(0.into()) {
             HummockObjectId::Sstable(_) => {}
             HummockObjectId::VectorFile(_) => {}
+            HummockObjectId::HnswGraphFile(_) => {}
         };
-        match &self.inner {
-            VectorIndexImpl::Flat(flat) => flat
-                .vector_store_info
-                .vector_files
-                .iter()
-                .map(|file| (HummockObjectId::VectorFile(file.object_id), file.file_size)),
-        }
+        let vector_files = match &self.inner {
+            VectorIndexImpl::Flat(flat) => &flat.vector_store_info.vector_files,
+            VectorIndexImpl::HnswFlat(hnsw_flat) => &hnsw_flat.vector_store_info.vector_files,
+        };
+        let graph_file_object_id = match &self.inner {
+            VectorIndexImpl::Flat(_) => None,
+            VectorIndexImpl::HnswFlat(hnsw_flat) => hnsw_flat.graph_file.as_ref().map(|file| {
+                (
+                    HummockObjectId::HnswGraphFile(file.object_id),
+                    file.file_size,
+                )
+            }),
+        };
+        vector_files
+            .iter()
+            .map(|file| (HummockObjectId::VectorFile(file.object_id), file.file_size))
+            .chain(graph_file_object_id)
     }
 }
 
@@ -256,14 +358,57 @@ impl From<FlatIndexAdd> for PbFlatIndexAdd {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct HnswFlatIndexAdd {
+    pub vector_store_info_delta: VectorStoreInfoDelta,
+    pub graph_file: HnswGraphFileInfo,
+}
+
+impl From<PbHnswFlatIndexAdd> for HnswFlatIndexAdd {
+    fn from(add: PbHnswFlatIndexAdd) -> Self {
+        Self {
+            vector_store_info_delta: VectorStoreInfoDelta {
+                next_vector_id: add.next_vector_id.try_into().unwrap(),
+                added_vector_files: add
+                    .added_vector_files
+                    .into_iter()
+                    .map(VectorFileInfo::from)
+                    .collect(),
+            },
+            graph_file: add.graph_file.unwrap().into(),
+        }
+    }
+}
+
+impl From<HnswFlatIndexAdd> for PbHnswFlatIndexAdd {
+    fn from(add: HnswFlatIndexAdd) -> Self {
+        Self {
+            added_vector_files: add
+                .vector_store_info_delta
+                .added_vector_files
+                .into_iter()
+                .map(PbVectorFileInfo::from)
+                .collect(),
+            next_vector_id: add
+                .vector_store_info_delta
+                .next_vector_id
+                .try_into()
+                .unwrap(),
+            graph_file: Some(add.graph_file.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum VectorIndexAdd {
     Flat(FlatIndexAdd),
+    HnswFlat(HnswFlatIndexAdd),
 }
 
 impl From<PbVectorIndexAdd> for VectorIndexAdd {
     fn from(add: PbVectorIndexAdd) -> Self {
         match add.add.unwrap() {
             vector_index_add::Add::Flat(flat_add) => Self::Flat(flat_add.into()),
+            vector_index_add::Add::HnswFlat(hnsw_flat_add) => Self::HnswFlat(hnsw_flat_add.into()),
         }
     }
 }
@@ -273,6 +418,9 @@ impl From<VectorIndexAdd> for PbVectorIndexAdd {
         match add {
             VectorIndexAdd::Flat(flat_add) => Self {
                 add: Some(vector_index_add::Add::Flat(flat_add.into())),
+            },
+            VectorIndexAdd::HnswFlat(hnsw_flat_add) => Self {
+                add: Some(vector_index_add::Add::HnswFlat(hnsw_flat_add.into())),
             },
         }
     }
@@ -297,16 +445,33 @@ impl From<PbVectorIndexDelta> for VectorIndexDelta {
 
 impl VectorIndexDelta {
     pub fn newly_added_objects(&self) -> impl Iterator<Item = (HummockObjectId, u64)> + '_ {
+        // DO NOT REMOVE THIS LINE
+        // This is to ensure that when adding new variant to `HummockObjectId`,
+        // the compiler will warn us if we forget to handle it here.
+        match HummockObjectId::Sstable(0.into()) {
+            HummockObjectId::Sstable(_) => {}
+            HummockObjectId::VectorFile(_) => {}
+            HummockObjectId::HnswGraphFile(_) => {}
+        };
         match self {
             VectorIndexDelta::Init(_) => None,
             VectorIndexDelta::Adds(adds) => Some(adds.iter().flat_map(|add| {
-                match add {
-                    VectorIndexAdd::Flat(add) => add
-                        .vector_store_info_delta
-                        .added_vector_files
-                        .iter()
-                        .map(|file| (HummockObjectId::VectorFile(file.object_id), file.file_size)),
-                }
+                let vector_store_delta = match add {
+                    VectorIndexAdd::Flat(add) => &add.vector_store_info_delta,
+                    VectorIndexAdd::HnswFlat(add) => &add.vector_store_info_delta,
+                };
+                let added_graph_file = match add {
+                    VectorIndexAdd::Flat(_) => None,
+                    VectorIndexAdd::HnswFlat(add) => Some((
+                        HummockObjectId::HnswGraphFile(add.graph_file.object_id),
+                        add.graph_file.file_size,
+                    )),
+                };
+                vector_store_delta
+                    .added_vector_files
+                    .iter()
+                    .map(|file| (HummockObjectId::VectorFile(file.object_id), file.file_size))
+                    .chain(added_graph_file)
             })),
         }
         .into_iter()
@@ -345,6 +510,7 @@ fn init_vector_index(init: &PbVectorIndexInit) -> VectorIndex {
     let init_info = init.info.as_ref().unwrap();
     let inner = match init_info.config.as_ref().unwrap() {
         Config::Flat(config) => VectorIndexImpl::Flat(FlatIndex::new(config)),
+        Config::HnswFlat(config) => VectorIndexImpl::HnswFlat(HnswFlatIndex::new(config)),
     };
     VectorIndex {
         dimension: init_info.dimension as _,
@@ -356,11 +522,16 @@ fn init_vector_index(init: &PbVectorIndexInit) -> VectorIndex {
 fn apply_vector_index_add(inner: &mut VectorIndexImpl, add: &VectorIndexAdd) {
     match inner {
         VectorIndexImpl::Flat(flat_index) => {
-            #[expect(irrefutable_let_patterns)]
             let VectorIndexAdd::Flat(add) = add else {
                 panic!("expect FlatIndexAdd but got {:?}", flat_index);
             };
             flat_index.apply_flat_index_add(add);
+        }
+        VectorIndexImpl::HnswFlat(hnsw_flat_index) => {
+            let VectorIndexAdd::HnswFlat(add) = add else {
+                panic!("expect HnswFlatIndexAdd but got {:?}", hnsw_flat_index);
+            };
+            hnsw_flat_index.apply_hnsw_flat_index_add(add);
         }
     }
 }
