@@ -170,7 +170,7 @@ impl DispatchExecutorInner {
                         }
                         _ = $interval.tick() => {
                             $start_time = Instant::now();
-                            $metrics.inc_by(Duration::from_secs(15).as_nanos() as u64);
+                            $metrics.inc_by($interval.period().as_nanos() as u64);
                         }
                     };
                 }
