@@ -29,7 +29,7 @@ use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
-use risingwave_pb::meta::table_fragments::ActorStatus;
+use risingwave_pb::meta::table_fragments::{ActorStatus, PbState};
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use thiserror_ext::AsReport;
@@ -767,6 +767,15 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
+                //   let state = self
+                //                     .metadata_manager.get_job_state_by_id(&id)
+                //                     .await?;
+                //                 if state == PbState::Created {
+                //                     Err(MetaError::invalid_parameter(format!(
+                //                         "streaming job {} is already created",
+                //                         id
+                //                     )))?;
+                //                 }
 
                 let (_, database_id) = self.metadata_manager
                     .catalog_controller
