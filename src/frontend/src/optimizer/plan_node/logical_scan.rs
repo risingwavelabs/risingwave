@@ -32,7 +32,7 @@ use super::{
 use crate::TableCatalog;
 use crate::binder::BoundBaseTable;
 use crate::catalog::ColumnId;
-use crate::catalog::index_catalog::{IndexType, TableIndex};
+use crate::catalog::index_catalog::{IndexType, TableIndex, VectorIndex};
 use crate::error::Result;
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::ApplyResult;
@@ -101,6 +101,7 @@ impl LogicalScan {
             output_col_idx,
             table_catalog,
             vec![],
+            vec![],
             ctx,
             Condition::true_cond(),
             as_of,
@@ -116,15 +117,18 @@ impl LogicalScan {
         let table_catalog = base_table.table_catalog.clone();
         let output_col_idx: Vec<usize> = (0..table_catalog.columns().len()).collect();
         let mut table_indexes = vec![];
+        let mut vector_indexes = vec![];
         for index in &base_table.table_indexes {
             match &index.index_type {
                 IndexType::Table(index) => table_indexes.push(index.clone()),
+                IndexType::Vector(index) => vector_indexes.push(index.clone()),
             }
         }
         generic::TableScan::new(
             output_col_idx,
             table_catalog,
             table_indexes,
+            vector_indexes,
             ctx,
             Condition::true_cond(),
             as_of,
@@ -162,6 +166,11 @@ impl LogicalScan {
     /// Get all table indexes on this table
     pub fn table_indexes(&self) -> &[Arc<TableIndex>] {
         &self.core.table_indexes
+    }
+
+    /// Get all vector indexes on this table
+    pub fn vector_indexes(&self) -> &[Arc<VectorIndex>] {
+        &self.core.vector_indexes
     }
 
     /// Get the logical scan's filter predicate
@@ -318,6 +327,7 @@ impl LogicalScan {
             self.required_col_idx().to_vec(),
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
+            self.vector_indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
             self.as_of(),
@@ -335,6 +345,7 @@ impl LogicalScan {
             self.output_col_idx().to_vec(),
             self.table().clone(),
             self.table_indexes().to_vec(),
+            self.vector_indexes().to_vec(),
             self.base.ctx().clone(),
             predicate,
             self.as_of(),
@@ -347,6 +358,7 @@ impl LogicalScan {
             output_col_idx,
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
+            self.vector_indexes().to_vec(),
             self.base.ctx().clone(),
             self.predicate().clone(),
             self.as_of(),

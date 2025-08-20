@@ -96,6 +96,7 @@ risedev slt './e2e_test/sink/license.slt'
 risedev slt './e2e_test/sink/rate_limit.slt'
 risedev slt './e2e_test/sink/auto_schema_change.slt'
 risedev slt 'e2e_test/sink/kafka/test_bytes_format.slt'
+risedev slt './e2e_test/sink/sink_vector_columns.slt'
 sleep 1
 
 echo "--- preparing postgresql"
