@@ -34,6 +34,8 @@ jobs:
           
           # Replace underscores with hyphens in the label and add datetime
           CLEAN_LABEL=$(echo "${{ inputs.label }}" | tr '_' '-')
+          # TODO: Remove
+          CLEAN_LABEL="test1"
           BENCH_NAMESPACE="${CLEAN_LABEL}-${DATETIME}"
           echo "BENCH_NAMESPACE=${BENCH_NAMESPACE}"
           echo "BENCH_NAMESPACE=${BENCH_NAMESPACE}" >> $GITHUB_ENV
@@ -43,10 +45,14 @@ jobs:
           echo "BENCH_TESTBED=${BENCH_TESTBED}" >> $GITHUB_ENV
 
           RW_VERSION=${{ inputs.rw_image_tag }}
+          # TODO: Remove
+          RW_VERSION='v2.6.0-alpha--bench--e7ca9bb--kwannoel-enhance-backpressure-graph6'
           echo "RW_VERSION=${RW_VERSION}"
           echo "RW_VERSION=${RW_VERSION}" >> $GITHUB_ENV
 
           NEXMARK_QUERY=${{ inputs.nexmark_queries }}
+          # TODO: Remove
+          NEXMARK_QUERY='q0,q4'
           echo "NEXMARK_QUERY=${NEXMARK_QUERY}"
           echo "NEXMARK_QUERY=${NEXMARK_QUERY}" >> $GITHUB_ENV
 
@@ -65,3 +71,12 @@ jobs:
           SKIP_DASHBOARD=false
           echo "SKIP_DASHBOARD=${SKIP_DASHBOARD}"
           echo "SKIP_DASHBOARD=${SKIP_DASHBOARD}" >> $GITHUB_ENV
+      - name: 'Trigger Nexmark Benchmark via Buildkite'
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        with:
+          buildkite_api_access_token: ${{ secrets.RISINGWAVE_TEST_BUILDKITE_TOKEN }}
+          pipeline: 'risingwave-test/nexmark-benchmark'
+          branch: main
+          commit: HEAD
+          message: ':github: Triggering Nexmark Benchmark with image tag: ${{ env.RW_VERSION }}'
+          build_env_vars: '{ "BENCH_NAMESPACE": "${{ env.BENCH_NAMESPACE }}", "BENCH_TESTBED": "${{ env.BENCH_TESTBED }}", "RW_VERSION": "${{ env.RW_VERSION }}", "NEXMARK_QUERY": "${{ env.NEXMARK_QUERY }}", "KAFKA_EVENTS": "${{ env.KAFKA_EVENTS }}", "KAFKA_PARTITION": "${{ env.KAFKA_PARTITION }}", "ENABLE_BLACKHOLE": "${{ env.ENABLE_BLACKHOLE }}", "SKIP_DASHBOARD": "${{ env.SKIP_DASHBOARD }}" }'
