@@ -1,15 +1,14 @@
 name: Run Perf Test
 on:
-  push:
   workflow_dispatch:
     inputs:
       label:
-        description: 'Performance test namespace'
+        description: 'Performance test namespace (date-time will be appended)'
         required: true
         type: string
         default: 'Untitled'
       rw_image_tag:
-        description: 'RisingWave Image Tag'
+        description: 'RisingWave Image Tag (docker image tag, e.g. v2.6.0-alpha--bench--e7ca9bb--kwannoel-enhance-backpressure-graph6)'
         required: true
         type: string
         default: 'latest'
@@ -34,8 +33,6 @@ jobs:
           
           # Replace underscores with hyphens in the label and add datetime
           CLEAN_LABEL=$(echo "${{ inputs.label }}" | tr '_' '-')
-          # TODO: Remove
-          CLEAN_LABEL="test1"
           BENCH_NAMESPACE="${CLEAN_LABEL}-${DATETIME}"
           echo "BENCH_NAMESPACE=${BENCH_NAMESPACE}"
           echo "BENCH_NAMESPACE=${BENCH_NAMESPACE}" >> $GITHUB_ENV
@@ -45,14 +42,10 @@ jobs:
           echo "BENCH_TESTBED=${BENCH_TESTBED}" >> $GITHUB_ENV
 
           RW_VERSION=${{ inputs.rw_image_tag }}
-          # TODO: Remove
-          RW_VERSION='v2.6.0-alpha--bench--e7ca9bb--kwannoel-enhance-backpressure-graph6'
           echo "RW_VERSION=${RW_VERSION}"
           echo "RW_VERSION=${RW_VERSION}" >> $GITHUB_ENV
 
           NEXMARK_QUERY=${{ inputs.nexmark_queries }}
-          # TODO: Remove
-          NEXMARK_QUERY='q0,q4'
           echo "NEXMARK_QUERY=${NEXMARK_QUERY}"
           echo "NEXMARK_QUERY=${NEXMARK_QUERY}" >> $GITHUB_ENV
 
