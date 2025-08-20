@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::mem::take;
-use std::slice;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::future::BoxFuture;
+use risingwave_common::vector::{decode_vector_payload, encode_vector_payload};
 use risingwave_hummock_sdk::HummockVectorFileId;
 use risingwave_hummock_sdk::vector_index::VectorFileInfo;
 use risingwave_object_store::object::ObjectStreamingUploader;
@@ -154,15 +154,7 @@ impl VectorBlock {
         assert_eq!(last_offset as usize, self.0.info_payload.len());
         buf.put_slice(&self.0.info_payload);
         assert_eq!(self.0.vector_payload.len(), self.0.dimension * vector_count);
-        let vector_payload_ptr = self.0.vector_payload.as_slice().as_ptr() as *const u8;
-        // safety: correctly set the size of vector_payload
-        let vector_payload_slice = unsafe {
-            slice::from_raw_parts(
-                vector_payload_ptr,
-                self.0.vector_payload.len() * size_of::<f32>(),
-            )
-        };
-        buf.put_slice(vector_payload_slice);
+        encode_vector_payload(&self.0.vector_payload, &mut buf);
     }
 
     fn decode_payload(mut buf: impl Buf) -> Self {
@@ -177,18 +169,8 @@ impl VectorBlock {
         let mut info_payload = vec![0; info_payload_len];
         buf.copy_to_slice(&mut info_payload);
         let vector_item_count = dimension * vector_count;
-        let mut vector_payload = Vec::with_capacity(vector_item_count);
+        let vector_payload = decode_vector_payload(vector_item_count, buf);
 
-        let vector_payload_ptr = vector_payload.spare_capacity_mut().as_mut_ptr() as *mut u8;
-        // safety: no data append to vector_payload, and correctly set the size of vector_payload
-        let vector_payload_slice = unsafe {
-            slice::from_raw_parts_mut(vector_payload_ptr, vector_item_count * size_of::<f32>())
-        };
-        buf.copy_to_slice(vector_payload_slice);
-        // safety: have written correct amount of data
-        unsafe {
-            vector_payload.set_len(vector_item_count);
-        }
         Self(Arc::new(VectorBlockInner {
             dimension,
             vector_payload,
