@@ -466,6 +466,34 @@ class Panels:
             **self.common_options,
         )
 
+    def timeseries_with_value_mapping(self, title, description, metric_expr, value_mappings):
+        """
+        Create a timeseries panel with value mapping for enum-like metrics.
+
+        Args:
+            title: Panel title
+            description: Panel description that should explain the value mappings
+            metric_expr: The metric expression to query
+            value_mappings: Dict mapping numeric values to string labels (for reference only)
+
+        Returns:
+            TimeSeries panel with descriptive legend showing the actual metric value
+        """
+        gridPos = self.layout.next_one_third_width_graph()
+        return TimeSeries(
+            title=title,
+            dataSource=self.datasource,
+            description=description,
+            targets=[
+                self.target(
+                    metric_expr,
+                    "{{__name__}}: {{value}}",  # Show metric name and current value
+                ),
+            ],
+            gridPos=gridPos,
+            **self.common_options,
+        )
+
     def table_info(
         self,
         title,

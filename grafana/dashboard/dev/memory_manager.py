@@ -19,15 +19,11 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries(
+                panels.timeseries_with_value_mapping(
                     "LRU manager eviction policy",
-                    "",
-                    [
-                        panels.target(
-                            f"{metric('lru_eviction_policy')}",
-                            "",
-                        ),
-                    ],
+                    "0=None, 1=Stable, 2=Graceful, 3=Aggressive",
+                    f"{metric('lru_eviction_policy')}",
+                    {0: "None", 1: "Stable", 2: "Graceful", 3: "Aggressive"}
                 ),
                 panels.timeseries(
                     "LRU manager sequence",
