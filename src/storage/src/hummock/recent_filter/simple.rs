@@ -63,12 +63,10 @@ impl<T> Inner<T> {
             let mut current = HashSet::new();
             std::mem::swap(&mut current, &mut layers.current.write());
             let old = layers.others.pop_back();
-            let diff = current.len() - old.map(|s| s.len()).unwrap_or_default();
+            let diff = current.len() as i64 - old.map(|s| s.len()).unwrap_or_default() as i64;
             layers.others.push_front(current);
             layers.updated = Instant::now();
-            GLOBAL_RECENT_FILTER_METRICS
-                .recent_filter_items
-                .add(diff as _);
+            GLOBAL_RECENT_FILTER_METRICS.recent_filter_items.add(diff);
         }
     }
 }
