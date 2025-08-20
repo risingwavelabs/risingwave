@@ -14,10 +14,9 @@ impl MigrationTrait for Migration {
                 MigrationTable::alter()
                     .table(Table::Table)
                     .add_column(
-                        ColumnDef::new(Table::VersionColumnIndices)
-                            .json_binary()
-                            .not_null()
-                            .default(I32Array(vec![])),
+                        // We allow null here because a added non null column must have default value,
+                        // but MySQL does not allow default value for JSON columns.
+                        ColumnDef::new(Table::VersionColumnIndices).json_binary(),
                     )
                     .to_owned(),
             )

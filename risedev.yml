@@ -34,10 +34,10 @@ profile:
       # To enable sqlite backend, uncomment the following lines and set the meta-backend to sqlite in 'meta-node'
       # - use: sqlite
       # To enable postgres backend, uncomment the following lines and set the meta-backend to postgres in 'meta-node'
-      - use: postgres
-        port: 8432
-        user: postgres
-        database: metadata
+      # - use: postgres
+      #   port: 8432
+      #   user: postgres
+      #   database: metadata
 
       # If you want to enable metrics or tracing, uncomment the following lines.
       # - use: prometheus  # metrics

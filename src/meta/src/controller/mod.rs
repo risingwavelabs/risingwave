@@ -235,6 +235,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             version_column_indices: value
                 .0
                 .version_column_indices
+                .unwrap_or_default()
                 .0
                 .iter()
                 .map(|&idx| idx as u32)
