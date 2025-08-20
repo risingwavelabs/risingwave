@@ -603,7 +603,6 @@ pub(crate) mod tests {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
-            toastable_column_indices: None,
             vector_index_info: None,
         };
         let batch_plan_node = LogicalScan::create(table_catalog.into(), ctx, None)

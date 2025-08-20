@@ -118,6 +118,26 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
 
+        // Extract TOAST-able column indices from table columns.
+        let toastable_column_indices = {
+            let toastable_indices: Vec<usize> = table_columns
+                .iter()
+                .enumerate()
+                .filter_map(|(index, column)| match &column.data_type {
+                    DataType::Varchar | DataType::List(_) | DataType::Bytea | DataType::Jsonb => {
+                        Some(index)
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            if toastable_indices.is_empty() {
+                None
+            } else {
+                Some(toastable_indices)
+            }
+        };
+
         let row_serde: BasicSerde = BasicSerde::new(
             Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
             Arc::from(table_columns.into_boxed_slice()),
@@ -155,19 +175,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
-
-        // Extract TOAST-able column indices from table catalog.
-        let toastable_column_indices = if table_catalog.toastable_column_indices.is_empty() {
-            None
-        } else {
-            Some(
-                table_catalog
-                    .toastable_column_indices
-                    .iter()
-                    .map(|&x| x as usize)
-                    .collect(),
-            )
-        };
 
         Self {
             input,

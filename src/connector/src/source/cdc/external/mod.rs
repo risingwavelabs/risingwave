@@ -476,12 +476,4 @@ impl ExternalTableImpl {
             ExternalTableImpl::SqlServer(sql_server) => sql_server.pk_names(),
         }
     }
-
-    /// Get TOAST column names for PostgreSQL CDC tables, None for other CDC types
-    pub fn toastable_column_names(&self) -> Option<&Vec<String>> {
-        match self {
-            ExternalTableImpl::Postgres(postgres) => Some(postgres.toastable_column_names()),
-            _ => None,
-        }
-    }
 }

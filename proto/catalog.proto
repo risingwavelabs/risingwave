@@ -520,9 +520,6 @@ message Table {
   // only exist when table_type is VECTOR_INDEX.
   optional VectorIndexInfo vector_index_info = 46;
 
-  // TOAST column indices for PostgreSQL CDC tables. Empty for non-CDC tables or CDC tables without TOAST columns.
-  repeated int32 toastable_column_indices = 47;
-
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.

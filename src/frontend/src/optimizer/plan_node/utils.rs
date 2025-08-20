@@ -218,7 +218,6 @@ impl TableCatalogBuilder {
             webhook_info: None,
             job_id: None,
             engine: Engine::Hummock,
-            toastable_column_indices: None,
             clean_watermark_index_in_pk: None, // TODO: fill this field
             refreshable: false,                // Internal tables are not refreshable
             vector_index_info: None,

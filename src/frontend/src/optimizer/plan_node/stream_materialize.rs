@@ -339,7 +339,6 @@ impl StreamMaterialize {
                     engine
                 }
             },
-            toastable_column_indices: None,
             clean_watermark_index_in_pk: None, // TODO: fill this field
             refreshable,
             vector_index_info: None,
