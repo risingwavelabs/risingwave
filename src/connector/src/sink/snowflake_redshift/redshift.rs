@@ -14,7 +14,6 @@
 
 use core::num::NonZero;
 use std::fmt::Write;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
