@@ -1,7 +1,7 @@
 -- SQL Server CDC timestamp test preparation
 -- This file prepares test data for timestamp handling in SQL Server CDC
 
-USE mydb;
+USE sqlserver_timestamp_db;
 GO
 
 -- Enable CDC on database first
