@@ -5,7 +5,7 @@ system ok
 sqlcmd -C -d master -Q 'create database sqlserver_timestamp_db;' -b
 
 system ok
-sqlcmd -C -i e2e_test/source_inline/cdc/sql_server/sql_server_timestamp_prepare.sql -b
+sqlcmd -C -d sqlserver_timestamp_db -i e2e_test/source_inline/cdc/sql_server/sql_server_timestamp_prepare.sql -b
 
 # ------------ Create source and table stage ------------
 
@@ -34,7 +34,7 @@ sleep 10s
 
 # ------------ add rows stage ------------
 system ok
-sqlcmd -C -i e2e_test/source_inline/cdc/sql_server/sql_server_timestamp_insert.sql -b
+sqlcmd -C -d sqlserver_timestamp_db -i e2e_test/source_inline/cdc/sql_server/sql_server_timestamp_insert.sql -b
 
 sleep 10s
 
@@ -53,7 +53,7 @@ select id, timestamp from timestamp_test order by id;
 
 # ------------ update rows stage ------------
 system ok
-sqlcmd -C -i e2e_test/source_inline/cdc/sql_server/sql_server_timestamp_update.sql -b
+sqlcmd -C -d sqlserver_timestamp_db -i e2e_test/source_inline/cdc/sql_server/sql_server_timestamp_update.sql -b
 
 sleep 10s
 
