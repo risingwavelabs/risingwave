@@ -16,7 +16,8 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(Table::VersionColumnIndices)
                             .json_binary()
-                            .not_null(),
+                            .not_null()
+                            .default(I32Array(vec![])),
                     )
                     .to_owned(),
             )
@@ -46,7 +47,10 @@ impl MigrationTrait for Migration {
             let table_entity = TableEntity::from_query_result(&row, "")?;
 
             // Create I32Array with single element
-            let i32_array = I32Array(vec![table_entity.version_column_index.unwrap()]);
+            let i32_array = table_entity
+                .version_column_index
+                .map(|index| I32Array(vec![index]))
+                .unwrap_or_else(|| I32Array(vec![]));
 
             // Update with the I32Array
             manager
