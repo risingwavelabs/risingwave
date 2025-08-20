@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::iter;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -396,7 +396,7 @@ impl UpstreamSinkUnionExecutor {
             // Remove the upstream sinks that are no longer needed.
             upstreams.remove_upstreams(dropped_upstream_sinks);
             for upstream_fragment_id in dropped_upstream_sinks {
-                self.barrier_tx_map.remove(upstream_fragment_id).unwrap();
+                self.barrier_tx_map.remove(upstream_fragment_id);
             }
         }
 
@@ -421,7 +421,7 @@ impl UpstreamSinkUnionExecutor {
         let upstreams = DynamicReceivers::new(inputs, Some(barrier_align.clone()), None);
         pin_mut!(upstreams);
 
-        let mut buffered_barriers = VecDeque::new();
+        let mut current_barrier = None;
 
         // Here, `tokio::select` cannot be used directly in `try_stream` function.
         // Err for breaking the loop. Ok(None) for continuing the loop.
@@ -435,14 +435,14 @@ impl UpstreamSinkUnionExecutor {
                     msg = pending_on_none(upstreams.next()) => {
                         let msg = msg.context("UpstreamSinkUnionExecutor pull upstream failed")?;
                         if let Message::Barrier(barrier) = &msg {
-                            let current_barrier = buffered_barriers.pop_front().unwrap();
+                            let current_barrier = current_barrier.take().unwrap();
                             assert_equal_dispatcher_barrier(&current_barrier, barrier);
                             self.handle_update(&mut upstreams, barrier).await?;
                         }
                         return Ok(msg);
                     }
 
-                    barrier = self.barrier_rx.recv() => {
+                    barrier = self.barrier_rx.recv(), if current_barrier.is_none() => {
                         let barrier = barrier.context("Failed to receive barrier from barrier_rx")?;
                         // Here, if there's no upstream, we should process the barrier directly and send it out.
                         // Otherwise, we need to forward the barrier to the upstream and then wait in the first branch
@@ -455,7 +455,7 @@ impl UpstreamSinkUnionExecutor {
                                 tx.send(barrier.clone())
                                     .map_err(|e| StreamExecutorError::from(anyhow::anyhow!(e)))?;
                             }
-                            buffered_barriers.push_back(barrier);
+                            current_barrier = Some(barrier);
                             continue;
                         }
                     }
