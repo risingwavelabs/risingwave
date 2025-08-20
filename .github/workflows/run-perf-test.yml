@@ -1,5 +1,6 @@
 name: Run Perf Test
 on:
+  push:
   workflow_dispatch:
     inputs:
       label:
