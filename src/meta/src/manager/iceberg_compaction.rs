@@ -369,7 +369,7 @@ impl IcebergCompactionManager {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             // Run GC every hour by default
-            const GC_LOOP_INTERVAL_SECS: u64 = 3600;
+            const GC_LOOP_INTERVAL_SECS: u64 = 900;
             let mut interval =
                 tokio::time::interval(std::time::Duration::from_secs(GC_LOOP_INTERVAL_SECS));
 
@@ -530,7 +530,6 @@ impl IcebergCompactionManager {
     async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
         const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000;
         let now = chrono::Utc::now().timestamp_millis();
-        let expired_older_than = now - MAX_SNAPSHOT_AGE_MS_DEFAULT;
 
         let iceberg_config = self.load_iceberg_config(sink_id).await?;
         if !iceberg_config.enable_snapshot_expiration {
@@ -547,7 +546,12 @@ impl IcebergCompactionManager {
         let mut snapshots = metadata.snapshots().collect_vec();
         snapshots.sort_by_key(|s| s.timestamp_ms());
 
-        if snapshots.is_empty() || snapshots.first().unwrap().timestamp_ms() > expired_older_than {
+        if snapshots.is_empty()
+            || snapshots.first().unwrap().timestamp_ms()
+                > iceberg_config
+                    .snapshot_expiration_expire_older_than
+                    .unwrap_or(now - MAX_SNAPSHOT_AGE_MS_DEFAULT)
+        {
             // avoid commit empty table updates
             return Ok(());
         }
@@ -562,16 +566,27 @@ impl IcebergCompactionManager {
 
         let tx = Transaction::new(&table);
 
-        // TODO: use config
-        let expired_snapshots = tx
-            .expire_snapshot()
-            .clear_expired_files(true)
-            .clear_expired_meta_data(true);
+        let mut expired_snapshots = tx.expire_snapshot();
+
+        if let Some(expiration_time) = iceberg_config.snapshot_expiration_expire_older_than {
+            expired_snapshots = expired_snapshots.expire_older_than(expiration_time);
+        }
+
+        if let Some(retain_last) = iceberg_config.snapshot_expiration_retain_last {
+            expired_snapshots = expired_snapshots.retain_last(retain_last);
+        }
+
+        expired_snapshots = expired_snapshots
+            .clear_expired_files(iceberg_config.snapshot_expiration_clear_expired_files);
+
+        expired_snapshots = expired_snapshots
+            .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
 
         let tx = expired_snapshots
             .apply()
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
+
         tx.commit(catalog.as_ref())
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
