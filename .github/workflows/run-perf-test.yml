@@ -30,7 +30,7 @@ jobs:
           # Get current datetime in a safe format for environment variables
           DATETIME=$(date +"%Y%m%d-%H%M%S")
           echo "DATE_TIME=${DATETIME}"
-          
+
           # Replace underscores with hyphens in the label and add datetime
           CLEAN_LABEL=$(echo "${{ inputs.label }}" | tr '_' '-')
           BENCH_NAMESPACE="${CLEAN_LABEL}-${DATETIME}"
