@@ -669,7 +669,7 @@ impl CacheRefillTask {
                     .data_refill_success_duration
                     .start_timer();
 
-                // tips: We still read data from the entire range to reduce IOPS. However, this cannot reduce the access throughput to the object store.
+                // Notes: We still read data from the entire range to reduce IOPS. However, this cannot reduce the access throughput to the object store.
                 let data = sstable_store
                     .store()
                     .read(&sstable_store.get_sst_data_path(sst.id), range.clone())
