@@ -2,7 +2,7 @@ control substitution on
 
 # ------------ data prepare stage ------------
 system ok
-sqlcmd -C -d master -Q 'create database mydb;' -b
+sqlcmd -C -d master -Q 'create database sqlserver_timestamp_db;' -b
 
 system ok
 sqlcmd -C -i e2e_test/source_inline/cdc/sql_server/sql_server_timestamp_prepare.sql -b
@@ -17,7 +17,7 @@ CREATE SOURCE mssql_timestamp_source WITH (
     port = '${SQLCMDPORT:1433}',
     username = '${SQLCMDUSER:SA}',
     password = '${SQLCMDPASSWORD}',
-    database.name = '${SQLCMDDBNAME}',
+    database.name = 'sqlserver_timestamp_db',
     debezium.time.precision.mode = 'connect'
 );
 
@@ -27,7 +27,7 @@ CREATE TABLE timestamp_test (
     timestamp TIMESTAMP,
     time_col TIME,
     PRIMARY KEY (id)
-) from mssql_timestamp_source table 'mydb.dbo.timestamp_test';
+) from mssql_timestamp_source table 'sqlserver_timestamp_db.dbo.timestamp_test';
 
 # sleep to ensure the data is consumed from Debezium message instead of backfill
 sleep 10s
