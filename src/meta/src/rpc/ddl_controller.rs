@@ -60,7 +60,7 @@ use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
+    MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph, PbStreamNode,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
@@ -81,7 +81,7 @@ use crate::manager::{
     NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
-    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, StreamContext,
+    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::cdc::{
@@ -918,7 +918,8 @@ impl DdlController {
             let sink = sink.expect("sink not found");
             Self::inject_replace_table_plan_for_sink(
                 sink.id,
-                &sink_fragment,
+                sink_fragment.fragment_id,
+                &sink_fragment.nodes,
                 target_table,
                 &mut replace_table_ctx,
                 stream_job_fragments.inner.union_fragment_for_table(),
@@ -954,7 +955,8 @@ impl DdlController {
 
                 Self::inject_replace_table_plan_for_sink(
                     sink_id,
-                    &sink_fragment,
+                    sink_fragment.fragment_id,
+                    &sink_fragment.nodes,
                     target_table,
                     &mut replace_table_ctx,
                     stream_job_fragments.inner.union_fragment_for_table(),
@@ -1010,13 +1012,14 @@ impl DdlController {
 
     pub(crate) fn inject_replace_table_plan_for_sink(
         sink_id: u32,
-        sink_fragment: &Fragment,
+        sink_fragment_id: FragmentId,
+        sink_fragment_node: &PbStreamNode,
         table: &Table,
         replace_table_ctx: &mut ReplaceStreamJobContext,
         union_fragment: &mut Fragment,
         unique_identity: Option<&str>,
     ) {
-        let sink_fields = sink_fragment.nodes.fields.clone();
+        let sink_fields = sink_fragment_node.fields.clone();
 
         let output_indices = sink_fields
             .iter()
@@ -1028,7 +1031,7 @@ impl DdlController {
 
         let sink_fragment_downstreams = replace_table_ctx
             .upstream_fragment_downstreams
-            .entry(sink_fragment.fragment_id)
+            .entry(sink_fragment_id)
             .or_default();
 
         {
@@ -1040,7 +1043,7 @@ impl DdlController {
             });
         }
 
-        let upstream_fragment_id = sink_fragment.fragment_id;
+        let upstream_fragment_id = sink_fragment_id;
 
         let mut max_operator_id = 0;
 
@@ -1789,18 +1792,19 @@ impl DdlController {
                 for sink in catalogs {
                     let sink_id = &sink.id;
 
-                    let sink_table_fragments = self
+                    let maybe_sink_fragments = self
                         .metadata_manager
-                        .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(
+                        .get_job_sink_fragments_by_id(&risingwave_common::catalog::TableId::new(
                             *sink_id,
                         ))
                         .await?;
 
-                    let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
+                    let sink_fragment = maybe_sink_fragments.into_iter().exactly_one().unwrap();
 
                     Self::inject_replace_table_plan_for_sink(
                         *sink_id,
-                        &sink_fragment,
+                        sink_fragment.fragment_id as FragmentId,
+                        &sink_fragment.stream_node.to_protobuf(),
                         table,
                         &mut ctx,
                         stream_job_fragments.inner.union_fragment_for_table(),
@@ -2260,6 +2264,11 @@ impl DdlController {
             .get_job_fragments_by_id(&id.into())
             .await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
+
+        //   let old_internal_table_ids = self
+        //             .metadata_manager
+        //             .list_job_internal_table_ids_by_id(&id.into())
+        //             .await?;
 
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;

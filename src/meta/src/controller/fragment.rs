@@ -611,13 +611,68 @@ impl CatalogController {
         Ok(fragment_ids)
     }
 
+    pub async fn get_job_sink_fragments_by_id(
+        &self,
+        job_id: ObjectId,
+    ) -> MetaResult<Vec<fragment::Model>> {
+        let inner = self.inner.read().await;
+
+        let fragments: Vec<_> = FragmentModel::find()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+            ])
+            .filter(fragment::Column::JobId.eq(job_id))
+            .all(&inner.db)
+            .await?;
+
+
+        let fragments = fragments
+            .into_iter()
+            .filter(|fragment| {
+                FragmentTypeMask::from(fragment.fragment_type_mask).contains(FragmentTypeFlag::Sink)
+            })
+            .collect();
+
+        Ok(fragments)
+    }
+
+    pub async fn get_job_info_by_id(&self, job_id: ObjectId) -> MetaResult<streaming_job::Model> {
+        let inner = self.inner.read().await;
+
+        let job_info = StreamingJob::find_by_id(job_id)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
+
+        Ok(job_info)
+    }
+
+    pub async fn list_job_state_table_ids_by_id(&self, job_id: ObjectId) -> MetaResult<Vec<u32>> {
+        let inner = self.inner.read().await;
+
+        let state_table_ids: Vec<I32Array> = FragmentModel::find()
+            .select_only()
+            .column(fragment::Column::StateTableIds)
+            .filter(fragment::Column::JobId.eq(job_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let state_table_ids = state_table_ids
+            .into_iter()
+            .flat_map(|arr| arr.into_inner().into_iter().map(|id| id as u32))
+            .collect_vec();
+
+        Ok(state_table_ids)
+    }
+
     // todo, unpatched
     pub async fn get_job_fragments_by_id(
         &self,
         job_id: ObjectId,
     ) -> MetaResult<StreamJobFragments> {
         let inner = self.inner.read().await;
-        //
         // let info = self.env.shared_actor_infos().read_guard();
 
         // Load fragments matching the job from the database
