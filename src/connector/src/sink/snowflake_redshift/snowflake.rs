@@ -295,7 +295,6 @@ impl Sink for SnowflakeSink {
         {
             let client = SnowflakeJniClient::new(client, snowflake_task_ctx);
             client.execute_create_table().await?;
-            client.execute_create_pipe().await?;
         }
 
         Ok(())
@@ -594,6 +593,8 @@ impl SnowflakeSinkCommitter {
 impl SinkCommitCoordinator for SnowflakeSinkCommitter {
     async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         if let Some(client) = &self.client {
+            // Todo: move this to validate
+            client.execute_create_pipe().await?;
             client.execute_create_merge_into_task().await?;
         }
         Ok(None)
