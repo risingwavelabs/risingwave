@@ -149,7 +149,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
 
     // mock upstream offset (start from "1.binlog, pos=0") for ingested chunks
     let mock_offset_executor = StreamExecutor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             Schema::new(vec![
                 Field::unnamed(DataType::Jsonb),   // payload
                 Field::unnamed(DataType::Varchar), // _rw_offset
@@ -222,7 +222,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     ];
 
     let cdc_backfill = StreamExecutor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             table_schema.clone(),
             table_pk_indices,
             "CdcBackfillExecutor".to_owned(),
@@ -465,7 +465,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
     let (tx, source) = MockSource::channel();
     let source = source.into_executor(Schema::new(vec![]), vec![]);
     let cdc_source = StreamExecutor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             Schema::new(vec![
                 Field::unnamed(DataType::Jsonb),   // payload
                 Field::unnamed(DataType::Varchar), // _rw_offset
@@ -528,7 +528,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
     ];
     let cdc_backfill = StreamExecutor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             table_schema.clone(),
             table_pk_indices,
             "ParallelizedCdcBackfillExecutor".to_owned(),

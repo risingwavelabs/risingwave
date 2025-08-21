@@ -18,7 +18,7 @@ use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::PbStreamNode;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
@@ -198,7 +198,7 @@ impl StreamCdcTableScan {
                 },
             ],
             stream_key: vec![], // not used
-            append_only: true,
+            stream_kind: PbStreamKind::AppendOnly as _,
             identity: "StreamCdcFilter".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::CdcFilter(Box::new(CdcFilterNode {
@@ -226,7 +226,7 @@ impl StreamCdcTableScan {
             operator_id: exchange_operator_id.0 as _,
             input: vec![filter_stream_node],
             stream_key: vec![], // not used
-            append_only: true,
+            stream_kind: PbStreamKind::AppendOnly as _,
             identity: "Exchange".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::Exchange(Box::new(ExchangeNode {
@@ -282,7 +282,7 @@ impl StreamCdcTableScan {
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
-            append_only: self.append_only(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
         })
     }
 
