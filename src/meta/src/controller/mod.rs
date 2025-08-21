@@ -410,6 +410,7 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             stream_job_status: PbStreamJobStatus::Created as _,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            create_type: risingwave_pb::catalog::CreateType::Foreground.into(), // Default for existing indexes
         }
     }
 }

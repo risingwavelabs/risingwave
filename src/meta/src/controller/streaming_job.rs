@@ -401,12 +401,12 @@ impl CatalogController {
         for_replace: bool,
     ) -> MetaResult<()> {
         let need_notify = streaming_job.should_notify_creating();
-        let (sink, table) = match streaming_job {
-            StreamingJob::Sink(sink, _) => (Some(sink), None),
-            StreamingJob::Table(_, table, _) => (None, Some(table)),
-            StreamingJob::Index(_, _)
-            | StreamingJob::Source(_)
-            | StreamingJob::MaterializedView(_) => (None, None),
+        let (sink, table, index) = match streaming_job {
+            StreamingJob::Sink(sink, _) => (Some(sink), None, None),
+            StreamingJob::Table(_, table, _) => (None, Some(table), None),
+            StreamingJob::Index(index, _) => (None, None, Some(index)),
+            StreamingJob::Source(_)
+            | StreamingJob::MaterializedView(_) => (None, None, None),
         };
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id().table_id as _,
@@ -419,6 +419,7 @@ impl CatalogController {
             for_replace,
             sink,
             table,
+            index,
         )
         .await
     }
@@ -442,6 +443,7 @@ impl CatalogController {
         for_replace: bool,
         sink: Option<&PbSink>,
         table: Option<&PbTable>,
+        index: Option<&risingwave_pb::catalog::Index>,
     ) -> MetaResult<()> {
         let fragment_actors = Self::extract_fragment_and_actors_from_fragments(
             job_id,
@@ -506,6 +508,14 @@ impl CatalogController {
         {
             objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Sink(sink.clone())),
+            })
+        }
+
+        if let Some(objects) = &mut objects_to_notify
+            && let Some(index) = index
+        {
+            objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Index(index.clone())),
             })
         }
 
