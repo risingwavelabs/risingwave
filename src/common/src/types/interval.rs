@@ -40,11 +40,23 @@ use super::*;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Default, rkyv::Serialize, rkyv::Archive)]
+#[derive(Debug, Clone, Copy, Default, rkyv::Archive, rkyv::Serialize)]
+#[archive_attr(derive(Clone, Copy))]
 pub struct Interval {
     months: i32,
     days: i32,
     usecs: i64,
+}
+
+impl From<ArchivedInterval> for Interval {
+    #[inline(always)]
+    fn from(value: ArchivedInterval) -> Self {
+        Self {
+            months: value.months,
+            days: value.days,
+            usecs: value.usecs,
+        }
+    }
 }
 
 impl ZeroHeapSize for Interval {}

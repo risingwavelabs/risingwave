@@ -100,6 +100,16 @@ const CANONICAL_ZERO_BITS: u64 = 0x0u64;
 #[repr(transparent)]
 pub struct OrderedFloat<T>(pub T);
 
+impl<T> From<ArchivedOrderedFloat<T>> for OrderedFloat<T>
+where
+    T: rkyv::Archive<Archived = T>, // this holds for f32 and f64
+{
+    #[inline(always)]
+    fn from(value: ArchivedOrderedFloat<T>) -> Self {
+        Self(value.0)
+    }
+}
+
 impl<T: Float> OrderedFloat<T> {
     /// Get the value out.
     #[inline]

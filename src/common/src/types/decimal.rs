@@ -23,6 +23,7 @@ use num_traits::{
 };
 use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::ZeroHeapSize;
+use rkyv::{Deserialize, Infallible};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
@@ -45,6 +46,7 @@ use crate::types::ordered_float::OrderedFloat;
     rkyv::Archive,
     rkyv::Serialize,
 )]
+#[archive_attr(derive(Clone, Copy))]
 pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
@@ -54,6 +56,20 @@ pub enum Decimal {
     PositiveInf,
     #[display("NaN")]
     NaN,
+}
+
+impl From<ArchivedDecimal> for Decimal {
+    #[inline(always)]
+    fn from(value: ArchivedDecimal) -> Self {
+        match value {
+            ArchivedDecimal::NegativeInf => Self::NegativeInf,
+            ArchivedDecimal::Normalized(d) => {
+                Self::Normalized(d.deserialize(&mut Infallible).unwrap())
+            }
+            ArchivedDecimal::PositiveInf => Self::PositiveInf,
+            ArchivedDecimal::NaN => Self::NaN,
+        }
+    }
 }
 
 impl ZeroHeapSize for Decimal {}

@@ -36,7 +36,15 @@ use crate::util::row_id::RowId;
     rkyv::Archive,
     rkyv::Serialize,
 )]
+#[archive_attr(derive(Clone, Copy))]
 pub struct Serial(pub(crate) i64);
+
+impl From<ArchivedSerial> for Serial {
+    #[inline(always)]
+    fn from(value: ArchivedSerial) -> Self {
+        Self(value.0)
+    }
+}
 
 impl From<Serial> for i64 {
     fn from(value: Serial) -> i64 {

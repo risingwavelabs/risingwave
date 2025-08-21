@@ -383,6 +383,16 @@ pub struct VectorRef<'a> {
     inner: &'a [VectorItemType],
 }
 
+impl<'a> From<&'a ArchivedVectorRef<'a>> for VectorRef<'a> {
+    fn from(value: &'a ArchivedVectorRef<'a>) -> Self {
+        Self {
+            // TODO(safety): do we ensure `ArchivedOrderedFloat<fxx>` has the same layout as `fxx`
+            // (then `OrderedFloat<fxx>`)?
+            inner: unsafe { std::mem::transmute(value.inner.get()) },
+        }
+    }
+}
+
 impl Debug for VectorRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.write_with_type(&DataType::Vector(self.into_slice().len()), f)

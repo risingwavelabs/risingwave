@@ -30,6 +30,7 @@ use postgres_types::{FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_pb::data::PbDataType;
 use risingwave_pb::data::data_type::PbTypeName;
+use rkyv::option::ArchivedOption;
 use rkyv::with::{RefAsBox, Skip};
 use rw_iter_util::ZipEqFast as _;
 use serde::{Deserialize, Serialize, Serializer};
@@ -737,7 +738,7 @@ pub enum ScalarRefImpl<'scalar> {
     Int16(i16),
     Int32(i32),
     Int64(i64),
-    Int256(crate::types::Int256Ref<'scalar>),
+    Int256(#[with(Skip)] crate::types::Int256Ref<'scalar>),
     Float32(crate::types::F32),
     Float64(crate::types::F64),
     Utf8(#[with(RefAsBox)] &'scalar str),
@@ -757,6 +758,34 @@ pub enum ScalarRefImpl<'scalar> {
     Bytea(#[with(RefAsBox)] &'scalar [u8]),
 }
 
+impl<'a> From<&'a ArchivedScalarRefImpl<'a>> for ScalarRefImpl<'a> {
+    fn from(value: &'a ArchivedScalarRefImpl<'a>) -> Self {
+        match value {
+            ArchivedScalarRefImpl::Int16(v) => Self::Int16(*v),
+            ArchivedScalarRefImpl::Int32(v) => Self::Int32(*v),
+            ArchivedScalarRefImpl::Int64(v) => Self::Int64(*v),
+            ArchivedScalarRefImpl::Int256(_v) => todo!(),
+            ArchivedScalarRefImpl::Float32(v) => Self::Float32(v.0.into()),
+            ArchivedScalarRefImpl::Float64(v) => Self::Float64(v.0.into()),
+            ArchivedScalarRefImpl::Utf8(v) => Self::Utf8(v.get()),
+            ArchivedScalarRefImpl::Bool(v) => Self::Bool(*v),
+            ArchivedScalarRefImpl::Decimal(v) => Self::Decimal((*v).into()),
+            ArchivedScalarRefImpl::Interval(v) => Self::Interval((*v).into()),
+            ArchivedScalarRefImpl::Date(v) => Self::Date((*v).into()),
+            ArchivedScalarRefImpl::Time(v) => Self::Time((*v).into()),
+            ArchivedScalarRefImpl::Timestamp(v) => Self::Timestamp((*v).into()),
+            ArchivedScalarRefImpl::Timestamptz(v) => Self::Timestamptz((*v).into()),
+            ArchivedScalarRefImpl::Jsonb(_v) => todo!(),
+            ArchivedScalarRefImpl::Serial(v) => Self::Serial((*v).into()),
+            ArchivedScalarRefImpl::Struct(_v) => todo!(),
+            ArchivedScalarRefImpl::List(_v) => todo!(),
+            ArchivedScalarRefImpl::Map(_v) => todo!(),
+            ArchivedScalarRefImpl::Vector(v) => Self::Vector(v.into()),
+            ArchivedScalarRefImpl::Bytea(v) => Self::Bytea(v.get()),
+        }
+    }
+}
+
 fn __test(value: ScalarRefImpl<'_>) {
     rkyv::to_bytes::<_, 1024>(&value).expect("failed to serialize vec");
 }
@@ -769,6 +798,7 @@ impl !PartialOrd for ScalarRefImpl<'_> {}
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
+// pub type ArchivedDatumRef<'a> = &'a ArchivedOption<ArchivedScalarRefImpl<'static>>;
 
 /// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
 pub trait ToOwnedDatum {
@@ -821,6 +851,23 @@ impl ToDatumRef for DatumRef<'_> {
         *self
     }
 }
+
+// FUCK! How to impl?
+// impl ToDatumRef for ArchivedOption<ArchivedScalarRefImpl<'_>> {
+//     #[inline(always)]
+//     fn to_datum_ref(&self) -> DatumRef<'_> {
+//         match self {
+//             ArchivedOption::None => DatumRef::None,
+//             ArchivedOption::Some(inner) => DatumRef::Some(inner.into()),
+//         }
+//     }
+// }
+
+// fn test() {
+//     let test = Some(ScalarRefImpl::Bool(true));
+//     let bytes = rkyv::to_bytes::<_, 1024>(&test).expect("failed to serialize vec");
+//     let archived = unsafe { rkyv::archived_root::<DatumRef<'static>>(&bytes) };
+// }
 
 /// To make sure there is `as_scalar_ref` for all scalar ref types.
 /// See <https://github.com/risingwavelabs/risingwave/pull/9977/files#r1208972881>

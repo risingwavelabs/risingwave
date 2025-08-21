@@ -45,8 +45,16 @@ use crate::array::ArrayResult;
     rkyv::Serialize,
     rkyv::Archive,
 )]
+#[archive_attr(derive(Clone, Copy))]
 #[repr(transparent)]
 pub struct Timestamptz(i64);
+
+impl From<ArchivedTimestamptz> for Timestamptz {
+    #[inline(always)]
+    fn from(value: ArchivedTimestamptz) -> Self {
+        Self(value.0)
+    }
+}
 
 impl ZeroHeapSize for Timestamptz {}
 

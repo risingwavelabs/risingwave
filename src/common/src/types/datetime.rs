@@ -55,6 +55,7 @@ macro_rules! impl_chrono_wrapper {
             rkyv::Archive,
             rkyv::Serialize,
         )]
+        #[archive_attr(derive(Clone, Copy))]
         #[repr(transparent)]
         pub struct $variant_name(pub $chrono);
 
@@ -108,6 +109,13 @@ macro_rules! impl_chrono_wrapper {
 
             fn accepts(ty: &Type) -> bool {
                 matches!(*ty, Type::$pg_type)
+            }
+        }
+
+        impl From<rkyv::Archived<$variant_name>> for $variant_name {
+            #[inline(always)]
+            fn from(value: rkyv::Archived<$variant_name>) -> Self {
+                Self(rkyv::Deserialize::deserialize(&value.0, &mut rkyv::Infallible).unwrap())
             }
         }
     };

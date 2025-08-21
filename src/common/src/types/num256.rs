@@ -34,56 +34,13 @@ use crate::array::ArrayResult;
 use crate::types::to_binary::ToBinary;
 use crate::types::{Buf, DataType, F64, Scalar, ScalarRef, to_text};
 
-pub mod rkyv_impl {
-    use rkyv::with::{ArchiveWith, SerializeWith};
-    use rkyv::{Archive, Fallible, Serialize};
-
-    pub trait MyAs {
-        type Target;
-
-        fn my_as(&self) -> Self::Target;
-    }
-
-    pub struct My;
-
-    impl<T: MyAs<Target = A>, A: Archive> ArchiveWith<T> for My {
-        type Archived = <A as Archive>::Archived;
-        type Resolver = <A as Archive>::Resolver;
-
-        unsafe fn resolve_with(
-            field: &T,
-            pos: usize,
-            resolver: Self::Resolver,
-            out: *mut Self::Archived,
-        ) {
-            unsafe {
-                field.my_as().resolve(pos, resolver, out);
-            }
-        }
-    }
-
-    impl<T: MyAs<Target = A>, A: Serialize<S>, S: Fallible + ?Sized> SerializeWith<T, S> for My {
-        fn serialize_with(field: &T, serializer: &mut S) -> Result<Self::Resolver, S::Error> {
-            field.my_as().serialize(serializer)
-        }
-    }
-}
-
 /// A 256-bit signed integer.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int256(pub(crate) Box<i256>);
 
 /// A reference to an `Int256` value.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, rkyv::Archive, rkyv::Serialize)]
-pub struct Int256Ref<'a>(#[with(rkyv_impl::My)] pub &'a i256);
-
-impl<'a> rkyv_impl::MyAs for &'a i256 {
-    type Target = [i128; 2];
-
-    fn my_as(&self) -> [i128; 2] {
-        self.0
-    }
-}
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
+pub struct Int256Ref<'a>(pub &'a i256);
 
 impl Display for Int256Ref<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
