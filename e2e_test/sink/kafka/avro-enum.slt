@@ -1,5 +1,5 @@
-# e2e_test/sink/avro-enum.slt
 # Test Avro enum support for varchar fields
+control substitution on
 
 statement ok
 set sink_decouple = false;
@@ -43,22 +43,19 @@ create table t_basic_enum(
 
 statement ok
 create sink sink_basic_enum from t_basic_enum with (
-  connector = 'kafka',
-  topic = 'test-rw-sink-enum-basic',
-  properties.bootstrap.server = 'localhost:9092'
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-rw-sink-enum-basic'
 ) format plain encode avro (
-  force_append_only = true,
-  schema.registry = 'http://localhost:8081/'
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  force_append_only = 'true'
 );
 
 statement ok
 create table from_basic_enum with (
-  connector = 'kafka',
-  topic = 'test-rw-sink-enum-basic',
-  properties.bootstrap.server = 'localhost:9092'
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-rw-sink-enum-basic'
 ) format plain encode avro (
-  force_append_only = true,
-  schema.registry = 'http://localhost:8081/'
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
 );
 
 statement ok
@@ -67,9 +64,9 @@ insert into t_basic_enum values
   (2, 'INACTIVE'),
   (3, 'PENDING');
 
-sleep 5s
+sleep 3s
 
-query IT
+query IT retry 5 backoff 1s
 select * from from_basic_enum order by id;
 ----
 1 ACTIVE
@@ -117,22 +114,19 @@ create table t_nullable_enum(
 
 statement ok
 create sink sink_nullable_enum from t_nullable_enum with (
-  connector = 'kafka',
-  topic = 'test-rw-sink-enum-nullable',
-  properties.bootstrap.server = 'localhost:9092'
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-rw-sink-enum-nullable'
 ) format plain encode avro (
-  force_append_only = true,
-  schema.registry = 'http://localhost:8081/'
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  force_append_only = 'true'
 );
 
 statement ok
 create table from_nullable_enum with (
-  connector = 'kafka',
-  topic = 'test-rw-sink-enum-nullable',
-  properties.bootstrap.server = 'localhost:9092'
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-rw-sink-enum-nullable'
 ) format plain encode avro (
-  force_append_only = true,
-  schema.registry = 'http://localhost:8081/'
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
 );
 
 statement ok
@@ -140,21 +134,22 @@ insert into t_nullable_enum values
   (1, 'DRAFT'),
   (2, null);
 
-sleep 5s
+sleep 3s
 
-query IT
+query IT retry 5 backoff 1s
 select * from from_nullable_enum order by id;
 ----
 1 DRAFT
 2 NULL
 
-# ===== Test 3: Error Handling ===== 
+# ===== Test 3: Error Handling (this should not appear in output) ===== 
 statement ok
 insert into t_basic_enum values (4, 'INVALID_STATUS');
 
-sleep 5s
+sleep 3s
 
-query IT
+# Should still only show the valid enum values
+query IT retry 5 backoff 1s
 select * from from_basic_enum order by id;
 ----
 1 ACTIVE
@@ -162,6 +157,14 @@ select * from from_basic_enum order by id;
 3 PENDING
 
 # ===== Cleanup =====
+system ok
+rpk topic delete 'test-rw-sink-enum-basic' || true; \
+(rpk sr subject delete 'test-rw-sink-enum-basic-value' && rpk sr subject delete 'test-rw-sink-enum-basic-value' --permanent) || true;
+
+system ok
+rpk topic delete 'test-rw-sink-enum-nullable' || true; \
+(rpk sr subject delete 'test-rw-sink-enum-nullable-value' && rpk sr subject delete 'test-rw-sink-enum-nullable-value' --permanent) || true;
+
 statement ok
 drop sink sink_basic_enum;
 
@@ -179,26 +182,6 @@ drop table from_basic_enum;
 
 statement ok
 drop table from_nullable_enum;
-
-# Delete topics
-system ok
-rpk topic delete test-rw-sink-enum-basic
-
-system ok
-rpk topic delete test-rw-sink-enum-nullable
-
-# Delete schemas using the environment variable for consistency
-system ok
-curl -X DELETE 'http://localhost:8081//subjects/test-rw-sink-enum-basic-value'
-
-system ok
-curl -X DELETE 'http://localhost:8081//subjects/test-rw-sink-enum-basic-value?permanent=true'
-
-system ok
-curl -X DELETE 'http://localhost:8081//subjects/test-rw-sink-enum-nullable-value'
-
-system ok
-curl -X DELETE 'http://localhost:8081//subjects/test-rw-sink-enum-nullable-value?permanent=true'
 
 statement ok
 set sink_decouple to default;
