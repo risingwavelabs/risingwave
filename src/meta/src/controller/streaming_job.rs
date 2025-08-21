@@ -503,20 +503,18 @@ impl CatalogController {
             }
         }
 
-        if let Some(objects) = &mut objects_to_notify
-            && let Some(sink) = sink
-        {
-            objects.push(PbObject {
-                object_info: Some(PbObjectInfo::Sink(sink.clone())),
-            })
-        }
+        // Add streaming job objects to notification
+        if let Some(objects) = &mut objects_to_notify {
+            let job_objects = [
+                sink.map(|s| PbObjectInfo::Sink(s.clone())),
+                index.map(|i| PbObjectInfo::Index(i.clone())),
+            ];
 
-        if let Some(objects) = &mut objects_to_notify
-            && let Some(index) = index
-        {
-            objects.push(PbObject {
-                object_info: Some(PbObjectInfo::Index(index.clone())),
-            })
+            for object_info in job_objects.into_iter().flatten() {
+                objects.push(PbObject {
+                    object_info: Some(object_info),
+                });
+            }
         }
 
         insert_fragment_relations(&txn, downstreams).await?;
