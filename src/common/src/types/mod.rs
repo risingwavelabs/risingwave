@@ -30,6 +30,7 @@ use postgres_types::{FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_pb::data::PbDataType;
 use risingwave_pb::data::data_type::PbTypeName;
+use rkyv::with::{RefAsBox, Skip};
 use rw_iter_util::ZipEqFast as _;
 use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::EnumDiscriminants;
@@ -718,23 +719,47 @@ macro_rules! scalar_impl_enum {
         pub enum ScalarImpl {
             $( $variant_name($scalar) ),*
         }
-
-        /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
-        /// framework.
-        ///
-        /// Note: `ScalarRefImpl` doesn't contain all information of its `DataType`,
-        /// so sometimes they need to be used together.
-        /// e.g., for `Struct`, we don't have the field names in the value.
-        ///
-        /// See `for_all_variants` for the definition.
-        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-        pub enum ScalarRefImpl<'scalar> {
-            $( $variant_name($scalar_ref) ),*
-        }
     };
 }
 
 for_all_variants! { scalar_impl_enum }
+
+/// `ScalarRefImpl` embeds all possible scalar references in the evaluation
+/// framework.
+///
+/// Note: `ScalarRefImpl` doesn't contain all information of its `DataType`,
+/// so sometimes they need to be used together.
+/// e.g., for `Struct`, we don't have the field names in the value.
+///
+/// See `for_all_variants` for the definition.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize)]
+pub enum ScalarRefImpl<'scalar> {
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Int256(crate::types::Int256Ref<'scalar>),
+    Float32(crate::types::F32),
+    Float64(crate::types::F64),
+    Utf8(#[with(RefAsBox)] &'scalar str),
+    Bool(bool),
+    Decimal(crate::types::Decimal),
+    Interval(crate::types::Interval),
+    Date(crate::types::Date),
+    Time(crate::types::Time),
+    Timestamp(crate::types::Timestamp),
+    Timestamptz(crate::types::Timestamptz),
+    Jsonb(#[with(Skip)] crate::types::JsonbRef<'scalar>),
+    Serial(crate::types::Serial),
+    Struct(#[with(Skip)] crate::types::StructRef<'scalar>),
+    List(#[with(Skip)] crate::types::ListRef<'scalar>),
+    Map(#[with(Skip)] crate::types::MapRef<'scalar>),
+    Vector(crate::types::VectorRef<'scalar>),
+    Bytea(#[with(RefAsBox)] &'scalar [u8]),
+}
+
+fn __test(value: ScalarRefImpl<'_>) {
+    rkyv::to_bytes::<_, 1024>(&value).expect("failed to serialize vec");
+}
 
 // We MUST NOT implement `Ord` for `ScalarImpl` because that will make `Datum` derive an incorrect
 // default `Ord`. To get a default-ordered `ScalarImpl`/`ScalarRefImpl`/`Datum`/`DatumRef`, you can

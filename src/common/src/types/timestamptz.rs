@@ -31,7 +31,19 @@ use crate::array::ArrayResult;
 
 /// Timestamp with timezone.
 #[derive(
-    Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+    Default,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Serialize,
+    rkyv::Archive,
 )]
 #[repr(transparent)]
 pub struct Timestamptz(i64);

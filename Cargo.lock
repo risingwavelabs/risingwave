@@ -2451,6 +2451,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "rkyv",
  "serde",
  "wasm-bindgen",
  "windows-link",
@@ -11582,6 +11583,7 @@ dependencies = [
  "risingwave_license",
  "risingwave_pb",
  "risingwave_telemetry_event",
+ "rkyv",
  "rust_decimal",
  "rusty-fork",
  "rw_iter_util",
@@ -13110,12 +13112,13 @@ dependencies = [
 
 [[package]]
 name = "rkyv"
-version = "0.7.42"
+version = "0.7.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0200c8230b013893c0b2d6213d6ec64ed2b9be2e0e016682b7224ff82cff5c58"
+checksum = "9008cd6385b9e161d8229e1f6549dd23c3d022f132a2ea37ac3a10ac4935779b"
 dependencies = [
  "bitvec",
  "bytecheck",
+ "bytes",
  "hashbrown 0.12.3",
  "ptr_meta",
  "rend",
@@ -13127,9 +13130,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv_derive"
-version = "0.7.42"
+version = "0.7.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2e06b915b5c230a17d7a736d1e2e63ee753c256a8614ef3f5147b13a4f5541d"
+checksum = "503d1d27590a2b0a3a4ca4c94755aa2875657196ecbf401a42eff41d7de532c0"
 dependencies = [
  "proc-macro2",
  "quote",

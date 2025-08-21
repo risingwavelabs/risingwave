@@ -96,7 +96,7 @@ const CANONICAL_ZERO_BITS: u64 = 0x0u64;
 /// s.insert(OrderedFloat(NAN));
 /// assert!(s.contains(&OrderedFloat(NAN)));
 /// ```
-#[derive(Debug, Default, Clone, Copy, Serialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, rkyv::Serialize, rkyv::Archive)]
 #[repr(transparent)]
 pub struct OrderedFloat<T>(pub T);
 

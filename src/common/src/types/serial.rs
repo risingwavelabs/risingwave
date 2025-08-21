@@ -23,7 +23,19 @@ use serde::{Serialize, Serializer};
 use crate::util::row_id::RowId;
 
 // Serial is an alias for i64
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Default,
+    Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+)]
 pub struct Serial(pub(crate) i64);
 
 impl From<Serial> for i64 {

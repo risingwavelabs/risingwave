@@ -42,7 +42,19 @@ const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 macro_rules! impl_chrono_wrapper {
     ($variant_name:ident, $chrono:ty, $pg_type:ident) => {
-        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(
+            Clone,
+            Copy,
+            Debug,
+            Default,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            rkyv::Archive,
+            rkyv::Serialize,
+        )]
         #[repr(transparent)]
         pub struct $variant_name(pub $chrono);
 

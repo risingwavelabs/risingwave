@@ -32,7 +32,19 @@ use crate::array::ArrayResult;
 use crate::types::Decimal::Normalized;
 use crate::types::ordered_float::OrderedFloat;
 
-#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+#[derive(
+    Debug,
+    Copy,
+    parse_display::Display,
+    Clone,
+    PartialEq,
+    Hash,
+    Eq,
+    Ord,
+    PartialOrd,
+    rkyv::Archive,
+    rkyv::Serialize,
+)]
 pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
