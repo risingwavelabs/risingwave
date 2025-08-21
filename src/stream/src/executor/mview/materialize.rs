@@ -664,7 +664,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         }
                         ConflictBehavior::DoUpdateIfNotNull => {
                             // In this section, we compare the new row and old row column by column and perform `DoUpdateIfNotNull` replacement.
-                            // TODO(wcy-fdu): find a way to output the resulting new row directly to the downstream chunk, thus avoiding an additional deserialization step.
 
                             let old_row_deserialized =
                                 row_serde.deserializer.deserialize(old_row.row.clone())?;
