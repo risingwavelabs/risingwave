@@ -73,3 +73,6 @@ jobs:
           commit: HEAD
           message: ':github: Triggering Nexmark Benchmark with image tag: ${{ env.RW_VERSION }}'
           build_env_vars: '{ "BENCH_NAMESPACE": "${{ env.BENCH_NAMESPACE }}", "BENCH_TESTBED": "${{ env.BENCH_TESTBED }}", "RW_VERSION": "${{ env.RW_VERSION }}", "NEXMARK_QUERY": "${{ env.NEXMARK_QUERY }}", "KAFKA_EVENTS": "${{ env.KAFKA_EVENTS }}", "KAFKA_PARTITION": "${{ env.KAFKA_PARTITION }}", "ENABLE_BLACKHOLE": "${{ env.ENABLE_BLACKHOLE }}", "SKIP_DASHBOARD": "${{ env.SKIP_DASHBOARD }}" }'
+      - name: 'Notify dashboard link'
+        run: |
+          echo 'To compare query results, visit: http://metabase.risingwave-cloud.xyz/dashboard/1405-nexmark-8c32g-1cn-rw-source-throughput?start_date=2024-12-01'
