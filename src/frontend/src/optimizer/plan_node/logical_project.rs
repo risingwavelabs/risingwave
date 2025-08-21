@@ -299,7 +299,7 @@ impl ToStream for LogicalProject {
                             .flatten()
                             .all(|stream_key_idx| !impure_expr_indices.contains(stream_key_idx))
                     {
-                        // no need to materialize for Upsert input when none of stream keys is impure expr
+                        // We're operating on non-stream-key columns of upsert stream, no need to materialize.
                         None
                     } else {
                         Some((impure_field_names, impure_expr_indices, impure_exprs))
@@ -347,7 +347,7 @@ impl ToStream for LogicalProject {
                 StreamProject::new(core).into()
             }
         } else {
-            // Materialized expressions feature is not enabled, create a regular `StreamProject`
+            // No expressions to materialize or the feature is not enabled, create a regular `StreamProject`
             let core = generic::Project::new(self.exprs().clone(), new_input);
             StreamProject::new(core).into()
         };
