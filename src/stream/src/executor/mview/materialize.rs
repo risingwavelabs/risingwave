@@ -26,14 +26,13 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
-use risingwave_common::row::{CompactedRow, RowDeserializer};
+use risingwave_common::row::{CompactedRow, OwnedRow};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::catalog::table::Engine;
-use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 
 use crate::cache::ManagedLruCache;
@@ -433,19 +432,18 @@ fn generate_output(
     // construct output chunk
     // TODO(st1page): when materialize partial columns(), we should construct some columns in the pk
     let mut new_ops: Vec<Op> = vec![];
-    let mut new_rows: Vec<Bytes> = vec![];
-    let row_deserializer = RowDeserializer::new(data_types.clone());
+    let mut new_rows: Vec<OwnedRow> = vec![];
     for (_, row_op) in change_buffer.into_parts() {
         match row_op {
-            KeyOp::Insert(value) => {
+            ChangeBufferKeyOp::Insert(value) => {
                 new_ops.push(Op::Insert);
                 new_rows.push(value);
             }
-            KeyOp::Delete(old_value) => {
+            ChangeBufferKeyOp::Delete(old_value) => {
                 new_ops.push(Op::Delete);
                 new_rows.push(old_value);
             }
-            KeyOp::Update((old_value, new_value)) => {
+            ChangeBufferKeyOp::Update((old_value, new_value)) => {
                 // if old_value == new_value, we don't need to emit updates to downstream.
                 if old_value != new_value {
                     new_ops.push(Op::UpdateDelete);
@@ -458,9 +456,8 @@ fn generate_output(
     }
     let mut data_chunk_builder = DataChunkBuilder::new(data_types, new_rows.len() + 1);
 
-    for row_bytes in new_rows {
-        let res =
-            data_chunk_builder.append_one_row(row_deserializer.deserialize(row_bytes.as_ref())?);
+    for row in new_rows {
+        let res = data_chunk_builder.append_one_row(row);
         debug_assert!(res.is_none());
     }
 
@@ -475,7 +472,15 @@ fn generate_output(
 /// `ChangeBuffer` is a buffer to handle chunk into `KeyOp`.
 /// TODO(rc): merge with `TopNStaging`.
 struct ChangeBuffer {
-    buffer: HashMap<Vec<u8>, KeyOp>,
+    buffer: HashMap<Vec<u8>, ChangeBufferKeyOp>,
+}
+
+/// `KeyOp` variant for `ChangeBuffer` that stores `OwnedRow` instead of Bytes
+enum ChangeBufferKeyOp {
+    Insert(OwnedRow),
+    Delete(OwnedRow),
+    /// (`old_value`, `new_value`)
+    Update((OwnedRow, OwnedRow)),
 }
 
 impl ChangeBuffer {
@@ -485,16 +490,16 @@ impl ChangeBuffer {
         }
     }
 
-    fn insert(&mut self, pk: Vec<u8>, value: Bytes) {
+    fn insert(&mut self, pk: Vec<u8>, value: OwnedRow) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(KeyOp::Insert(value));
+                e.insert(ChangeBufferKeyOp::Insert(value));
             }
             Entry::Occupied(mut e) => {
-                if let KeyOp::Delete(old_value) = e.get_mut() {
+                if let ChangeBufferKeyOp::Delete(old_value) = e.get_mut() {
                     let old_val = std::mem::take(old_value);
-                    e.insert(KeyOp::Update((old_val, value)));
+                    e.insert(ChangeBufferKeyOp::Update((old_val, value)));
                 } else {
                     unreachable!();
                 }
@@ -502,48 +507,48 @@ impl ChangeBuffer {
         }
     }
 
-    fn delete(&mut self, pk: Vec<u8>, old_value: Bytes) {
-        let entry: Entry<'_, Vec<u8>, KeyOp> = self.buffer.entry(pk);
+    fn delete(&mut self, pk: Vec<u8>, old_value: OwnedRow) {
+        let entry: Entry<'_, Vec<u8>, ChangeBufferKeyOp> = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(KeyOp::Delete(old_value));
+                e.insert(ChangeBufferKeyOp::Delete(old_value));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                KeyOp::Insert(_) => {
+                ChangeBufferKeyOp::Insert(_) => {
                     e.remove();
                 }
-                KeyOp::Update((prev, _curr)) => {
+                ChangeBufferKeyOp::Update((prev, _curr)) => {
                     let prev = std::mem::take(prev);
-                    e.insert(KeyOp::Delete(prev));
+                    e.insert(ChangeBufferKeyOp::Delete(prev));
                 }
-                KeyOp::Delete(_) => {
+                ChangeBufferKeyOp::Delete(_) => {
                     unreachable!();
                 }
             },
         }
     }
 
-    fn update(&mut self, pk: Vec<u8>, old_value: Bytes, new_value: Bytes) {
+    fn update(&mut self, pk: Vec<u8>, old_value: OwnedRow, new_value: OwnedRow) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(KeyOp::Update((old_value, new_value)));
+                e.insert(ChangeBufferKeyOp::Update((old_value, new_value)));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                KeyOp::Insert(_) => {
-                    e.insert(KeyOp::Insert(new_value));
+                ChangeBufferKeyOp::Insert(_) => {
+                    e.insert(ChangeBufferKeyOp::Insert(new_value));
                 }
-                KeyOp::Update((_prev, curr)) => {
+                ChangeBufferKeyOp::Update((_prev, curr)) => {
                     *curr = new_value;
                 }
-                KeyOp::Delete(_) => {
+                ChangeBufferKeyOp::Delete(_) => {
                     unreachable!()
                 }
             },
         }
     }
 
-    fn into_parts(self) -> HashMap<Vec<u8>, KeyOp> {
+    fn into_parts(self) -> HashMap<Vec<u8>, ChangeBufferKeyOp> {
         self.buffer
     }
 }
@@ -620,7 +625,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 Op::Insert | Op::UpdateInsert => {
                     let Some(old_row) = self.get_expected(&key) else {
                         // not exists before, meaning no conflict, simply insert
-                        change_buffer.insert(key.clone(), row.clone());
+                        let new_row_deserialized =
+                            row_serde.deserializer.deserialize(row.clone())?;
+                        change_buffer.insert(key.clone(), new_row_deserialized);
                         self.lru_cache.put(key, Some(CompactedRow { row }));
                         continue;
                     };
@@ -628,12 +635,12 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     // now conflict happens, handle it according to the specified behavior
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            let need_overwrite = if let Some(idx) = version_column_index {
-                                let old_row_deserialized =
-                                    row_serde.deserializer.deserialize(old_row.row.clone())?;
-                                let new_row_deserialized =
-                                    row_serde.deserializer.deserialize(row.clone())?;
+                            let old_row_deserialized =
+                                row_serde.deserializer.deserialize(old_row.row.clone())?;
+                            let new_row_deserialized =
+                                row_serde.deserializer.deserialize(row.clone())?;
 
+                            let need_overwrite = if let Some(idx) = version_column_index {
                                 version_is_newer_or_equal(
                                     old_row_deserialized.index(idx as usize),
                                     new_row_deserialized.index(idx as usize),
@@ -642,8 +649,13 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 // no version column specified, just overwrite
                                 true
                             };
+
                             if need_overwrite {
-                                change_buffer.update(key.clone(), old_row.row.clone(), row.clone());
+                                change_buffer.update(
+                                    key.clone(),
+                                    old_row_deserialized,
+                                    new_row_deserialized,
+                                );
                                 self.lru_cache.put(key.clone(), Some(CompactedRow { row }));
                             };
                         }
@@ -669,19 +681,20 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                             if need_overwrite {
                                 let mut row_deserialized_vec =
-                                    old_row_deserialized.into_inner().into_vec();
+                                    old_row_deserialized.clone().into_inner().into_vec();
                                 replace_if_not_null(
                                     &mut row_deserialized_vec,
                                     new_row_deserialized,
                                 );
                                 let updated_row = OwnedRow::new(row_deserialized_vec);
-                                let updated_row_bytes =
-                                    Bytes::from(row_serde.serializer.serialize(updated_row));
+                                let updated_row_bytes = Bytes::from(
+                                    row_serde.serializer.serialize(updated_row.clone()),
+                                );
 
                                 change_buffer.update(
                                     key.clone(),
-                                    old_row.row.clone(),
-                                    updated_row_bytes.clone(),
+                                    old_row_deserialized,
+                                    updated_row,
                                 );
                                 self.lru_cache.put(
                                     key.clone(),
@@ -699,7 +712,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     match conflict_behavior {
                         checked_conflict_behaviors!() => {
                             if let Some(old_row) = self.get_expected(&key) {
-                                change_buffer.delete(key.clone(), old_row.row.clone());
+                                let old_row_deserialized =
+                                    row_serde.deserializer.deserialize(old_row.row.clone())?;
+                                change_buffer.delete(key.clone(), old_row_deserialized);
                                 // put a None into the cache to represent deletion
                                 self.lru_cache.put(key, None);
                             } else {
