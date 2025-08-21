@@ -10,11 +10,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(TableEnum::Table)
-                    .add_column(
-                        ColumnDef::new(TableEnum::CdcTableType)
-                            .string()
-                            .null(),
-                    )
+                    .add_column(ColumnDef::new(TableEnum::CdcTableType).string().null())
                     .to_owned(),
             )
             .await

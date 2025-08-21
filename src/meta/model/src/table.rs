@@ -14,9 +14,10 @@
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbEngine, PbTableType};
+use risingwave_pb::catalog::table::{
+    CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
+};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable, PbVectorIndexInfo};
-use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
 use sea_orm::entity::prelude::*;
@@ -40,6 +41,8 @@ pub enum TableType {
     Index,
     #[sea_orm(string_value = "INTERNAL")]
     Internal,
+    #[sea_orm(string_value = "VECTOR_INDEX")]
+    VectorIndex,
 }
 
 impl From<TableType> for PbTableType {
@@ -49,6 +52,7 @@ impl From<TableType> for PbTableType {
             TableType::MaterializedView => Self::MaterializedView,
             TableType::Index => Self::Index,
             TableType::Internal => Self::Internal,
+            TableType::VectorIndex => Self::VectorIndex,
         }
     }
 }
@@ -60,6 +64,7 @@ impl From<PbTableType> for TableType {
             PbTableType::MaterializedView => Self::MaterializedView,
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
+            PbTableType::VectorIndex => Self::VectorIndex,
             PbTableType::Unspecified => unreachable!("Unspecified table type"),
         }
     }
@@ -362,7 +367,7 @@ impl From<PbTable> for ActiveModel {
                     2 => CdcTableType::Mysql,
                     3 => CdcTableType::Sqlserver,
                     4 => CdcTableType::Mongo,
-                    _ => panic!("Invalid CDC table type: {}", cdc_table_type),
+                    _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
             })),
         }
