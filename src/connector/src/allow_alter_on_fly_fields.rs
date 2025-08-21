@@ -17,6 +17,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
+
 use crate::error::ConnectorError;
 
 macro_rules! use_source_properties {
@@ -62,9 +63,9 @@ mod source_properties {
 }
 
 mod sink_properties {
-    use crate::use_all_sink_configs;
     use crate::sink::Sink;
     use crate::sink::file_sink::fs::FsSink;
+    use crate::use_all_sink_configs;
 
     use_all_sink_configs!();
 
@@ -91,152 +92,195 @@ mod sink_properties {
 }
 
 /// Map of source connector names to their `allow_alter_on_fly` field names
-pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
-    use source_properties::*;
-    let mut map = HashMap::new();
-    // CDC Properties - added for schema.change.failure.policy
-    map.try_insert(
-        std::any::type_name::<MysqlCdcProperties>().to_owned(),
-        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<PostgresCdcProperties>().to_owned(),
-        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
-    ).unwrap();
-    map.try_insert(
-        std::any::type_name::<SqlServerCdcProperties>().to_owned(),
-        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
-    ).unwrap();
+pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> =
+    LazyLock::new(|| {
+        use source_properties::*;
+        let mut map = HashMap::new();
+        // CDC Properties - added for schema.change.failure.policy
+        map.try_insert(
+            std::any::type_name::<MysqlCdcProperties>().to_owned(),
+            ["cdc.source.wait.streaming.start.timeout".to_owned()]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
+        map.try_insert(
+            std::any::type_name::<PostgresCdcProperties>().to_owned(),
+            ["cdc.source.wait.streaming.start.timeout".to_owned()]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
+        map.try_insert(
+            std::any::type_name::<SqlServerCdcProperties>().to_owned(),
+            ["cdc.source.wait.streaming.start.timeout".to_owned()]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
 
-    map.try_insert(
-        std::any::type_name::<MongodbCdcProperties>().to_owned(),
-        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
-    ).unwrap();
-    // KafkaProperties
-    map.try_insert(
-        std::any::type_name::<KafkaProperties>().to_owned(),
-        [
-            "group.id.prefix".to_owned(),
-            "properties.sync.call.timeout".to_owned(),
-            "properties.security.protocol".to_owned(),
-            "properties.ssl.endpoint.identification.algorithm".to_owned(),
-            "properties.sasl.mechanism".to_owned(),
-            "properties.sasl.username".to_owned(),
-            "properties.sasl.password".to_owned(),
-            "properties.message.max.bytes".to_owned(),
-            "properties.receive.message.max.bytes".to_owned(),
-            "properties.statistics.interval.ms".to_owned(),
-            "properties.client.id".to_owned(),
-            "properties.enable.ssl.certificate.verification".to_owned(),
-            "properties.queued.min.messages".to_owned(),
-            "properties.queued.max.messages.kbytes".to_owned(),
-            "properties.fetch.wait.max.ms".to_owned(),
-            "properties.fetch.queue.backoff.ms".to_owned(),
-            "properties.fetch.max.bytes".to_owned(),
-            "properties.enable.auto.commit".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map
-});
+        map.try_insert(
+            std::any::type_name::<MongodbCdcProperties>().to_owned(),
+            ["cdc.source.wait.streaming.start.timeout".to_owned()]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
+        // KafkaProperties
+        map.try_insert(
+            std::any::type_name::<KafkaProperties>().to_owned(),
+            [
+                "group.id.prefix".to_owned(),
+                "properties.sync.call.timeout".to_owned(),
+                "properties.security.protocol".to_owned(),
+                "properties.ssl.endpoint.identification.algorithm".to_owned(),
+                "properties.sasl.mechanism".to_owned(),
+                "properties.sasl.username".to_owned(),
+                "properties.sasl.password".to_owned(),
+                "properties.message.max.bytes".to_owned(),
+                "properties.receive.message.max.bytes".to_owned(),
+                "properties.statistics.interval.ms".to_owned(),
+                "properties.client.id".to_owned(),
+                "properties.enable.ssl.certificate.verification".to_owned(),
+                "properties.queued.min.messages".to_owned(),
+                "properties.queued.max.messages.kbytes".to_owned(),
+                "properties.fetch.wait.max.ms".to_owned(),
+                "properties.fetch.queue.backoff.ms".to_owned(),
+                "properties.fetch.max.bytes".to_owned(),
+                "properties.enable.auto.commit".to_owned(),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .unwrap();
+        map
+    });
 
 /// Map of sink connector names to their `allow_alter_on_fly` field names
-pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
-    use sink_properties::*;
-    let mut map = HashMap::new();
-    // ClickHouseConfig
-    map.try_insert(
-        std::any::type_name::<ClickHouseConfig>().to_owned(),
-        [
-            "commit_checkpoint_interval".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    // DeltaLakeConfig
-    map.try_insert(
-        std::any::type_name::<DeltaLakeConfig>().to_owned(),
-        [
-            "commit_checkpoint_interval".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    // IcebergConfig
-    map.try_insert(
-        std::any::type_name::<IcebergConfig>().to_owned(),
-        [
-            "commit_checkpoint_interval".to_owned(),
-            "enable_compaction".to_owned(),
-            "compaction_interval_sec".to_owned(),
-            "enable_snapshot_expiration".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    // KafkaConfig
-    map.try_insert(
-        std::any::type_name::<KafkaConfig>().to_owned(),
-        [
-            "properties.sync.call.timeout".to_owned(),
-            "properties.security.protocol".to_owned(),
-            "properties.ssl.endpoint.identification.algorithm".to_owned(),
-            "properties.sasl.mechanism".to_owned(),
-            "properties.sasl.username".to_owned(),
-            "properties.sasl.password".to_owned(),
-            "properties.message.max.bytes".to_owned(),
-            "properties.receive.message.max.bytes".to_owned(),
-            "properties.statistics.interval.ms".to_owned(),
-            "properties.client.id".to_owned(),
-            "properties.enable.ssl.certificate.verification".to_owned(),
-            "properties.allow.auto.create.topics".to_owned(),
-            "properties.queue.buffering.max.messages".to_owned(),
-            "properties.queue.buffering.max.kbytes".to_owned(),
-            "properties.queue.buffering.max.ms".to_owned(),
-            "properties.enable.idempotence".to_owned(),
-            "properties.message.send.max.retries".to_owned(),
-            "properties.retry.backoff.ms".to_owned(),
-            "properties.batch.num.messages".to_owned(),
-            "properties.batch.size".to_owned(),
-            "properties.message.timeout.ms".to_owned(),
-            "properties.max.in.flight.requests.per.connection".to_owned(),
-            "properties.request.required.acks".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    // StarrocksConfig
-    map.try_insert(
-        std::any::type_name::<StarrocksConfig>().to_owned(),
-        [
-            "commit_checkpoint_interval".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map
-});
+pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> =
+    LazyLock::new(|| {
+        use sink_properties::*;
+        let mut map = HashMap::new();
+        // ClickHouseConfig
+        map.try_insert(
+            std::any::type_name::<ClickHouseConfig>().to_owned(),
+            ["commit_checkpoint_interval".to_owned()]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
+        // DeltaLakeConfig
+        map.try_insert(
+            std::any::type_name::<DeltaLakeConfig>().to_owned(),
+            ["commit_checkpoint_interval".to_owned()]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
+        // IcebergConfig
+        map.try_insert(
+            std::any::type_name::<IcebergConfig>().to_owned(),
+            [
+                "commit_checkpoint_interval".to_owned(),
+                "enable_compaction".to_owned(),
+                "compaction_interval_sec".to_owned(),
+                "enable_snapshot_expiration".to_owned(),
+                "snapshot_expiration_expire_older_than".to_owned(),
+                "snapshot_expiration_retain_last".to_owned(),
+                "snapshot_expiration_clear_expired_files".to_owned(),
+                "snapshot_expiration_clear_expired_meta_data".to_owned(),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .unwrap();
+        // KafkaConfig
+        map.try_insert(
+            std::any::type_name::<KafkaConfig>().to_owned(),
+            [
+                "properties.sync.call.timeout".to_owned(),
+                "properties.security.protocol".to_owned(),
+                "properties.ssl.endpoint.identification.algorithm".to_owned(),
+                "properties.sasl.mechanism".to_owned(),
+                "properties.sasl.username".to_owned(),
+                "properties.sasl.password".to_owned(),
+                "properties.message.max.bytes".to_owned(),
+                "properties.receive.message.max.bytes".to_owned(),
+                "properties.statistics.interval.ms".to_owned(),
+                "properties.client.id".to_owned(),
+                "properties.enable.ssl.certificate.verification".to_owned(),
+                "properties.allow.auto.create.topics".to_owned(),
+                "properties.queue.buffering.max.messages".to_owned(),
+                "properties.queue.buffering.max.kbytes".to_owned(),
+                "properties.queue.buffering.max.ms".to_owned(),
+                "properties.enable.idempotence".to_owned(),
+                "properties.message.send.max.retries".to_owned(),
+                "properties.retry.backoff.ms".to_owned(),
+                "properties.batch.num.messages".to_owned(),
+                "properties.batch.size".to_owned(),
+                "properties.message.timeout.ms".to_owned(),
+                "properties.max.in.flight.requests.per.connection".to_owned(),
+                "properties.request.required.acks".to_owned(),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .unwrap();
+        // StarrocksConfig
+        map.try_insert(
+            std::any::type_name::<StarrocksConfig>().to_owned(),
+            ["commit_checkpoint_interval".to_owned()]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
+        map
+    });
 
 /// Map of connection names to their `allow_alter_on_fly` field names
-pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
-    use crate::connector_common::*;
-    let mut map = HashMap::new();
-    // KafkaConnection
-    map.try_insert(
-        std::any::type_name::<KafkaConnection>().to_owned(),
-        [
-            "properties.security.protocol".to_owned(),
-            "properties.ssl.endpoint.identification.algorithm".to_owned(),
-            "properties.sasl.mechanism".to_owned(),
-            "properties.sasl.username".to_owned(),
-            "properties.sasl.password".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
-    map
-});
+pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> =
+    LazyLock::new(|| {
+        use crate::connector_common::*;
+        let mut map = HashMap::new();
+        // KafkaConnection
+        map.try_insert(
+            std::any::type_name::<KafkaConnection>().to_owned(),
+            [
+                "properties.security.protocol".to_owned(),
+                "properties.ssl.endpoint.identification.algorithm".to_owned(),
+                "properties.sasl.mechanism".to_owned(),
+                "properties.sasl.username".to_owned(),
+                "properties.sasl.password".to_owned(),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .unwrap();
+        map
+    });
 
 /// Get all source connector names that have `allow_alter_on_fly` fields
 pub fn get_source_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {
-    SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+    SOURCE_ALLOW_ALTER_ON_FLY_FIELDS
+        .keys()
+        .map(|s| s.as_str())
+        .collect()
 }
 
 /// Get all sink connector names that have `allow_alter_on_fly` fields
 pub fn get_sink_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {
-    SINK_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+    SINK_ALLOW_ALTER_ON_FLY_FIELDS
+        .keys()
+        .map(|s| s.as_str())
+        .collect()
 }
 
 /// Get all connection names that have `allow_alter_on_fly` fields
 pub fn get_connection_names_with_allow_alter_on_fly_fields() -> Vec<&'static str> {
-    CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+    CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS
+        .keys()
+        .map(|s| s.as_str())
+        .collect()
 }
 
 /// Checks if all given fields are allowed to be altered on the fly for the specified source connector.
@@ -319,4 +363,3 @@ pub fn check_sink_allow_alter_on_fly_fields(
     }
     Ok(())
 }
-
