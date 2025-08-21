@@ -568,6 +568,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         yield Message::Barrier(barrier);
                     }
                     Message::Chunk(chunk) => {
+                        if actor_snapshot_splits.is_empty() {
+                            continue;
+                        }
                         if chunk.cardinality() == 0 {
                             continue;
                         }
