@@ -198,6 +198,7 @@ async fn test_merger_sum_aggr() {
                     local_barrier_manager.clone(),
                     schema,
                     100,
+                    None,
                 )
                 .boxed(),
             );
@@ -282,8 +283,10 @@ async fn test_merger_sum_aggr() {
             .unwrap();
         epoch.inc_epoch();
     }
-    let b = Barrier::new_test_barrier(epoch)
-        .with_mutation(Mutation::Stop(actors.clone().into_iter().collect()));
+    let b = Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(StopMutation {
+        dropped_actors: actors.clone().into_iter().collect(),
+        ..Default::default()
+    }));
     barrier_test_env.inject_barrier(&b, actors);
     input
         .send(Message::Barrier(b.into_dispatcher()).into())
