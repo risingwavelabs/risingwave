@@ -59,7 +59,7 @@ create table from_basic_enum with (
 );
 
 statement ok
-insert into t_basic_enum values 
+insert into t_basic_enum values
   (1, 'ACTIVE'),
   (2, 'INACTIVE'),
   (3, 'PENDING');
@@ -97,7 +97,7 @@ sr_register test-rw-sink-enum-nullable-value AVRO << EOF
         "null",
         {
           "type": "enum",
-          "name": "Status", 
+          "name": "Status",
           "symbols": ["DRAFT", "PUBLISHED"]
         }
       ]
@@ -130,7 +130,7 @@ create table from_nullable_enum with (
 );
 
 statement ok
-insert into t_nullable_enum values 
+insert into t_nullable_enum values
   (1, 'DRAFT'),
   (2, null);
 
@@ -142,7 +142,7 @@ select * from from_nullable_enum order by id;
 1 DRAFT
 2 NULL
 
-# ===== Test 3: Error Handling (this should not appear in output) ===== 
+# ===== Test 3: Error Handling (this should not appear in output) =====
 statement ok
 insert into t_basic_enum values (4, 'INVALID_STATUS');
 
