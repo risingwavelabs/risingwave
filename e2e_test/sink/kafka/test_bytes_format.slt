@@ -96,7 +96,7 @@ statement ok
 insert into t_single_bytea values ('\xDEADBEEF'), ('\xCAFEBABE'), ('\x00112233');
 
 statement ok
-insert into t_single_bytea_pk values ('\xFEEDBEEF'), ('\xBADCODE');
+insert into t_single_bytea_pk values ('\xFEEDBEEF'), ('\xBADC0DE');
 
 # Update test for upsert
 statement ok
@@ -111,6 +111,15 @@ with (
   topic = 'test-rw-sink-bytes-format',
 ) format plain encode bytes;
 
+# Test source reading from upsert bytes format sink
+statement ok
+create table t_source_upsert_bytes (data bytea)
+with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-upsert-bytes',
+) format plain encode bytes;
+
 sleep 2s
 
 # Verify data roundtrip
@@ -122,9 +131,22 @@ select data from t_source_bytes order by data;
 \xdeadbeef
 
 
+sleep 2s
+
+# Verify upsert data roundtrip
+query T retry 3 backoff 1s
+select data from t_source_upsert_bytes order by data;
+----
+\xbadc0de
+\xfeedbeef
+
+
 # Clean up
 statement ok
 drop table t_source_bytes;
+
+statement ok
+drop table t_source_upsert_bytes cascade;
 
 statement ok
 drop sink sink_bytes_format;
