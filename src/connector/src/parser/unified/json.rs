@@ -595,17 +595,16 @@ impl JsonParseOptions {
             }
 
             // ---- List -----
-            (DataType::List(item_type), ValueType::Array) => {
+            (DataType::List(item_type), ValueType::Array) => ListValue::new({
                 let array = value.as_array().unwrap();
-
-                // Normal processing
                 let mut builder = item_type.create_array_builder(array.len());
                 for v in array {
                     let value = self.parse(v, item_type)?;
                     builder.append(value);
                 }
-                ListValue::new(builder.finish()).into()
-            }
+                builder.finish()
+            })
+            .into(),
 
             // ---- Bytea -----
             (DataType::Bytea, ValueType::String) => {

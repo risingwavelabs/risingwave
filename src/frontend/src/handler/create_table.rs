@@ -1343,17 +1343,18 @@ async fn bind_cdc_table_schema_externally(
         .await
         .context("failed to auto derive table schema")?;
 
-    let columns: Vec<ColumnCatalog> = table
-        .column_descs()
-        .iter()
-        .cloned()
-        .map(|column_desc| ColumnCatalog {
-            column_desc,
-            is_hidden: false,
-        })
-        .collect();
-
-    Ok((columns, table.pk_names().clone()))
+    Ok((
+        table
+            .column_descs()
+            .iter()
+            .cloned()
+            .map(|column_desc| ColumnCatalog {
+                column_desc,
+                is_hidden: false,
+            })
+            .collect(),
+        table.pk_names().clone(),
+    ))
 }
 
 /// Derive schema for cdc table when create a new Table or alter an existing Table

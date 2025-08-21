@@ -115,7 +115,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         // Determine if we should handle TOAST based on CDC table type
-        // Only handle TOAST for PostgreSQL CDC tables (cdc_table_type = Some(1))
+        // Only handle TOAST for PostgreSQL CDC tables.
         let handle_toast = table_catalog.cdc_table_type == Some(1);
 
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -512,7 +512,7 @@ fn is_debezium_unavailable_value(
 }
 
 /// Fix TOAST columns by replacing unavailable values with old row values.
-fn handle_toast_columns_for_cdc(
+fn handle_toast_columns_for_postgres_cdc(
     old_row: &OwnedRow,
     new_row: &OwnedRow,
     toastable_indices: &[usize],
@@ -766,7 +766,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                     && let Some(toastable_indices) = toastable_column_indices
                                 {
                                     // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
-                                    handle_toast_columns_for_cdc(
+                                    handle_toast_columns_for_postgres_cdc(
                                         &old_row_deserialized,
                                         &new_row_deserialized,
                                         toastable_indices,
@@ -826,7 +826,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                     // So we re-deserialize the old row
                                     let old_row_deserialized_again =
                                         row_serde.deserializer.deserialize(old_row.row.clone())?;
-                                    updated_row = handle_toast_columns_for_cdc(
+                                    updated_row = handle_toast_columns_for_postgres_cdc(
                                         &old_row_deserialized_again,
                                         &updated_row,
                                         toastable_indices,

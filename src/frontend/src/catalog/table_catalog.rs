@@ -598,16 +598,16 @@ impl TableCatalog {
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
-            cdc_table_type: self.cdc_table_type.clone().map(|cdc_table_type| {
-                match cdc_table_type {
-                    CdcTableType::Undefined => 0,
+            cdc_table_type: self.cdc_table_type.clone().map(
+                |cdc_table_type| match cdc_table_type {
+                    CdcTableType::Undefined | CdcTableType::Mock => 0,
                     CdcTableType::Postgres => 1,
                     CdcTableType::MySql => 2,
                     CdcTableType::SqlServer => 3,
-                    CdcTableType::Mock => 0,  // Map to Unspecified
-                    CdcTableType::Citus => 5, // Map to Unspecified
-                }
-            }),
+
+                    CdcTableType::Citus => 5,
+                },
+            ),
         }
     }
 
