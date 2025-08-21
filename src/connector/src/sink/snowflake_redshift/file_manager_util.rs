@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_meta_model::snowflake_redshift_sink_file::{
-    self, ActiveModel, Column, Entity, Model,
-};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, Order, QueryFilter, QueryOrder, Set};
+use risingwave_meta_model::snowflake_redshift_sink_file::{ActiveModel, Column, Entity, Model};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror_ext::AsReport;
 
 use crate::sink::Result;
-use crate::sink::snowflake_redshift::file_manager_util;
 
 pub async fn insert_file_paths_with_sink_id(
     sink_id: u32,
@@ -30,7 +27,7 @@ pub async fn insert_file_paths_with_sink_id(
     let m = ActiveModel {
         sink_id: Set(sink_id as i32),
         end_epoch: Set(end_epoch.try_into().unwrap()),
-        file_paths: Set(file_paths),
+        file_paths: Set(risingwave_meta_model::StringArray::from(file_paths)),
     };
     match Entity::insert(m).exec(&db).await {
         Ok(_) => Ok(()),
@@ -54,7 +51,7 @@ pub async fn get_file_paths_by_sink_id(
     let mut max_end_epoch = 0;
 
     for model in models {
-        file_paths.extend(model.file_paths);
+        file_paths.extend(model.file_paths.into_string_array());
         max_end_epoch = max_end_epoch.max(model.end_epoch as u64);
     }
 

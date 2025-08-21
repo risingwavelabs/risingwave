@@ -45,6 +45,7 @@ mod m20250528_064717_barrier_interval_per_database;
 mod m20250603_084830_default_privilege;
 mod m20250702_062029_cdc_table_snapshot_splits;
 mod m20250710_065220_sink_auto_refresh_schema;
+mod m20250820_080903_snowflake_redshift_sink_file_path;
 mod utils;
 
 pub struct Migrator;
@@ -128,6 +129,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250603_084830_default_privilege::Migration),
             Box::new(m20250702_062029_cdc_table_snapshot_splits::Migration),
             Box::new(m20250710_065220_sink_auto_refresh_schema::Migration),
+            Box::new(m20250820_080903_snowflake_redshift_sink_file_path::Migration),
         ]
     }
 }

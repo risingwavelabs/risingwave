@@ -16,15 +16,15 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};
 use serde::{Deserialize, Serialize};
 
-use crate::{Epoch, SinkId};
+use crate::{Epoch, SinkId, StringArray};
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default, Serialize, Deserialize)]
-#[sea_orm(table_name = "snowflake_redshift_sink_file_metadata")]
+#[sea_orm(table_name = "snowflake_redshift_sink_file_path")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub sink_id: SinkId,
     #[sea_orm(primary_key, auto_increment = false)]
     pub end_epoch: Epoch,
-    pub file_paths: Vec<String>,
+    pub file_paths: StringArray,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -351,6 +351,14 @@ impl I32Array {
     }
 }
 
+derive_from_json_struct!(StringArray, Vec<String>);
+
+impl StringArray {
+    pub fn into_string_array(self) -> Vec<String> {
+        self.0.into_iter().map(|id| id as _).collect()
+    }
+}
+
 derive_from_json_struct!(ActorUpstreamActors, BTreeMap<FragmentId, Vec<ActorId>>);
 
 impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
