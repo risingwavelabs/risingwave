@@ -6,7 +6,7 @@ on:
         description: 'Performance test namespace (date-time will be appended)'
         required: true
         type: string
-        default: 'Untitled'
+        default: 'untitled'
       rw_image_tag:
         description: 'RisingWave Image Tag (docker image tag, e.g. v2.6.0-alpha--bench--e7ca9bb--kwannoel-enhance-backpressure-graph6)'
         required: true
