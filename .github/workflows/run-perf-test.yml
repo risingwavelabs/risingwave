@@ -16,7 +16,7 @@ on:
         description: 'Nexmark Queries to Benchmark'
         required: true
         type: string
-        default: 'q0,q4,q6,q15,q20,q101'
+        default: 'q0,q4,q15,q20,q22,q101'
 
 jobs:
   run-perf-test:
