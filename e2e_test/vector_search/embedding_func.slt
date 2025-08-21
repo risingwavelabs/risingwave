@@ -1,0 +1,47 @@
+query
+select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, 'first')::vector(3);
+----
+[1,2,3]
+
+query
+select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, 'second')::vector(3);
+----
+[4,5,6]
+
+query
+select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, 'any other')::vector(3);
+----
+[0,0,0]
+
+query
+select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, null)::vector(3);
+----
+NULL
+
+statement ok
+create function get_embedding(string) returns vector(3) language sql as $$
+select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, $1)::vector(3);
+$$;
+
+query
+select get_embedding('first')::vector(3);
+----
+[1,2,3]
+
+query
+select get_embedding('second')::vector(3);
+----
+[4,5,6]
+
+query
+select get_embedding('any other')::vector(3);
+----
+[0,0,0]
+
+query
+select get_embedding(null)::vector(3);
+----
+NULL
+
+statement ok
+drop function get_embedding;

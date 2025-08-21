@@ -11,38 +11,38 @@
 - before:
   - create_table
   sql: |
-    select id, value, openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding
+    select id, value, openai_embedding('{"api-key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
     from t;
   logical_plan: |-
-    LogicalProject { exprs: [t.id, t.value, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr1] }
+    LogicalProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
     └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.id, t.value, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr1] }
+    └─BatchProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
       └─BatchScan { table: t, columns: [t.id, t.value], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, value, embedding, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.id, t.value, $expr1, t._row_id] }
-      └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr1] }
+      └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
         └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - before:
   - create_table
   sql: |
     select id, value, id + 1 as id_plus_one,
-           openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding,
+           openai_embedding('{"api-key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding,
            upper(value) as upper_value
     from t;
   logical_plan: |-
-    LogicalProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr2, Upper(t.value) as $expr3] }
+    LogicalProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3] }
     └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr2, Upper(t.value) as $expr3] }
+    └─BatchProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3] }
       └─BatchScan { table: t, columns: [t.id, t.value], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, value, id_plus_one, embedding, upper_value, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr2, $expr1, Upper(t.value) as $expr3, t._row_id] }
-      └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr1] }
+      └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
         └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: materialize impure expressions after singleton (top-n)
   sql: |
@@ -160,34 +160,34 @@
 - before:
   - create_append_only_table
   sql: |
-    select id, value, openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding
+    select id, value, openai_embedding('{"api-key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
     from t;
   logical_plan: |-
-    LogicalProject { exprs: [t.id, t.value, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr1] }
+    LogicalProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
     └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.id, t.value, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr1] }
+    └─BatchProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
       └─BatchScan { table: t, columns: [t.id, t.value], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, value, embedding, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.id, t.value, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr1, t._row_id] }
+    └─StreamProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - before:
   - create_append_only_table
   sql: |
     select id, value, id + 1 as id_plus_one,
-           openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding,
+           openai_embedding('{"api-key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding,
            upper(value) as upper_value
     from t;
   logical_plan: |-
-    LogicalProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr2, Upper(t.value) as $expr3] }
+    LogicalProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3] }
     └─LogicalScan { table: t, columns: [t.id, t.value, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr2, Upper(t.value) as $expr3] }
+    └─BatchProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3] }
       └─BatchScan { table: t, columns: [t.id, t.value], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, value, id_plus_one, embedding, upper_value, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, t.value) as $expr2, Upper(t.value) as $expr3, t._row_id] }
+    └─StreamProject { exprs: [t.id, t.value, (t.id + 1:Int32) as $expr1, OpenaiEmbedding('{"api-key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr2, Upper(t.value) as $expr3, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
