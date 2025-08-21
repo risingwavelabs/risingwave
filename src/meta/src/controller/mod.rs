@@ -32,6 +32,7 @@ use risingwave_pb::catalog::{
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
     PbView,
 };
+use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use sea_orm::{ConnectOptions, DatabaseConnection, DbBackend, ModelTrait};
 
 use crate::{MetaError, MetaResult, MetaStoreBackend};
@@ -268,6 +269,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
             refreshable: value.0.refreshable,
             vector_index_info: value.0.vector_index_info.map(|index| index.to_protobuf()),
+            cdc_table_type: value.0.cdc_table_type.map(|cdc_type| PbCdcTableType::from(cdc_type) as i32),
         }
     }
 }

@@ -878,7 +878,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
-    let options = build_cdc_scan_options_with_options(context.with_options(), cdc_table_type)?;
+    let options = build_cdc_scan_options_with_options(context.with_options(), &cdc_table_type)?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name.clone(),
@@ -924,7 +924,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
-
+    table.cdc_table_type = Some(cdc_table_type);
     Ok((materialize.into(), table))
 }
 

@@ -402,6 +402,15 @@ message Table {
     ICEBERG = 2;
   }
 
+  enum CdcTableType {
+    CDC_TABLE_TYPE_UNSPECIFIED = 0;
+    CDC_TABLE_TYPE_POSTGRES = 1;
+    CDC_TABLE_TYPE_MYSQL = 2;
+    CDC_TABLE_TYPE_SQLSERVER = 3;
+    CDC_TABLE_TYPE_MONGO = 4;
+    CDC_TABLE_TYPE_CITUS = 5;
+  }
+
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
@@ -519,6 +528,8 @@ message Table {
 
   // only exist when table_type is VECTOR_INDEX.
   optional VectorIndexInfo vector_index_info = 46;
+
+  optional CdcTableType cdc_table_type = 47;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for

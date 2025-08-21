@@ -76,6 +76,9 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     /// Indices of TOAST-able columns for PostgreSQL CDC tables. None means either non-CDC table or CDC table without TOAST-able columns.
     toastable_column_indices: Option<Vec<usize>>,
+
+    /// Whether to handle TOAST for PostgreSQL CDC tables. Only true when cdc_table_type is Some(1) (PostgreSQL).
+    handle_toast: bool,
 }
 
 fn get_op_consistency_level(
@@ -112,7 +115,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         version_column_index: Option<u32>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let table_columns: Vec<ColumnDesc> = table_catalog
+        println!("new materialized 
+         {:?}", table_catalog.cdc_table_type);
+        
+        // Determine if we should handle TOAST based on CDC table type
+        // Only handle TOAST for PostgreSQL CDC tables (cdc_table_type = Some(1))
+        let handle_toast = table_catalog.cdc_table_type == Some(1);
+        
+        let table_columns: Vec<ColumnDesc> = table_catalog  
             .columns
             .iter()
             .map(|col| col.column_desc.as_ref().unwrap().into())
@@ -195,6 +205,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             depended_subscription_ids,
             metrics: mv_metrics,
             toastable_column_indices,
+            handle_toast,
         }
     }
 
@@ -449,6 +460,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
             metrics,
+            handle_toast: false,
         }
     }
 }
@@ -569,7 +581,7 @@ fn generate_output(
     } else {
         Ok(None)
     }
-}
+}f
 
 /// `ChangeBuffer` is a buffer to handle chunk into `KeyOp`.
 /// TODO(rc): merge with `TopNStaging`.

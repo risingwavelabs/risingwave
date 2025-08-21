@@ -24,6 +24,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
 };
@@ -205,6 +206,8 @@ pub struct TableCatalog {
     pub refreshable: bool,
 
     pub vector_index_info: Option<PbVectorIndexInfo>,
+
+    pub cdc_table_type: Option<CdcTableType>,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -592,6 +595,16 @@ impl TableCatalog {
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
+            cdc_table_type: self.cdc_table_type.clone().map(|cdc_table_type| {
+                match cdc_table_type {
+                    CdcTableType::Undefined => 0,
+                    CdcTableType::Postgres => 1,
+                    CdcTableType::MySql => 2,
+                    CdcTableType::SqlServer => 3,
+                    CdcTableType::Mock => 0, // Map to Unspecified
+                    CdcTableType::Citus => 5, // Map to Unspecified
+                }
+            }),
         }
     }
 
@@ -817,6 +830,17 @@ impl From<PbTable> for TableCatalog {
 
             refreshable: tb.refreshable,
             vector_index_info: tb.vector_index_info,
+            cdc_table_type: tb.cdc_table_type.map(|cdc_table_type| {
+                match cdc_table_type {
+                    0 => CdcTableType::Undefined,
+                    1 => CdcTableType::Postgres,
+                    2 => CdcTableType::MySql,
+                    3 => CdcTableType::SqlServer,
+                    4 => CdcTableType::Undefined,
+                    5 => CdcTableType::Citus,
+                    _ => panic!("Invalid CDC table type: {}", cdc_table_type),
+                }
+            }),
         }
     }
 }
@@ -911,6 +935,7 @@ mod tests {
 
             refreshable: false,
             vector_index_info: None,
+            cdc_table_type: None,
         }
         .into();
 
@@ -982,6 +1007,7 @@ mod tests {
 
                 refreshable: false,
                 vector_index_info: None,
+                cdc_table_type: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost()));

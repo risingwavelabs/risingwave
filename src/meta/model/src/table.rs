@@ -16,6 +16,7 @@ use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbEngine, PbTableType};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable, PbVectorIndexInfo};
+use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
 use sea_orm::entity::prelude::*;
@@ -130,6 +131,48 @@ impl From<PbEngine> for Engine {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum CdcTableType {
+    #[sea_orm(string_value = "POSTGRES")]
+    Postgres,
+    #[sea_orm(string_value = "MYSQL")]
+    Mysql,
+    #[sea_orm(string_value = "SQLSERVER")]
+    Sqlserver,
+    #[sea_orm(string_value = "MONGO")]
+    Mongo,
+    #[sea_orm(string_value = "CITUS")]
+    Citus,
+}
+
+impl From<CdcTableType> for PbCdcTableType {
+    fn from(cdc_table_type: CdcTableType) -> Self {
+        match cdc_table_type {
+            CdcTableType::Postgres => Self::Postgres,
+            CdcTableType::Mysql => Self::Mysql,
+            CdcTableType::Sqlserver => Self::Sqlserver,
+            CdcTableType::Mongo => Self::Mongo,
+            CdcTableType::Citus => Self::Citus,
+        }
+    }
+}
+
+impl From<PbCdcTableType> for CdcTableType {
+    fn from(cdc_table_type: PbCdcTableType) -> Self {
+        match cdc_table_type {
+            PbCdcTableType::Postgres => Self::Postgres,
+            PbCdcTableType::Mysql => Self::Mysql,
+            PbCdcTableType::Sqlserver => Self::Sqlserver,
+            PbCdcTableType::Mongo => Self::Mongo,
+            PbCdcTableType::Citus => Self::Citus,
+            PbCdcTableType::Unspecified => {
+                unreachable!("Unspecified CDC table type")
+            }
+        }
+    }
+}
+
 crate::derive_from_blob!(VectorIndexInfo, PbVectorIndexInfo);
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
@@ -170,6 +213,7 @@ pub struct Model {
     pub clean_watermark_index_in_pk: Option<i32>,
     pub refreshable: bool,
     pub vector_index_info: Option<VectorIndexInfo>,
+    pub cdc_table_type: Option<CdcTableType>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -311,6 +355,16 @@ impl From<PbTable> for ActiveModel {
                 .vector_index_info
                 .as_ref()
                 .map(VectorIndexInfo::from)),
+            cdc_table_type: Set(pb_table.cdc_table_type.map(|cdc_table_type| {
+                match cdc_table_type {
+                    0 => CdcTableType::Postgres, // Map Unspecified to Postgres as default
+                    1 => CdcTableType::Postgres,
+                    2 => CdcTableType::Mysql,
+                    3 => CdcTableType::Sqlserver,
+                    4 => CdcTableType::Mongo,
+                    _ => panic!("Invalid CDC table type: {}", cdc_table_type),
+                }
+            })),
         }
     }
 }
