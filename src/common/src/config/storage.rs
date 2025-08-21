@@ -348,6 +348,9 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
     pub recent_filter_rotate_interval_ms: usize,
 
+    #[serde(default = "default::cache_refill::data_refill_table_ids")]
+    pub data_refill_table_ids: Vec<u32>,
+
     /// Skip check recent filter on data refill.
     ///
     /// This option is suitable for a single compute node or debugging.
@@ -1165,6 +1168,10 @@ pub mod default {
 
         pub fn skip_recent_filter() -> bool {
             false
+        }
+
+        pub fn data_refill_table_ids() -> Vec<u32> {
+            vec![]
         }
     }
 
