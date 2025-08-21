@@ -604,7 +604,7 @@ impl TableCatalog {
                     CdcTableType::Postgres => 1,
                     CdcTableType::MySql => 2,
                     CdcTableType::SqlServer => 3,
-
+                    CdcTableType::Mongo => 4,
                     CdcTableType::Citus => 5,
                 },
             ),
@@ -840,7 +840,7 @@ impl From<PbTable> for TableCatalog {
                     1 => CdcTableType::Postgres,
                     2 => CdcTableType::MySql,
                     3 => CdcTableType::SqlServer,
-                    4 => CdcTableType::Undefined,
+                    4 => CdcTableType::Mongo,
                     5 => CdcTableType::Citus,
                     _ => panic!("Invalid CDC table type: {}", cdc_table_type),
                 }),

@@ -54,6 +54,7 @@ pub enum CdcTableType {
     Postgres,
     SqlServer,
     Citus,
+    Mongo,
 }
 
 impl CdcTableType {
@@ -64,6 +65,7 @@ impl CdcTableType {
             "postgres-cdc" => Self::Postgres,
             "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
+            "mongodb-cdc" => Self::Mongo,
             _ => Self::Undefined,
         }
     }
