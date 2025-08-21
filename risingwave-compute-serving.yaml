@@ -1,0 +1,29 @@
+apiVersion: v1
+data:
+  risingwave.toml: |
+    [batch]
+      enable_spill = false
+
+    [storage]
+      [storage.cache_refill]
+        data_refill_levels = [0, 1, 2, 3, 4, 5, 6, 7]
+      [storage.data_file_cache]
+        capacity_mb = 40960
+        dir = "/foyer/data"
+        insert_rate_limit_mb = 200
+      [storage.meta_file_cache]
+        capacity_mb = 7680
+        dir = "/foyer/meta"
+        insert_rate_limit_mb = 20
+
+    [system]
+      backup_storage_directory = "test-useast1-eks-a-rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml-backup"
+      backup_storage_url = "s3://test-useast1-mgmt-bucket"
+immutable: false
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2025-12-29T06:40:05Z"
+  name: risingwave-compute-serving
+  namespace: rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+  resourceVersion: "991073662"
+  uid: 8b5865a8-c5de-4492-9131-1ceebcb8632f

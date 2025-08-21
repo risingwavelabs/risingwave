@@ -1,0 +1,575 @@
+apiVersion: risingwave.risingwavelabs.com/v1alpha1
+kind: RisingWave
+metadata:
+  annotations:
+    risingwave.risingwavelabs.com/inherit-label-prefix: cloud.risingwavelabs.com
+  creationTimestamp: "2025-12-29T06:40:05Z"
+  generation: 7
+  labels:
+    cloud.risingwavelabs.com/tenant-id: "23581"
+    cloud.risingwavelabs.com/tenant-name: test-yaml
+    cloud.risingwavelabs.com/tenant-org: e40a380d-2781-4a5a-b583-bd4a0edc6cfd
+    cloud.risingwavelabs.com/tenant-resource-namespace: rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+    cloud.risingwavelabs.com/tier: Invited
+  name: risingwave
+  namespace: rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+  resourceVersion: "991090918"
+  uid: 4e2a17b7-d222-4c3e-abdd-302ef1c991cc
+spec:
+  additionalFrontendServiceMetadata: {}
+  additionalMetaServiceMetadata: {}
+  components:
+    compactor:
+      logLevel: INFO
+      nodeGroups:
+      - configuration:
+          configMap:
+            key: risingwave.toml
+            name: risingwave-compactor-default
+        name: default
+        persistentVolumeClaimRetentionPolicy:
+          whenDeleted: Delete
+          whenScaled: Delete
+        replicas: 1
+        template:
+          metadata:
+            annotations:
+              ephemeral-volumes.risingwave-labs.com/containers: "0"
+              ephemeral-volumes.risingwave-labs.com/volumes: core,path=/var/mnt/coredump;cache,path=/cache;tmp,path=/var/mnt/tmp,share=1
+            labels:
+              cloud.risingwavelabs.com/instance: test-yaml
+              cloud.risingwavelabs.com/org-id: e40a380d-2781-4a5a-b583-bd4a0edc6cfd
+              cloud.risingwavelabs.com/tenant-id: "23581"
+              cloud.risingwavelabs.com/tier: Invited
+              ephemeral-volumes.risingwave-labs.com/enabled: "1"
+              resource-namespace: rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+          spec:
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: rw-workload-type
+                      operator: In
+                      values:
+                      - meta-front-workload
+                    - key: cpu-memory-ratio
+                      operator: In
+                      values:
+                      - 1c4m
+              podAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                    - key: resource-namespace
+                      operator: In
+                      values:
+                      - rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+                  topologyKey: topology.kubernetes.io/zone
+            env:
+            - name: RW_HEAP_PROFILING_DIR
+              value: /var/mnt/coredump/
+            - name: RW_PROMETHEUS_ENDPOINT
+              value: http://promproxy.promproxy/$(POD_NAMESPACE)
+            - name: RISINGWAVE_CLOUD
+              value: "1"
+            - name: RW_METRICS_LEVEL
+              value: "1"
+            - name: DISABLE_DEFAULT_CREDENTIAL
+              value: "true"
+            - name: ENABLE_TELEMETRY
+              value: "true"
+            - name: RW_TELEMETRY_TYPE
+              value: hosted
+            - name: RISINGWAVE_CLOUD_UUID
+              value: 019b68cf-a29b-7ddf-b2da-5947ad0c4f99
+            - name: MALLOC_CONF
+              value: prof:true,lg_prof_interval:-1,lg_prof_sample:20,prof_prefix:/var/mnt/coredump/heap
+            resources:
+              limits:
+                cpu: "2"
+                memory: 8Gi
+              requests:
+                cpu: "2"
+                memory: 8Gi
+            serviceAccountName: test-yaml
+            tolerations:
+            - effect: NoSchedule
+              key: rw-type
+              operator: Equal
+              value: meta-front-workload
+            volumeMounts:
+            - mountPath: /secrets
+              name: risingwave-secret-tmp-file
+            volumes:
+            - emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
+              name: risingwave-secret-tmp-file
+        upgradeStrategy:
+          type: Recreate
+    compute:
+      logLevel: INFO
+      nodeGroups:
+      - configuration:
+          configMap:
+            key: risingwave.toml
+            name: risingwave-compute-default
+        name: default
+        persistentVolumeClaimRetentionPolicy:
+          whenDeleted: Delete
+          whenScaled: Delete
+        replicas: 2
+        template:
+          metadata:
+            annotations:
+              ephemeral-volumes.risingwave-labs.com/containers: "0"
+              ephemeral-volumes.risingwave-labs.com/volumes: core,path=/var/mnt/coredump;cache,path=/cache;tmp,path=/var/mnt/tmp,share=1
+            labels:
+              cloud.risingwavelabs.com/instance: test-yaml
+              cloud.risingwavelabs.com/org-id: e40a380d-2781-4a5a-b583-bd4a0edc6cfd
+              cloud.risingwavelabs.com/tenant-id: "23581"
+              cloud.risingwavelabs.com/tier: Invited
+              ephemeral-volumes.risingwave-labs.com/enabled: "1"
+              resource-namespace: rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+          spec:
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: rw-workload-type
+                      operator: In
+                      values:
+                      - meta-front-workload
+                    - key: cpu-memory-ratio
+                      operator: In
+                      values:
+                      - 1c4m
+              podAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                    - key: resource-namespace
+                      operator: In
+                      values:
+                      - rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+                  topologyKey: topology.kubernetes.io/zone
+            env:
+            - name: ENABLE_TELEMETRY
+              value: "true"
+            - name: RISINGWAVE_CLOUD
+              value: "1"
+            - name: RW_METRICS_LEVEL
+              value: "1"
+            - name: MALLOC_CONF
+              value: prof:true,lg_prof_interval:-1,lg_prof_sample:20,prof_prefix:/var/mnt/coredump/heap
+            - name: DISABLE_DEFAULT_CREDENTIAL
+              value: "true"
+            - name: RW_PROMETHEUS_ENDPOINT
+              value: http://promproxy.promproxy/$(POD_NAMESPACE)
+            - name: RW_TELEMETRY_TYPE
+              value: hosted
+            - name: RISINGWAVE_CLOUD_UUID
+              value: 019b68cf-a29b-7ddf-b2da-5947ad0c4f99
+            - name: RW_HEAP_PROFILING_DIR
+              value: /var/mnt/coredump/
+            - name: RW_COMPUTE_NODE_ROLE
+              value: streaming
+            resources:
+              limits:
+                cpu: "8"
+                memory: 30Gi
+              requests:
+                cpu: "7"
+                memory: 30Gi
+            serviceAccountName: test-yaml
+            tolerations:
+            - effect: NoSchedule
+              key: rw-type
+              operator: Equal
+              value: meta-front-workload
+            volumeMounts:
+            - mountPath: /secrets
+              name: risingwave-secret-tmp-file
+            - mountPath: /foyer
+              name: risingwave-compute-cache-pvc
+            volumes:
+            - emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
+              name: risingwave-secret-tmp-file
+        upgradeStrategy:
+          type: Recreate
+        volumeClaimTemplates:
+        - metadata:
+            name: risingwave-compute-cache-pvc
+          spec:
+            accessModes:
+            - ReadWriteOnce
+            resources:
+              requests:
+                storage: 50Gi
+            storageClassName: rw-compute-cache
+      - configuration:
+          configMap:
+            key: risingwave.toml
+            name: risingwave-compute-serving
+        name: serving-custom
+        persistentVolumeClaimRetentionPolicy:
+          whenDeleted: Delete
+          whenScaled: Delete
+        replicas: 1
+        template:
+          metadata: {}
+          spec:
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: rw-workload-type
+                      operator: In
+                      values:
+                      - meta-front-workload
+                    - key: cpu-memory-ratio
+                      operator: In
+                      values:
+                      - 1c4m
+              podAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                    - key: resource-namespace
+                      operator: In
+                      values:
+                      - rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+                  topologyKey: topology.kubernetes.io/zone
+            env:
+            - name: ENABLE_TELEMETRY
+              value: "true"
+            - name: RISINGWAVE_CLOUD
+              value: "1"
+            - name: RW_METRICS_LEVEL
+              value: "1"
+            - name: MALLOC_CONF
+              value: prof:true,lg_prof_interval:-1,lg_prof_sample:20,prof_prefix:/var/mnt/coredump/heap
+            - name: DISABLE_DEFAULT_CREDENTIAL
+              value: "true"
+            - name: RW_PROMETHEUS_ENDPOINT
+              value: http://promproxy.promproxy/$(POD_NAMESPACE)
+            - name: RW_TELEMETRY_TYPE
+              value: hosted
+            - name: RISINGWAVE_CLOUD_UUID
+              value: 019b68cf-a29b-7ddf-b2da-5947ad0c4f99
+            - name: RW_HEAP_PROFILING_DIR
+              value: /var/mnt/coredump/
+            - name: RW_COMPUTE_NODE_ROLE
+              value: serving
+            resources:
+              limits:
+                cpu: "2"
+                memory: 8Gi
+              requests:
+                cpu: "2"
+                memory: 8Gi
+            serviceAccountName: test-yaml
+            tolerations:
+            - effect: NoSchedule
+              key: rw-type
+              operator: Equal
+              value: meta-front-workload
+            volumeMounts:
+            - mountPath: /secrets
+              name: risingwave-secret-tmp-file
+            - mountPath: /foyer
+              name: risingwave-compute-cache-pvc
+            volumes:
+            - emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
+              name: risingwave-secret-tmp-file
+        upgradeStrategy:
+          type: Recreate
+        volumeClaimTemplates:
+        - metadata:
+            name: risingwave-compute-cache-pvc
+          spec:
+            accessModes:
+            - ReadWriteOnce
+            resources:
+              requests:
+                storage: 50Gi
+            storageClassName: rw-compute-cache
+    frontend:
+      logLevel: pgwire_query_log=info
+      nodeGroups:
+      - configuration:
+          configMap:
+            key: risingwave.toml
+            name: risingwave-frontend-default
+        name: default
+        persistentVolumeClaimRetentionPolicy:
+          whenDeleted: Delete
+          whenScaled: Delete
+        replicas: 1
+        template:
+          metadata:
+            annotations:
+              ephemeral-volumes.risingwave-labs.com/containers: "0"
+              ephemeral-volumes.risingwave-labs.com/volumes: core,path=/var/mnt/coredump;cache,path=/cache;tmp,path=/var/mnt/tmp,share=1
+            labels:
+              cloud.risingwavelabs.com/instance: test-yaml
+              cloud.risingwavelabs.com/org-id: e40a380d-2781-4a5a-b583-bd4a0edc6cfd
+              cloud.risingwavelabs.com/tenant-id: "23581"
+              cloud.risingwavelabs.com/tier: Invited
+              ephemeral-volumes.risingwave-labs.com/enabled: "1"
+              resource-namespace: rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+          spec:
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: rw-workload-type
+                      operator: In
+                      values:
+                      - meta-front-workload
+                    - key: cpu-memory-ratio
+                      operator: In
+                      values:
+                      - 1c4m
+              podAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                    - key: resource-namespace
+                      operator: In
+                      values:
+                      - rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+                  topologyKey: topology.kubernetes.io/zone
+            env:
+            - name: RISINGWAVE_CLOUD_UUID
+              value: 019b68cf-a29b-7ddf-b2da-5947ad0c4f99
+            - name: MALLOC_CONF
+              value: prof:true,lg_prof_interval:-1,lg_prof_sample:20,prof_prefix:/var/mnt/coredump/heap
+            - name: DISABLE_DEFAULT_CREDENTIAL
+              value: "true"
+            - name: ENABLE_TELEMETRY
+              value: "true"
+            - name: RISINGWAVE_CLOUD
+              value: "1"
+            - name: RW_METRICS_LEVEL
+              value: "1"
+            - name: RW_HEAP_PROFILING_DIR
+              value: /var/mnt/coredump/
+            - name: RW_PROMETHEUS_ENDPOINT
+              value: http://promproxy.promproxy/$(POD_NAMESPACE)
+            - name: RW_TELEMETRY_TYPE
+              value: hosted
+            resources:
+              limits:
+                cpu: "1"
+                memory: 4Gi
+              requests:
+                cpu: "1"
+                memory: 4Gi
+            serviceAccountName: test-yaml
+            tolerations:
+            - effect: NoSchedule
+              key: rw-type
+              operator: Equal
+              value: meta-front-workload
+            volumeMounts:
+            - mountPath: /secrets
+              name: risingwave-secret-tmp-file
+            volumes:
+            - emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
+              name: risingwave-secret-tmp-file
+        upgradeStrategy:
+          type: RollingUpdate
+    meta:
+      logLevel: INFO
+      nodeGroups:
+      - configuration:
+          configMap:
+            key: risingwave.toml
+            name: risingwave-meta-default
+        name: default
+        persistentVolumeClaimRetentionPolicy:
+          whenDeleted: Delete
+          whenScaled: Delete
+        replicas: 1
+        template:
+          metadata:
+            annotations:
+              ephemeral-volumes.risingwave-labs.com/containers: "0"
+              ephemeral-volumes.risingwave-labs.com/volumes: core,path=/var/mnt/coredump;cache,path=/cache;tmp,path=/var/mnt/tmp,share=1
+            labels:
+              cloud.risingwavelabs.com/instance: test-yaml
+              cloud.risingwavelabs.com/org-id: e40a380d-2781-4a5a-b583-bd4a0edc6cfd
+              cloud.risingwavelabs.com/tenant-id: "23581"
+              cloud.risingwavelabs.com/tier: Invited
+              ephemeral-volumes.risingwave-labs.com/enabled: "1"
+              resource-namespace: rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+          spec:
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: rw-workload-type
+                      operator: In
+                      values:
+                      - meta-front-workload
+                    - key: cpu-memory-ratio
+                      operator: In
+                      values:
+                      - 1c4m
+              podAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                    - key: resource-namespace
+                      operator: In
+                      values:
+                      - rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+                  topologyKey: topology.kubernetes.io/zone
+            env:
+            - name: DISABLE_DEFAULT_CREDENTIAL
+              value: "true"
+            - name: RW_PROMETHEUS_ENDPOINT
+              value: http://promproxy.promproxy/$(POD_NAMESPACE)
+            - name: RW_TELEMETRY_TYPE
+              value: hosted
+            - name: RISINGWAVE_CLOUD_UUID
+              value: 019b68cf-a29b-7ddf-b2da-5947ad0c4f99
+            - name: RW_METRICS_LEVEL
+              value: "1"
+            - name: RW_HEAP_PROFILING_DIR
+              value: /var/mnt/coredump/
+            - name: ENABLE_TELEMETRY
+              value: "true"
+            - name: RISINGWAVE_CLOUD
+              value: "1"
+            - name: MALLOC_CONF
+              value: prof:true,lg_prof_interval:-1,lg_prof_sample:20,prof_prefix:/var/mnt/coredump/heap
+            resources:
+              limits:
+                cpu: "2"
+                memory: 8Gi
+              requests:
+                cpu: "2"
+                memory: 8Gi
+            serviceAccountName: test-yaml
+            tolerations:
+            - effect: NoSchedule
+              key: rw-type
+              operator: Equal
+              value: meta-front-workload
+            volumeMounts:
+            - mountPath: /secrets
+              name: risingwave-secret-tmp-file
+            volumes:
+            - emptyDir:
+                medium: Memory
+                sizeLimit: 16Mi
+              name: risingwave-secret-tmp-file
+        upgradeStrategy:
+          type: Recreate
+  configuration:
+    configMap:
+      key: risingwave.toml
+      name: rwconfig-rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+  enableDefaultServiceMonitor: false
+  enableEmbeddedServingMode: false
+  enableFullKubernetesAddr: true
+  enableOpenKruise: false
+  enableStandaloneMode: false
+  enableWebhookListener: false
+  frontendServiceType: NodePort
+  image: ghcr.io/risingwavelabs/risingwave:v2.7.0
+  licenseKey:
+    secretKey: licenseKey
+    secretName: rwc-license-key-secret
+  metaStore:
+    postgresql:
+      credentials:
+        passwordKeyRef: password
+        secretName: rwc-g1jdkcv8krfnfr5mip8umgojsp-rds
+        usernameKeyRef: username
+      database: rwc_g1jdkcv8krfnfr5mip8umgojsp_db
+      host: rwc-g1jdkcv8krfnfr5mip8umgojsp-rds.ccob5q9usppn.us-east-1.rds.amazonaws.com
+      port: 5432
+  secretStore:
+    privateKey:
+      secretRef:
+        key: rwc-secret-store-private-key-secret-key
+        name: rwc-secret-store-private-key-secret
+  standaloneMode: 0
+  stateStore:
+    dataDirectory: test-useast1-eks-a-rwc-g1jdkcv8krfnfr5mip8umgojsp-test-yaml
+    s3:
+      bucket: test-useast1-mgmt-bucket
+      credentials:
+        accessKeyRef: AccessKeyID
+        secretAccessKeyRef: SecretAccessKey
+        useServiceAccount: true
+      region: us-east-1
+status:
+  componentReplicas:
+    compactor:
+      groups:
+      - exists: true
+        name: default
+        running: 1
+        target: 1
+      running: 1
+      target: 1
+    compute:
+      groups:
+      - exists: true
+        name: default
+        running: 2
+        target: 2
+      - exists: true
+        name: serving-custom
+        running: 1
+        target: 1
+      running: 3
+      target: 3
+    frontend:
+      groups:
+      - exists: true
+        name: default
+        running: 1
+        target: 1
+      running: 1
+      target: 1
+    meta:
+      groups:
+      - exists: true
+        name: default
+        running: 1
+        target: 1
+      running: 1
+      target: 1
+    standalone:
+      running: 0
+      target: 0
+  conditions:
+  - lastTransitionTime: "2025-12-29T07:06:12Z"
+    status: "True"
+    type: Running
+  - lastTransitionTime: "2025-12-29T07:11:11Z"
+    status: "False"
+    type: Upgrading
+  internal: {}
+  metaStore:
+    backend: PostgreSQL
+  observedGeneration: 7
+  stateStore:
+    backend: S3
+  version: v2.7.0
