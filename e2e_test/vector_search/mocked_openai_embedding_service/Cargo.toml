@@ -1,0 +1,19 @@
+[package]
+name = "mocked_openai_embedding_service"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = []
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+async-openai = "0.18"
+tracing-subscriber = "0.3"
+serde_json = "1"
+
+
+[[bin]]
+name = "test_client"
