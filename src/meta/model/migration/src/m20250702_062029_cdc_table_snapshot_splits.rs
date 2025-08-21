@@ -34,11 +34,6 @@ impl MigrationTrait for Migration {
                             .rw_binary(manager)
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(CdcTableSnapshotSplits::IsBackfillFinished)
-                            .boolean()
-                            .not_null(),
-                    )
                     .primary_key(
                         Index::create()
                             .col(CdcTableSnapshotSplits::TableId)
@@ -78,5 +73,4 @@ enum CdcTableSnapshotSplits {
     SplitId,
     Left,
     Right,
-    IsBackfillFinished,
 }
