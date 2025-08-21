@@ -45,9 +45,6 @@ use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
 use crate::task::cdc_progress::CdcProgressReporter;
 
-/// `split_id`, `is_finished`, `row_count`, `cdc_offset_low`, `cdc_offset_high` all occupy 1 column each.
-const METADATA_STATE_LEN: usize = 5;
-
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -165,8 +162,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         .boxed();
         let mut next_reset_barrier = Some(first_barrier);
         let mut is_reset = false;
-        let mut state_impl =
-            ParallelizedCdcBackfillState::new(self.state_table, METADATA_STATE_LEN);
+        let mut state_impl = ParallelizedCdcBackfillState::new(self.state_table);
         // The buffered chunks have already been mapped.
         let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
         // Need reset on CDC table snapshot splits reschedule.
@@ -584,10 +580,15 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         {
                             continue;
                         }
-                        if let Some(high) = actor_cdc_offset_high.as_ref()
+                        if state_impl.is_legacy_state() {
+                            // Since the legacy state does not track CDC offsets, report backfill completion immediately.
+                            actor_cdc_offset_high = None;
+                            should_report_actor_backfill_done = true;
+                        } else if let Some(high) = actor_cdc_offset_high.as_ref()
                             && let Some(ref chunk_offset) = chunk_cdc_offset
                             && *chunk_offset >= *high
                         {
+                            // Report backfill completion once the latest CDC offset exceeds the highest offset tracked during the backfill.
                             actor_cdc_offset_high = None;
                             should_report_actor_backfill_done = true;
                         }

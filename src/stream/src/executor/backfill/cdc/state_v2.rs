@@ -31,15 +31,20 @@ pub struct CdcStateRecord {
     pub cdc_offset_high: Option<CdcOffset>,
 }
 
-/// state schema: | `split_id` | `backfill_finished` | `row_count` |
+/// state schema: | `split_id` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
+/// legacy state schema: | `split_id` | `backfill_finished` | `row_count` |
 pub struct ParallelizedCdcBackfillState<S: StateStore> {
     state_table: StateTable<S>,
     state_len: usize,
+    is_legacy_state: bool,
 }
 
 impl<S: StateStore> ParallelizedCdcBackfillState<S> {
-    pub fn new(state_table: StateTable<S>, state_len: usize) -> Self {
+    pub fn new(state_table: StateTable<S>) -> Self {
+        let is_legacy_state = state_table.get_data_types().len() == 3;
+        let state_len = if is_legacy_state { 3 } else { 5 };
         Self {
+            is_legacy_state,
             state_table,
             state_len,
         }
@@ -68,17 +73,22 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
                     Some(ScalarImpl::Int64(val)) => val,
                     _ => return Err(anyhow!("invalid backfill state: row_count").into()),
                 };
-                let cdc_offset_low = match state[3] {
-                    Some(ScalarImpl::Jsonb(ref jsonb)) => {
-                        serde_json::from_value(jsonb.clone().take()).unwrap()
-                    }
-                    _ => return Err(anyhow!("invalid backfill state: cdc_offset_low").into()),
-                };
-                let cdc_offset_high = match state[4] {
-                    Some(ScalarImpl::Jsonb(ref jsonb)) => {
-                        serde_json::from_value(jsonb.clone().take()).unwrap()
-                    }
-                    _ => return Err(anyhow!("invalid backfill state: cdc_offset_high").into()),
+                let (cdc_offset_low, cdc_offset_high) = if !self.is_legacy_state {
+                    let cdc_offset_low = match state[3] {
+                        Some(ScalarImpl::Jsonb(ref jsonb)) => {
+                            serde_json::from_value(jsonb.clone().take()).unwrap()
+                        }
+                        _ => return Err(anyhow!("invalid backfill state: cdc_offset_low").into()),
+                    };
+                    let cdc_offset_high = match state[4] {
+                        Some(ScalarImpl::Jsonb(ref jsonb)) => {
+                            serde_json::from_value(jsonb.clone().take()).unwrap()
+                        }
+                        _ => return Err(anyhow!("invalid backfill state: cdc_offset_high").into()),
+                    };
+                    (cdc_offset_low, cdc_offset_high)
+                } else {
+                    (None, None)
                 };
 
                 Ok(CdcStateRecord {
@@ -107,14 +117,17 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         state[0].clone_from(&split_id);
         state[1] = Some(is_finished.into());
         state[2] = Some((row_count as i64).into());
-        state[3] = cdc_offset_low.map(|cdc_offset| {
-            let json = serde_json::to_value(cdc_offset).unwrap();
-            ScalarImpl::Jsonb(JsonbVal::from(json))
-        });
-        state[4] = cdc_offset_high.map(|cdc_offset| {
-            let json = serde_json::to_value(cdc_offset).unwrap();
-            ScalarImpl::Jsonb(JsonbVal::from(json))
-        });
+        if !self.is_legacy_state {
+            state[3] = cdc_offset_low.map(|cdc_offset| {
+                let json = serde_json::to_value(cdc_offset).unwrap();
+                ScalarImpl::Jsonb(JsonbVal::from(json))
+            });
+            state[4] = cdc_offset_high.map(|cdc_offset| {
+                let json = serde_json::to_value(cdc_offset).unwrap();
+                ScalarImpl::Jsonb(JsonbVal::from(json))
+            });
+        }
+
         match self.state_table.get_row(row::once(split_id)).await? {
             Some(prev_row) => {
                 self.state_table.update(prev_row, state.as_slice());
@@ -131,5 +144,9 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         self.state_table
             .commit_assert_no_update_vnode_bitmap(new_epoch)
             .await
+    }
+
+    pub fn is_legacy_state(&self) -> bool {
+        self.is_legacy_state
     }
 }
