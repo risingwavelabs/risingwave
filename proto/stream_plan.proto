@@ -943,6 +943,15 @@ message VectorIndexWriteNode {
 }
 
 message StreamNode {
+  // This field used to be a `bool append_only`.
+  // Enum variants are ordered for backwards compatibility.
+  enum StreamKind {
+    // buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+    STREAM_KIND_RETRACT = 0;
+    STREAM_KIND_APPEND_ONLY = 1;
+    STREAM_KIND_UPSERT = 2;
+  }
+
   oneof node_body {
     SourceNode source = 100;
     ProjectNode project = 101;
@@ -1001,7 +1010,7 @@ message StreamNode {
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
   repeated uint32 stream_key = 2;
-  bool append_only = 24;
+  StreamKind stream_kind = 24;
   string identity = 18;
   // The schema of the plan node
   repeated plan_common.Field fields = 19;

@@ -45,6 +45,7 @@ use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
+use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
@@ -204,6 +205,9 @@ pub struct ExecutorInfo {
     /// pk indices are maintained independently.
     pub pk_indices: PkIndices,
 
+    /// The stream kind of the OUTPUT of the executor.
+    pub stream_kind: PbStreamKind,
+
     /// Identity of the executor.
     pub identity: String,
 
@@ -212,10 +216,11 @@ pub struct ExecutorInfo {
 }
 
 impl ExecutorInfo {
-    pub fn new(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
+    pub fn for_test(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
         Self {
             schema,
             pk_indices,
+            stream_kind: PbStreamKind::Retract, // dummy value for test
             identity,
             id,
         }
@@ -260,6 +265,10 @@ impl Executor {
 
     pub fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
+    }
+
+    pub fn stream_kind(&self) -> PbStreamKind {
+        self.info.stream_kind
     }
 
     pub fn identity(&self) -> &str {
