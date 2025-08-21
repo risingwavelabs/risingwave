@@ -474,12 +474,26 @@ class Panels:
             title: Panel title
             description: Panel description that should explain the value mappings
             metric_expr: The metric expression to query
-            value_mappings: Dict mapping numeric values to string labels (for reference only)
+            value_mappings: Dict mapping numeric values to string labels
 
         Returns:
-            TimeSeries panel with descriptive legend showing the actual metric value
+            TimeSeries panel with value mappings to display string labels instead of numeric values
         """
         gridPos = self.layout.next_one_third_width_graph()
+
+        # Convert value_mappings dict to Grafana mappings format
+        # Use the nested options format that Grafana expects
+        mappings = []
+        for value, text in value_mappings.items():
+            mappings.append({
+                "options": {
+                    str(value): {
+                        "text": text
+                    }
+                },
+                "type": "value"
+            })
+
         return TimeSeries(
             title=title,
             dataSource=self.datasource,
@@ -487,11 +501,23 @@ class Panels:
             targets=[
                 self.target(
                     metric_expr,
-                    "{{__name__}}: {{value}}",  # Show metric name and current value
+                    "{{instance}}",
                 ),
             ],
             gridPos=gridPos,
-            **self.common_options,
+            mappings=mappings,
+            unit="short",  # Use short unit which is compatible with mappings
+            drawStyle="stepPlot",  # Step plot for discrete values
+            lineInterpolation="stepBefore",  # Step interpolation
+            showPoints="always",  # Always show points for discrete values
+            pointSize=8,  # Larger points
+            fillOpacity=10,
+            interval="1s",
+            maxDataPoints=1000,
+            legendDisplayMode="table",
+            # Set Y-axis range to only show the valid enum values
+            valueMin=0,  # Minimum value
+            valueMax=len(value_mappings) - 1,  # Maximum value (3 for 0,1,2,3)
         )
 
     def table_info(
