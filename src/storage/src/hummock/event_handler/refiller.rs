@@ -201,6 +201,8 @@ pub struct CacheRefillConfig {
 
     /// Skip recent filter.
     pub skip_recent_filter: bool,
+
+    pub data_refill_table_ids: HashSet<u32>,
 }
 
 impl CacheRefillConfig {
@@ -217,6 +219,18 @@ impl CacheRefillConfig {
             }
         };
 
+        let data_refill_table_ids = match Feature::ElasticDiskCache.check_available() {
+            Ok(_) => options
+                .cache_refill_data_refill_table_ids
+                .iter()
+                .copied()
+                .collect(),
+            Err(e) => {
+                tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                HashSet::new()
+            }
+        };
+
         Self {
             timeout: Duration::from_millis(options.cache_refill_timeout_ms),
             data_refill_levels,
@@ -224,6 +238,7 @@ impl CacheRefillConfig {
             unit: options.cache_refill_unit,
             threshold: options.cache_refill_threshold,
             skip_recent_filter: options.cache_refill_skip_recent_filter,
+            data_refill_table_ids,
         }
     }
 }
@@ -613,8 +628,20 @@ impl CacheRefillTask {
         GLOBAL_CACHE_REFILL_METRICS
             .data_refill_ideal_bytes
             .inc_by(size as _);
+        let mut data_refill_ideal_bytes = 0;
 
         for blk in unit.blks {
+            let block_meta = &sst.meta.block_metas[blk];
+            // skip if the block is not in the target table ids
+            if !context.config.data_refill_table_ids.is_empty()
+                && !context
+                    .config
+                    .data_refill_table_ids
+                    .contains(&block_meta.table_id().table_id())
+            {
+                continue;
+            }
+
             let (range, uncompressed_capacity) = sst.calculate_block_info(blk);
             let key = SstableBlockIndex {
                 sst_id: sst.id,
@@ -627,8 +654,13 @@ impl CacheRefillTask {
                 admits += 1;
             }
 
+            data_refill_ideal_bytes += range.size().unwrap() as u64;
             contexts.push((writer, range, uncompressed_capacity))
         }
+
+        GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_ideal_bytes
+            .inc_by(data_refill_ideal_bytes);
 
         if admits as f64 / contexts.len() as f64 >= threshold {
             let task = async move {
@@ -642,6 +674,7 @@ impl CacheRefillTask {
                     .data_refill_success_duration
                     .start_timer();
 
+                // Notes: We still read data from the entire range to reduce IOPS. However, this cannot reduce the access throughput to the object store.
                 let data = sstable_store
                     .store()
                     .read(&sstable_store.get_sst_data_path(sst.id), range.clone())
