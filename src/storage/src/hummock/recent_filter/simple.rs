@@ -56,9 +56,9 @@ impl<T> Clone for SimpleRecentFilter<T> {
 
 impl<T> Inner<T> {
     #[expect(clippy::swap_with_temporary)]
-    fn maybe_rotate(&self) {
+    fn maybe_rotate(&self, force: bool) {
         if let Some(mut layers) = self.layers.try_write()
-            && layers.updated.elapsed() >= self.refresh
+            && (layers.updated.elapsed() >= self.refresh || force)
         {
             let mut current = HashSet::new();
             std::mem::swap(&mut current, &mut layers.current.write());
@@ -104,7 +104,7 @@ where
     where
         Self::Item: Eq + Hash,
     {
-        self.inner.maybe_rotate();
+        self.inner.maybe_rotate(false);
         self.inner.layers.read().current.write().insert(item);
         GLOBAL_RECENT_FILTER_METRICS.recent_filter_inserts.inc();
     }
@@ -113,7 +113,7 @@ where
     where
         Self::Item: Eq + Hash,
     {
-        self.inner.maybe_rotate();
+        self.inner.maybe_rotate(false);
         let mut cnt = 0;
         self.inner
             .layers
@@ -171,5 +171,41 @@ where
 
         GLOBAL_RECENT_FILTER_METRICS.recent_filter_miss.inc();
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn test_simple_recent_filter() {
+        let rf: SimpleRecentFilter<u64> = SimpleRecentFilter::new(3, Duration::from_secs(10));
+
+        rf.insert(1);
+        assert!(rf.contains(&1));
+        assert!(!rf.contains(&2));
+        assert!(rf.contains_any(&[1, 2]));
+        assert!(!rf.contains_any(&[2, 3]));
+
+        rf.extend([6, 7, 8, 9, 10]);
+        for i in 6..=10 {
+            assert!(rf.contains(&i));
+        }
+
+        rf.inner.maybe_rotate(true);
+        rf.insert(2);
+        assert!(rf.contains(&1));
+        assert!(rf.contains(&2));
+        assert!(!rf.contains(&3));
+        assert!(rf.contains_any(&[2, 3]));
+        assert!(!rf.contains_any(&[3, 4]));
+
+        rf.inner.maybe_rotate(true);
+        rf.inner.maybe_rotate(true);
+        assert!(!rf.contains(&1));
+        assert!(rf.contains(&2));
     }
 }

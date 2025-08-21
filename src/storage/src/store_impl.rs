@@ -36,6 +36,7 @@ use thiserror_ext::AsReport;
 use crate::StateStore;
 use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
 use crate::error::StorageResult;
+use crate::hummock::all::AllRecentFilter;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::sharded::ShardedRecentFilter;
@@ -805,6 +806,8 @@ impl StateStoreImpl {
                 )
                 .into(),
             )
+        } else if opts.cache_refill_skip_recent_filter {
+            Arc::new(AllRecentFilter::default().into())
         } else {
             Arc::new(
                 ShardedRecentFilter::new(
