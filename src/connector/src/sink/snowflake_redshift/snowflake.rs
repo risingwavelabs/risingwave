@@ -295,7 +295,6 @@ impl Sink for SnowflakeSink {
         {
             let client = SnowflakeJniClient::new(client, snowflake_task_ctx);
             client.execute_create_table().await?;
-            client.execute_create_pipe().await?;
         }
 
         Ok(())
@@ -594,6 +593,8 @@ impl SnowflakeSinkCommitter {
 impl SinkCommitCoordinator for SnowflakeSinkCommitter {
     async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         if let Some(client) = &self.client {
+            // Todo: move this to validate
+            client.execute_create_pipe().await?;
             client.execute_create_merge_into_task().await?;
         }
         Ok(None)
@@ -629,7 +630,6 @@ impl Drop for SnowflakeSinkCommitter {
         if let Some(client) = self.client.take() {
             tokio::spawn(async move {
                 client.execute_drop_task().await.ok();
-                client.execute_drop_pipe().await.ok();
             });
         }
     }
@@ -767,27 +767,6 @@ impl SnowflakeJniClient {
         Ok(())
     }
 
-    pub async fn execute_drop_pipe(&self) -> Result<()> {
-        if let Some(pipe_name) = &self.snowflake_task_context.pipe_name {
-            let drop_pipe_sql = build_drop_pipe_sql(
-                &self.snowflake_task_context.database,
-                &self.snowflake_task_context.schema_name,
-                pipe_name,
-            );
-            if self
-                .jdbc_client
-                .execute_sql_sync(vec![drop_pipe_sql])
-                .await
-                .is_err()
-            {
-                tracing::warn!("Failed to drop Snowflake sink pipe {:?}", pipe_name);
-            } else {
-                tracing::info!("Snowflake sink pipe {:?} dropped", pipe_name);
-            }
-        }
-        Ok(())
-    }
-
     pub async fn execute_flush_pipe(&self) -> Result<()> {
         if let Some(pipe_name) = &self.snowflake_task_context.pipe_name {
             let flush_pipe_sql = build_flush_pipe_sql(
@@ -879,11 +858,6 @@ fn build_create_pipe_sql(
 fn build_flush_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
     let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
     format!("ALTER PIPE {} REFRESH;", pipe_name,)
-}
-
-fn build_drop_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
-    let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
-    format!("DROP PIPE IF EXISTS {};", pipe_name)
 }
 
 fn build_alter_add_column_sql(
