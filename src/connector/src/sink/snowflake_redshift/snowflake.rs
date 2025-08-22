@@ -14,6 +14,7 @@
 
 use core::num::NonZeroU64;
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use phf::{Set, phf_set};
@@ -25,7 +26,8 @@ use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::time::{MissedTickBehavior, interval};
 use tonic::async_trait;
 use with_options::WithOptions;
 
@@ -66,9 +68,14 @@ pub struct SnowflakeConfig {
     pub snowflake_schema: Option<String>,
 
     #[serde(default = "default_schedule")]
-    #[serde(rename = "schedule_seconds")]
+    #[serde(rename = "schedule_seconds", alias = "merge_into_schedule_seconds")]
     #[serde_as(as = "DisplayFromStr")]
     pub snowflake_schedule_seconds: u64,
+
+    #[serde(default = "default_schedule")]
+    #[serde(rename = "copy_into_schedule_seconds")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub copy_into_schedule_seconds: u64,
 
     #[serde(rename = "warehouse")]
     pub snowflake_warehouse: Option<String>,
@@ -138,7 +145,11 @@ impl SnowflakeConfig {
         schema: &Schema,
         pk_indices: &Vec<usize>,
     ) -> Result<Option<(SnowflakeTaskContext, JdbcJniClient)>> {
-        if !self.auto_schema_change && is_append_only && !self.create_table_if_not_exists {
+        if !self.auto_schema_change
+            && is_append_only
+            && !self.create_table_if_not_exists
+            && !self.with_s3
+        {
             // append-only + no auto schema change is not need to create a client
             return Ok(None);
         }
@@ -350,6 +361,7 @@ impl Sink for SnowflakeSink {
             &self.schema,
             &self.pk_indices,
             self.is_append_only,
+            self.param.sink_id.sink_id(),
         )?;
         Ok(coordinator)
     }
@@ -548,7 +560,7 @@ impl SnowflakeSinkJdbcWriter {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SnowflakeTaskContext {
     // required for task creation
     pub target_table_name: String,
@@ -570,6 +582,8 @@ pub struct SnowflakeTaskContext {
 }
 pub struct SnowflakeSinkCommitter {
     client: Option<SnowflakeJniClient>,
+    _periodic_task_handle: Option<tokio::task::JoinHandle<()>>,
+    shutdown_sender: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 impl SnowflakeSinkCommitter {
@@ -578,15 +592,62 @@ impl SnowflakeSinkCommitter {
         schema: &Schema,
         pk_indices: &Vec<usize>,
         is_append_only: bool,
+        sink_id: u32,
     ) -> Result<Self> {
-        let client = if let Some((snowflake_task_ctx, client)) =
-            config.build_snowflake_task_ctx_jdbc_client(is_append_only, schema, pk_indices)?
-        {
-            Some(SnowflakeJniClient::new(client, snowflake_task_ctx))
-        } else {
-            None
-        };
-        Ok(Self { client })
+        let (client, periodic_task_handle, shutdown_sender) =
+            if let Some((snowflake_task_ctx, client)) =
+                config.build_snowflake_task_ctx_jdbc_client(is_append_only, schema, pk_indices)?
+            {
+                let (shutdown_sender, shutdown_receiver) = unbounded_channel();
+                let snowflake_client =
+                    SnowflakeJniClient::new(client.clone(), snowflake_task_ctx.clone());
+                let periodic_task_handle = tokio::spawn(async move {
+                    Self::run_periodic_query_task(
+                        snowflake_client,
+                        config.copy_into_schedule_seconds,
+                        sink_id,
+                        shutdown_receiver,
+                    )
+                    .await;
+                });
+                (
+                    Some(SnowflakeJniClient::new(client, snowflake_task_ctx)),
+                    Some(periodic_task_handle),
+                    Some(shutdown_sender),
+                )
+            } else {
+                (None, None, None)
+            };
+
+        Ok(Self {
+            client,
+            _periodic_task_handle: periodic_task_handle,
+            shutdown_sender,
+        })
+    }
+
+    async fn run_periodic_query_task(
+        client: SnowflakeJniClient,
+        copy_into_schedule_seconds: u64,
+        sink_id: u32,
+        mut shutdown_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,
+    ) {
+        let mut copy_timer = interval(Duration::from_secs(copy_into_schedule_seconds));
+        copy_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = shutdown_receiver.recv() => break,
+                _ = copy_timer.tick() => {
+                    if let Err(e) = async {
+                        client.execute_flush_pipe().await?;
+                        Ok::<(),SinkError>(())
+                    }.await {
+                        tracing::error!("Failed to execute copy into task for sink id {}: {}", sink_id, e.as_report());
+                    }
+                }
+            }
+        }
+        tracing::info!("Periodic query task stopped for sink id {}", sink_id);
     }
 }
 
@@ -627,9 +688,11 @@ impl SinkCommitCoordinator for SnowflakeSinkCommitter {
 impl Drop for SnowflakeSinkCommitter {
     fn drop(&mut self) {
         if let Some(client) = self.client.take() {
+            if let Some(sender) = self.shutdown_sender.take() {
+                let _ = sender.send(()); // Ignore the result, as the receiver may have been dropped.
+            }
             tokio::spawn(async move {
                 client.execute_drop_task().await.ok();
-                client.execute_drop_pipe().await.ok();
             });
         }
     }
