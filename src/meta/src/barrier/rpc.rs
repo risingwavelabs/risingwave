@@ -518,6 +518,7 @@ impl ControlStreamManager {
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan
             backfill_nodes_to_pause: Default::default(),
+            new_upstream_sinks: Default::default(),
         });
 
         fn resolve_jobs_committed_epoch(

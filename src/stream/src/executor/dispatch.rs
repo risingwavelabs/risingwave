@@ -40,8 +40,8 @@ use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
-use crate::executor::StreamConsumer;
 use crate::executor::prelude::*;
+use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, LocalBarrierManager, NewOutputRequest};
 
 mod output_mapping;
@@ -358,11 +358,11 @@ impl DispatchExecutorInner {
         };
 
         match mutation {
-            Mutation::Stop(stops) => {
+            Mutation::Stop(StopMutation { dropped_actors, .. }) => {
                 // Remove outputs only if this actor itself is not to be stopped.
-                if !stops.contains(&self.actor_id) {
+                if !dropped_actors.contains(&self.actor_id) {
                     for dispatcher in &mut self.dispatchers {
-                        dispatcher.remove_outputs(stops);
+                        dispatcher.remove_outputs(dropped_actors);
                     }
                 }
             }
