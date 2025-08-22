@@ -40,6 +40,7 @@ pub struct Int256(pub(crate) Box<i256>);
 
 /// A reference to an `Int256` value.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
+#[repr(transparent)]
 pub struct Int256Ref<'a>(pub &'a i256);
 
 impl Display for Int256Ref<'_> {

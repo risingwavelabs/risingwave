@@ -1,12 +1,12 @@
-use rkyv::primitive::{
-    ArchivedF32, ArchivedF64, ArchivedI16, ArchivedI32, ArchivedI64, ArchivedI128,
-};
-use rkyv::string::ArchivedString;
+use general::WithDelegate;
 use rkyv::with::AsString;
-use rkyv::{Archive, Portable, Serialize};
+use rkyv::{Archive, Serialize};
+
+use crate::types::ScalarRefImpl;
 
 fn __test(my: My<'static>) {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&my).unwrap();
+    let _scalar = __view(&bytes);
 }
 
 fn __view<'a>(data: &'a [u8]) -> ScalarRefImpl<'a> {
@@ -32,6 +32,20 @@ pub enum My<'scalar> {
     Float32(#[rkyv(with = WithDelegate)] crate::types::F32),
     Float64(#[rkyv(with = WithDelegate)] crate::types::F64),
     Utf8(#[rkyv(with = AsString)] &'scalar str),
+    // Bool(bool),
+    Decimal(#[rkyv(with = WithDelegate)] crate::types::Decimal),
+    // Interval(crate::types::Interval),
+    // Date(crate::types::Date),
+    // Time(crate::types::Time),
+    // Timestamp(crate::types::Timestamp),
+    // Timestamptz(crate::types::Timestamptz),
+    // Jsonb(crate::types::JsonbRef<'scalar>),
+    // Serial(crate::types::Serial),
+    // Struct(crate::types::StructRef<'scalar>),
+    // List(crate::types::ListRef<'scalar>),
+    // Map(crate::types::MapRef<'scalar>),
+    // Vector(crate::types::VectorRef<'scalar>),
+    // Bytea(&'scalar [u8]),
 }
 
 // #[derive(Portable)]
@@ -49,13 +63,17 @@ pub enum My<'scalar> {
 impl<'a> From<&'a ArchivedMy<'static>> for ScalarRefImpl<'a> {
     fn from(value: &'a ArchivedMy<'static>) -> Self {
         match value {
-            ArchivedMy::Int16(i16_le) => todo!(),
-            ArchivedMy::Int32(i32_le) => todo!(),
-            ArchivedMy::Int64(i64_le) => todo!(),
-            ArchivedMy::Int256(_) => todo!(),
-            ArchivedMy::Float32(f32_le) => todo!(),
-            ArchivedMy::Float64(f64_le) => todo!(),
-            ArchivedMy::Utf8(archived_string) => ScalarRefImpl::Utf8(archived_string.as_str()),
+            ArchivedMy::Int16(i16_le) => Self::Int16(i16_le.to_native()),
+            ArchivedMy::Int32(i32_le) => Self::Int32(i32_le.to_native()),
+            ArchivedMy::Int64(i64_le) => Self::Int64(i64_le.to_native()),
+            ArchivedMy::Int256(words_le) => Self::Int256(
+                // UNSAFETY: only works in little endian!
+                unsafe { std::mem::transmute(words_le) },
+            ),
+            ArchivedMy::Float32(f32_le) => Self::Float32(f32_le.to_native().into()),
+            ArchivedMy::Float64(f64_le) => Self::Float64(f64_le.to_native().into()),
+            ArchivedMy::Utf8(archived_string) => Self::Utf8(archived_string.as_str()),
+            ArchivedMy::Decimal(archived_decimal) => Self::Decimal(archived_decimal.into()),
         }
     }
 }
@@ -88,9 +106,6 @@ mod general {
         }
     }
 }
-pub use general::WithDelegate;
-
-use crate::types::ScalarRefImpl;
 
 mod ordered_float {
     use crate::types::ordered_float::OrderedFloat;
@@ -110,28 +125,6 @@ mod ordered_float {
             self.0
         }
     }
-
-    // impl<T: Archive> rkyv::with::ArchiveWith<OrderedFloat<T>> for With {
-    //     type Archived = <T as Archive>::Archived;
-    //     type Resolver = <T as Archive>::Resolver;
-
-    //     fn resolve_with(
-    //         field: &OrderedFloat<T>,
-    //         resolver: Self::Resolver,
-    //         out: rkyv::Place<Self::Archived>,
-    //     ) {
-    //         field.0.resolve(resolver, out)
-    //     }
-    // }
-
-    // impl<T: Serialize<S>, S: Fallible> rkyv::with::SerializeWith<OrderedFloat<T>, S> for With {
-    //     fn serialize_with(
-    //         field: &OrderedFloat<T>,
-    //         serializer: &mut S,
-    //     ) -> Result<Self::Resolver, <S as rkyv::rancor::Fallible>::Error> {
-    //         field.0.serialize(serializer)
-    //     }
-    // }
 }
 
 mod int256 {
@@ -145,20 +138,45 @@ mod int256 {
             self.0.0
         }
     }
+}
 
-    // pub(super) struct With;
+mod decimal {
+    use rkyv::{Archive, Serialize};
 
-    // impl rkyv::with::ArchiveWith<crate::types::Int256Ref<'_>> for With {
-    //     type Archived = [ArchivedI128; 2];
-    //     type Resolver = [(); 2];
+    use crate::types::Decimal;
+    use crate::types::rkyv_impl::general::RkyvDelegate;
 
-    //     fn resolve_with(
-    //         field: &crate::types::Int256Ref<'_>,
-    //         resolver: Self::Resolver,
-    //         out: rkyv::Place<Self::Archived>,
-    //     ) {
-    //         let words = field.0.0;
-    //         words.resolve(resolver, out)
-    //     }
-    // }
+    #[derive(Archive, Serialize)]
+    pub enum ADecimal {
+        Normalized([u8; 16]),
+        NaN,
+        PositiveInf,
+        NegativeInf,
+    }
+
+    impl RkyvDelegate for Decimal {
+        type Target = ADecimal;
+
+        fn delegate(&self) -> Self::Target {
+            match self {
+                Decimal::Normalized(d) => ADecimal::Normalized(d.serialize()),
+                Decimal::NaN => ADecimal::NaN,
+                Decimal::PositiveInf => ADecimal::PositiveInf,
+                Decimal::NegativeInf => ADecimal::NegativeInf,
+            }
+        }
+    }
+
+    impl From<&ArchivedADecimal> for Decimal {
+        fn from(value: &ArchivedADecimal) -> Self {
+            match value {
+                ArchivedADecimal::Normalized(bytes) => {
+                    Self::Normalized(rust_decimal::Decimal::deserialize(*bytes))
+                }
+                ArchivedADecimal::NaN => Self::NaN,
+                ArchivedADecimal::PositiveInf => Self::PositiveInf,
+                ArchivedADecimal::NegativeInf => Self::NegativeInf,
+            }
+        }
+    }
 }
