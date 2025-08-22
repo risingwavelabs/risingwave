@@ -533,6 +533,8 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
 // THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 // UPDATE WITH: ./risedev generate-with-options
 
+#![rustfmt::skip]
+
 use std::collections::{{HashMap, HashSet}};
 use std::sync::LazyLock;
 use crate::error::ConnectorError;

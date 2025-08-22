@@ -527,7 +527,7 @@ impl IcebergCompactionManager {
         Ok(())
     }
 
-    async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
+    pub async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
         const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000;
         let now = chrono::Utc::now().timestamp_millis();
         let expired_older_than = now - MAX_SNAPSHOT_AGE_MS_DEFAULT;
