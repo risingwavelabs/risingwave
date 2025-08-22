@@ -120,14 +120,14 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
 
                 macro_rules! new_executor {
                     ($SD:ident) => {{
-                        let upstream_table =
-                            ReplicatedStateTable::<_, $SD>::from_table_catalog_with_output_column_ids(
-                                upstream_table,
-                                state_store.clone(),
-                                vnodes,
-                                column_ids,
-                            )
-                            .await;
+                        // TODO: can it be ConsistentOldValue?
+                        let upstream_table = ReplicatedStateTable::new_replicated(
+                            upstream_table,
+                            state_store.clone(),
+                            vnodes,
+                            column_ids,
+                        )
+                        .await;
                         ArrangementBackfillExecutor::<_, $SD>::new(
                             upstream_table,
                             upstream,
