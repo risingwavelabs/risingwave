@@ -96,7 +96,7 @@ statement ok
 insert into t_single_bytea values ('\xDEADBEEF'), ('\xCAFEBABE'), ('\x00112233');
 
 statement ok
-insert into t_single_bytea_pk values ('\xFEEDBEEF'), ('\xBADC0DE');
+insert into t_single_bytea_pk values ('\xFEEDBEEF'), ('\x0BADC0DE');
 
 # Update test for upsert
 statement ok
@@ -137,7 +137,7 @@ sleep 2s
 query T retry 3 backoff 1s
 select data from t_source_upsert_bytes order by data;
 ----
-\xbadc0de
+\x0badc0de
 \xfeedbeef
 
 
