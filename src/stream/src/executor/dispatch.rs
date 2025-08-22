@@ -155,23 +155,26 @@ impl DispatchExecutorInner {
 
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
         macro_rules! await_with_metrics {
-            ($fut:expr, $metrics:expr, $interval:expr, $start_time:expr) => {{
+            ($fut:expr, $metrics:expr) => {{
+                let mut start_time = Instant::now();
+                let interval_duration = Duration::from_secs(15);
+                let mut interval =
+                    tokio::time::interval_at(start_time + interval_duration, interval_duration);
+
                 let mut fut = std::pin::pin!($fut);
-                // First tick completes immediately: https://docs.rs/tokio/1.47.1/tokio/time/fn.interval.html.
-                $interval.tick().await;
 
                 loop {
                     tokio::select! {
                         biased;
                         res = &mut fut => {
                             res?;
-                            let ns = $start_time.elapsed().as_nanos() as u64;
+                            let ns = start_time.elapsed().as_nanos() as u64;
                             $metrics.inc_by(ns);
                             break;
                         }
-                        _ = $interval.tick() => {
-                            $start_time = Instant::now();
-                            $metrics.inc_by($interval.period().as_nanos() as u64);
+                        _ = interval.tick() => {
+                            start_time = Instant::now();
+                            $metrics.inc_by(interval_duration.as_nanos() as u64);
                         }
                     };
                 }
@@ -197,8 +200,6 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let mut start_time = Instant::now();
-                        let mut interval = tokio::time::interval(Duration::from_secs(15));
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_barriers(
@@ -208,7 +209,7 @@ impl DispatchExecutorInner {
                                 .map(|b| b.into_dispatcher())
                                 .collect(),
                         );
-                        await_with_metrics!(std::pin::pin!(fut), metrics, interval, start_time)
+                        await_with_metrics!(std::pin::pin!(fut), metrics)
                     })
                     .await?;
                 self.post_mutate_dispatchers(&mutation)?;
@@ -217,13 +218,10 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let mut start_time = Instant::now();
-                        let mut interval = tokio::time::interval(Duration::from_secs(15));
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_watermark(watermark.clone());
-                        tokio::pin!(fut);
-                        await_with_metrics!(std::pin::pin!(fut), metrics, interval, start_time)
+                        await_with_metrics!(std::pin::pin!(fut), metrics)
                     })
                     .await?;
             }
@@ -231,13 +229,10 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let mut start_time = Instant::now();
-                        let mut interval = tokio::time::interval(Duration::from_secs(15));
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_data(chunk.clone());
-                        tokio::pin!(fut);
-                        await_with_metrics!(std::pin::pin!(fut), metrics, interval, start_time)
+                        await_with_metrics!(std::pin::pin!(fut), metrics)
                     })
                     .await?;
 
