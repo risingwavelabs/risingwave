@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::collections::vec_deque::VecDeque;
-use std::ops::Bound::Included;
+use std::collections::{Bound, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -186,7 +185,7 @@ impl StagingVersion {
                     && range_overlap(
                         &(left, right),
                         &imm.start_table_key(),
-                        Included(&imm.end_table_key()),
+                        Bound::Included(&imm.end_table_key()),
                     )
             });
 
@@ -912,6 +911,28 @@ impl HummockVersionReader {
         local_stats: &mut StoreLocalStatistic,
         factory: &mut F,
     ) -> StorageResult<()> {
+        {
+            fn bound_inner<T>(bound: &Bound<T>) -> Option<&T> {
+                match bound {
+                    Bound::Included(bound) | Bound::Excluded(bound) => Some(bound),
+                    Bound::Unbounded => None,
+                }
+            }
+            let (left, right) = &table_key_range;
+            if let (Some(left), Some(right)) = (bound_inner(left), bound_inner(right))
+                && right < left
+            {
+                if cfg!(debug_assertions) {
+                    panic!("invalid iter key range: {table_id} {left:?} {right:?}")
+                } else {
+                    return Err(HummockError::other(format!(
+                        "invalid iter key range: {table_id} {left:?} {right:?}"
+                    ))
+                    .into());
+                }
+            }
+        }
+
         local_stats.staging_imm_iter_count = imms.len() as u64;
         for imm in imms {
             factory.add_batch_iter(imm);
