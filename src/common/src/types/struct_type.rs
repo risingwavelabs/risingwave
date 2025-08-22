@@ -26,7 +26,7 @@ use crate::util::iter_util::ZipEqFast;
 use crate::util::quote_ident::QuoteIdent;
 
 /// A cheaply cloneable struct type.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
@@ -46,7 +46,7 @@ impl Debug for StructType {
     }
 }
 
-#[derive(Clone, Debug, educe::Educe)]
+#[derive(Clone, Debug, educe::Educe, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[educe(PartialEq, Eq, Hash)] // ignore ids for backward compatibility
 struct StructTypeInner {
     /// The name and data type of each field.

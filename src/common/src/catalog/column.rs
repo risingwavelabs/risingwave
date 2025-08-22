@@ -37,7 +37,18 @@ use crate::util::value_encoding::DatumToProtoExt;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
 /// not globally unique.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ColumnId(i32);
 
 impl std::fmt::Debug for ColumnId {

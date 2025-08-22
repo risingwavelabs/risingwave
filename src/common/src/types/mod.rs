@@ -112,11 +112,28 @@ pub type F64 = ordered_float::OrderedFloat<f64>;
 ///   but without data fields.
 /// - `FromStr` is only used internally for tests.
 ///   The generated implementation isn't efficient, and doesn't handle whitespaces, etc.
-#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants, FromStr)]
+#[derive(
+    Debug,
+    Display,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    EnumDiscriminants,
+    FromStr,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[strum_discriminants(derive(Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
 #[cfg_attr(test, strum_discriminants(derive(strum_macros::EnumIter)))]
+#[rkyv(serialize_bounds(
+    __S: rkyv::ser::Writer + rkyv::ser::Allocator + rkyv::ser::Sharing,
+    __S::Error: rkyv::rancor::Source,
+))]
+#[rkyv(deserialize_bounds(__D: rkyv::de::Pooling, __D::Error: rkyv::rancor::Source))]
 pub enum DataType {
     #[display("boolean")]
     #[from_str(regex = "(?i)^bool$|^boolean$")]
@@ -159,10 +176,10 @@ pub enum DataType {
     Interval,
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
-    Struct(StructType),
+    Struct(#[rkyv(omit_bounds)] StructType),
     #[display("{0}[]")]
     #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
-    List(Box<DataType>),
+    List(#[rkyv(omit_bounds)] Box<DataType>),
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
     Bytea,
@@ -177,7 +194,7 @@ pub enum DataType {
     Int256,
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
-    Map(MapType),
+    Map(#[rkyv(omit_bounds)] MapType),
     #[display("vector({0})")]
     #[from_str(regex = "(?i)^vector\\((?P<0>.+)\\)$")]
     Vector(usize),

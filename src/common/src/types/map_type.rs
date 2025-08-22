@@ -19,7 +19,7 @@ use anyhow::Context;
 use super::*;
 
 /// Refer to [`super::super::array::MapArray`] for the invariants of a map value.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct MapType(Box<(DataType, DataType)>);
 
 impl From<MapType> for DataType {
