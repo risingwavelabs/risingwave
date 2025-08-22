@@ -109,6 +109,26 @@ def _(outer_panels: Panels):
                                     ),
                                 ],
                             ),
+                            panels.timeseries_count(
+                                "PostgreSQL CDC JNI Commit Offset LSN",
+                                "LSN value when JNI commit offset is called for PostgreSQL CDC by source_id",
+                                [
+                                    panels.target(
+                                        f"{metric('stream_pg_cdc_jni_commit_offset_lsn')}",
+                                        "source_id={{source_id}}",
+                                    ),
+                                ],
+                            ),
+                            panels.timeseries_ops(
+                                "PostgreSQL CDC JNI Commit Offset Success Rate",
+                                "Number of successful JNI commit offset calls for PostgreSQL CDC by source_id",
+                                [
+                                    panels.target(
+                                        f"rate({metric('stream_pg_cdc_jni_commit_offset_success')}[$__rate_interval])",
+                                        "source_id={{source_id}}",
+                                    ),
+                                ],
+                            ),
             ],
         ),
     ]

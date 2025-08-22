@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -116,6 +117,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn spawn_wait_checkpoint_worker(
         core: &StreamSourceCore<S>,
         source_reader: SourceReader,
+        metrics: Arc<StreamingMetrics>,
     ) -> StreamExecutorResult<Option<WaitCheckpointTaskBuilder>> {
         let Some(initial_task) = source_reader.create_wait_checkpoint_task().await? else {
             return Ok(None);
@@ -125,6 +127,7 @@ impl<S: StateStore> SourceExecutor<S> {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table().state_store().clone(),
             table_id: core.split_state_store.state_table().table_id().into(),
+            metrics,
         };
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
@@ -521,8 +524,12 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let mut wait_checkpoint_task_builder =
-            Self::spawn_wait_checkpoint_worker(&core, source_desc.source.clone()).await?;
+        let mut wait_checkpoint_task_builder = Self::spawn_wait_checkpoint_worker(
+            &core,
+            source_desc.source.clone(),
+            self.metrics.clone(),
+        )
+        .await?;
 
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
@@ -961,6 +968,7 @@ struct WaitCheckpointWorker<S: StateStore> {
     wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,
     table_id: TableId,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> WaitCheckpointWorker<S> {
@@ -984,6 +992,47 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
+
+                            // Record metrics for JNI commit offset
+                            if let WaitCheckpointTask::CommitCdcOffset(updated_offset) = &task {
+                                if let Some((split_id, offset)) = updated_offset {
+                                    if let Ok(source_id) = u64::from_str(split_id.as_ref()) {
+                                        // Parse the offset to extract LSN for PostgreSQL CDC
+                                        if let Ok(offset_json) =
+                                            serde_json::from_str::<serde_json::Value>(offset)
+                                        {
+                                            if let Some(source_offset) =
+                                                offset_json.get("sourceOffset")
+                                            {
+                                                if let Some(lsn) = source_offset.get("lsn") {
+                                                    if let Some(lsn_value) = lsn.as_u64() {
+                                                        // Update metrics
+                                                        self.metrics
+                                                            .pg_cdc_jni_commit_offset_lsn
+                                                            .with_guarded_label_values(&[
+                                                                &source_id.to_string(),
+                                                            ])
+                                                            .set(lsn_value as i64);
+
+                                                        self.metrics
+                                                            .pg_cdc_jni_commit_offset_success
+                                                            .with_guarded_label_values(&[
+                                                                &source_id.to_string(),
+                                                            ])
+                                                            .inc();
+
+                                                        println!(
+                                                            "JNI commit offset metrics updated: source_id={}, lsn={}",
+                                                            source_id, lsn_value
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             task.run().await;
                         }
                         Err(e) => {
