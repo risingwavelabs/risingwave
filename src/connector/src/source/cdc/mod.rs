@@ -239,7 +239,7 @@ impl<T: CdcSourceTypeTrait> CdcProperties<T> {
 
 pub type CdcTableSnapshotSplitAssignment = HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct CdcTableSnapshotSplitAssignmentWithGeneration {
     pub splits: HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>,
     pub generation: u64,

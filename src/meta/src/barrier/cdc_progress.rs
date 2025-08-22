@@ -224,3 +224,172 @@ async fn load_cdc_fragment_table_mapping(
         .map(|(k, v)| (k.to_u32().unwrap(), v.to_u32().unwrap()))
         .collect())
 }
+
+#[cfg(test)]
+mod test {
+    use std::iter;
+
+    use risingwave_pb::stream_service::BarrierCompleteResponse;
+    use risingwave_pb::stream_service::barrier_complete_response::CdcTableBackfillProgress;
+
+    use crate::barrier::cdc_progress::CdcTableBackfillTracker;
+    use crate::manager::MetaSrvEnv;
+
+    #[tokio::test]
+    async fn test_generation() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store();
+        let tracker = CdcTableBackfillTracker::new(meta_store).await.unwrap();
+        assert_eq!(tracker.inner.lock().next_generation, 2);
+        let table_id = 123;
+        let split_count = 10;
+        tracker.add_split_count(table_id, split_count);
+        tracker.add_fragment_table_mapping(vec![11, 12, 13].into_iter(), table_id);
+        let generation = tracker.next_generation(vec![table_id].into_iter());
+        assert_eq!(generation, 2);
+        assert_init_state(&tracker, table_id, generation, split_count);
+        let barrier_complete = BarrierCompleteResponse {
+            cdc_table_backfill_progress: vec![
+                CdcTableBackfillProgress {
+                    done: true,
+                    split_id_start_inclusive: 1,
+                    split_id_end_inclusive: 2,
+                    generation,
+                    fragment_id: 12,
+                    ..Default::default()
+                },
+                CdcTableBackfillProgress {
+                    done: true,
+                    split_id_start_inclusive: 5,
+                    split_id_end_inclusive: 10,
+                    generation,
+                    fragment_id: 11,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let completed = tracker.apply_collected_command(iter::once(&barrier_complete));
+        assert!(completed.is_empty());
+        assert_eq!(
+            tracker
+                .inner
+                .lock()
+                .table_split_completed_counts
+                .get(&table_id)
+                .cloned()
+                .unwrap(),
+            8
+        );
+
+        // Reset generation.
+        let generation = tracker.next_generation(vec![table_id].into_iter());
+        assert_eq!(generation, 3);
+        assert_init_state(&tracker, table_id, generation, split_count);
+        let barrier_complete = BarrierCompleteResponse {
+            cdc_table_backfill_progress: vec![CdcTableBackfillProgress {
+                done: true,
+                split_id_start_inclusive: 3,
+                split_id_end_inclusive: 4,
+                // Expired generation.
+                generation: generation - 1,
+                fragment_id: 13,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let completed = tracker.apply_collected_command(iter::once(&barrier_complete));
+        assert!(completed.is_empty());
+        assert_init_state(&tracker, table_id, generation, split_count);
+        assert_eq!(
+            tracker
+                .inner
+                .lock()
+                .table_split_completed_counts
+                .get(&table_id)
+                .cloned()
+                .unwrap(),
+            0
+        );
+
+        let barrier_complete = BarrierCompleteResponse {
+            cdc_table_backfill_progress: vec![
+                CdcTableBackfillProgress {
+                    done: true,
+                    split_id_start_inclusive: 1,
+                    split_id_end_inclusive: 2,
+                    generation,
+                    fragment_id: 12,
+                    ..Default::default()
+                },
+                CdcTableBackfillProgress {
+                    done: true,
+                    split_id_start_inclusive: 5,
+                    split_id_end_inclusive: 10,
+                    generation,
+                    fragment_id: 11,
+                    ..Default::default()
+                },
+                CdcTableBackfillProgress {
+                    done: true,
+                    split_id_start_inclusive: 3,
+                    split_id_end_inclusive: 4,
+                    generation,
+                    fragment_id: 13,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let completed = tracker.apply_collected_command(iter::once(&barrier_complete));
+        assert_eq!(completed, vec![table_id.into()]);
+        assert_eq!(
+            tracker
+                .inner
+                .lock()
+                .table_split_completed_counts
+                .get(&table_id)
+                .cloned()
+                .unwrap(),
+            10
+        );
+    }
+
+    fn assert_init_state(
+        tracker: &CdcTableBackfillTracker,
+        table_id: u32,
+        generation: u64,
+        split_count: u64,
+    ) {
+        assert_eq!(
+            tracker
+                .inner
+                .lock()
+                .table_split_assignment_generations
+                .get(&table_id)
+                .cloned()
+                .unwrap(),
+            generation
+        );
+        assert_eq!(
+            tracker
+                .inner
+                .lock()
+                .table_split_total_counts
+                .get(&table_id)
+                .cloned()
+                .unwrap(),
+            split_count
+        );
+        assert_eq!(
+            tracker
+                .inner
+                .lock()
+                .table_split_completed_counts
+                .get(&table_id)
+                .cloned()
+                .unwrap(),
+            0
+        );
+    }
+}
