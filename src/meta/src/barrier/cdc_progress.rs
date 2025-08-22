@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use num_traits::ToPrimitive;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_meta_model::{FragmentId, ObjectId, cdc_table_snapshot_split, fragment};
@@ -202,7 +201,7 @@ async fn load_split_counts(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32,
         .await?;
     Ok(split_counts
         .into_iter()
-        .map(|(k, v)| (k.to_u32().unwrap(), v.to_u64().unwrap()))
+        .map(|(k, v)| (u32::try_from(k).unwrap(), u64::try_from(v).unwrap()))
         .collect())
 }
 
@@ -221,7 +220,7 @@ async fn load_cdc_fragment_table_mapping(
         .await?;
     Ok(fragment_jobs
         .into_iter()
-        .map(|(k, v)| (k.to_u32().unwrap(), v.to_u32().unwrap()))
+        .map(|(k, v)| (u32::try_from(k).unwrap(), u32::try_from(v).unwrap()))
         .collect())
 }
 

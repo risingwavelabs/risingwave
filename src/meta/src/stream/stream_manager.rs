@@ -21,7 +21,6 @@ use await_tree::{InstrumentAwait, span};
 use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
-use num_traits::ToPrimitive;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
@@ -528,7 +527,7 @@ impl GlobalStreamManager {
                 stream_job_fragments.stream_job_id.table_id,
                 cdc_table_snapshot_split_assignment
                     .values()
-                    .map(|s| s.len().to_u64().unwrap())
+                    .map(|s| u64::try_from(s.len()).unwrap())
                     .sum(),
             );
             self.env
