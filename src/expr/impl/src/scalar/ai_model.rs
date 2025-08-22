@@ -55,7 +55,7 @@ impl OpenAiEmbeddingContext {
 
         let model = expect_string("model")?;
         let api_key = get_string("api-key")?;
-        let ord_id = get_string("ord-id")?;
+        let org_id = get_string("org-id")?;
         let proj_id = get_string("project-id")?;
         let api_base = get_string("api-base")?;
 
@@ -63,7 +63,7 @@ impl OpenAiEmbeddingContext {
         if let Some(api_key) = api_key {
             config = config.with_api_key(api_key);
         }
-        if let Some(org_id) = ord_id {
+        if let Some(org_id) = org_id {
             config = config.with_org_id(org_id);
         }
         if let Some(proj_id) = proj_id {
