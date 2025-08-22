@@ -213,6 +213,10 @@ pub struct MetaMetrics {
     pub compaction_group_size: IntGaugeVec,
     pub compaction_group_file_count: IntGaugeVec,
     pub compaction_group_throughput: IntGaugeVec,
+
+    // ********************************** Iceberg ************************************
+    /// Number of snapshots per iceberg table
+    pub iceberg_snapshot_count: IntGaugeVec,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -817,6 +821,14 @@ impl MetaMetrics {
         let compact_task_trivial_move_sst_count =
             register_histogram_vec_with_registry!(opts, &["group"], registry).unwrap();
 
+        let iceberg_snapshot_count = register_int_gauge_vec_with_registry!(
+            "iceberg_snapshot_count",
+            "Number of snapshots per iceberg table",
+            &["sink_id", "catalog_name", "table_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -898,6 +910,7 @@ impl MetaMetrics {
             compaction_group_size,
             compaction_group_file_count,
             compaction_group_throughput,
+            iceberg_snapshot_count,
         }
     }
 

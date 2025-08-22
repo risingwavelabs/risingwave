@@ -547,6 +547,18 @@ impl IcebergCompactionManager {
         let mut snapshots = metadata.snapshots().collect_vec();
         snapshots.sort_by_key(|s| s.timestamp_ms());
 
+        // Update metrics for snapshot count
+        let snapshot_count = snapshots.len();
+        let full_table_name = iceberg_config.full_table_name()?.to_string();
+        self.metrics
+            .iceberg_snapshot_count
+            .with_label_values(&[
+                &sink_id.sink_id.to_string(),
+                &iceberg_config.catalog_name(),
+                &full_table_name,
+            ])
+            .set(snapshot_count as i64);
+
         if snapshots.is_empty() || snapshots.first().unwrap().timestamp_ms() > expired_older_than {
             // avoid commit empty table updates
             return Ok(());
