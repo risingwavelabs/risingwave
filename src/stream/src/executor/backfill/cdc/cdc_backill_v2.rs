@@ -33,7 +33,7 @@ use tracing::Instrument;
 
 use crate::executor::UpdateMutation;
 use crate::executor::backfill::cdc::cdc_backfill::{
-    CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS, build_reader_and_poll_upstream, transform_upstream,
+    build_reader_and_poll_upstream, start_confirm_flush_lsn_monitor, transform_upstream,
 };
 use crate::executor::backfill::cdc::state_v2::ParallelizedCdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
@@ -170,53 +170,12 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         let external_table = self.external_table.clone();
 
         if let Some(slot_name) = slot_name {
-            let _confirm_flush_monitor = tokio::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(
-                    CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS,
-                ));
-                loop {
-                    interval.tick().await;
-
-                    // Try to create a table reader to query confirm_flush_lsn
-                    match external_table.create_table_reader().await {
-                        Ok(reader) => {
-                            if let ExternalTableReaderImpl::Postgres(pg_reader) = reader {
-                                match pg_reader.query_confirm_flush_lsn(&slot_name).await {
-                                    Ok(Some(confirm_flush_lsn)) => {
-                                        // Update metrics
-                                        streaming_metrics
-                                            .pg_cdc_confirm_flush_lsn
-                                            .with_guarded_label_values(&[
-                                                &source_id.to_string(),
-                                                &slot_name,
-                                            ])
-                                            .set(confirm_flush_lsn as i64);
-                                    }
-                                    Ok(None) => {
-                                        tracing::warn!(
-                                            "No confirmed_flush_lsn found for slot: {}",
-                                            slot_name
-                                        );
-                                    }
-                                    Err(e) => {
-                                        tracing::error!(
-                                            "Failed to query confirmed_flush_lsn for slot {}: {}",
-                                            slot_name,
-                                            e
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "Failed to create table reader for confirmed_flush_lsn query: {}",
-                                e
-                            );
-                        }
-                    }
-                }
-            });
+            start_confirm_flush_lsn_monitor(
+                streaming_metrics,
+                source_id,
+                slot_name,
+                external_table,
+            );
         }
 
         // Need reset on CDC table snapshot splits reschedule.
