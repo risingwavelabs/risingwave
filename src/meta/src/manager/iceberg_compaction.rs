@@ -369,7 +369,7 @@ impl IcebergCompactionManager {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             // Run GC every hour by default
-            const GC_LOOP_INTERVAL_SECS: u64 = 900;
+            const GC_LOOP_INTERVAL_SECS: u64 = 3600;
             let mut interval =
                 tokio::time::interval(std::time::Duration::from_secs(GC_LOOP_INTERVAL_SECS));
 
