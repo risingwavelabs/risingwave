@@ -583,17 +583,19 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         {
                             continue;
                         }
-                        if state_impl.is_legacy_state() {
-                            // Since the legacy state does not track CDC offsets, report backfill completion immediately.
-                            actor_cdc_offset_high = None;
-                            should_report_actor_backfill_done = true;
-                        } else if let Some(high) = actor_cdc_offset_high.as_ref()
-                            && let Some(ref chunk_offset) = chunk_cdc_offset
-                            && *chunk_offset >= *high
-                        {
-                            // Report backfill completion once the latest CDC offset exceeds the highest offset tracked during the backfill.
-                            actor_cdc_offset_high = None;
-                            should_report_actor_backfill_done = true;
+                        // should_report_actor_backfill_done is set to true at most once.
+                        if let Some(high) = actor_cdc_offset_high.as_ref() {
+                            if state_impl.is_legacy_state() {
+                                // Since the legacy state does not track CDC offsets, report backfill completion immediately.
+                                actor_cdc_offset_high = None;
+                                should_report_actor_backfill_done = true;
+                            } else if let Some(ref chunk_offset) = chunk_cdc_offset
+                                && *chunk_offset >= *high
+                            {
+                                // Report backfill completion once the latest CDC offset exceeds the highest offset tracked during the backfill.
+                                actor_cdc_offset_high = None;
+                                should_report_actor_backfill_done = true;
+                            }
                         }
                         let chunk = mapping_chunk(chunk, &self.output_indices);
                         if let Some(filtered_chunk) = filter_stream_chunk(
