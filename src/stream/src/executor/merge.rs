@@ -246,7 +246,7 @@ impl MergeExecutor {
             metrics
                 .actor_input_buffer_blocking_duration_ns
                 .inc_by(start_time.elapsed().as_nanos() as u64);
-            let msg: DispatcherMessage = msg.context("MergeExecutor pull upstream failed")?;
+            let msg: DispatcherMessage = msg?;
             let mut msg: Message = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
 
             match &mut msg {
