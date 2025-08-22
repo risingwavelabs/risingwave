@@ -652,7 +652,6 @@ pub enum DispatcherImpl {
 
 impl DispatcherImpl {
     pub fn new(outputs: Vec<Output>, dispatcher: &PbDispatcher) -> StreamResult<Self> {
-        tracing::debug!("outputs: {:?}", outputs);
         let output_mapping =
             DispatchOutputMapping::from_protobuf(dispatcher.output_mapping.clone().unwrap());
 
