@@ -76,6 +76,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     metrics: CdcBackfillMetrics,
 
+    streaming_metrics: Arc<StreamingMetrics>,
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
@@ -107,8 +108,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             pk_indices.len() + METADATA_STATE_LEN,
         );
 
-        let metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
-
+        let cdc_metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
         Self {
             actor_ctx,
             external_table,
@@ -117,7 +117,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             output_columns,
             state_impl,
             progress,
-            metrics,
+            metrics: cdc_metrics,
+            streaming_metrics: metrics,
             rate_limit_rps,
             options,
             properties,
@@ -148,6 +149,60 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let upstream_table_name = self.external_table.qualified_table_name();
         let schema_table_name = self.external_table.schema_table_name().clone();
         let external_database_name = self.external_table.database_name().to_owned();
+
+        // Start background task to periodically query confirm_flush_lsn for PostgreSQL CDC
+        let streaming_metrics = self.streaming_metrics.clone();
+        let source_id = self.actor_ctx.id;
+        let slot_name = self.properties.get("slot.name").cloned();
+        let external_table = self.external_table.clone();
+
+        if let Some(slot_name) = slot_name {
+            let _confirm_flush_monitor = tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(3)); // 5 minutes
+                loop {
+                    interval.tick().await;
+
+                    // Try to create a table reader to query confirm_flush_lsn
+                    match external_table.create_table_reader().await {
+                        Ok(reader) => {
+                            if let ExternalTableReaderImpl::Postgres(pg_reader) = reader {
+                                match pg_reader.query_confirm_flush_lsn(&slot_name).await {
+                                    Ok(Some(confirm_flush_lsn)) => {
+                                        // Update metrics
+                                        streaming_metrics
+                                            .pg_cdc_confirm_flush_lsn
+                                            .with_guarded_label_values(&[
+                                                &source_id.to_string(),
+                                                &slot_name,
+                                            ])
+                                            .set(confirm_flush_lsn as i64);
+                                    }
+                                    Ok(None) => {
+                                        tracing::warn!(
+                                            "No confirmed_flush_lsn found for slot: {}",
+                                            slot_name
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(
+                                            "Failed to query confirmed_flush_lsn for slot {}: {}",
+                                            slot_name,
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to create table reader for confirmed_flush_lsn query: {}",
+                                e
+                            );
+                        }
+                    }
+                }
+            });
+        }
 
         let additional_columns = self
             .output_columns
