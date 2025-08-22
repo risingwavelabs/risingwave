@@ -156,13 +156,14 @@ impl DispatchExecutorInner {
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
         macro_rules! await_with_metrics {
             ($fut:expr, $metrics:expr, $interval:expr, $start_time:expr) => {{
+                let mut fut = std::pin::pin!($fut);
                 // First tick completes immediately: https://docs.rs/tokio/1.47.1/tokio/time/fn.interval.html.
                 $interval.tick().await;
 
                 loop {
                     tokio::select! {
                         biased;
-                        res = &mut $fut => {
+                        res = &mut fut => {
                             res?;
                             let ns = $start_time.elapsed().as_nanos() as u64;
                             $metrics.inc_by(ns);
@@ -207,8 +208,7 @@ impl DispatchExecutorInner {
                                 .map(|b| b.into_dispatcher())
                                 .collect(),
                         );
-                        tokio::pin!(fut);
-                        await_with_metrics!(fut, metrics, interval, start_time)
+                        await_with_metrics!(std::pin::pin!(fut), metrics, interval, start_time)
                     })
                     .await?;
                 self.post_mutate_dispatchers(&mutation)?;
@@ -223,7 +223,7 @@ impl DispatchExecutorInner {
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_watermark(watermark.clone());
                         tokio::pin!(fut);
-                        await_with_metrics!(fut, metrics, interval, start_time)
+                        await_with_metrics!(std::pin::pin!(fut), metrics, interval, start_time)
                     })
                     .await?;
             }
@@ -237,7 +237,7 @@ impl DispatchExecutorInner {
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_data(chunk.clone());
                         tokio::pin!(fut);
-                        await_with_metrics!(fut, metrics, interval, start_time)
+                        await_with_metrics!(std::pin::pin!(fut), metrics, interval, start_time)
                     })
                     .await?;
 
