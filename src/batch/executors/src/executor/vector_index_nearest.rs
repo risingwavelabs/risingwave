@@ -63,7 +63,7 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         ensure!(
             inputs.len() == 1,
-            "VectorIndexNearest should not have input executor!"
+            "VectorIndexNearest should have an input executor!"
         );
         let [input]: [_; 1] = inputs.try_into().unwrap();
         let vector_index_nearest_node = try_match_expand!(
