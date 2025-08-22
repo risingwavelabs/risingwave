@@ -10,17 +10,6 @@ def _(outer_panels: Panels):
             "Iceberg Compaction Metrics",
             [
                 panels.timeseries_count(
-                    "Iceberg Snapshot Count",
-                    "Number of snapshots per iceberg table",
-                    [
-                        panels.target(
-                            f"sum({metric('iceberg_snapshot_count')}) by (sink_id, catalog_name, table_name)",
-                            "{{catalog_name}}/{{table_name}} (sink_id={{sink_id}})",
-                        ),
-                    ],
-                ),
-
-                panels.timeseries_count(
                     "Iceberg Compaction Commit Count",
                     "iceberg compaction commit count",
                     [
