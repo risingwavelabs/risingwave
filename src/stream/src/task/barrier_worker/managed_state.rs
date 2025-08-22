@@ -1036,6 +1036,7 @@ impl DatabaseManagedBarrierState {
             .map(|barrier| (prev_partial_graph_id, barrier))
     }
 
+    #[allow(clippy::type_complexity)]
     pub(super) fn pop_barrier_to_complete(
         &mut self,
         partial_graph_id: PartialGraphId,
@@ -1174,6 +1175,7 @@ impl PartialGraphManagedBarrierState {
         None
     }
 
+    #[allow(clippy::type_complexity)]
     fn pop_barrier_to_complete(
         &mut self,
         prev_epoch: u64,

@@ -44,9 +44,9 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         let is_legacy_state = state_table.get_data_types().len() == 3;
         let state_len = if is_legacy_state { 3 } else { 5 };
         Self {
-            is_legacy_state,
             state_table,
             state_len,
+            is_legacy_state,
         }
     }
 
