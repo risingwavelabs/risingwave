@@ -124,7 +124,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 node.rate_limit,
                 scan_options,
                 properties,
-                progress,
+                Some(progress),
             );
             Ok((params.info, exec).into())
         } else {

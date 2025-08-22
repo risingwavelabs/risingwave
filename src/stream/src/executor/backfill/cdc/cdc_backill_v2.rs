@@ -69,7 +69,7 @@ pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
 
     properties: BTreeMap<String, String>,
 
-    progress: CdcProgressReporter,
+    progress: Option<CdcProgressReporter>,
 }
 
 impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
@@ -85,7 +85,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         rate_limit_rps: Option<u32>,
         options: CdcScanOptions,
         properties: BTreeMap<String, String>,
-        progress: CdcProgressReporter,
+        progress: Option<CdcProgressReporter>,
     ) -> Self {
         Self {
             actor_ctx,
@@ -554,16 +554,19 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         if should_report_actor_backfill_done {
                             should_report_actor_backfill_done = false;
                             assert!(!actor_snapshot_splits.is_empty());
-                            self.progress.finish(
-                                self.actor_ctx.fragment_id,
-                                self.actor_ctx.id,
-                                barrier.epoch,
-                                generation,
-                                (
-                                    actor_snapshot_splits[0].split_id,
-                                    actor_snapshot_splits[actor_snapshot_splits.len() - 1].split_id,
-                                ),
-                            );
+                            if let Some(ref progress) = self.progress {
+                                progress.finish(
+                                    self.actor_ctx.fragment_id,
+                                    self.actor_ctx.id,
+                                    barrier.epoch,
+                                    generation,
+                                    (
+                                        actor_snapshot_splits[0].split_id,
+                                        actor_snapshot_splits[actor_snapshot_splits.len() - 1]
+                                            .split_id,
+                                    ),
+                                );
+                            }
                         }
                         yield Message::Barrier(barrier);
                     }
