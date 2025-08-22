@@ -9,6 +9,7 @@ repository = { workspace = true }
 
 [features]
 dhat-heap = ["dhat"]
+test = []
 
 [dependencies]
 anyhow = "1"

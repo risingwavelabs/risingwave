@@ -6,7 +6,7 @@ on:
         description: 'Performance test namespace (date-time will be appended)'
         required: true
         type: string
-        default: 'Untitled'
+        default: 'untitled'
       rw_image_tag:
         description: 'RisingWave Image Tag (docker image tag, e.g. v2.6.0-alpha--bench--e7ca9bb--kwannoel-enhance-backpressure-graph6)'
         required: true
@@ -16,7 +16,7 @@ on:
         description: 'Nexmark Queries to Benchmark'
         required: true
         type: string
-        default: 'q0,q4,q6,q15,q20,q101'
+        default: 'q0,q4,q15,q20,q22,q101'
 
 jobs:
   run-perf-test:
@@ -73,3 +73,6 @@ jobs:
           commit: HEAD
           message: ':github: Triggering Nexmark Benchmark with image tag: ${{ env.RW_VERSION }}'
           build_env_vars: '{ "BENCH_NAMESPACE": "${{ env.BENCH_NAMESPACE }}", "BENCH_TESTBED": "${{ env.BENCH_TESTBED }}", "RW_VERSION": "${{ env.RW_VERSION }}", "NEXMARK_QUERY": "${{ env.NEXMARK_QUERY }}", "KAFKA_EVENTS": "${{ env.KAFKA_EVENTS }}", "KAFKA_PARTITION": "${{ env.KAFKA_PARTITION }}", "ENABLE_BLACKHOLE": "${{ env.ENABLE_BLACKHOLE }}", "SKIP_DASHBOARD": "${{ env.SKIP_DASHBOARD }}" }'
+      - name: 'Notify dashboard link'
+        run: |
+          echo 'To compare query results, visit: http://metabase.risingwave-cloud.xyz/dashboard/1405-nexmark-8c32g-1cn-rw-source-throughput?start_date=2024-12-01'

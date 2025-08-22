@@ -581,14 +581,16 @@ impl Sink for IcebergSink {
         let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
 
         if let Some(compaction_interval) = iceberg_config.compaction_interval_sec {
-            if iceberg_config.enable_compaction {
-                if compaction_interval == 0 {
-                    bail!(
-                        "`compaction_interval_sec` must be greater than 0 when `enable_compaction` is true"
-                    );
-                }
+            if iceberg_config.enable_compaction && compaction_interval == 0 {
+                bail!(
+                    "`compaction_interval_sec` must be greater than 0 when `enable_compaction` is true"
+                );
             } else {
-                bail!("`compaction_interval_sec` can only be set when `enable_compaction` is true");
+                // log compaction_interval
+                tracing::info!(
+                    "Alter config compaction_interval set to {} seconds",
+                    compaction_interval
+                );
             }
         }
 
