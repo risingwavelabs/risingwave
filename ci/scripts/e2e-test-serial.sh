@@ -135,6 +135,8 @@ risedev slt -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}
 echo "--- e2e, $mode, embedding"
 cargo run --manifest-path e2e_test/vector_search/mocked_openai_embedding_service/Cargo.toml --locked --bin mocked_openai_embedding_service &
 MOCKED_EMBEDDING_SERVICE_PID=$!
+# wait for embedding service up
+sleep 3
 risedev slt -p 4566 -d dev './e2e_test/vector_search/**/*.slt'
 kill $MOCKED_EMBEDDING_SERVICE_PID
 
