@@ -98,6 +98,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+
                 panels.subheader("Sink"),
                 # TODO: These 2 metrics should be deprecated because they are unaware of Log Store
                 # Let's remove them when all sinks are migrated to Log Store

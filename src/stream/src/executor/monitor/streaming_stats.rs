@@ -213,6 +213,10 @@ pub struct StreamingMetrics {
     materialize_cache_total_count: RelabeledGuardedIntCounterVec,
     materialize_input_row_count: RelabeledGuardedIntCounterVec,
     pub materialize_current_epoch: RelabeledGuardedIntGaugeVec,
+
+    // PostgreSQL CDC LSN monitoring
+    pub pg_cdc_state_table_lsn: LabelGuardedIntGaugeVec,
+    pub pg_cdc_state_table_commit_success: LabelGuardedIntCounterVec,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -294,6 +298,22 @@ impl StreamingMetrics {
         )
         .unwrap()
         .relabel_debug_1(level);
+
+        let pg_cdc_state_table_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_pg_cdc_state_table_lsn",
+            "Current LSN value stored in PostgreSQL CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let pg_cdc_state_table_commit_success = register_guarded_int_counter_vec_with_registry!(
+            "stream_pg_cdc_state_table_commit_success",
+            "Number of successful commits for PostgreSQL CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
 
         let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_sink_chunk_buffer_size",
@@ -1304,6 +1324,8 @@ impl StreamingMetrics {
             materialize_cache_total_count,
             materialize_input_row_count,
             materialize_current_epoch,
+            pg_cdc_state_table_lsn,
+            pg_cdc_state_table_commit_success,
         }
     }
 

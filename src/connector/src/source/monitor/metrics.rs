@@ -139,6 +139,7 @@ impl SourceMetrics {
             registry
         )
         .unwrap();
+
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,

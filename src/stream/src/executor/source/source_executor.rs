@@ -34,6 +34,7 @@ use risingwave_connector::source::{
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
+use serde_json;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
@@ -430,6 +431,35 @@ impl<S: StateStore> SourceExecutor<S> {
 
         if !cache.is_empty() {
             tracing::debug!(state = ?cache, "take snapshot");
+
+            // Record LSN metrics for PostgreSQL CDC sources before moving cache
+            let source_id = core.source_id.to_string();
+            for split_impl in &cache {
+                if split_impl.is_cdc_split() {
+                    let start_offset = split_impl.get_cdc_split_offset();
+                    // Parse the offset to extract LSN for PostgreSQL CDC
+                    if let Ok(offset) = serde_json::from_str::<serde_json::Value>(&start_offset) {
+                        if let Some(source_offset) = offset.get("sourceOffset") {
+                            if let Some(lsn) = source_offset.get("lsn") {
+                                if let Some(lsn_value) = lsn.as_u64() {
+                                    println!("这里更新metrics: {:?}", lsn_value);
+                                    // Update metrics
+                                    self.metrics
+                                        .pg_cdc_state_table_lsn
+                                        .with_guarded_label_values(&[&source_id])
+                                        .set(lsn_value as i64);
+
+                                    self.metrics
+                                        .pg_cdc_state_table_commit_success
+                                        .with_guarded_label_values(&[&source_id])
+                                        .inc();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             core.split_state_store.set_states(cache).await?;
         }
 

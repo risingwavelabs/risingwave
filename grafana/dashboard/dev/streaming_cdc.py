@@ -89,6 +89,26 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                                            panels.timeseries_count(
+                                "PostgreSQL CDC State Table LSN",
+                                "Current LSN value stored in PostgreSQL CDC state table by source_id",
+                                [
+                                    panels.target(
+                                        f"{metric('stream_pg_cdc_state_table_lsn')}",
+                                        "source_id={{source_id}}",
+                                    ),
+                                ],
+                            ),
+                            panels.timeseries_ops(
+                                "PostgreSQL CDC State Table Commit Success Rate",
+                                "Number of successful commits for PostgreSQL CDC state table by source_id",
+                                [
+                                    panels.target(
+                                        f"rate({metric('stream_pg_cdc_state_table_commit_success')}[$__rate_interval])",
+                                        "source_id={{source_id}}",
+                                    ),
+                                ],
+                            ),
             ],
         ),
     ]
