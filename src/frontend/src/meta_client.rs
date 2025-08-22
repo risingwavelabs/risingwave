@@ -165,6 +165,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64>;
 
+    async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()>;
+
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
 }
 
@@ -406,6 +408,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
         self.0.compact_iceberg_table(sink_id).await
+    }
+
+    async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()> {
+        self.0.expire_iceberg_table_snapshots(sink_id).await
     }
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
