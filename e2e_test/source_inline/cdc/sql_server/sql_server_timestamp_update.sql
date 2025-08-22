@@ -1,7 +1,7 @@
 -- SQL Server CDC timestamp test update data
 -- This file updates test data to verify CDC update functionality
 
-USE mydb;
+USE sqlserver_timestamp_db;
 GO
 
 -- Update data in SQL Server to test CDC update functionality

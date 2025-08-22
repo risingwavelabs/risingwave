@@ -33,6 +33,8 @@ message UserInfo {
 
   /// Granted privileges will be only updated through the command of GRANT/REVOKE.
   repeated GrantPrivilege grant_privileges = 8;
+
+  bool is_admin = 9;
 }
 
 enum Action {
@@ -97,6 +99,7 @@ message UpdateUserRequest {
     AUTH_INFO = 4;
     RENAME = 5;
     CREATE_USER = 6;
+    ADMIN = 7;
   }
   UserInfo user = 1;
   repeated UpdateField update_fields = 2;
