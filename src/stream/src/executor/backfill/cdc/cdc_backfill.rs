@@ -51,7 +51,8 @@ use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
-
+/// Interval for querying `confirm_flush_lsn` from upstream PostgreSQL (5 minutes).
+pub const CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS: u64 = 300;
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -158,7 +159,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         if let Some(slot_name) = slot_name {
             let _confirm_flush_monitor = tokio::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(3)); // 5 minutes
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+                    CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS,
+                ));
                 loop {
                     interval.tick().await;
 
