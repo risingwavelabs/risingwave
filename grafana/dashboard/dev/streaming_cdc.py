@@ -90,42 +90,20 @@ def _(outer_panels: Panels):
                     ],
                 ),
                                             panels.timeseries_count(
-                                "PostgreSQL CDC State Table LSN",
-                                "Current LSN value stored in PostgreSQL CDC state table by source_id",
+                                "PostgreSQL CDC LSN Progression",
+                                "LSN progression through the CDC pipeline by source_id",
                                 [
                                     panels.target(
                                         f"{metric('stream_pg_cdc_state_table_lsn')}",
-                                        "source_id={{source_id}}",
+                                        "source_id {{source_id}} - State Table LSN",
                                     ),
-                                ],
-                            ),
-                            panels.timeseries_ops(
-                                "PostgreSQL CDC State Table Commit Success Rate",
-                                "Number of successful commits for PostgreSQL CDC state table by source_id",
-                                [
-                                    panels.target(
-                                        f"rate({metric('stream_pg_cdc_state_table_commit_success')}[$__rate_interval])",
-                                        "source_id={{source_id}}",
-                                    ),
-                                ],
-                            ),
-                            panels.timeseries_count(
-                                "PostgreSQL CDC JNI Commit Offset LSN",
-                                "LSN value when JNI commit offset is called for PostgreSQL CDC by source_id",
-                                [
                                     panels.target(
                                         f"{metric('stream_pg_cdc_jni_commit_offset_lsn')}",
-                                        "source_id={{source_id}}",
+                                        "source_id {{source_id}} - JNI Commit Offset LSN",
                                     ),
-                                ],
-                            ),
-                            panels.timeseries_ops(
-                                "PostgreSQL CDC JNI Commit Offset Success Rate",
-                                "Number of successful JNI commit offset calls for PostgreSQL CDC by source_id",
-                                [
                                     panels.target(
-                                        f"rate({metric('stream_pg_cdc_jni_commit_offset_success')}[$__rate_interval])",
-                                        "source_id={{source_id}}",
+                                        f"{metric('stream_pg_cdc_confirm_flush_lsn')}",
+                                                                                 "slot {{slot_name}} source_id {{source_id}} - Confirmed Flush LSN",
                                     ),
                                 ],
                             ),

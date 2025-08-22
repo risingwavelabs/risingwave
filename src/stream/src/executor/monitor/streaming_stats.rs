@@ -216,9 +216,8 @@ pub struct StreamingMetrics {
 
     // PostgreSQL CDC LSN monitoring
     pub pg_cdc_state_table_lsn: LabelGuardedIntGaugeVec,
-    pub pg_cdc_state_table_commit_success: LabelGuardedIntCounterVec,
     pub pg_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
-    pub pg_cdc_jni_commit_offset_success: LabelGuardedIntCounterVec,
+    pub pg_cdc_confirm_flush_lsn: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -309,14 +308,6 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let pg_cdc_state_table_commit_success = register_guarded_int_counter_vec_with_registry!(
-            "stream_pg_cdc_state_table_commit_success",
-            "Number of successful commits for PostgreSQL CDC state table",
-            &["source_id"],
-            registry,
-        )
-        .unwrap();
-
         let pg_cdc_jni_commit_offset_lsn = register_guarded_int_gauge_vec_with_registry!(
             "stream_pg_cdc_jni_commit_offset_lsn",
             "LSN value when JNI commit offset is called for PostgreSQL CDC",
@@ -325,10 +316,10 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let pg_cdc_jni_commit_offset_success = register_guarded_int_counter_vec_with_registry!(
-            "stream_pg_cdc_jni_commit_offset_success",
-            "Number of successful JNI commit offset calls for PostgreSQL CDC",
-            &["source_id"],
+        let pg_cdc_confirm_flush_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_pg_cdc_confirm_flush_lsn",
+            "confirm_flush_lsn value from PostgreSQL replication slots",
+            &["source_id", "slot_name"],
             registry,
         )
         .unwrap();
@@ -1343,9 +1334,8 @@ impl StreamingMetrics {
             materialize_input_row_count,
             materialize_current_epoch,
             pg_cdc_state_table_lsn,
-            pg_cdc_state_table_commit_success,
             pg_cdc_jni_commit_offset_lsn,
-            pg_cdc_jni_commit_offset_success,
+            pg_cdc_confirm_flush_lsn,
         }
     }
 
@@ -1791,6 +1781,7 @@ pub struct BackfillMetrics {
     pub backfill_upstream_output_row_count: LabelGuardedIntCounter,
 }
 
+#[derive(Clone)]
 pub struct CdcBackfillMetrics {
     pub cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounter,
     pub cdc_backfill_upstream_output_row_count: LabelGuardedIntCounter,

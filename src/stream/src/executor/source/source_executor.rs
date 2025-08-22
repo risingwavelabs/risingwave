@@ -54,6 +54,17 @@ use crate::task::LocalBarrierManager;
 /// some latencies in network and cost in meta.
 pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
+/// Extract LSN value from PostgreSQL CDC offset JSON string
+///
+/// This function parses the offset JSON and extracts the LSN value from the sourceOffset.lsn field.
+/// Returns Some(lsn) if the LSN is found and can be parsed as u64, None otherwise.
+fn extract_pg_cdc_lsn(offset_str: &str) -> Option<u64> {
+    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+    let source_offset = offset.get("sourceOffset")?;
+    let lsn = source_offset.get("lsn")?;
+    lsn.as_u64()
+}
+
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -441,24 +452,11 @@ impl<S: StateStore> SourceExecutor<S> {
                 if split_impl.is_cdc_split() {
                     let start_offset = split_impl.get_cdc_split_offset();
                     // Parse the offset to extract LSN for PostgreSQL CDC
-                    if let Ok(offset) = serde_json::from_str::<serde_json::Value>(&start_offset) {
-                        if let Some(source_offset) = offset.get("sourceOffset") {
-                            if let Some(lsn) = source_offset.get("lsn") {
-                                if let Some(lsn_value) = lsn.as_u64() {
-                                    println!("这里更新metrics: {:?}", lsn_value);
-                                    // Update metrics
-                                    self.metrics
-                                        .pg_cdc_state_table_lsn
-                                        .with_guarded_label_values(&[&source_id])
-                                        .set(lsn_value as i64);
-
-                                    self.metrics
-                                        .pg_cdc_state_table_commit_success
-                                        .with_guarded_label_values(&[&source_id])
-                                        .inc();
-                                }
-                            }
-                        }
+                    if let Some(state_table_lsn_value) = extract_pg_cdc_lsn(&start_offset) {
+                        self.metrics
+                            .pg_cdc_state_table_lsn
+                            .with_guarded_label_values(&[&source_id])
+                            .set(state_table_lsn_value as i64);
                     }
                 }
             }
@@ -994,43 +992,16 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
 
                             // Record metrics for JNI commit offset
-                            if let WaitCheckpointTask::CommitCdcOffset(updated_offset) = &task {
-                                if let Some((split_id, offset)) = updated_offset {
-                                    if let Ok(source_id) = u64::from_str(split_id.as_ref()) {
-                                        // Parse the offset to extract LSN for PostgreSQL CDC
-                                        if let Ok(offset_json) =
-                                            serde_json::from_str::<serde_json::Value>(offset)
-                                        {
-                                            if let Some(source_offset) =
-                                                offset_json.get("sourceOffset")
-                                            {
-                                                if let Some(lsn) = source_offset.get("lsn") {
-                                                    if let Some(lsn_value) = lsn.as_u64() {
-                                                        // Update metrics
-                                                        self.metrics
-                                                            .pg_cdc_jni_commit_offset_lsn
-                                                            .with_guarded_label_values(&[
-                                                                &source_id.to_string(),
-                                                            ])
-                                                            .set(lsn_value as i64);
-
-                                                        self.metrics
-                                                            .pg_cdc_jni_commit_offset_success
-                                                            .with_guarded_label_values(&[
-                                                                &source_id.to_string(),
-                                                            ])
-                                                            .inc();
-
-                                                        println!(
-                                                            "JNI commit offset metrics updated: source_id={}, lsn={}",
-                                                            source_id, lsn_value
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            if let WaitCheckpointTask::CommitCdcOffset(Some((split_id, offset))) = &task
+                                && let Ok(source_id) = u64::from_str(split_id.as_ref())
+                                && let Some(lsn_value) = extract_pg_cdc_lsn(offset)
+                            {
+                                self.metrics
+                                    .pg_cdc_jni_commit_offset_lsn
+                                    .with_guarded_label_values(&[
+                                        &source_id.to_string(),
+                                    ])
+                                    .set(lsn_value as i64);
                             }
 
                             task.run().await;

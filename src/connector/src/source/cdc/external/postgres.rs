@@ -157,6 +157,24 @@ impl ExternalTableReader for PostgresExternalTableReader {
 }
 
 impl PostgresExternalTableReader {
+    /// Query the `confirmed_flush_lsn` from `pg_replication_slots` for a specific slot
+    pub async fn query_confirm_flush_lsn(&self, slot_name: &str) -> ConnectorResult<Option<u64>> {
+        let client = self.client.lock().await;
+        let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
+        let row = client.query_opt(query, &[&slot_name]).await?;
+
+        match row {
+            Some(row) => {
+                let confirm_flush_lsn: Option<PgLsn> = row.get(0);
+                Ok(confirm_flush_lsn.map(|lsn| lsn.into()))
+            }
+            None => {
+                tracing::warn!("No replication slot found with name: {}", slot_name);
+                Ok(None)
+            }
+        }
+    }
+
     pub async fn new(
         config: ExternalTableConfig,
         rw_schema: Schema,
