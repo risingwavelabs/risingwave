@@ -383,8 +383,8 @@ pub struct VectorRef<'a> {
     inner: &'a [VectorItemType],
 }
 
-impl<'a> From<&'a ArchivedVectorRef<'a>> for VectorRef<'a> {
-    fn from(value: &'a ArchivedVectorRef<'a>) -> Self {
+impl<'a> From<&'a ArchivedVectorRef<'static>> for VectorRef<'a> {
+    fn from(value: &'a ArchivedVectorRef<'static>) -> Self {
         Self {
             // TODO(safety): do we ensure `ArchivedOrderedFloat<fxx>` has the same layout as `fxx`
             // (then `OrderedFloat<fxx>`)?

@@ -758,8 +758,8 @@ pub enum ScalarRefImpl<'scalar> {
     Bytea(#[with(RefAsBox)] &'scalar [u8]),
 }
 
-impl<'a> From<&'a ArchivedScalarRefImpl<'a>> for ScalarRefImpl<'a> {
-    fn from(value: &'a ArchivedScalarRefImpl<'a>) -> Self {
+impl<'a> From<&'a ArchivedScalarRefImpl<'static>> for ScalarRefImpl<'a> {
+    fn from(value: &'a ArchivedScalarRefImpl<'static>) -> Self {
         match value {
             ArchivedScalarRefImpl::Int16(v) => Self::Int16(*v),
             ArchivedScalarRefImpl::Int32(v) => Self::Int32(*v),
@@ -789,6 +789,8 @@ impl<'a> From<&'a ArchivedScalarRefImpl<'a>> for ScalarRefImpl<'a> {
 fn __test(value: ScalarRefImpl<'_>) {
     rkyv::to_bytes::<_, 1024>(&value).expect("failed to serialize vec");
 }
+
+
 
 // We MUST NOT implement `Ord` for `ScalarImpl` because that will make `Datum` derive an incorrect
 // default `Ord`. To get a default-ordered `ScalarImpl`/`ScalarRefImpl`/`Datum`/`DatumRef`, you can
