@@ -48,7 +48,9 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbState};
-use risingwave_pb::meta::{FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping};
+use risingwave_pb::meta::{
+    FragmentDistribution, FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping,
+};
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -70,7 +72,7 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
-    get_fragment_mappings_txn, resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings_txn, rebuild_fragment_mapping, resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
@@ -118,32 +120,6 @@ pub struct StreamingJobInfo {
     pub resource_group: String,
     pub database_id: DatabaseId,
     pub schema_id: SchemaId,
-}
-
-impl CatalogControllerInner {
-    /// List all fragment vnode mapping info for all CREATED streaming jobs.
-    pub async fn all_running_fragment_mappings(
-        &self,
-    ) -> MetaResult<impl Iterator<Item = FragmentWorkerSlotMapping> + '_> {
-        let txn = self.db.begin().await?;
-
-        let job_ids: Vec<ObjectId> = StreamingJob::find()
-            .select_only()
-            .column(streaming_job::Column::JobId)
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let mut result = vec![];
-        for job_id in job_ids {
-            let mappings = get_fragment_mappings_txn(&txn, &self.actors, job_id).await?;
-
-            result.extend(mappings.into_iter());
-        }
-
-        Ok(result.into_iter())
-    }
 }
 
 impl NotificationManager {
@@ -625,7 +601,6 @@ impl CatalogController {
             .filter(fragment::Column::JobId.eq(job_id))
             .all(&inner.db)
             .await?;
-
 
         let fragments = fragments
             .into_iter()
@@ -1297,72 +1272,24 @@ impl CatalogController {
         Ok(source_actors)
     }
 
-    pub async fn list_creating_fragment_descs(
+    pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
+        let guard = self.env.shared_actor_info.read_guard();
+        guard
+            .iter_over_fragments()
+            .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
+            .collect_vec()
+    }
+
+    pub async fn list_fragment_descs(
         &self,
-    ) -> MetaResult<Vec<(FragmentDesc, Vec<FragmentId>)>> {
+        is_creating: bool,
+    ) -> MetaResult<Vec<(FragmentDistribution, Vec<FragmentId>)>> {
         let inner = self.inner.read().await;
-        let mut result = Vec::new();
-        // 1. Load fragment metadata + job status filter from the DB
-        let fragments_meta: Vec<_> = FragmentModel::find()
-            .select_only()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::JobId,
-                fragment::Column::FragmentTypeMask,
-                fragment::Column::DistributionType,
-                fragment::Column::StateTableIds,
-                fragment::Column::VnodeCount,
-                fragment::Column::StreamNode,
-            ])
-            .join(JoinType::LeftJoin, fragment::Relation::Object.def())
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                streaming_job::Column::JobStatus
-                    .eq(JobStatus::Initial)
-                    .or(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
-            )
-            .all(&inner.db)
-            .await?;
 
-        // 2. Build the `FragmentDesc` list using in-memory cache for parallelism
-        let fragments_from_cache: Vec<FragmentDesc> = fragments_meta
-            .iter()
-            .map(|fm| {
-                let parallelism = inner
-                    .actors
-                    .actors_by_fragment_id
-                    .get(&fm.fragment_id)
-                    .map(|ids| ids.len() as i64)
-                    .unwrap_or(0);
-                FragmentDesc {
-                    fragment_id: fm.fragment_id,
-                    job_id: fm.job_id,
-                    fragment_type_mask: fm.fragment_type_mask,
-                    distribution_type: fm.distribution_type,
-                    state_table_ids: fm.state_table_ids.clone(),
-                    vnode_count: fm.vnode_count,
-                    stream_node: fm.stream_node.clone(),
-                    parallelism,
-                }
-            })
-            .collect();
+        let txn = inner.db.begin().await?;
 
-        {
-            // Execute original DB query (with actor count) for comparison
-            let fragments_from_db: Vec<FragmentDesc> = FragmentModel::find()
-                .select_only()
-                .columns([
-                    fragment::Column::FragmentId,
-                    fragment::Column::JobId,
-                    fragment::Column::FragmentTypeMask,
-                    fragment::Column::DistributionType,
-                    fragment::Column::StateTableIds,
-                    fragment::Column::VnodeCount,
-                    fragment::Column::StreamNode,
-                ])
-                .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
-                // NOTE(actor): actor usage
-                .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
+        let fragments: Vec<_> = if is_creating {
+            FragmentModel::find()
                 .join(JoinType::LeftJoin, fragment::Relation::Object.def())
                 .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
                 .filter(
@@ -1370,128 +1297,53 @@ impl CatalogController {
                         .eq(JobStatus::Initial)
                         .or(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
                 )
-                .group_by(fragment::Column::FragmentId)
-                .into_model::<FragmentDesc>()
-                .all(&inner.db)
-                .await?;
+                .all(&txn)
+                .await?
+        } else {
+            FragmentModel::find().all(&txn).await?
+        };
 
-            // Compare by mapping each FragmentDesc by its id
-            let map_db: HashMap<FragmentId, FragmentDesc> = fragments_from_db
-                .into_iter()
-                .map(|fd| (fd.fragment_id, fd))
-                .collect();
-            let map_cache: HashMap<FragmentId, FragmentDesc> = fragments_from_cache
-                .iter()
-                .cloned()
-                .map(|fd| (fd.fragment_id, fd))
-                .collect();
+        let fragment_ids = fragments.iter().map(|f| f.fragment_id).collect_vec();
 
-            debug_assert_eq!(
-                map_db, map_cache,
-                "FragmentDesc mismatch between DB and cache"
-            );
-        }
-
-        // 3. Use the cache-based result going forward
-        let fragments = fragments_from_cache;
-        for fragment in fragments {
-            let upstreams: Vec<FragmentId> = FragmentRelation::find()
-                .select_only()
-                .column(fragment_relation::Column::SourceFragmentId)
-                .filter(fragment_relation::Column::TargetFragmentId.eq(fragment.fragment_id))
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
-            result.push((fragment, upstreams));
-        }
-        Ok(result)
-    }
-
-    pub async fn list_fragment_descs(&self) -> MetaResult<Vec<(FragmentDesc, Vec<FragmentId>)>> {
-        let inner = self.inner.read().await;
-        let mut result = Vec::new();
-
-        let query_results: Vec<(_, _, _, _, _, _, _)> = FragmentModel::find()
+        let upstreams: Vec<(FragmentId, FragmentId)> = FragmentRelation::find()
             .select_only()
             .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::JobId,
-                fragment::Column::FragmentTypeMask,
-                fragment::Column::DistributionType,
-                fragment::Column::StateTableIds,
-                fragment::Column::VnodeCount,
-                fragment::Column::StreamNode,
+                fragment_relation::Column::TargetFragmentId,
+                fragment_relation::Column::SourceFragmentId,
             ])
+            .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids))
             .into_tuple()
-            .all(&inner.db)
+            .all(&txn)
             .await?;
 
-        let fragments: Vec<FragmentDesc> = query_results
-            .into_iter()
-            .map(|fragment_tuple| {
-                let fragment_id = fragment_tuple.0;
+        let guard = self.env.shared_actor_info.read_guard();
 
-                let parallelism = inner
-                    .actors
-                    .actors_by_fragment_id
-                    .get(&fragment_id)
-                    .map(Vec::len)
-                    .unwrap_or(0) as i64;
+        let mut result = Vec::new();
 
-                FragmentDesc {
-                    fragment_id,
-                    job_id: fragment_tuple.1,
-                    fragment_type_mask: fragment_tuple.2,
-                    distribution_type: fragment_tuple.3,
-                    state_table_ids: fragment_tuple.4,
-                    vnode_count: fragment_tuple.5,
-                    stream_node: fragment_tuple.6,
-                    parallelism,
-                }
-            })
-            .collect();
+        let mut all_upstreams = upstreams.into_iter().into_group_map();
 
-        {
-            let fragments_from_db = FragmentModel::find()
-                .select_only()
-                .columns([
-                    fragment::Column::FragmentId,
-                    fragment::Column::JobId,
-                    fragment::Column::FragmentTypeMask,
-                    fragment::Column::DistributionType,
-                    fragment::Column::StateTableIds,
-                    fragment::Column::VnodeCount,
-                    fragment::Column::StreamNode,
-                ])
-                .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
-                // NOTE(actor): actor usage
-                .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
-                .group_by(fragment::Column::FragmentId)
-                .into_model::<FragmentDesc>()
-                .all(&inner.db)
-                .await?;
+        for fragment_desc in fragments {
+            let parallelism = guard
+                .get_fragment(fragment_desc.fragment_id as _)
+                .unwrap()
+                .actors
+                .len();
 
-            let fragments_from_db: HashMap<_, _> = fragments_from_db
-                .into_iter()
-                .map(|fragment| (fragment.fragment_id, fragment.parallelism))
-                .collect();
+            let upstreams = all_upstreams.remove(&fragment_desc.fragment_id).unwrap();
 
-            let fragments: HashMap<_, _> = fragments
-                .iter()
-                .map(|fragment| (fragment.fragment_id, fragment.parallelism))
-                .collect();
+            let fragment = FragmentDistribution {
+                fragment_id: fragment_desc.fragment_id as _,
+                table_id: fragment_desc.job_id as _,
+                distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type)
+                    as _,
+                state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
+                upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
+                fragment_type_mask: fragment_desc.fragment_type_mask as _,
+                parallelism: parallelism as _,
+                vnode_count: fragment_desc.vnode_count as _,
+                node: Some(fragment_desc.stream_node.to_protobuf()),
+            };
 
-            debug_assert_eq!(fragments, fragments_from_db);
-        }
-
-        for fragment in fragments {
-            let upstreams: Vec<FragmentId> = FragmentRelation::find()
-                .select_only()
-                .column(fragment_relation::Column::SourceFragmentId)
-                .filter(fragment_relation::Column::TargetFragmentId.eq(fragment.fragment_id))
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
             result.push((fragment, upstreams));
         }
         Ok(result)
