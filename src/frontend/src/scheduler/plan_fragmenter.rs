@@ -1399,6 +1399,7 @@ fn derive_partitions(
 mod tests {
     use std::collections::{HashMap, HashSet};
 
+    use maplit::hashset;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
 
     use crate::optimizer::plan_node::BatchPlanNodeType;
@@ -1412,16 +1413,16 @@ mod tests {
         assert_eq!(query.stage_graph.stages.len(), 4);
 
         // Check the mappings of child edges.
-        assert_eq!(query.stage_graph.child_edges[&0], [1].into());
-        assert_eq!(query.stage_graph.child_edges[&1], [2, 3].into());
+        assert_eq!(query.stage_graph.child_edges[&0], hashset! {1});
+        assert_eq!(query.stage_graph.child_edges[&1], hashset! {2, 3});
         assert_eq!(query.stage_graph.child_edges[&2], HashSet::new());
         assert_eq!(query.stage_graph.child_edges[&3], HashSet::new());
 
         // Check the mappings of parent edges.
         assert_eq!(query.stage_graph.parent_edges[&0], HashSet::new());
-        assert_eq!(query.stage_graph.parent_edges[&1], [0].into());
-        assert_eq!(query.stage_graph.parent_edges[&2], [1].into());
-        assert_eq!(query.stage_graph.parent_edges[&3], [1].into());
+        assert_eq!(query.stage_graph.parent_edges[&1], hashset! {0});
+        assert_eq!(query.stage_graph.parent_edges[&2], hashset! {1});
+        assert_eq!(query.stage_graph.parent_edges[&3], hashset! {1});
 
         // Verify topology order
         {
