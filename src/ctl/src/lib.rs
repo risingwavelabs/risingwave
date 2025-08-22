@@ -586,10 +586,47 @@ async fn compute_dispatch(cmd: ComputeCommands) -> Result<()> {
 #[inline(never)]
 async fn hummock_dispatch(context: &CtlContext, cmd: HummockCommands) -> Result<()> {
     match cmd {
-        HummockCommands::DisableCommitEpoch => {
-            cmd_impl::hummock::disable_commit_epoch(context).await?;
+        // Read/List type ops
+        HummockCommands::ListVersion { .. }
+        | HummockCommands::ListVersionDeltas { .. }
+        | HummockCommands::ListKv { .. }
+        | HummockCommands::SstDump(_)
+        | HummockCommands::ListPinnedVersions { .. }
+        | HummockCommands::ListCompactionGroup
+        | HummockCommands::ListCompactionStatus { .. }
+        | HummockCommands::GetCompactionScore { .. }
+        | HummockCommands::ValidateVersion
+        | HummockCommands::RebuildTableStats => {
+            hummock_list_ops(context, cmd).await?;
             Ok(())
         }
+
+        // Compaction & group management
+        HummockCommands::UpdateCompactionConfig { .. }
+        | HummockCommands::SplitCompactionGroup { .. }
+        | HummockCommands::MergeCompactionGroup { .. }
+        | HummockCommands::TriggerManualCompaction { .. }
+        | HummockCommands::TriggerFullGc { .. }
+        | HummockCommands::CancelCompactTask { .. } => hummock_compaction_ops(context, cmd).await,
+
+        //  Archive printers
+        HummockCommands::PrintVersionDeltaInArchive { .. }
+        | HummockCommands::PrintUserKeyInArchive { .. } => hummock_archive_ops(context, cmd).await,
+
+        // Everything else
+        HummockCommands::DisableCommitEpoch
+        | HummockCommands::PauseVersionCheckpoint
+        | HummockCommands::ResumeVersionCheckpoint
+        | HummockCommands::ReplayVersion
+        | HummockCommands::TieredCacheTracing { .. }
+        | HummockCommands::MigrateLegacyObject { .. }
+        | HummockCommands::ResizeCache { .. } => hummock_misc_ops(context, cmd).await,
+    }
+}
+
+#[inline(never)]
+async fn hummock_list_ops(context: &CtlContext, cmd: HummockCommands) -> Result<()> {
+    match cmd {
         HummockCommands::ListVersion {
             verbose,
             verbose_key_range,
@@ -629,29 +666,6 @@ async fn hummock_dispatch(context: &CtlContext, cmd: HummockCommands) -> Result<
             cmd_impl::hummock::sst_dump(context, args).await.unwrap();
             Ok(())
         }
-        HummockCommands::TriggerManualCompaction {
-            compaction_group_id,
-            table_id,
-            level,
-            sst_ids,
-        } => {
-            cmd_impl::hummock::trigger_manual_compaction(
-                context,
-                compaction_group_id,
-                table_id,
-                level,
-                sst_ids,
-            )
-            .await?;
-            Ok(())
-        }
-        HummockCommands::TriggerFullGc {
-            sst_retention_time_sec,
-            prefix,
-        } => {
-            cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec, prefix).await?;
-            Ok(())
-        }
         HummockCommands::ListPinnedVersions {} => {
             list_pinned_versions(context).await?;
             Ok(())
@@ -660,6 +674,31 @@ async fn hummock_dispatch(context: &CtlContext, cmd: HummockCommands) -> Result<
             cmd_impl::hummock::list_compaction_group(context).await?;
             Ok(())
         }
+        HummockCommands::ListCompactionStatus { verbose } => {
+            cmd_impl::hummock::list_compaction_status(context, verbose).await?;
+            Ok(())
+        }
+        HummockCommands::GetCompactionScore {
+            compaction_group_id,
+        } => {
+            cmd_impl::hummock::get_compaction_score(context, compaction_group_id).await?;
+            Ok(())
+        }
+        HummockCommands::ValidateVersion => {
+            cmd_impl::hummock::validate_version(context).await?;
+            Ok(())
+        }
+        HummockCommands::RebuildTableStats => {
+            cmd_impl::hummock::rebuild_table_stats(context).await?;
+            Ok(())
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[inline(never)]
+async fn hummock_compaction_ops(context: &CtlContext, cmd: HummockCommands) -> Result<()> {
+    match cmd {
         HummockCommands::UpdateCompactionConfig {
             compaction_group_ids,
             max_bytes_for_level_base,
@@ -747,40 +786,49 @@ async fn hummock_dispatch(context: &CtlContext, cmd: HummockCommands) -> Result<
             .await?;
             Ok(())
         }
-        HummockCommands::PauseVersionCheckpoint => {
-            cmd_impl::hummock::pause_version_checkpoint(context).await?;
-            Ok(())
-        }
-        HummockCommands::ResumeVersionCheckpoint => {
-            cmd_impl::hummock::resume_version_checkpoint(context).await?;
-            Ok(())
-        }
-        HummockCommands::ReplayVersion => {
-            cmd_impl::hummock::replay_version(context).await?;
-            Ok(())
-        }
-        HummockCommands::ListCompactionStatus { verbose } => {
-            cmd_impl::hummock::list_compaction_status(context, verbose).await?;
-            Ok(())
-        }
-        HummockCommands::GetCompactionScore {
-            compaction_group_id,
+        HummockCommands::MergeCompactionGroup {
+            left_group_id,
+            right_group_id,
         } => {
-            cmd_impl::hummock::get_compaction_score(context, compaction_group_id).await?;
+            cmd_impl::hummock::merge_compaction_group(context, left_group_id, right_group_id)
+                .await?;
             Ok(())
         }
-        HummockCommands::ValidateVersion => {
-            cmd_impl::hummock::validate_version(context).await?;
+        HummockCommands::TriggerManualCompaction {
+            compaction_group_id,
+            table_id,
+            level,
+            sst_ids,
+        } => {
+            cmd_impl::hummock::trigger_manual_compaction(
+                context,
+                compaction_group_id,
+                table_id,
+                level,
+                sst_ids,
+            )
+            .await?;
             Ok(())
         }
-        HummockCommands::RebuildTableStats => {
-            cmd_impl::hummock::rebuild_table_stats(context).await?;
+        HummockCommands::TriggerFullGc {
+            sst_retention_time_sec,
+            prefix,
+        } => {
+            cmd_impl::hummock::trigger_full_gc(context, sst_retention_time_sec, prefix).await?;
             Ok(())
         }
+
         HummockCommands::CancelCompactTask { task_id } => {
             cmd_impl::hummock::cancel_compact_task(context, task_id).await?;
             Ok(())
         }
+        _ => unreachable!(),
+    }
+}
+
+#[inline(never)]
+async fn hummock_archive_ops(context: &CtlContext, cmd: HummockCommands) -> Result<()> {
+    match cmd {
         HummockCommands::PrintVersionDeltaInArchive {
             archive_ids,
             data_dir,
@@ -813,6 +861,29 @@ async fn hummock_dispatch(context: &CtlContext, cmd: HummockCommands) -> Result<
             .await?;
             Ok(())
         }
+        _ => unreachable!(),
+    }
+}
+
+#[inline(never)]
+async fn hummock_misc_ops(context: &CtlContext, cmd: HummockCommands) -> Result<()> {
+    match cmd {
+        HummockCommands::DisableCommitEpoch => {
+            cmd_impl::hummock::disable_commit_epoch(context).await?;
+            Ok(())
+        }
+        HummockCommands::PauseVersionCheckpoint => {
+            cmd_impl::hummock::pause_version_checkpoint(context).await?;
+            Ok(())
+        }
+        HummockCommands::ResumeVersionCheckpoint => {
+            cmd_impl::hummock::resume_version_checkpoint(context).await?;
+            Ok(())
+        }
+        HummockCommands::ReplayVersion => {
+            cmd_impl::hummock::replay_version(context).await?;
+            Ok(())
+        }
         HummockCommands::TieredCacheTracing {
             enable,
             record_hybrid_insert_threshold_ms,
@@ -831,14 +902,6 @@ async fn hummock_dispatch(context: &CtlContext, cmd: HummockCommands) -> Result<
                 record_hybrid_fetch_threshold_ms,
             )
             .await?;
-            Ok(())
-        }
-        HummockCommands::MergeCompactionGroup {
-            left_group_id,
-            right_group_id,
-        } => {
-            cmd_impl::hummock::merge_compaction_group(context, left_group_id, right_group_id)
-                .await?;
             Ok(())
         }
 
@@ -864,6 +927,7 @@ async fn hummock_dispatch(context: &CtlContext, cmd: HummockCommands) -> Result<
             .await?;
             Ok(())
         }
+        _ => unreachable!(),
     }
 }
 
