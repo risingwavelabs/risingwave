@@ -62,8 +62,7 @@ statement ok
 insert into t_basic_enum values
   (1, 'ACTIVE'),
   (2, 'INACTIVE'),
-  (3, 'PENDING'),
-  (4, 'INVALID_STATUS');
+  (3, 'PENDING');
 
 sleep 5s
 
@@ -146,6 +145,22 @@ select * from from_nullable_enum order by id;
 # ===== Test 3: Illegal Enum Value Handling =====
 statement ok
 insert into t_basic_enum values (5, 'INVALID_STATUS');
+
+sleep 5s
+
+# Should still only show the valid enum values
+query IT retry 5 backoff 1s
+select * from from_basic_enum order by id;
+----
+1 ACTIVE
+2 INACTIVE
+3 PENDING
+
+statement ok
+insert into t_basic_enum values
+  (6, 'ACTIVE'),
+  (7, 'INACTIVE'),
+  (8, 'INVALID_STATUS');
 
 sleep 5s
 
