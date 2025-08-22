@@ -93,7 +93,7 @@ pub fn start_confirm_flush_lsn_monitor(
                                 tracing::error!(
                                     "Failed to query confirmed_flush_lsn for slot {}: {}",
                                     slot_name,
-                                    e
+                                    e.as_report()
                                 );
                             }
                         }
@@ -102,7 +102,7 @@ pub fn start_confirm_flush_lsn_monitor(
                 Err(e) => {
                     tracing::error!(
                         "Failed to create table reader for confirmed_flush_lsn query: {}",
-                        e
+                        e.as_report()
                     );
                 }
             }
