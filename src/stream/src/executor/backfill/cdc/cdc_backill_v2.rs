@@ -33,7 +33,7 @@ use tracing::Instrument;
 
 use crate::executor::UpdateMutation;
 use crate::executor::backfill::cdc::cdc_backfill::{
-    build_reader_and_poll_upstream, transform_upstream,
+    build_reader_and_poll_upstream, start_confirm_flush_lsn_monitor, transform_upstream,
 };
 use crate::executor::backfill::cdc::state_v2::ParallelizedCdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
@@ -43,7 +43,6 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
 use crate::executor::backfill::utils::{mapping_chunk, mapping_message};
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
-
 /// `split_id`, `is_finished`, `row_count` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 3;
 
@@ -163,6 +162,22 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         let mut state_impl =
             ParallelizedCdcBackfillState::new(self.state_table, METADATA_STATE_LEN);
         let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+
+        // Start background task to periodically query confirm_flush_lsn for PostgreSQL CDC
+        let streaming_metrics = self.actor_ctx.streaming_metrics.clone();
+        let source_id = self.actor_ctx.id;
+        let slot_name = self.properties.get("slot.name").cloned();
+        let external_table = self.external_table.clone();
+
+        if let Some(slot_name) = slot_name {
+            start_confirm_flush_lsn_monitor(
+                streaming_metrics,
+                source_id,
+                slot_name,
+                external_table,
+            );
+        }
+
         // Need reset on CDC table snapshot splits reschedule.
         'with_cdc_table_snapshot_splits: loop {
             assert!(upstream_chunk_buffer.is_empty());

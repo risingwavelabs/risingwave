@@ -213,6 +213,11 @@ pub struct StreamingMetrics {
     materialize_cache_total_count: RelabeledGuardedIntCounterVec,
     materialize_input_row_count: RelabeledGuardedIntCounterVec,
     pub materialize_current_epoch: RelabeledGuardedIntGaugeVec,
+
+    // PostgreSQL CDC LSN monitoring
+    pub pg_cdc_state_table_lsn: LabelGuardedIntGaugeVec,
+    pub pg_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
+    pub pg_cdc_confirm_flush_lsn: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -294,6 +299,30 @@ impl StreamingMetrics {
         )
         .unwrap()
         .relabel_debug_1(level);
+
+        let pg_cdc_state_table_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_pg_cdc_state_table_lsn",
+            "Current LSN value stored in PostgreSQL CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let pg_cdc_jni_commit_offset_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_pg_cdc_jni_commit_offset_lsn",
+            "LSN value when JNI commit offset is called for PostgreSQL CDC",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let pg_cdc_confirm_flush_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_pg_cdc_confirm_flush_lsn",
+            "confirm_flush_lsn value from PostgreSQL replication slots",
+            &["source_id", "slot_name"],
+            registry,
+        )
+        .unwrap();
 
         let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_sink_chunk_buffer_size",
@@ -1304,6 +1333,9 @@ impl StreamingMetrics {
             materialize_cache_total_count,
             materialize_input_row_count,
             materialize_current_epoch,
+            pg_cdc_state_table_lsn,
+            pg_cdc_jni_commit_offset_lsn,
+            pg_cdc_confirm_flush_lsn,
         }
     }
 
@@ -1749,6 +1781,7 @@ pub struct BackfillMetrics {
     pub backfill_upstream_output_row_count: LabelGuardedIntCounter,
 }
 
+#[derive(Clone)]
 pub struct CdcBackfillMetrics {
     pub cdc_backfill_snapshot_read_row_count: LabelGuardedIntCounter,
     pub cdc_backfill_upstream_output_row_count: LabelGuardedIntCounter,
