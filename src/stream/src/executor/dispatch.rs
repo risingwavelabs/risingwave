@@ -57,14 +57,7 @@ pub struct DispatchExecutor {
 
 struct DispatcherWithMetrics {
     dispatcher: DispatcherImpl,
-    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
-}
-
-impl DispatcherWithMetrics {
-    pub fn record_output_buffer_blocking_duration(&self, duration: Duration) {
-        let ns = duration.as_nanos() as u64;
-        self.actor_output_buffer_blocking_duration_ns.inc_by(ns);
-    }
+    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
 }
 
 impl Debug for DispatcherWithMetrics {
@@ -161,6 +154,34 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
+        macro_rules! await_with_metrics {
+            ($fut:expr, $metrics:expr) => {{
+                let mut start_time = Instant::now();
+                let interval_duration = Duration::from_secs(15);
+                let mut interval =
+                    tokio::time::interval_at(start_time + interval_duration, interval_duration);
+
+                let mut fut = std::pin::pin!($fut);
+
+                loop {
+                    tokio::select! {
+                        biased;
+                        res = &mut fut => {
+                            res?;
+                            let ns = start_time.elapsed().as_nanos() as u64;
+                            $metrics.inc_by(ns);
+                            break;
+                        }
+                        _ = interval.tick() => {
+                            start_time = Instant::now();
+                            $metrics.inc_by(interval_duration.as_nanos() as u64);
+                        }
+                    };
+                }
+                StreamResult::Ok(())
+            }};
+        }
+
         let limit = self
             .local_barrier_manager
             .env
@@ -179,18 +200,16 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher
-                            .dispatch_barriers(
-                                barrier_batch
-                                    .iter()
-                                    .cloned()
-                                    .map(|b| b.into_dispatcher())
-                                    .collect(),
-                            )
-                            .await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
-                        StreamResult::Ok(())
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
+                        let fut = dispatcher_output.dispatch_barriers(
+                            barrier_batch
+                                .iter()
+                                .cloned()
+                                .map(|b| b.into_dispatcher())
+                                .collect(),
+                        );
+                        await_with_metrics!(std::pin::pin!(fut), metrics)
                     })
                     .await?;
                 self.post_mutate_dispatchers(&mutation)?;
@@ -199,10 +218,10 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher.dispatch_watermark(watermark.clone()).await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
-                        StreamResult::Ok(())
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
+                        let fut = dispatcher_output.dispatch_watermark(watermark.clone());
+                        await_with_metrics!(std::pin::pin!(fut), metrics)
                     })
                     .await?;
             }
@@ -210,10 +229,10 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher.dispatch_data(chunk.clone()).await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
-                        StreamResult::Ok(())
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
+                        let fut = dispatcher_output.dispatch_data(chunk.clone());
+                        await_with_metrics!(std::pin::pin!(fut), metrics)
                     })
                     .await?;
 
