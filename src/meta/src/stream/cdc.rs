@@ -21,7 +21,7 @@ use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::external::{
@@ -108,6 +108,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
             split_id: Set(split.split_id.to_owned()),
             left: Set(split.left_bound_inclusive.value_serialize()),
             right: Set(split.right_bound_exclusive.value_serialize()),
+            is_backfill_finished: Set(false),
         });
         if insert_batch.len() >= insert_batch_size as usize {
             cdc_table_snapshot_split::Entity::insert_many(std::mem::take(&mut insert_batch))
@@ -129,7 +130,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
 }
 
 /// Returns true if the fragment is CDC scan and has parallelized backfill enabled.
-fn is_parallelized_backfill_enabled_cdc_scan_fragment(fragment: &Fragment) -> bool {
+pub(crate) fn is_parallelized_backfill_enabled_cdc_scan_fragment(fragment: &Fragment) -> bool {
     let mut b = false;
     visit_stream_node_cont(&fragment.nodes, |node| {
         if let Some(NodeBody::StreamCdcScan(node)) = &node.node_body {
@@ -262,12 +263,13 @@ pub async fn try_get_cdc_table_snapshot_splits(
     meta_store: &SqlMetaStore,
 ) -> MetaResult<Vec<CdcTableSnapshotSplitRaw>> {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
-    let splits: Vec<(i64, Vec<u8>, Vec<u8>)> = cdc_table_snapshot_split::Entity::find()
+    let splits: Vec<(i64, Vec<u8>, Vec<u8>, bool)> = cdc_table_snapshot_split::Entity::find()
         .select_only()
         .columns([
             cdc_table_snapshot_split::Column::SplitId,
             cdc_table_snapshot_split::Column::Left,
             cdc_table_snapshot_split::Column::Right,
+            cdc_table_snapshot_split::Column::IsBackfillFinished,
         ])
         .filter(
             cdc_table_snapshot_split::Column::TableId
@@ -276,13 +278,26 @@ pub async fn try_get_cdc_table_snapshot_splits(
         .into_tuple()
         .all(&meta_store.conn)
         .await?;
+    if !splits.is_empty()
+        && splits
+            .iter()
+            .all(|(_, _, _, is_backfill_finished)| *is_backfill_finished)
+    {
+        let merged_split = vec![CdcTableSnapshotSplitRaw {
+            // Reuse an existing split id.
+            split_id: splits[0].0,
+            left_bound_inclusive: OwnedRow::new(vec![None]).value_serialize(),
+            right_bound_exclusive: OwnedRow::new(vec![None]).value_serialize(),
+        }];
+        return Ok(merged_split);
+    }
     let splits: Vec<_> = splits
         .into_iter()
         // The try_init_parallel_cdc_table_snapshot_splits ensures that split with a larger split_id will always have a larger left bound.
         // Assigning consecutive splits to the same actor enables potential optimization in CDC backfill executor.
-        .sorted_by_key(|(split_id, _, _)| *split_id)
+        .sorted_by_key(|(split_id, _, _, _)| *split_id)
         .map(
-            |(split_id, left_bound_inclusive, right_bound_exclusive)| CdcTableSnapshotSplitRaw {
+            |(split_id, left_bound_inclusive, right_bound_exclusive, _)| CdcTableSnapshotSplitRaw {
                 split_id,
                 left_bound_inclusive,
                 right_bound_exclusive,
