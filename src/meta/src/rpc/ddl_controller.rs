@@ -947,16 +947,20 @@ impl DdlController {
                     continue;
                 };
 
-                let sink_table_fragments = mgr
-                    .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink_id))
+                let sink_fragments = mgr
+                    .get_job_sink_fragments_by_id(&risingwave_common::catalog::TableId::new(
+                        sink_id,
+                    ))
                     .await?;
-
-                let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
+                let sink_fragment = sink_fragments
+                    .into_iter()
+                    .exactly_one()
+                    .expect("There should be exactly one fragment for each sink.");
 
                 Self::inject_replace_table_plan_for_sink(
                     sink_id,
-                    sink_fragment.fragment_id,
-                    &sink_fragment.nodes,
+                    sink_fragment.fragment_id as _,
+                    &sink_fragment.stream_node.to_protobuf(),
                     target_table,
                     &mut replace_table_ctx,
                     stream_job_fragments.inner.union_fragment_for_table(),
