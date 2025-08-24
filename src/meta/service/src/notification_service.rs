@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use anyhow::{Context, anyhow};
-use itertools::Itertools;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_meta::MetaResult;
 use risingwave_meta::controller::catalog::Catalog;
-use risingwave_meta::controller::utils::rebuild_fragment_mapping;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};

@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
@@ -66,7 +64,7 @@ use thiserror_ext::AsReport;
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::ActorInfo;
-use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
+use crate::model::FragmentDownstreamRelation;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
