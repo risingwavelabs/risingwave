@@ -803,34 +803,31 @@
     create index idx1 on t1(a, b desc);
     select * from t1 where a = 1 order by b desc limit 10
   batch_plan: |-
-    BatchSort { order: [idx1.b DESC] }
-    └─BatchTopN { order: [idx1.a ASC, idx1.b DESC], limit: 10, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
+    BatchTopN { order: [idx1.b DESC], limit: 10, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 10, offset: 0 }
+        └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
 - name: topn index selection + limit pushdown with multi point get
   sql: |
     create table t1 (a int, b int, c int);
     create index idx1 on t1(a, c, b desc);
     select * from t1 where c = 1 and a = 2 order by b desc limit 10
   batch_plan: |-
-    BatchSort { order: [idx1.b DESC] }
-    └─BatchTopN { order: [idx1.a ASC, idx1.c ASC, idx1.b DESC], limit: 10, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(2) AND idx1.c = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
+    BatchTopN { order: [idx1.b DESC], limit: 10, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 10, offset: 0 }
+        └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(2) AND idx1.c = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
 - name: topn index selection + limit pushdown with multi point get + unindexed point get
   sql: |
     create table t1 (a int, b int, c int, d int);
     create index idx1 on t1(a, c, b desc);
     select * from t1 where c = 1 and a = 2 and d = 3 order by b desc limit 10
   batch_plan: |-
-    BatchSort { order: [idx1.b DESC] }
-    └─BatchTopN { order: [idx1.a ASC, idx1.c ASC, idx1.b DESC], limit: 10, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchFilter { predicate: (idx1.d = 3:Int32) }
-            └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c, idx1.d], scan_ranges: [idx1.a = Int32(2) AND idx1.c = Int32(1)], distribution: UpstreamHashShard(idx1.a) }
+    BatchTopN { order: [idx1.b DESC], limit: 10, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 10, offset: 0 }
+        └─BatchFilter { predicate: (idx1.d = 3:Int32) }
+          └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c, idx1.d], scan_ranges: [idx1.a = Int32(2) AND idx1.c = Int32(1)], distribution: UpstreamHashShard(idx1.a) }
 - name: topn index selection + limit pushdown with multi index
   sql: |
     create table t1 (a int, b int, c int, d int);
@@ -840,22 +837,20 @@
     create index idx4 on t1(b, a desc);
     select * from t1 where c = 1 and a = 2 and d = 3 order by b desc limit 10
   batch_plan: |-
-    BatchSort { order: [idx3.b DESC] }
-    └─BatchTopN { order: [idx3.a ASC, idx3.c ASC, idx3.d ASC, idx3.b DESC], limit: 10, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c, idx3.d], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(1) AND idx3.d = Int32(3)], limit: 10, distribution: UpstreamHashShard(idx3.a) }
+    BatchTopN { order: [idx3.b DESC], limit: 10, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 10, offset: 0 }
+        └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c, idx3.d], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(1) AND idx3.d = Int32(3)], limit: 10, distribution: UpstreamHashShard(idx3.a) }
 - name: topn index selection + limit pushdown with point get + descending order point get
   sql: |
     create table t1 (a int, b int, c int);
     create index idx1 on t1(a asc, b);
     select * from t1 where a = 1 order by b limit 10;
   batch_plan: |-
-    BatchSort { order: [idx1.b ASC] }
-    └─BatchTopN { order: [idx1.a ASC, idx1.b ASC], limit: 10, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
+    BatchTopN { order: [idx1.b ASC], limit: 10, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 10, offset: 0 }
+        └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
 - name: topn index selection + limit pushdown with multi point get + various order combination point get
   sql: |
     create table t1 (a int, b int, c int);
@@ -864,8 +859,7 @@
     create index idx3 on t1(a desc nulls last, c asc nulls first, b desc nulls last);
     select * from t1 where c = 2 and a = 2 order by b desc nulls last limit 10;
   batch_plan: |-
-    BatchSort { order: [idx3.b DESC NULLS LAST] }
-    └─BatchTopN { order: [idx3.a DESC NULLS LAST, idx3.c ASC NULLS FIRST, idx3.b DESC NULLS LAST], limit: 10, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchLimit { limit: 10, offset: 0 }
-          └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(2)], limit: 10, distribution: UpstreamHashShard(idx3.a) }
+    BatchTopN { order: [idx3.b DESC NULLS LAST], limit: 10, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 10, offset: 0 }
+        └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(2)], limit: 10, distribution: UpstreamHashShard(idx3.a) }
