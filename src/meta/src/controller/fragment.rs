@@ -49,7 +49,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbState};
 use risingwave_pb::meta::{
-    FragmentDistribution, FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping,
+    FragmentDistribution, PbFragmentWorkerSlotMapping,
 };
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
@@ -68,11 +68,10 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::barrier::{SharedFragmentInfo, SnapshotBackfillInfo};
-use crate::controller::catalog::{CatalogController, CatalogControllerInner};
+use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
 use crate::controller::utils::{
-    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
-    get_fragment_mappings_txn, rebuild_fragment_mapping, resolve_no_shuffle_actor_dispatcher,
+    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers, rebuild_fragment_mapping, resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
@@ -648,7 +647,6 @@ impl CatalogController {
         job_id: ObjectId,
     ) -> MetaResult<StreamJobFragments> {
         let inner = self.inner.read().await;
-        // let info = self.env.shared_actor_infos().read_guard();
 
         // Load fragments matching the job from the database
         let fragments: Vec<_> = FragmentModel::find()
@@ -657,56 +655,33 @@ impl CatalogController {
             .await?;
 
         // Build (FragmentModel, Vec<actor::Model>) from the in-memory cache
-        let fragment_actors_from_cache: Vec<(_, Vec<actor::Model>)> = fragments
-            .into_iter()
-            .map(|fm| {
-                let actors = inner
-                    .actors
-                    .actors_by_fragment_id
-                    .get(&fm.fragment_id)
-                    .into_iter()
-                    .flat_map(|ids| {
-                        ids.iter()
-                            .filter_map(|id| inner.actors.models.get(id).cloned())
-                    })
-                    .collect();
-                (fm, actors)
-            })
-            .collect();
-
-        {
-            // Execute original DB query for comparison
-            let fragment_actors_from_db: Vec<(_, Vec<actor::Model>)> = FragmentModel::find()
-                .find_with_related(Actor)
-                .filter(fragment::Column::JobId.eq(job_id))
-                .all(&inner.db)
-                .await?;
-
-            // Map each fragment to its set of actor IDs
-            let map_db: HashMap<FragmentId, HashSet<ActorId>> = fragment_actors_from_db
+        let fragment_actors_from_cache: Vec<(_, Vec<actor::Model>)> = {
+            let info = self.env.shared_actor_infos().read_guard();
+            fragments
                 .into_iter()
-                .map(|(fm, acts)| {
-                    (
-                        fm.fragment_id,
-                        acts.into_iter().map(|a| a.actor_id).collect(),
-                    )
-                })
-                .collect();
-            let map_cache: HashMap<FragmentId, HashSet<ActorId>> = fragment_actors_from_cache
-                .iter()
-                .map(|(fragment, acts)| {
-                    (
-                        fragment.fragment_id,
-                        acts.iter().map(|a| a.actor_id).collect(),
-                    )
-                })
-                .collect();
+                .map(|fm| {
+                    let fragment = info.get_fragment(fm.fragment_id as _).unwrap();
 
-            debug_assert_eq!(
-                map_db, map_cache,
-                "Fragment–actor mapping mismatch between DB and cache"
-            );
-        }
+                    let actors = fragment
+                        .actors
+                        .iter()
+                        .map(|(actor_id, actor_info)| actor::Model {
+                            actor_id: *actor_id as _,
+                            fragment_id: fm.fragment_id,
+                            status: ActorStatus::Running, // Placeholder, actual status should be fetched from DB if needed
+                            worker_id: actor_info.worker_id as _,
+                            splits: None, // Placeholder, actual splits should be fetched from DB if needed
+                            upstream_actor_ids: Default::default(), // Placeholder, actual upstream_actor_ids should be fetched from DB if needed
+                            vnode_bitmap: actor_info.vnode_bitmap.as_ref().map(|bitmap| {
+                                VnodeBitmap::from(&bitmap.to_protobuf())
+                            }),
+                            expr_context: ExprContext::default(), // Placeholder, actual expr_context should be fetched from DB if needed
+                        })
+                        .collect();
+                    (fm, actors)
+                })
+                .collect()
+        };
 
         // Use cache-based result from here on
         let fragment_actors = fragment_actors_from_cache;

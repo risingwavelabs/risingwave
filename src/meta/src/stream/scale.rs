@@ -537,7 +537,7 @@ impl ScaleController {
                         actor_id: *actor_id,
                         fragment_id: prev_fragment_info.fragment_id as _,
                         vnode_bitmap: curr_actors[actor_id].vnode_bitmap.clone(),
-                        mview_definition: "wtf".to_string(), // TODO: handle mview definition
+                        mview_definition: "wtf".to_owned(), // TODO: handle mview definition
                         expr_context: Some(PbExprContext::default()),
                     };
                     (
@@ -2373,7 +2373,7 @@ impl ScaleController {
             all_upstream_fragments
                 .entry(fragment)
                 .or_insert(HashMap::new())
-                .insert(upstream as u32, dispatcher);
+                .insert(upstream, dispatcher);
         }
 
         let mut all_downstream_fragments = HashMap::new();
@@ -2409,13 +2409,13 @@ impl ScaleController {
             let prev_fragment = read_gurad.get_fragment(*fragment_id as FragmentId).unwrap();
 
             let InflightFragmentInfo {
-                job_id,
+                
                 distribution_type,
-                fragment_type_mask,
-                vnode_count,
-                nodes,
+                
+                
+                
                 actors,
-                state_table_ids,
+                
                 ..
             } = fragment_info;
 
@@ -2459,8 +2459,9 @@ impl ScaleController {
                                 "no more downstream_fragments for {}",
                                 downstream_fragment_id
                             );
-                            let external_fragment =
-                                read_gurad.get_fragment(*downstream_fragment_id as FragmentId).unwrap();
+                            let external_fragment = read_gurad
+                                .get_fragment(*downstream_fragment_id as FragmentId)
+                                .unwrap();
 
                             external_fragment
                                 .actors
@@ -2526,7 +2527,7 @@ impl ScaleController {
 
             let reschedule = self.diff_fragment(
                 prev_fragment,
-                &actors,
+                actors,
                 upstream_fragments,
                 downstream_fragments,
                 all_actor_dispatchers,

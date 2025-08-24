@@ -67,8 +67,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
-    SplitAssignment, ThrottleConfig, build_actor_connector_splits,
+    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
+    ThrottleConfig, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors

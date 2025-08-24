@@ -951,8 +951,6 @@ where
 
             let database_id = streaming_job_databases[&job_id];
 
-
-
             result
                 .entry(database_id)
                 .or_default()

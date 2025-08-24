@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
@@ -30,9 +30,6 @@ use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingPar
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
-use risingwave_pb::meta::list_table_fragments_response::{
-    ActorInfo, FragmentInfo, TableFragmentInfo,
-};
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
