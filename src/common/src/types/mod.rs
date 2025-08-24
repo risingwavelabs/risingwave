@@ -64,6 +64,7 @@ mod ops;
 mod ordered;
 mod ordered_float;
 mod postgres_type;
+mod rkyv_impl;
 mod scalar_impl;
 mod sentinel;
 mod serial;
