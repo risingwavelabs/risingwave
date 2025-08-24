@@ -146,7 +146,7 @@ pub mod sled {
             create_dir_all("./.risingwave/sled").expect("should create");
             let path = tempfile::TempDir::new_in("./.risingwave/sled")
                 .expect("find temp dir")
-                .into_path();
+                .keep();
             Self::new(path)
         }
     }
