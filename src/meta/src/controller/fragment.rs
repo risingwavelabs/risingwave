@@ -48,9 +48,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbState};
-use risingwave_pb::meta::{
-    FragmentDistribution, PbFragmentWorkerSlotMapping,
-};
+use risingwave_pb::meta::{FragmentDistribution, PbFragmentWorkerSlotMapping};
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -71,7 +69,8 @@ use crate::barrier::{SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
 use crate::controller::utils::{
-    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers, rebuild_fragment_mapping, resolve_no_shuffle_actor_dispatcher,
+    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
+    rebuild_fragment_mapping, resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
