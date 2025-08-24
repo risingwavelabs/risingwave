@@ -63,7 +63,7 @@ use sea_orm::{
 };
 use thiserror_ext::AsReport;
 
-use crate::barrier::SharedFragmentInfo;
+use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::ActorInfo;
 use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
@@ -1592,7 +1592,7 @@ pub fn rebuild_fragment_mapping_from_actors(
 /// - All fragments
 pub async fn get_fragments_for_jobs<C>(
     db: &C,
-    actor_cache: &ActorInfo,
+    actor_info: &SharedActorInfos,
     streaming_jobs: Vec<ObjectId>,
 ) -> MetaResult<(
     HashMap<SourceId, BTreeSet<FragmentId>>,
@@ -1618,32 +1618,17 @@ where
         .all(db)
         .await?;
 
-    let fragment_ids: Vec<FragmentId> = fragments.iter().map(|(id, _, _)| *id).collect();
-    let actors_from_cache: Vec<ActorId> = fragment_ids
-        .iter()
-        .filter_map(|fid| actor_cache.actors_by_fragment_id.get(fid))
-        .flat_map(|ids| ids.iter().copied())
-        .collect();
+    let fragment_ids: HashSet<FragmentId> = fragments.iter().map(|(id, _, _)| *id).collect();
 
-    {
-        let actors_from_db: Vec<ActorId> = Actor::find()
-            .select_only()
-            .column(actor::Column::ActorId)
-            .filter(actor::Column::FragmentId.is_in(fragment_ids))
-            .into_tuple()
-            .all(db)
-            .await?;
+    let guard = actor_info.read_guard();
 
-        let set_db: HashSet<ActorId> = actors_from_db.into_iter().collect();
-        let set_cache: HashSet<ActorId> = actors_from_cache.iter().copied().collect();
-
-        debug_assert_eq!(
-            set_db, set_cache,
-            "Actor lists mismatch between DB and cache"
-        );
-    }
-
-    let actors = actors_from_cache;
+    let actors = {
+        fragment_ids
+            .iter()
+            .flat_map(|id| guard.get_fragment(*id as _))
+            .flat_map(|f| f.actors.keys().cloned().map(|id| id as _))
+            .collect::<HashSet<_>>()
+    };
 
     let fragment_ids = fragments
         .iter()
