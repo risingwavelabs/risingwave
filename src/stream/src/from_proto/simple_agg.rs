@@ -55,6 +55,9 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
                 .await;
         let must_output_per_barrier = node.get_must_output_per_barrier();
 
+        // 10 is used to be the default.
+        let extreme_cache_size = *node.get_extreme_cache_size().unwrap_or(&10) as usize;
+
         let exec = SimpleAggExecutor::new(AggExecutorArgs {
             version: node.version(),
 
@@ -62,7 +65,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             actor_ctx: params.actor_context,
             info: params.info.clone(),
 
-            extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
+            extreme_cache_size,
 
             agg_calls,
             row_count_index: node.get_row_count_index() as usize,
