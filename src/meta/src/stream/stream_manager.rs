@@ -38,9 +38,8 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument;
 
 use super::{
-    FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy,
-    JobRescheduleTarget, JobResourceGroupTarget, Locations, RescheduleOptions, RescheduleTarget,
-    ScaleControllerRef,
+    FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget,
+    JobResourceGroupTarget, Locations, RescheduleOptions, RescheduleTarget, ScaleControllerRef,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,

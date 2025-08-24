@@ -2409,13 +2409,9 @@ impl ScaleController {
             let prev_fragment = read_gurad.get_fragment(*fragment_id as FragmentId).unwrap();
 
             let InflightFragmentInfo {
-                
                 distribution_type,
-                
-                
-                
+
                 actors,
-                
                 ..
             } = fragment_info;
 
