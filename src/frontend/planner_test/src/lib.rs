@@ -13,7 +13,11 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![allow(clippy::derive_partial_eq_without_eq)]
+#![allow(
+    clippy::derive_partial_eq_without_eq,
+    clippy::large_futures,
+    clippy::large_stack_frames
+)]
 
 //! Data-driven tests.
 
