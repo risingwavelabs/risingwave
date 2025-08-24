@@ -169,9 +169,9 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Vector(v) => {
-                assert_eq!(&DataType::Vector(v.into_slice().len()), ty);
+                assert_eq!(&DataType::Vector(v.dimension()), ty);
                 list_to_binary_with_type(
-                    v.inner().iter().cloned().map(Some),
+                    v.as_slice().iter().cloned().map(Some),
                     &DataType::List(DataType::Float32.into()),
                 )
             }

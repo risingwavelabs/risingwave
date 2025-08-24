@@ -16,19 +16,25 @@
 //!
 //! Use [`seed_rand_array`] to generate an random array.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use chrono::Datelike;
+use parking_lot::Mutex;
 use rand::distr::StandardUniform;
-use rand::prelude::Distribution;
+use rand::prelude::{Distribution, StdRng};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef};
+use crate::array::{Array, ArrayBuilder, ArrayRef, VectorVal};
 use crate::types::{
     Date, Decimal, Int256, Interval, JsonbVal, NativeType, Scalar, Serial, Time, Timestamp,
     Timestamptz,
 };
+
+pub fn gen_vector_for_test(d: usize) -> VectorVal {
+    static RNG: LazyLock<Mutex<StdRng>> = LazyLock::new(|| Mutex::new(StdRng::seed_from_u64(233)));
+    VectorVal::from_iter((0..d).map(|_| RNG.lock().random::<f32>().try_into().unwrap()))
+}
 
 pub trait RandValue {
     fn rand_value<R: Rng>(rand: &mut R) -> Self;
