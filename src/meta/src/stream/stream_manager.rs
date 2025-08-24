@@ -29,7 +29,7 @@ use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
-use risingwave_pb::meta::table_fragments::{ActorStatus, PbState};
+use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use thiserror_ext::AsReport;
@@ -38,7 +38,7 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument;
 
 use super::{
-    FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates,
+    FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy,
     JobRescheduleTarget, JobResourceGroupTarget, Locations, RescheduleOptions, RescheduleTarget,
     ScaleControllerRef,
 };

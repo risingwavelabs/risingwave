@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{Either, select};
-use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId, TableOption};
-use risingwave_meta_model::{JobStatus, ObjectId, SinkId, SourceId, WorkerId, fragment};
+use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId, fragment};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
