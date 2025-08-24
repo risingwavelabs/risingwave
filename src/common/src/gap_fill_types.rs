@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod gap_fill_eowc;
-mod sort;
-mod sort_buffer;
-
-pub use gap_fill_eowc::{GapFillExecutor, GapFillExecutorArgs};
-pub use risingwave_common::gap_fill_types::FillStrategy;
-pub use sort::{SortExecutor, SortExecutorArgs};
-pub use sort_buffer::SortBuffer;
+/// Strategy for filling gaps in time series data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FillStrategy {
+    Interpolate,
+    Locf,
+    Null,
+}
