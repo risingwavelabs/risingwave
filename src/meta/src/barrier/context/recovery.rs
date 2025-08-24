@@ -82,7 +82,7 @@ impl GlobalBarrierWorkerContextImpl {
                 .map(|(id, definition, _init_at)| async move {
                     let table_id = TableId::new(id as _);
                     let stream_job_fragments =
-                        mgr.catalog_controller.get_job_fragments_by_id(id).await?;
+                        mgr.get_job_fragments_by_id(&table_id).await?;
                     assert_eq!(stream_job_fragments.stream_job_id(), table_id);
                     Ok((definition, stream_job_fragments))
                 }),
