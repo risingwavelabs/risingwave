@@ -1113,17 +1113,18 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema).unwrap();
+        let table_name = SchemaTableName {
+            schema_name: "mytest".to_owned(),
+            table_name: "t1".to_owned(),
+        };
+        let reader =
+            MySqlExternalTableReader::new(config, rw_schema, vec![0], table_name.clone()).unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 
         let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
         let parser = MySqlExternalTableReader::get_cdc_offset_parser();
         println!("parsed offset: {:?}", parser(off0_str).unwrap());
-        let table_name = SchemaTableName {
-            schema_name: "mytest".to_owned(),
-            table_name: "t1".to_owned(),
-        };
 
         let stream = reader.snapshot_read(table_name, None, vec!["v1".to_owned()], 1000);
         pin_mut!(stream);

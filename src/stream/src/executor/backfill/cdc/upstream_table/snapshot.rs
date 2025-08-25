@@ -400,16 +400,23 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema.clone()).unwrap();
+        let schema_table_name = SchemaTableName {
+            schema_name: "mydb".to_owned(),
+            table_name: "orders_rw".to_owned(),
+        };
+        let reader = MySqlExternalTableReader::new(
+            config,
+            rw_schema.clone(),
+            vec![0],
+            schema_table_name.clone(),
+        )
+        .unwrap();
 
         let mut cnt: usize = 0;
         let mut start_pk = Some(OwnedRow::new(vec![Some(ScalarImpl::Int64(0))]));
         loop {
             let row_stream = reader.snapshot_read(
-                SchemaTableName {
-                    schema_name: "mydb".to_owned(),
-                    table_name: "orders_rw".to_owned(),
-                },
+                schema_table_name.clone(),
                 start_pk.clone(),
                 vec!["o_orderkey".to_owned()],
                 1000,
