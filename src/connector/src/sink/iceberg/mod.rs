@@ -100,10 +100,16 @@ pub const ICEBERG_COW_BRANCH: &str = "ingestion";
 pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
 pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
 
+// Configuration constants
 pub const ENABLE_COMPACTION: &str = "enable_compaction";
 pub const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
 pub const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
 pub const WRITE_MODE: &str = "write_mode";
+pub const SNAPSHOT_EXPIRATION_RETAIN_LAST: &str = "snapshot_expiration_retain_last";
+pub const SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN: &str = "snapshot_expiration_expire_older_than";
+pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
+pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
+    "snapshot_expiration_clear_expired_meta_data";
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -111,6 +117,10 @@ fn default_commit_retry_num() -> u32 {
 
 fn default_iceberg_write_mode() -> String {
     ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[serde_as]
@@ -159,24 +169,60 @@ pub struct IcebergConfig {
     pub commit_retry_num: u32,
 
     /// Whether to enable iceberg compaction.
-    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[serde(
+        rename = "enable_compaction",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
     #[with_option(allow_alter_on_fly)]
     pub enable_compaction: bool,
 
     /// The interval of iceberg compaction
-    #[serde(default)]
+    #[serde(rename = "compaction_interval_sec", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub compaction_interval_sec: Option<u64>,
 
     /// Whether to enable iceberg expired snapshots.
-    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[serde(
+        rename = "enable_snapshot_expiration",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
     #[with_option(allow_alter_on_fly)]
     pub enable_snapshot_expiration: bool,
 
     /// The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
-    #[serde(default = "default_iceberg_write_mode")]
+    #[serde(rename = "write_mode", default = "default_iceberg_write_mode")]
     pub write_mode: String,
+
+    /// The timestamp (in milliseconds) to expire snapshots older than this
+    #[serde(rename = "snapshot_expiration_expire_older_than", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub snapshot_expiration_expire_older_than: Option<i64>,
+
+    /// The number of snapshots to retain
+    #[serde(rename = "snapshot_expiration_retain_last", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub snapshot_expiration_retain_last: Option<i32>,
+
+    #[serde(
+        rename = "snapshot_expiration_clear_expired_files",
+        default = "default_true",
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    #[with_option(allow_alter_on_fly)]
+    pub snapshot_expiration_clear_expired_files: bool,
+
+    #[serde(
+        rename = "snapshot_expiration_clear_expired_meta_data",
+        default = "default_true",
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    #[with_option(allow_alter_on_fly)]
+    pub snapshot_expiration_clear_expired_meta_data: bool,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -1871,6 +1917,15 @@ impl IcebergSinkCommitter {
         .await?;
         self.table = table;
 
+        let snapshot_num = self.table.metadata().snapshots().count();
+        let catalog_name = self.config.common.catalog_name();
+        let table_name = self.table.identifier().to_string();
+        let metrics_labels = [&self.param.sink_name, &catalog_name, &table_name];
+        GLOBAL_SINK_METRICS
+            .iceberg_snapshot_num
+            .with_guarded_label_values(&metrics_labels)
+            .set(snapshot_num as i64);
+
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
         if self.is_exactly_once {
@@ -2107,7 +2162,12 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::{ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig};
+    use crate::sink::iceberg::{
+        COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
+        ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN,
+        SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+    };
 
     pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
@@ -2353,6 +2413,10 @@ mod test {
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
             enable_snapshot_expiration: true,
             write_mode: ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
+            snapshot_expiration_expire_older_than: None,
+            snapshot_expiration_retain_last: None,
+            snapshot_expiration_clear_expired_files: true,
+            snapshot_expiration_clear_expired_meta_data: true
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
@@ -2474,5 +2538,31 @@ mod test {
         .collect();
 
         test_create_catalog(values).await;
+    }
+
+    #[test]
+    fn test_config_constants_consistency() {
+        // This test ensures our constants match the expected configuration names
+        // If you change a constant, this test will remind you to update both places
+        assert_eq!(ENABLE_COMPACTION, "enable_compaction");
+        assert_eq!(COMPACTION_INTERVAL_SEC, "compaction_interval_sec");
+        assert_eq!(ENABLE_SNAPSHOT_EXPIRATION, "enable_snapshot_expiration");
+        assert_eq!(WRITE_MODE, "write_mode");
+        assert_eq!(
+            SNAPSHOT_EXPIRATION_RETAIN_LAST,
+            "snapshot_expiration_retain_last"
+        );
+        assert_eq!(
+            SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN,
+            "snapshot_expiration_expire_older_than"
+        );
+        assert_eq!(
+            SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+            "snapshot_expiration_clear_expired_files"
+        );
+        assert_eq!(
+            SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
+            "snapshot_expiration_clear_expired_meta_data"
+        );
     }
 }

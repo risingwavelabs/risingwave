@@ -92,7 +92,9 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, WRITE_MODE,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
+    SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     parse_partition_by_exprs,
 };
 
@@ -1818,6 +1820,47 @@ pub async fn create_iceberg_engine_table(
             "true" => {
                 risingwave_common::license::Feature::IcebergCompaction.check_available()?;
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
+
+                // configuration for snapshot expiration
+                if let Some(snapshot_expiration_retain_last) = handler_args
+                    .with_options
+                    .get(SNAPSHOT_EXPIRATION_RETAIN_LAST)
+                {
+                    sink_with.insert(
+                        SNAPSHOT_EXPIRATION_RETAIN_LAST.to_owned(),
+                        snapshot_expiration_retain_last.to_owned(),
+                    );
+                }
+
+                if let Some(snapshot_expiration_expire_older_than) = handler_args
+                    .with_options
+                    .get(SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN)
+                {
+                    sink_with.insert(
+                        SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN.to_owned(),
+                        snapshot_expiration_expire_older_than.to_owned(),
+                    );
+                }
+
+                if let Some(snapshot_expiration_clear_expired_files) = handler_args
+                    .with_options
+                    .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
+                {
+                    sink_with.insert(
+                        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES.to_owned(),
+                        snapshot_expiration_clear_expired_files.to_owned(),
+                    );
+                }
+
+                if let Some(snapshot_expiration_clear_expired_meta_data) = handler_args
+                    .with_options
+                    .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
+                {
+                    sink_with.insert(
+                        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA.to_owned(),
+                        snapshot_expiration_clear_expired_meta_data.to_owned(),
+                    );
+                }
             }
             "false" => {
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "false".to_owned());
