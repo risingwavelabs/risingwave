@@ -434,14 +434,6 @@ profile:
       - use: compute-node
       - use: frontend
 
-  mysql-backend:
-    steps:
-      - use: mysql
-        port: 4306
-        user: root
-        database: metadata
-        application: metastore
-
   meta-1cn-1fe-mysql-backend-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:
