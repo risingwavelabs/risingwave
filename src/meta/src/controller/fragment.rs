@@ -1069,24 +1069,35 @@ impl CatalogController {
                 .all(&inner.db)
                 .await?;
 
-            let fragment_actors = fragments
-                .into_iter()
-                .map(|fragment| {
-                    let actor_ids = inner
-                        .actors
-                        .actors_by_fragment_id
-                        .get(&fragment.fragment_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    // TODO: tooooo heavy
-                    let actors = actor_ids
-                        .iter()
-                        .map(|actor_id| inner.actors.models.get(actor_id).cloned().expect(""))
-                        .collect_vec();
+            let fragment_actors = {
+                let guard = self.env.shared_actor_infos().read_guard();
 
-                    (fragment, actors)
-                })
-                .collect();
+                fragments
+                    .into_iter()
+                    .map(|fragment| {
+                        let fragment_info = guard.get_fragment(fragment.fragment_id as _).unwrap();
+                        let actors = fragment_info
+                            .actors
+                            .iter()
+                            .map(|(actor_id, actor_info)| actor::Model {
+                                actor_id: *actor_id as _,
+                                fragment_id: fragment.fragment_id as _,
+                                status: ActorStatus::Running,
+                                splits: None, // Placeholder, actual expr_context should be fetched from DB if needed
+                                worker_id: actor_info.worker_id,
+                                #[allow(deprecated)]
+                                upstream_actor_ids: Default::default(),
+                                vnode_bitmap: actor_info.vnode_bitmap.as_ref().map(|bitmap| {
+                                    VnodeBitmap::from(&bitmap.to_protobuf())
+                                }),
+                                expr_context: ExprContext::default(), // Placeholder, actual expr_context should be fetched from DB if needed
+                            })
+                            .collect();
+
+                        (fragment, actors)
+                    })
+                    .collect()
+            };
 
             table_fragments.insert(
                 job.job_id as ObjectId,

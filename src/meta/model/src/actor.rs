@@ -20,7 +20,7 @@ use crate::{
     ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap, WorkerId,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum ActorStatus {
     #[sea_orm(string_value = "INACTIVE")]
