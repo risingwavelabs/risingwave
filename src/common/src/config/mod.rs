@@ -352,6 +352,10 @@ pub mod default {
             30000
         }
 
+        pub fn streaming_now_progress_ratio() -> Option<f32> {
+            None
+        }
+
         pub fn enable_explain_analyze_stats() -> bool {
             true
         }
