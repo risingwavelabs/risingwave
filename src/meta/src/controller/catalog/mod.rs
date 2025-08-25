@@ -138,8 +138,8 @@ pub struct ReleaseContext {
 
     /// Removed sinks that target table has not been removed.
     pub(crate) removed_sink_in_existing_table: HashMap<SinkId, TableId>,
-    /// Removed upstream sink fragments.
-    pub(crate) removed_sink_fragments: Vec<FragmentId>,
+    /// Removed sink fragment with target fragment.
+    pub(crate) removed_sink_fragment_with_targets: Vec<(FragmentId, FragmentId)>,
 }
 
 impl CatalogController {

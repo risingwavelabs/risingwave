@@ -308,7 +308,8 @@ pub enum Command {
         unregistered_fragment_ids: HashSet<FragmentId>,
         // used to update catalog in existing table
         dropped_sink_in_existing_table: HashMap<SinkId, risingwave_meta_model::TableId>,
-        dropped_sink_fragments: Vec<FragmentId>,
+        // sink_fragment -> target_fragment
+        dropped_sink_fragment_with_targets: Vec<(FragmentId, FragmentId)>,
     },
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
@@ -463,19 +464,38 @@ impl Command {
             Command::Resume => None,
             Command::DropStreamingJobs {
                 unregistered_fragment_ids,
+                dropped_sink_fragment_with_targets,
                 ..
-            } => Some(
-                unregistered_fragment_ids
+            } => {
+                let mut dropped_sink_fragment_by_target: HashMap<FragmentId, Vec<FragmentId>> =
+                    HashMap::new();
+                for (sink_fragment, target_fragment) in dropped_sink_fragment_with_targets {
+                    dropped_sink_fragment_by_target
+                        .entry(*target_fragment)
+                        .or_default()
+                        .push(*sink_fragment);
+                }
+                let changes = unregistered_fragment_ids
                     .iter()
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
-                    .collect(),
-            ),
+                    .chain(dropped_sink_fragment_by_target.into_iter().map(
+                        |(target_fragment, sink_fragments)| {
+                            (
+                                target_fragment,
+                                CommandFragmentChanges::DropNodeUpstream(sink_fragments),
+                            )
+                        },
+                    ))
+                    .collect();
+
+                Some(changes)
+            }
             Command::CreateStreamingJob { info, job_type, .. } => {
                 assert!(
                     !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)),
                     "should handle fragment changes separately for snapshot backfill"
                 );
-                let changes: HashMap<_, _> = info
+                let mut changes: HashMap<_, _> = info
                     .stream_job_fragments
                     .new_fragment_info()
                     .map(|(fragment_id, fragment_info)| {
@@ -489,6 +509,18 @@ impl Command {
                         )
                     })
                     .collect();
+
+                if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
+                    let downstream_fragment_id = ctx.new_sink_downstream.downstream_fragment_id;
+                    changes.insert(
+                        downstream_fragment_id,
+                        CommandFragmentChanges::AddNodeUpstream(PbUpstreamSinkInfo {
+                            upstream_fragment_id: ctx.sink_fragment_id,
+                            sink_output_schema: ctx.sink_output_fields.clone(),
+                            project_exprs: ctx.project_exprs.clone(),
+                        }),
+                    );
+                }
 
                 Some(changes)
             }
@@ -835,11 +867,14 @@ impl Command {
 
             Command::DropStreamingJobs {
                 actors,
-                dropped_sink_fragments,
+                dropped_sink_fragment_with_targets,
                 ..
             } => Some(Mutation::Stop(StopMutation {
                 actors: actors.clone(),
-                dropped_sink_fragments: dropped_sink_fragments.clone(),
+                dropped_sink_fragments: dropped_sink_fragment_with_targets
+                    .iter()
+                    .map(|(sink_fragment_id, _)| *sink_fragment_id)
+                    .collect(),
             })),
 
             Command::CreateStreamingJob {

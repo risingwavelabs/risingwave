@@ -178,7 +178,6 @@ select * from t_append_only;
 statement ok
 create sink s21 into t_append_only as select v1+1000 as v1, v1+2000 as v2, v1+3000 as v3 from t_s2 with (type = 'append-only', force_append_only = 'true');
 
-onlyif can-use-recover
 statement ok
 recover;
 
@@ -213,7 +212,6 @@ create table m_alter_1 (v2 varchar, v1 int primary key);
 statement ok
 create sink s_alter_1 into m_alter_1 (v2, v1) as select v2 as w2, v1 + 10 as w1 from t_alter_1;
 
-onlyif can-use-recover
 statement ok
 recover;
 
@@ -270,7 +268,6 @@ create table m_drop_1 (v2 varchar, v1 int primary key);
 statement ok
 create sink s_drop_1 into m_drop_1 (v2, v1) as select v2, v1 from t_drop_1;
 
-onlyif can-use-recover
 statement ok
 recover;
 

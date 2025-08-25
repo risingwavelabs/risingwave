@@ -72,8 +72,8 @@ use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_internal_tables_by_id, get_sink_fragment_by_id, get_table_columns,
+    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, fetch_target_fragments,
+    get_fragment_actor_ids, get_internal_tables_by_id, get_sink_fragment_by_id, get_table_columns,
     grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
     try_get_sink_into_table,
 };
@@ -562,6 +562,17 @@ impl CatalogController {
 
         let dropped_sink_fragments =
             get_sink_fragment_by_id(&txn, dropped_sink_in_existing_table.keys().copied()).await?;
+        let mut dropped_sink_fragment_with_targets =
+            Vec::with_capacity(dropped_sink_fragments.len());
+        for sink_fragment_id in dropped_sink_fragments {
+            let target_fragment = fetch_target_fragments(&txn, sink_fragment_id).await?;
+            assert_eq!(
+                target_fragment.len(),
+                1,
+                "sink should have only one downstream fragment"
+            );
+            dropped_sink_fragment_with_targets.push((sink_fragment_id, target_fragment[0]));
+        }
 
         Ok(Command::DropStreamingJobs {
             table_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
@@ -572,9 +583,9 @@ impl CatalogController {
                 .collect(),
             unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
             dropped_sink_in_existing_table,
-            dropped_sink_fragments: dropped_sink_fragments
+            dropped_sink_fragment_with_targets: dropped_sink_fragment_with_targets
                 .into_iter()
-                .map(|id| id as _)
+                .map(|(sink, target)| (sink as _, target as _))
                 .collect(),
         })
     }

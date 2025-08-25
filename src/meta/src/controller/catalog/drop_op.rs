@@ -294,6 +294,17 @@ impl CatalogController {
 
         let removed_sink_fragments =
             get_sink_fragment_by_id(&txn, removed_sink_in_existing_table.keys().copied()).await?;
+        let mut removed_sink_fragment_with_targets =
+            Vec::with_capacity(removed_sink_fragments.len());
+        for sink_fragment_id in removed_sink_fragments {
+            let target_fragment = fetch_target_fragments(&txn, sink_fragment_id).await?;
+            assert_eq!(
+                target_fragment.len(),
+                1,
+                "sink should have only one downstream fragment"
+            );
+            removed_sink_fragment_with_targets.push((sink_fragment_id, target_fragment[0]));
+        }
 
         // Find affect users with privileges on all this objects.
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -385,7 +396,7 @@ impl CatalogController {
                 removed_actors,
                 removed_fragments,
                 removed_sink_in_existing_table,
-                removed_sink_fragments,
+                removed_sink_fragment_with_targets,
             },
             version,
         ))

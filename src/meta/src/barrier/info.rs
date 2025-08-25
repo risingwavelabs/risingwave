@@ -24,8 +24,8 @@ use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
-use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{PbSubscriptionUpstreamInfo, PbUpstreamSinkInfo};
 use tracing::warn;
 
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
@@ -245,6 +245,8 @@ pub(crate) enum CommandFragmentChanges {
         /// back to the database.
         is_existing: bool,
     },
+    AddNodeUpstream(PbUpstreamSinkInfo),
+    DropNodeUpstream(Vec<FragmentId>),
     ReplaceNodeUpstream(
         /// old `fragment_id` -> new `fragment_id`
         HashMap<FragmentId, FragmentId>,
@@ -469,6 +471,62 @@ impl InflightDatabaseInfo {
                             warn!(?remaining_fragment_ids, node = ?info.nodes, ?replace_map, "non-existing fragment to replace");
                         }
                     }
+                    CommandFragmentChanges::AddNodeUpstream(new_upstream_info) => {
+                        let info = self.fragment_mut(fragment_id);
+                        let mut injected = false;
+                        visit_stream_node_mut(&mut info.nodes, |node| {
+                            if let NodeBody::UpstreamSinkUnion(u) = node {
+                                if cfg!(debug_assertions) {
+                                    let current_upstream_fragment_ids = u
+                                        .init_upstreams
+                                        .iter()
+                                        .map(|upstream| upstream.upstream_fragment_id)
+                                        .collect::<HashSet<_>>();
+                                    if current_upstream_fragment_ids
+                                        .contains(&new_upstream_info.upstream_fragment_id)
+                                    {
+                                        panic!(
+                                            "duplicate upstream fragment: {:?} {:?}",
+                                            u, new_upstream_info
+                                        );
+                                    }
+                                }
+                                u.init_upstreams.push(new_upstream_info.clone());
+                                injected = true;
+                            }
+                        });
+                        assert!(injected, "should inject upstream into UpstreamSinkUnion");
+                    }
+                    CommandFragmentChanges::DropNodeUpstream(drop_upstream_fragment_ids) => {
+                        let info = self.fragment_mut(fragment_id);
+                        let mut removed = false;
+                        visit_stream_node_mut(&mut info.nodes, |node| {
+                            if let NodeBody::UpstreamSinkUnion(u) = node {
+                                if cfg!(debug_assertions) {
+                                    let current_upstream_fragment_ids = u
+                                        .init_upstreams
+                                        .iter()
+                                        .map(|upstream| upstream.upstream_fragment_id)
+                                        .collect::<HashSet<_>>();
+                                    for drop_fragment_id in &drop_upstream_fragment_ids {
+                                        if !current_upstream_fragment_ids.contains(drop_fragment_id)
+                                        {
+                                            panic!(
+                                                "non-existing upstream fragment to drop: {:?} {:?} {:?}",
+                                                u, drop_upstream_fragment_ids, drop_fragment_id
+                                            );
+                                        }
+                                    }
+                                }
+                                u.init_upstreams.retain(|upstream| {
+                                    !drop_upstream_fragment_ids
+                                        .contains(&upstream.upstream_fragment_id)
+                                });
+                                removed = true;
+                            }
+                        });
+                        assert!(removed, "should remove upstream from UpstreamSinkUnion");
+                    }
                 }
             }
             shared_actor_writer.finish();
@@ -676,7 +734,9 @@ impl InflightDatabaseInfo {
                             self.jobs.remove(&job_id).expect("should exist");
                         }
                     }
-                    CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
+                    CommandFragmentChanges::ReplaceNodeUpstream(_)
+                    | CommandFragmentChanges::AddNodeUpstream(_)
+                    | CommandFragmentChanges::DropNodeUpstream(_) => {}
                 }
             }
         }
