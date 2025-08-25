@@ -342,13 +342,6 @@ impl ScaleController {
         }
     }
 
-    pub async fn integrity_check(&self) -> MetaResult<()> {
-        self.metadata_manager
-            .catalog_controller
-            .integrity_check()
-            .await
-    }
-
     // pub async fn render_actors(
     //     &self,
     //     salt: ObjectId,

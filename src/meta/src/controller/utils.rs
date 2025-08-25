@@ -30,9 +30,9 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array,
     JobStatus, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId,
-    UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment, fragment_relation,
-    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
-    subscription, table, user, user_default_privilege, user_privilege, view,
+    UserId, VnodeBitmap, WorkerId, connection, database, fragment, fragment_relation, function,
+    index, object, object_dependency, schema, secret, sink, source, streaming_job, subscription,
+    table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -63,7 +63,6 @@ use thiserror_ext::AsReport;
 
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
-use crate::controller::catalog::ActorInfo;
 use crate::model::FragmentDownstreamRelation;
 use crate::{MetaError, MetaResult};
 
@@ -1382,45 +1381,6 @@ pub fn resolve_no_shuffle_actor_dispatcher(
                 }).collect()
         }
     }
-}
-
-/// `get_fragment_mappings_txn` returns the fragment vnode mappings of the given job.
-pub async fn get_fragment_mappings_txn<C>(
-    db: &C,
-    _actor_cache: &ActorInfo,
-    job_id: ObjectId,
-) -> MetaResult<Vec<PbFragmentWorkerSlotMapping>>
-where
-    C: ConnectionTrait,
-{
-    let job_actors_from_db: Vec<(
-        FragmentId,
-        DistributionType,
-        ActorId,
-        Option<VnodeBitmap>,
-        WorkerId,
-        ActorStatus,
-    )> = Actor::find()
-        .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::DistributionType,
-        ])
-        .columns([
-            actor::Column::ActorId,
-            actor::Column::VnodeBitmap,
-            actor::Column::WorkerId,
-            actor::Column::Status,
-        ])
-        .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-        .filter(fragment::Column::JobId.eq(job_id))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    let job_actors = job_actors_from_db;
-
-    Ok(rebuild_fragment_mapping_from_actors(job_actors))
 }
 
 pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerSlotMapping {

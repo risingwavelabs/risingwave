@@ -12049,7 +12049,6 @@ dependencies = [
  "risingwave_storage",
  "risingwave_stream",
  "rw-diagnose-tools",
- "sea-orm",
  "serde",
  "serde_json",
  "serde_yaml",

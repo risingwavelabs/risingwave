@@ -420,11 +420,26 @@ impl StreamManagerService for StreamServiceImpl {
             mut actor_splits,
         } = self.stream_manager.source_manager.get_running_info().await;
 
-        let source_actors = self
-            .metadata_manager
-            .catalog_controller
-            .list_source_actors()
-            .await?;
+        let source_actors: HashMap<_, _> = {
+            let all_fragment_ids: HashSet<_> = backfill_fragments
+                .values()
+                .flat_map(|set| set.iter().flat_map(|&(id1, id2)| [id1, id2]))
+                .chain(source_fragments.values().flatten().copied())
+                .collect();
+
+            let guard = self.env.shared_actor_info.read_guard();
+            guard
+                .iter_over_fragments()
+                .filter(|(frag_id, _)| all_fragment_ids.contains(&{ **frag_id }))
+                .flat_map(|(fragment_id, fragment_info)| {
+                    fragment_info
+                        .actors
+                        .keys()
+                        .copied()
+                        .map(|actor_id| (actor_id, *fragment_id))
+                })
+                .collect()
+        };
 
         let is_shared_source = self
             .metadata_manager

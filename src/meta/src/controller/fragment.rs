@@ -1230,34 +1230,6 @@ impl CatalogController {
         Ok(actor_infos)
     }
 
-    pub async fn list_source_actors(&self) -> MetaResult<Vec<(ActorId, FragmentId)>> {
-        let inner = self.inner.read().await;
-
-        let source_actors = inner
-            .actors
-            .models
-            .values()
-            .filter(|actor| actor.splits.is_some())
-            .map(|actor| (actor.actor_id, actor.fragment_id))
-            .collect_vec();
-
-        {
-            let source_actors_from_db: Vec<(ActorId, FragmentId)> = Actor::find()
-                .select_only()
-                .filter(actor::Column::Splits.is_not_null())
-                .columns([actor::Column::ActorId, actor::Column::FragmentId])
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
-
-            let source_actors_from_db = source_actors_from_db.into_iter().collect::<HashSet<_>>();
-            let source_actors = source_actors.iter().cloned().collect::<HashSet<_>>();
-            debug_assert_eq!(source_actors, source_actors_from_db);
-        }
-
-        Ok(source_actors)
-    }
-
     pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
         let guard = self.env.shared_actor_info.read_guard();
         guard
