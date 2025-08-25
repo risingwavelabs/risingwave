@@ -546,11 +546,12 @@ impl IcebergCompactionManager {
         let mut snapshots = metadata.snapshots().collect_vec();
         snapshots.sort_by_key(|s| s.timestamp_ms());
 
-        let snapshot_expiration_timestamp_ms = iceberg_config.snapshot_expiration_timestamp_ms(now);
+        let snapshot_expiration_timestamp_ms = iceberg_config
+            .snapshot_expiration_timestamp_ms(now)
+            .unwrap_or(now - MAX_SNAPSHOT_AGE_MS_DEFAULT);
 
         if snapshots.is_empty()
-            || snapshots.first().unwrap().timestamp_ms()
-                > snapshot_expiration_timestamp_ms.unwrap_or(now - MAX_SNAPSHOT_AGE_MS_DEFAULT)
+            || snapshots.first().unwrap().timestamp_ms() > snapshot_expiration_timestamp_ms
         {
             // avoid commit empty table updates
             return Ok(());
@@ -568,9 +569,7 @@ impl IcebergCompactionManager {
 
         let mut expired_snapshots = tx.expire_snapshot();
 
-        if let Some(expiration_time) = snapshot_expiration_timestamp_ms {
-            expired_snapshots = expired_snapshots.expire_older_than(expiration_time);
-        }
+        expired_snapshots = expired_snapshots.expire_older_than(snapshot_expiration_timestamp_ms);
 
         if let Some(retain_last) = iceberg_config.snapshot_expiration_retain_last {
             expired_snapshots = expired_snapshots.retain_last(retain_last);

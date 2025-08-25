@@ -1813,57 +1813,22 @@ pub async fn create_iceberg_engine_table(
             .map(|x| x.with_properties.remove("compaction_interval_sec"));
     }
 
-    if let Some(enable_snapshot_expiration) =
+    let has_enabled_snapshot_expiration = if let Some(enable_snapshot_expiration) =
         handler_args.with_options.get(ENABLE_SNAPSHOT_EXPIRATION)
     {
+        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
         match enable_snapshot_expiration.to_lowercase().as_str() {
             "true" => {
                 risingwave_common::license::Feature::IcebergCompaction.check_available()?;
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
-
-                // configuration for snapshot expiration
-                if let Some(snapshot_expiration_retain_last) = handler_args
-                    .with_options
-                    .get(SNAPSHOT_EXPIRATION_RETAIN_LAST)
-                {
-                    sink_with.insert(
-                        SNAPSHOT_EXPIRATION_RETAIN_LAST.to_owned(),
-                        snapshot_expiration_retain_last.to_owned(),
-                    );
-                }
-
-                if let Some(snapshot_expiration_max_age) = handler_args
-                    .with_options
-                    .get(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
-                {
-                    sink_with.insert(
-                        SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS.to_owned(),
-                        snapshot_expiration_max_age.to_owned(),
-                    );
-                }
-
-                if let Some(snapshot_expiration_clear_expired_files) = handler_args
-                    .with_options
-                    .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
-                {
-                    sink_with.insert(
-                        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES.to_owned(),
-                        snapshot_expiration_clear_expired_files.to_owned(),
-                    );
-                }
-
-                if let Some(snapshot_expiration_clear_expired_meta_data) = handler_args
-                    .with_options
-                    .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
-                {
-                    sink_with.insert(
-                        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA.to_owned(),
-                        snapshot_expiration_clear_expired_meta_data.to_owned(),
-                    );
-                }
+                true
             }
             "false" => {
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "false".to_owned());
+                false
             }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -1873,11 +1838,6 @@ pub async fn create_iceberg_engine_table(
                 .into());
             }
         }
-
-        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
     } else {
         sink_with.insert(
             ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
@@ -1886,6 +1846,68 @@ pub async fn create_iceberg_engine_table(
                 .is_ok()
                 .to_string(),
         );
+        true
+    };
+
+    if has_enabled_snapshot_expiration {
+        // configuration for snapshot expiration
+        if let Some(snapshot_expiration_retain_last) = handler_args
+            .with_options
+            .get(SNAPSHOT_EXPIRATION_RETAIN_LAST)
+        {
+            sink_with.insert(
+                SNAPSHOT_EXPIRATION_RETAIN_LAST.to_owned(),
+                snapshot_expiration_retain_last.to_owned(),
+            );
+            // remove snapshot_expiration_retain_last from source options, otherwise it will be considered as an unknown field.
+            source
+                .as_mut()
+                .map(|x| x.with_properties.remove(SNAPSHOT_EXPIRATION_RETAIN_LAST));
+        }
+
+        if let Some(snapshot_expiration_max_age) = handler_args
+            .with_options
+            .get(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
+        {
+            sink_with.insert(
+                SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS.to_owned(),
+                snapshot_expiration_max_age.to_owned(),
+            );
+            // remove snapshot_expiration_max_age from source options, otherwise it will be considered as an unknown field.
+            source
+                .as_mut()
+                .map(|x| x.with_properties.remove(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS));
+        }
+
+        if let Some(snapshot_expiration_clear_expired_files) = handler_args
+            .with_options
+            .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
+        {
+            sink_with.insert(
+                SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES.to_owned(),
+                snapshot_expiration_clear_expired_files.to_owned(),
+            );
+            // remove snapshot_expiration_clear_expired_files from source options, otherwise it will be considered as an unknown field.
+            source.as_mut().map(|x| {
+                x.with_properties
+                    .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
+            });
+        }
+
+        if let Some(snapshot_expiration_clear_expired_meta_data) = handler_args
+            .with_options
+            .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
+        {
+            sink_with.insert(
+                SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA.to_owned(),
+                snapshot_expiration_clear_expired_meta_data.to_owned(),
+            );
+            // remove snapshot_expiration_clear_expired_meta_data from source options, otherwise it will be considered as an unknown field.
+            source.as_mut().map(|x| {
+                x.with_properties
+                    .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
+            });
+        }
     }
 
     if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
