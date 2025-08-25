@@ -290,25 +290,6 @@ impl CatalogController {
             .await
     }
 
-    pub async fn resolve_working_set_for_reschedule_tables(
-        &self,
-        table_ids: Vec<ObjectId>,
-    ) -> MetaResult<RescheduleWorkingSet> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-
-        let fragment_ids: Vec<FragmentId> = Fragment::find()
-            .select_only()
-            .column(fragment::Column::FragmentId)
-            .filter(fragment::Column::JobId.is_in(table_ids))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        self.resolve_working_set_for_reschedule_helper(&txn, &inner.actors, fragment_ids)
-            .await
-    }
-
     pub async fn resolve_working_set_for_reschedule_helper<C>(
         &self,
         txn: &C,

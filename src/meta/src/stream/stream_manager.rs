@@ -37,23 +37,19 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument;
 
-use super::{
-    FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget,
-    JobResourceGroupTarget, Locations, RescheduleOptions, RescheduleTarget, ScaleControllerRef,
-};
+use super::{FragmentBackfillOrder, Locations, RescheduleTarget, ScaleControllerRef};
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
-use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
     ActorId, Fragment, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle,
-    FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+    FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::cdc::{
     assign_cdc_table_snapshot_splits, assign_cdc_table_snapshot_splits_for_replace_table,
@@ -818,20 +814,20 @@ impl GlobalStreamManager {
             .await?;
 
         if !background_jobs.is_empty() {
-            let related_jobs = self
-                .scale_controller
-                .resolve_related_no_shuffle_jobs(&background_jobs)
-                .await?;
-
-            for job in background_jobs {
-                if related_jobs.contains(&job) {
-                    bail!(
-                        "Cannot alter the job {} because the related job {} is currently being created",
-                        job_id,
-                        job.table_id
-                    );
-                }
-            }
+            // let related_jobs = self
+            //     .scale_controller
+            //     .resolve_related_no_shuffle_jobs(&background_jobs)
+            //     .await?;
+            //
+            // for job in background_jobs {
+            //     if related_jobs.contains(&job) {
+            //         bail!(
+            //             "Cannot alter the job {} because the related job {} is currently being created",
+            //             job_id,
+            //             job.table_id
+            //         );
+            //     }
+            // }
         }
 
         let database_id = DatabaseId::new(
@@ -850,7 +846,6 @@ impl GlobalStreamManager {
             .into_iter()
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
-
         let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
         let command = self
             .scale_controller
@@ -869,82 +864,82 @@ impl GlobalStreamManager {
         Ok(())
     }
 
-    /// This method is copied from `GlobalStreamManager::reschedule_streaming_job` and modified to handle reschedule CDC table backfill.
-    pub(crate) async fn reschedule_cdc_table_backfill(
-        &self,
-        job_id: u32,
-        target: JobRescheduleTarget,
-    ) -> MetaResult<()> {
-        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
-        let JobRescheduleTarget {
-            parallelism: parallelism_change,
-            resource_group: resource_group_change,
-        } = target;
-        let database_id = DatabaseId::new(
-            self.metadata_manager
-                .catalog_controller
-                .get_object_database_id(job_id as ObjectId)
-                .await? as _,
-        );
-        let job_id = TableId::new(job_id);
-        if let JobParallelismTarget::Update(parallelism) = &parallelism_change {
-            match parallelism {
-                TableParallelism::Fixed(_) => {}
-                TableParallelism::Custom => {
-                    bail_invalid_parameter!("should not alter parallelism to custom")
-                }
-                TableParallelism::Adaptive => {
-                    bail_invalid_parameter!("should not alter parallelism to adaptive")
-                }
-            }
-        } else {
-            bail_invalid_parameter!("should not refresh")
-        }
-        match &resource_group_change {
-            JobResourceGroupTarget::Update(_) => {
-                bail_invalid_parameter!("should not update resource group")
-            }
-            JobResourceGroupTarget::Keep => {}
-        };
-        // Only generate reschedule for fragment of CDC table backfill.
-        let reschedule_plan = self
-            .scale_controller
-            .generate_job_reschedule_plan(
-                JobReschedulePolicy {
-                    targets: HashMap::from([(
-                        job_id.table_id,
-                        JobRescheduleTarget {
-                            parallelism: parallelism_change,
-                            resource_group: resource_group_change,
-                        },
-                    )]),
-                },
-                true,
-            )
-            .await?;
-        if reschedule_plan.reschedules.is_empty() {
-            tracing::debug!(
-                ?job_id,
-                post_updates = ?reschedule_plan.post_updates,
-                "Empty reschedule plan generated for job.",
-            );
-            // self.scale_controller
-            //     .post_apply_reschedule(&HashMap::new())
-            //     .await?;
-        } else {
-            self.reschedule_actors(
-                database_id,
-                reschedule_plan,
-                RescheduleOptions {
-                    resolve_no_shuffle_upstream: false,
-                    skip_create_new_actors: false,
-                },
-            )
-            .await?;
-        }
-
-        Ok(())
-    }
+    // /// This method is copied from `GlobalStreamManager::reschedule_streaming_job` and modified to handle reschedule CDC table backfill.
+    // pub(crate) async fn reschedule_cdc_table_backfill(
+    //     &self,
+    //     job_id: u32,
+    //     target: JobRescheduleTarget,
+    // ) -> MetaResult<()> {
+    //     let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+    //     let JobRescheduleTarget {
+    //         parallelism: parallelism_change,
+    //         resource_group: resource_group_change,
+    //     } = target;
+    //     let database_id = DatabaseId::new(
+    //         self.metadata_manager
+    //             .catalog_controller
+    //             .get_object_database_id(job_id as ObjectId)
+    //             .await? as _,
+    //     );
+    //     let job_id = TableId::new(job_id);
+    //     if let JobParallelismTarget::Update(parallelism) = &parallelism_change {
+    //         match parallelism {
+    //             TableParallelism::Fixed(_) => {}
+    //             TableParallelism::Custom => {
+    //                 bail_invalid_parameter!("should not alter parallelism to custom")
+    //             }
+    //             TableParallelism::Adaptive => {
+    //                 bail_invalid_parameter!("should not alter parallelism to adaptive")
+    //             }
+    //         }
+    //     } else {
+    //         bail_invalid_parameter!("should not refresh")
+    //     }
+    //     match &resource_group_change {
+    //         JobResourceGroupTarget::Update(_) => {
+    //             bail_invalid_parameter!("should not update resource group")
+    //         }
+    //         JobResourceGroupTarget::Keep => {}
+    //     };
+    //     // Only generate reschedule for fragment of CDC table backfill.
+    //     let reschedule_plan = self
+    //         .scale_controller
+    //         .generate_job_reschedule_plan(
+    //             JobReschedulePolicy {
+    //                 targets: HashMap::from([(
+    //                     job_id.table_id,
+    //                     JobRescheduleTarget {
+    //                         parallelism: parallelism_change,
+    //                         resource_group: resource_group_change,
+    //                     },
+    //                 )]),
+    //             },
+    //             true,
+    //         )
+    //         .await?;
+    //     if reschedule_plan.reschedules.is_empty() {
+    //         tracing::debug!(
+    //             ?job_id,
+    //             post_updates = ?reschedule_plan.post_updates,
+    //             "Empty reschedule plan generated for job.",
+    //         );
+    //         // self.scale_controller
+    //         //     .post_apply_reschedule(&HashMap::new())
+    //         //     .await?;
+    //     } else {
+    //         self.reschedule_actors(
+    //             database_id,
+    //             reschedule_plan,
+    //             RescheduleOptions {
+    //                 resolve_no_shuffle_upstream: false,
+    //                 skip_create_new_actors: false,
+    //             },
+    //         )
+    //         .await?;
+    //     }
+    //
+    //     Ok(())
+    // }
 
     // Don't need to add actor, just send a command
     pub async fn create_subscription(
