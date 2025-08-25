@@ -818,8 +818,22 @@ impl SchemaCatalog {
         self.subscription_by_id.get(subscription_id)
     }
 
-    pub fn get_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
-        self.index_by_name.get(index_name)
+    pub fn get_index_by_name(
+        &self,
+        index_name: &str,
+        bind_creating: bool,
+    ) -> Option<&Arc<IndexCatalog>> {
+        self.index_by_name
+            .get(index_name)
+            .filter(|i| bind_creating || i.is_created())
+    }
+
+    pub fn get_any_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
+        self.get_index_by_name(index_name, true)
+    }
+
+    pub fn get_created_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
+        self.get_index_by_name(index_name, false)
     }
 
     pub fn get_index_by_id(&self, index_id: &IndexId) -> Option<&Arc<IndexCatalog>> {

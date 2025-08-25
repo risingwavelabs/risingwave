@@ -311,6 +311,9 @@ message Index {
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 14;
   optional string created_at_cluster_version = 15;
+
+  // Whether it should use background ddl or block until backfill finishes.
+  CreateType create_type = 17;
 }
 
 // https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-INFO-INDEX-COLUMN-PROPS

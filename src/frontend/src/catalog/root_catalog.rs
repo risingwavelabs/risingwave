@@ -840,7 +840,22 @@ impl Catalog {
             .try_find(|schema_name| {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
-                    .get_index_by_name(index_name))
+                    .get_created_index_by_name(index_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("index", index_name.to_owned()))
+    }
+
+    pub fn get_any_index_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        index_name: &str,
+    ) -> CatalogResult<(&Arc<IndexCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_any_index_by_name(index_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("index", index_name.to_owned()))
     }
@@ -1142,7 +1157,7 @@ impl Catalog {
                     Ok(Some(item.id().into()))
                 } else if let Some(item) = schema.get_created_table_by_name(class_name) {
                     Ok(Some(item.id().into()))
-                } else if let Some(item) = schema.get_index_by_name(class_name) {
+                } else if let Some(item) = schema.get_any_index_by_name(class_name) {
                     Ok(Some(item.id.into()))
                 } else if let Some(item) = schema.get_source_by_name(class_name) {
                     Ok(Some(item.id))

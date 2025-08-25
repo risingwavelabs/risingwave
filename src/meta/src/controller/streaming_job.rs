@@ -401,12 +401,11 @@ impl CatalogController {
         for_replace: bool,
     ) -> MetaResult<()> {
         let need_notify = streaming_job.should_notify_creating();
-        let (sink, table) = match streaming_job {
-            StreamingJob::Sink(sink, _) => (Some(sink), None),
-            StreamingJob::Table(_, table, _) => (None, Some(table)),
-            StreamingJob::Index(_, _)
-            | StreamingJob::Source(_)
-            | StreamingJob::MaterializedView(_) => (None, None),
+        let (sink, table, index) = match streaming_job {
+            StreamingJob::Sink(sink, _) => (Some(sink), None, None),
+            StreamingJob::Table(_, table, _) => (None, Some(table), None),
+            StreamingJob::Index(index, _) => (None, None, Some(index)),
+            StreamingJob::Source(_) | StreamingJob::MaterializedView(_) => (None, None, None),
         };
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id().table_id as _,
@@ -419,6 +418,7 @@ impl CatalogController {
             for_replace,
             sink,
             table,
+            index,
         )
         .await
     }
@@ -442,6 +442,7 @@ impl CatalogController {
         for_replace: bool,
         sink: Option<&PbSink>,
         table: Option<&PbTable>,
+        index: Option<&risingwave_pb::catalog::Index>,
     ) -> MetaResult<()> {
         let fragment_actors = Self::extract_fragment_and_actors_from_fragments(
             job_id,
@@ -501,12 +502,18 @@ impl CatalogController {
             }
         }
 
-        if let Some(objects) = &mut objects_to_notify
-            && let Some(sink) = sink
-        {
-            objects.push(PbObject {
-                object_info: Some(PbObjectInfo::Sink(sink.clone())),
-            })
+        // Add streaming job objects to notification
+        if let Some(objects) = &mut objects_to_notify {
+            let job_objects = [
+                sink.map(|s| PbObjectInfo::Sink(s.clone())),
+                index.map(|i| PbObjectInfo::Index(i.clone())),
+            ];
+
+            for object_info in job_objects.into_iter().flatten() {
+                objects.push(PbObject {
+                    object_info: Some(object_info),
+                });
+            }
         }
 
         insert_fragment_relations(&txn, downstreams).await?;
@@ -588,12 +595,16 @@ impl CatalogController {
         // Get the notification info if the job is a materialized view or created in the background.
         let mut objs = vec![];
         let table_obj = Table::find_by_id(job_id).one(&txn).await?;
-        let need_notify = if let Some(table) = &table_obj {
-            // If the job is a materialized view, we need to notify the frontend.
-            table.table_type == TableType::MaterializedView
-        } else {
-            streaming_job.is_some_and(|job| job.create_type == CreateType::Background)
-        };
+
+        let mut need_notify =
+            streaming_job.is_some_and(|job| job.create_type == CreateType::Background);
+        if !need_notify {
+            // If the job is not created in the background, we only need to notify the frontend if the job is a materialized view.
+            if let Some(table) = &table_obj {
+                need_notify = table.table_type == TableType::MaterializedView;
+            }
+        }
+
         if need_notify {
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
