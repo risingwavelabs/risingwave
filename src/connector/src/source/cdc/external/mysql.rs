@@ -549,7 +549,7 @@ impl MySqlExternalTableReader {
                 .map(|(pk, datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
-                        adapt_rw_type_to_mysql_type(value, ty)
+                        adapt_rw_type_to_mysql_type(value, ty).map(|t| (pk.to_lowercase(), t))
                     } else {
                         bail!("primary key {} cannot be null", pk);
                     }
