@@ -27,9 +27,8 @@ use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::plan_common::StorageTableDesc;
-use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamNode, StreamScanNode, StreamScanType};
+use risingwave_pb::stream_plan::{self, StreamNode, StreamScanNode, StreamScanType};
 use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
@@ -44,8 +43,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, UpstreamFragmentInfo,
-    UpstreamSinkUnionExecutor, WrapperExecutor,
+    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -226,7 +224,7 @@ impl StreamActorManager {
         subtasks: &mut Vec<SubtaskHandle>,
         local_barrier_manager: &LocalBarrierManager,
         prefix_nodes: Vec<&stream_plan::StreamNode>,
-        merge_projects: Vec<(&stream_plan::StreamNode, &stream_plan::StreamNode)>,
+        _merge_projects: Vec<(&stream_plan::StreamNode, &stream_plan::StreamNode)>,
     ) -> StreamResult<Executor> {
         let mut input = Vec::with_capacity(union_node.get_input().len());
 
@@ -246,51 +244,6 @@ impl StreamActorManager {
                 .await?,
             );
         }
-
-        // Use the first MergeNode to fill in the info of the new node.
-        let first_merge = merge_projects.first().unwrap().0;
-        let executor_id = Self::get_executor_id(actor_context, first_merge);
-        let mut info = Self::get_executor_info(first_merge, executor_id);
-        info.identity = format!("UpstreamSinkUnion {:X}", executor_id);
-        let eval_error_report = ActorEvalErrorReport {
-            actor_context: actor_context.clone(),
-            identity: info.identity.clone().into(),
-        };
-
-        let mut initial_upstream_infos = Vec::with_capacity(merge_projects.len());
-        for (merge_node, project_node) in merge_projects {
-            let upstream_fragment_id = merge_node
-                .get_node_body()
-                .unwrap()
-                .as_merge()
-                .unwrap()
-                .upstream_fragment_id;
-            let project_exprs = project_node
-                .get_node_body()
-                .unwrap()
-                .as_project()
-                .unwrap()
-                .get_select_list();
-            let info = UpstreamFragmentInfo::new(
-                upstream_fragment_id,
-                &actor_context.initial_upstream_actors,
-                merge_node.get_fields(),
-                project_exprs,
-                eval_error_report.clone(),
-            )?;
-            initial_upstream_infos.push(info);
-        }
-
-        let upstream_sink_union_executor = UpstreamSinkUnionExecutor::new(
-            actor_context.clone(),
-            local_barrier_manager.clone(),
-            self.streaming_metrics.clone(),
-            env.config().developer.chunk_size,
-            initial_upstream_infos,
-            eval_error_report,
-        );
-        let executor = (info, upstream_sink_union_executor).into();
-        input.push(executor);
 
         self.generate_executor_from_inputs(
             fragment_id,

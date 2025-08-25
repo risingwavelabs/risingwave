@@ -276,6 +276,36 @@ impl CatalogController {
         let (removed_source_fragments, removed_actors, removed_fragments) =
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
+        let mut removed_sink_in_existing_table = HashMap::new();
+        for obj in removed_objects.values() {
+            if obj.obj_type != ObjectType::Sink {
+                continue;
+            }
+            let sink = Sink::find_by_id(obj.oid)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
+            if let Some(target_table_id) = sink.target_table
+                && !removed_streaming_job_ids.contains(&target_table_id)
+            {
+                removed_sink_in_existing_table.insert(sink.sink_id, target_table_id);
+            }
+        }
+
+        let removed_sink_fragments =
+            get_sink_fragment_by_id(&txn, removed_sink_in_existing_table.keys().copied()).await?;
+        let mut removed_sink_fragment_with_targets =
+            Vec::with_capacity(removed_sink_fragments.len());
+        for sink_fragment_id in removed_sink_fragments {
+            let target_fragment = fetch_target_fragments(&txn, sink_fragment_id).await?;
+            assert_eq!(
+                target_fragment.len(),
+                1,
+                "sink should have only one downstream fragment"
+            );
+            removed_sink_fragment_with_targets.push((sink_fragment_id, target_fragment[0]));
+        }
+
         // Find affect users with privileges on all this objects.
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
@@ -365,6 +395,8 @@ impl CatalogController {
                 removed_source_fragments,
                 removed_actors,
                 removed_fragments,
+                removed_sink_in_existing_table,
+                removed_sink_fragment_with_targets,
             },
             version,
         ))
