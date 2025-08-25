@@ -1,0 +1,70 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v1 int, v2 int);
+
+statement ok
+insert into t select x, x*2 from generate_series(1, 10000) t(x);
+
+statement ok
+set backfill_rate_limit=1;
+
+statement ok
+set background_ddl=true;
+
+statement ok
+CREATE INDEX idx1 ON t(v1);
+
+statement count 1
+show jobs;
+
+onlyif can-use-recover
+statement ok
+recover;
+
+onlyif can-use-recover
+statement count 1
+show jobs;
+
+statement ok
+wait;
+
+statement count 0
+show jobs;
+
+statement ok
+CREATE INDEX idx2 ON t(v2);
+
+statement count 1
+show jobs;
+
+statement ok
+drop index idx2;
+
+statement count 0
+show jobs;
+
+statement ok
+wait;
+
+statement count 0
+show jobs;
+
+# Verify index works after completion
+query I
+select count(*) from t where v1 = 100;
+----
+1
+
+statement ok
+drop index idx1;
+
+statement ok
+drop table t cascade;
+
+statement ok
+set background_ddl=false;
+
+statement ok
+set backfill_rate_limit=default;
