@@ -133,7 +133,7 @@ impl BarrierWorkerRuntimeInfoSnapshot {
         database_id: DatabaseId,
         database_jobs: &HashMap<TableId, InflightStreamingJobInfo>,
         active_streaming_nodes: &ActiveStreamingWorkerNodes,
-        stream_actors: &HashMap<ActorId, StreamActor>,
+        _stream_actors: &HashMap<ActorId, StreamActor>,
         state_table_committed_epochs: &HashMap<TableId, u64>,
     ) -> MetaResult<()> {
         {

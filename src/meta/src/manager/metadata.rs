@@ -14,11 +14,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
-use std::pin::pin;
-use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::{Either, select};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId, fragment};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
@@ -29,7 +26,6 @@ use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
-use tokio::time::{Instant, sleep};
 use tracing::warn;
 
 use crate::MetaResult;
@@ -108,28 +104,6 @@ impl ActiveStreamingWorkerNodes {
 
     pub(crate) fn current(&self) -> &HashMap<WorkerId, WorkerNode> {
         &self.worker_nodes
-    }
-
-    pub(crate) async fn wait_changed(
-        &mut self,
-        verbose_internal: Duration,
-        verbose_timeout: Duration,
-        verbose_fn: impl Fn(&Self),
-    ) -> Option<ActiveStreamingWorkerChange> {
-        let start = Instant::now();
-        loop {
-            if let Either::Left((change, _)) =
-                select(pin!(self.changed()), pin!(sleep(verbose_internal))).await
-            {
-                break Some(change);
-            }
-
-            if start.elapsed() > verbose_timeout {
-                break None;
-            }
-
-            verbose_fn(self)
-        }
     }
 
     pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
@@ -388,15 +362,14 @@ impl MetadataManager {
         self.catalog_controller.list_sources().await
     }
 
-    pub async fn running_fragment_parallelisms(
+    pub fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
         Ok(self
             .catalog_controller
-            .running_fragment_parallelisms(id_filter)
-            .await?
+            .running_fragment_parallelisms(id_filter)?
             .into_iter()
             .map(|(k, v)| (k as FragmentId, v))
             .collect())
@@ -608,10 +581,7 @@ impl MetadataManager {
         Ok(internal_table_ids)
     }
 
-    pub async fn get_running_actors_of_fragment(
-        &self,
-        id: FragmentId,
-    ) -> MetaResult<HashSet<ActorId>> {
+    pub fn get_running_actors_of_fragment(&self, id: FragmentId) -> MetaResult<HashSet<ActorId>> {
         let actor_ids = self
             .catalog_controller
             .get_running_actors_of_fragment(id as _)?;
@@ -665,8 +635,8 @@ impl MetadataManager {
     //     Ok(actor_maps)
     // }
 
-    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
-        let actor_cnt = self.catalog_controller.worker_actor_count().await?;
+    pub fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        let actor_cnt = self.catalog_controller.worker_actor_count()?;
         Ok(actor_cnt
             .into_iter()
             .map(|(id, cnt)| (id as WorkerId, cnt))

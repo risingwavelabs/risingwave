@@ -312,7 +312,7 @@ impl CatalogController {
     pub async fn resolve_working_set_for_reschedule_helper<C>(
         &self,
         txn: &C,
-        actor_cache: &ActorInfo,
+        _actor_cache: &ActorInfo,
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<RescheduleWorkingSet>
     where
@@ -732,11 +732,6 @@ pub struct WorkerInfo {
     pub resource_group: Option<String>,
 }
 
-pub struct RenderedJobContext {
-    fragments: HashMap<FragmentId, InflightFragmentInfo>,
-    database_id: DatabaseId,
-}
-
 pub async fn render_jobs<C>(
     txn: &C,
     job_ids: HashSet<ObjectId>,
@@ -745,7 +740,7 @@ pub async fn render_jobs<C>(
 where
     C: ConnectionTrait,
 {
-    println!("reander jobs");
+    println!("render jobs");
 
     println!("jobs {:?}", job_ids);
     println!("workers {:?}", workers);

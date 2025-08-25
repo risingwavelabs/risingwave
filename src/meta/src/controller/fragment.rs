@@ -420,7 +420,7 @@ impl CatalogController {
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
     }
 
-    pub async fn running_fragment_parallelisms(
+    pub fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
@@ -670,6 +670,7 @@ impl CatalogController {
                             status: ActorStatus::Running, // Placeholder, actual status should be fetched from DB if needed
                             worker_id: actor_info.worker_id as _,
                             splits: None, // Placeholder, actual splits should be fetched from DB if needed
+                            #[allow(deprecated)]
                             upstream_actor_ids: Default::default(), // Placeholder, actual upstream_actor_ids should be fetched from DB if needed
                             vnode_bitmap: actor_info.vnode_bitmap.as_ref().map(|bitmap| {
                                 VnodeBitmap::from(&bitmap.to_protobuf())
@@ -1032,7 +1033,7 @@ impl CatalogController {
         Ok(count > 0)
     }
 
-    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+    pub fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
         let read_guard = self.env.shared_actor_infos().read_guard();
         let actor_cnt: HashMap<WorkerId, _> = read_guard
             .iter_over_fragments()
@@ -1150,7 +1151,7 @@ impl CatalogController {
         Ok(upstream_fragments)
     }
 
-    pub async fn list_actor_locations(&self) -> MetaResult<Vec<PartialActorLocation>> {
+    pub fn list_actor_locations(&self) -> MetaResult<Vec<PartialActorLocation>> {
         let info = self.env.shared_actor_infos().read_guard();
 
         let actor_locations = info
@@ -1368,8 +1369,8 @@ impl CatalogController {
 
             // todo
             info.iter_over_fragments()
-                .filter(|(fragment_id, fragment)| sink_ids.contains(&fragment.job_id))
-                .flat_map(|(fragment_id, fragment)| {
+                .filter(|(_, fragment)| sink_ids.contains(&fragment.job_id))
+                .flat_map(|(_, fragment)| {
                     fragment.actors.keys().map(move |actor_id| {
                         (
                             *actor_id as _,

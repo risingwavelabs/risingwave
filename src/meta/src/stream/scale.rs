@@ -498,7 +498,7 @@ impl ScaleController {
                 |(
                     actor_id,
                     InflightActorInfo {
-                        worker_id,
+                        worker_id: _,
                         vnode_bitmap,
                     },
                 )| (*actor_id as hash::ActorId, vnode_bitmap.clone().unwrap()),
@@ -1784,8 +1784,7 @@ impl ScaleController {
                 .await?;
             let streaming_parallelisms = self
                 .metadata_manager
-                .running_fragment_parallelisms(Some(reschedules.keys().cloned().collect()))
-                .await?;
+                .running_fragment_parallelisms(Some(reschedules.keys().cloned().collect()))?;
             let serving_worker_slot_mapping = Arc::new(ServingVnodeMapping::default());
             let max_serving_parallelism = self
                 .env
@@ -2340,8 +2339,8 @@ impl ScaleController {
 
         let mut all_fragments = HashMap::new();
 
-        for (database_id, jobs) in result {
-            for (job, fragments) in jobs {
+        for (_, jobs) in result {
+            for (_, fragments) in jobs {
                 for (fragment, fragment_info) in fragments {
                     all_fragments.insert(fragment, fragment_info);
                 }
@@ -2446,7 +2445,7 @@ impl ScaleController {
 
             let mut all_actor_dispatchers: HashMap<_, Vec<_>> = HashMap::new();
 
-            for (downstream_fragment_id, dispatcher_type) in &downstream_fragments {
+            for downstream_fragment_id in downstream_fragments.keys() {
                 println!("for down {}", downstream_fragment_id);
                 let target_fragment_actors =
                     match all_fragments.get(&(*downstream_fragment_id as _)) {
@@ -2480,8 +2479,8 @@ impl ScaleController {
                 let target_fragment_distribution = *distribution_type;
 
                 let fragment_relation::Model {
-                    source_fragment_id,
-                    target_fragment_id,
+                    source_fragment_id: _,
+                    target_fragment_id: _,
                     dispatcher_type,
                     dist_key_indices,
                     output_indices,
@@ -2868,7 +2867,7 @@ impl GlobalStreamManager {
         // options: RescheduleOptions,
     ) -> MetaResult<()> {
         let inner = self.metadata_manager.catalog_controller.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let _txn = inner.db.begin().await?;
 
         // let info = self.env.shared_actor_infos().read_guard();
         //
@@ -2916,8 +2915,7 @@ impl GlobalStreamManager {
             try_join_all(up_down_stream_fragment.iter().map(|fragment_id| async {
                 let actor_ids = self
                     .metadata_manager
-                    .get_running_actors_of_fragment(*fragment_id)
-                    .await?;
+                    .get_running_actors_of_fragment(*fragment_id)?;
                 Result::<_, MetaError>::Ok((*fragment_id, actor_ids))
             }))
             .await?
