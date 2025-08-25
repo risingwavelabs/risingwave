@@ -21,7 +21,7 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 use tokio_postgres::types::PgLsn;
@@ -32,8 +32,9 @@ use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::parser::{postgres_cell_to_scalar_impl, postgres_row_to_owned_row};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName,
+    CDC_TABLE_SPLIT_ID_START, CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption,
+    DebeziumOffset, ExternalTableConfig, ExternalTableReader, SchemaTableName,
+    is_supported_even_split_data_type, to_int_scalar, try_increase_split_id,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -552,7 +553,7 @@ impl PostgresExternalTableReader {
     #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
     async fn as_uneven_splits(&self, options: CdcTableSnapshotSplitOption) {
         let split_column = self.split_column(&options);
-        let mut split_id = 1;
+        let mut split_id = CDC_TABLE_SPLIT_ID_START;
         let Some((min_value, max_value)) = self.min_and_max(&split_column).await? else {
             let left_bound_row = OwnedRow::new(vec![None]);
             let right_bound_row = OwnedRow::new(vec![None]);
@@ -608,6 +609,7 @@ impl PostgresExternalTableReader {
                 assert_eq!(split_id, 1);
             }
             tracing::info!(
+                schema_table_name = ?self.schema_table_name,
                 split_id,
                 ?left_bound_inclusive,
                 ?right_bound_exclusive,
@@ -680,35 +682,6 @@ impl PostgresExternalTableReader {
         self.rw_schema.fields[self.pk_indices[options.backfill_split_pk_column_index as usize]]
             .clone()
     }
-}
-
-fn to_int_scalar(i: i64, data_type: &DataType) -> ScalarImpl {
-    match data_type {
-        DataType::Int16 => ScalarImpl::Int16(i.try_into().unwrap()),
-        DataType::Int32 => ScalarImpl::Int32(i.try_into().unwrap()),
-        DataType::Int64 => ScalarImpl::Int64(i),
-        _ => {
-            panic!("Can't convert int {} to ScalarImpl::{}", i, data_type)
-        }
-    }
-}
-
-fn try_increase_split_id(split_id: &mut i64) -> ConnectorResult<()> {
-    match split_id.checked_add(1) {
-        Some(s) => {
-            *split_id = s;
-            Ok(())
-        }
-        None => Err(anyhow::anyhow!("too many CDC snapshot splits").into()),
-    }
-}
-
-/// Use the first column of primary keys to split table.
-fn is_supported_even_split_data_type(data_type: &DataType) -> bool {
-    matches!(
-        data_type,
-        DataType::Int16 | DataType::Int32 | DataType::Int64
-    )
 }
 
 #[cfg(test)]
