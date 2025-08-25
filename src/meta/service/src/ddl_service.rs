@@ -24,12 +24,8 @@ use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::bail_unavailable;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
-use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_meta::stream::{
-    JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget, ParallelismTarget,
-    RescheduleTarget, ResourceGroupTarget,
-};
+use risingwave_meta::stream::{ParallelismTarget, RescheduleTarget, ResourceGroupTarget};
 use risingwave_meta_model::{ObjectId, StreamingParallelism};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
@@ -922,20 +918,20 @@ impl DdlService for DdlServiceImpl {
 
     async fn alter_cdc_table_backfill_parallelism(
         &self,
-        request: Request<AlterCdcTableBackfillParallelismRequest>,
+        _request: Request<AlterCdcTableBackfillParallelismRequest>,
     ) -> Result<Response<AlterCdcTableBackfillParallelismResponse>, Status> {
-        let req = request.into_inner();
-        let job_id = req.get_table_id();
-        let parallelism = *req.get_parallelism()?;
-        self.ddl_controller
-            .reschedule_cdc_table_backfill(
-                job_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
-                    resource_group: JobResourceGroupTarget::Keep,
-                },
-            )
-            .await?;
+        // let req = request.into_inner();
+        // let job_id = req.get_table_id();
+        // let parallelism = *req.get_parallelism()?;
+        // self.ddl_controller
+        //     .reschedule_cdc_table_backfill(
+        //         job_id,
+        //         JobRescheduleTarget {
+        //             parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
+        //             resource_group: JobResourceGroupTarget::Keep,
+        //         },
+        //     )
+        //     .await?;
         Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
     }
 

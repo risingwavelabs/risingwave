@@ -91,8 +91,8 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    JobRescheduleTarget, ReplaceStreamJobContext, RescheduleTarget, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, check_sink_fragments_support_refresh_schema, create_source_worker,
+    ReplaceStreamJobContext, RescheduleTarget, SourceChange, SourceManagerRef, StreamFragmentGraph,
+    check_sink_fragments_support_refresh_schema, create_source_worker,
     rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
@@ -515,19 +515,19 @@ impl DdlController {
             .await
     }
 
-    pub async fn reschedule_cdc_table_backfill(
-        &self,
-        job_id: u32,
-        target: JobRescheduleTarget,
-    ) -> MetaResult<()> {
-        tracing::info!("alter CDC table backfill parallelism");
-        if self.barrier_manager.check_status_running().is_err() {
-            return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
-        }
-        self.stream_manager
-            .reschedule_cdc_table_backfill(job_id, target)
-            .await
-    }
+    // pub async fn reschedule_cdc_table_backfill(
+    //     &self,
+    //     job_id: u32,
+    //     target: JobRescheduleTarget,
+    // ) -> MetaResult<()> {
+    //     tracing::info!("alter CDC table backfill parallelism");
+    //     if self.barrier_manager.check_status_running().is_err() {
+    //         return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
+    //     }
+    //     self.stream_manager
+    //         .reschedule_cdc_table_backfill(job_id, target)
+    //         .await
+    // }
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         self.drop_object(
@@ -2331,7 +2331,7 @@ impl DdlController {
                 .iter()
                 .map(|sink| sink.original_fragment.fragment_id)
                 .collect();
-            for (_, downstream_fragment, node) in &mut downstream_fragments {
+            for (_, downstream_fragment, _) in &mut downstream_fragments {
                 if let Some(sink) = auto_refresh_schema_sinks.iter().find(|sink| {
                     sink.original_fragment.fragment_id == downstream_fragment.fragment_id
                 }) {

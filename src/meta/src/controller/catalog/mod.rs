@@ -42,8 +42,8 @@ use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
-    actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    secret, sink, source, streaming_job, subscription, table, user_privilege, view,
+    connection, database, fragment, function, index, object, object_dependency, schema, secret,
+    sink, source, streaming_job, subscription, table, user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -140,14 +140,12 @@ pub struct ReleaseContext {
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let meta_store = env.meta_store();
-        let actor_info = ActorInfo::init_from_db(&meta_store.conn).await?;
         let catalog_controller = Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
                 creating_table_finish_notifier: HashMap::new(),
                 dropped_tables: HashMap::new(),
-                actors: actor_info,
             }),
         };
 
@@ -166,44 +164,6 @@ impl CatalogController {
     }
 }
 
-pub struct ActorInfo {
-    pub models: HashMap<ActorId, actor::Model>,
-
-    pub actors_by_fragment_id: HashMap<FragmentId, Vec<ActorId>>,
-}
-
-impl ActorInfo {}
-
-impl ActorInfo {
-    pub async fn init_from_db(db: &DatabaseConnection) -> MetaResult<Self> {
-        tracing::info!("initializing actor info");
-        let actors: Vec<_> = Actor::find().all(db).await?;
-
-        let actors: HashMap<_, _> = actors
-            .into_iter()
-            .map(|actor| (actor.actor_id, actor))
-            .collect();
-
-        let mut actors_by_fragment_id = HashMap::new();
-        let mut actors_by_worker_id = HashMap::new();
-        for actor in actors.values() {
-            actors_by_fragment_id
-                .entry(actor.fragment_id)
-                .or_insert(vec![])
-                .push(actor.actor_id);
-            actors_by_worker_id
-                .entry(actor.worker_id)
-                .or_insert(vec![])
-                .push(actor.actor_id);
-        }
-
-        Ok(Self {
-            models: actors,
-            actors_by_fragment_id,
-        })
-    }
-}
-
 pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
     /// Registered finish notifiers for creating tables.
@@ -215,9 +175,6 @@ pub struct CatalogControllerInner {
         HashMap<DatabaseId, HashMap<ObjectId, Vec<Sender<Result<NotificationVersion, String>>>>>,
     /// Tables have been dropped from the meta store, but the corresponding barrier remains unfinished.
     pub dropped_tables: HashMap<TableId, PbTable>,
-
-    /// Internal actor cache
-    pub actors: ActorInfo,
 }
 
 impl CatalogController {
@@ -449,15 +406,13 @@ impl CatalogController {
             filter_condition
         };
 
-        let object_ids: Vec<ObjectId> = Object::find()
+        let _object_ids: Vec<ObjectId> = Object::find()
             .select_only()
             .column(object::Column::Oid)
             .filter(filter_condition.clone())
             .into_tuple()
             .all(&txn)
             .await?;
-
-        let dirty_fragment_ids = self.get_fragment_ids_by_job_ids(&txn, &object_ids).await?;
 
         Object::delete_many()
             .filter(filter_condition)
@@ -624,10 +579,6 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let dirty_fragment_ids = self
-            .get_fragment_ids_by_job_ids(&txn, &dirty_job_ids)
-            .await?;
-
         let to_delete_objs: HashSet<ObjectId> = dirty_job_ids
             .clone()
             .into_iter()
@@ -740,6 +691,51 @@ impl CatalogController {
         let mut inner = self.inner.write().await;
         inner.complete_dropped_tables(table_ids)
     }
+
+    pub async fn stats(&self) -> MetaResult<CatalogStats> {
+        let inner = self.inner.read().await;
+
+        let mut table_num_map: HashMap<_, _> = Table::find()
+            .select_only()
+            .column(table::Column::TableType)
+            .column_as(table::Column::TableId.count(), "num")
+            .group_by(table::Column::TableType)
+            .having(table::Column::TableType.ne(TableType::Internal))
+            .into_tuple::<(TableType, i64)>()
+            .all(&inner.db)
+            .await?
+            .into_iter()
+            .map(|(table_type, num)| (table_type, num as u64))
+            .collect();
+
+        let source_num = Source::find().count(&inner.db).await?;
+        let sink_num = Sink::find().count(&inner.db).await?;
+        let function_num = Function::find().count(&inner.db).await?;
+        let streaming_job_num = StreamingJob::find().count(&inner.db).await?;
+
+        let actor_num = {
+            let guard = self.env.shared_actor_info.read_guard();
+            let actors = guard
+                .iter_over_fragments()
+                .flat_map(|(_, fragment)| fragment.actors.keys())
+                .collect_vec();
+
+            actors.len() as u64
+        };
+
+        Ok(CatalogStats {
+            table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
+            mview_num: table_num_map
+                .remove(&TableType::MaterializedView)
+                .unwrap_or(0),
+            index_num: table_num_map.remove(&TableType::Index).unwrap_or(0),
+            source_num,
+            sink_num,
+            function_num,
+            streaming_job_num,
+            actor_num,
+        })
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.
@@ -786,44 +782,6 @@ impl CatalogControllerInner {
             ),
             users,
         ))
-    }
-
-    pub async fn stats(&self) -> MetaResult<CatalogStats> {
-        let mut table_num_map: HashMap<_, _> = Table::find()
-            .select_only()
-            .column(table::Column::TableType)
-            .column_as(table::Column::TableId.count(), "num")
-            .group_by(table::Column::TableType)
-            .having(table::Column::TableType.ne(TableType::Internal))
-            .into_tuple::<(TableType, i64)>()
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|(table_type, num)| (table_type, num as u64))
-            .collect();
-
-        let source_num = Source::find().count(&self.db).await?;
-        let sink_num = Sink::find().count(&self.db).await?;
-        let function_num = Function::find().count(&self.db).await?;
-        let streaming_job_num = StreamingJob::find().count(&self.db).await?;
-        // let actor_num_from_db = Actor::find().count(&self.db).await?;
-        // let actor_num = self.actors.models.len() as u64;
-        //
-        // debug_assert_eq!(actor_num_from_db, actor_num);
-        let actor_num = 10000000;
-
-        Ok(CatalogStats {
-            table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
-            mview_num: table_num_map
-                .remove(&TableType::MaterializedView)
-                .unwrap_or(0),
-            index_num: table_num_map.remove(&TableType::Index).unwrap_or(0),
-            source_num,
-            sink_num,
-            function_num,
-            streaming_job_num,
-            actor_num,
-        })
     }
 
     async fn list_databases(&self) -> MetaResult<Vec<PbDatabase>> {
