@@ -42,8 +42,8 @@ use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
-    actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    secret, sink, source, streaming_job, subscription, table, user_privilege, view,
+    connection, database, fragment, function, index, object, object_dependency, schema, secret,
+    sink, source, streaming_job, subscription, table, user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -140,14 +140,12 @@ pub struct ReleaseContext {
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let meta_store = env.meta_store();
-        let actor_info = ActorInfo::init_from_db(&meta_store.conn).await?;
         let catalog_controller = Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
                 creating_table_finish_notifier: HashMap::new(),
                 dropped_tables: HashMap::new(),
-                actors: actor_info,
             }),
         };
 
@@ -166,44 +164,6 @@ impl CatalogController {
     }
 }
 
-pub struct ActorInfo {
-    pub models: HashMap<ActorId, actor::Model>,
-
-    pub actors_by_fragment_id: HashMap<FragmentId, Vec<ActorId>>,
-}
-
-impl ActorInfo {}
-
-impl ActorInfo {
-    pub async fn init_from_db(db: &DatabaseConnection) -> MetaResult<Self> {
-        tracing::info!("initializing actor info");
-        let actors: Vec<_> = Actor::find().all(db).await?;
-
-        let actors: HashMap<_, _> = actors
-            .into_iter()
-            .map(|actor| (actor.actor_id, actor))
-            .collect();
-
-        let mut actors_by_fragment_id = HashMap::new();
-        let mut actors_by_worker_id = HashMap::new();
-        for actor in actors.values() {
-            actors_by_fragment_id
-                .entry(actor.fragment_id)
-                .or_insert(vec![])
-                .push(actor.actor_id);
-            actors_by_worker_id
-                .entry(actor.worker_id)
-                .or_insert(vec![])
-                .push(actor.actor_id);
-        }
-
-        Ok(Self {
-            models: actors,
-            actors_by_fragment_id,
-        })
-    }
-}
-
 pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
     /// Registered finish notifiers for creating tables.
@@ -215,9 +175,6 @@ pub struct CatalogControllerInner {
         HashMap<DatabaseId, HashMap<ObjectId, Vec<Sender<Result<NotificationVersion, String>>>>>,
     /// Tables have been dropped from the meta store, but the corresponding barrier remains unfinished.
     pub dropped_tables: HashMap<TableId, PbTable>,
-
-    /// Internal actor cache
-    pub actors: ActorInfo,
 }
 
 impl CatalogController {
