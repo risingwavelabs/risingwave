@@ -24,7 +24,8 @@ use risingwave_common::catalog::{IndexId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{
-    CreateType, PbFlatIndexConfig, PbIndex, PbIndexColumnProperties, PbStreamJobStatus, PbVectorIndexInfo,
+    CreateType, PbFlatIndexConfig, PbIndex, PbIndexColumnProperties, PbStreamJobStatus,
+    PbVectorIndexInfo,
 };
 use risingwave_pb::common::PbDistanceType;
 use risingwave_sqlparser::ast;
@@ -39,10 +40,10 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
+use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::{
     Explain, LogicalProject, LogicalScan, StreamMaterialize, StreamPlanRef as PlanRef,
 };
-use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRoot, OptimizerContext, OptimizerContextRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -366,13 +367,12 @@ pub(crate) fn gen_create_index_plan(
         index_columns_ordered_expr,
     );
 
-    let create_type = if context.session_ctx().config().background_ddl()
-        && plan_can_use_background_ddl(&plan)
-    {
-        CreateType::Background
-    } else {
-        CreateType::Foreground
-    };
+    let create_type =
+        if context.session_ctx().config().background_ddl() && plan_can_use_background_ddl(&plan) {
+            CreateType::Background
+        } else {
+            CreateType::Foreground
+        };
 
     let index_prost = PbIndex {
         id: IndexId::placeholder().index_id,

@@ -405,8 +405,7 @@ impl CatalogController {
             StreamingJob::Sink(sink, _) => (Some(sink), None, None),
             StreamingJob::Table(_, table, _) => (None, Some(table), None),
             StreamingJob::Index(index, _) => (None, None, Some(index)),
-            StreamingJob::Source(_)
-            | StreamingJob::MaterializedView(_) => (None, None, None),
+            StreamingJob::Source(_) | StreamingJob::MaterializedView(_) => (None, None, None),
         };
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id().table_id as _,
@@ -596,12 +595,16 @@ impl CatalogController {
         // Get the notification info if the job is a materialized view or created in the background.
         let mut objs = vec![];
         let table_obj = Table::find_by_id(job_id).one(&txn).await?;
-        let need_notify = if let Some(table) = &table_obj {
-            // If the job is a materialized view, we need to notify the frontend.
-            table.table_type == TableType::MaterializedView
-        } else {
-            streaming_job.is_some_and(|job| job.create_type == CreateType::Background)
-        };
+
+        let mut need_notify =
+            streaming_job.is_some_and(|job| job.create_type == CreateType::Background);
+        if !need_notify {
+            // If the job is not created in the background, we only need to notify the frontend if the job is a materialized view.
+            if let Some(table) = &table_obj {
+                need_notify = table.table_type == TableType::MaterializedView;
+            }
+        }
+
         if need_notify {
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
