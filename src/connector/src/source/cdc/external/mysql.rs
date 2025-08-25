@@ -638,7 +638,7 @@ impl MySqlExternalTableReader {
                     left_arg_expr.push_str(", ");
                 }
                 left_col_expr.push_str(&Self::quote_column(column));
-                left_arg_expr.push_str("?");
+                left_arg_expr.push('?');
             }
         }
         if !is_last_split {
@@ -648,7 +648,7 @@ impl MySqlExternalTableReader {
                     right_arg_expr.push_str(", ");
                 }
                 right_col_expr.push_str(&Self::quote_column(column));
-                right_arg_expr.push_str("?");
+                right_arg_expr.push('?');
             }
         }
         if is_first_split && is_last_split {
