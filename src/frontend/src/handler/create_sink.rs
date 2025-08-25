@@ -827,7 +827,8 @@ fn bind_sink_format_desc(
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
         E::Parquet => SinkEncode::Parquet,
-        e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
+        E::Bytes => SinkEncode::Bytes,
+        e @ (E::Native | E::Csv | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -893,8 +894,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json],
                 ),
                 KafkaSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
-                    Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
+                    Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf, Encode::Bytes],
+                    Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf, Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
                 ),
                 FileSink::<S3Sink>::SINK_NAME => hashmap!(
