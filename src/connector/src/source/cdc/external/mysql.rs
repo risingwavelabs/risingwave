@@ -704,21 +704,20 @@ impl MySqlExternalTableReader {
         split_column: &Field,
     ) -> ConnectorResult<Option<Datum>> {
         let sql = format!(
-            "WITH t as (SELECT {} FROM {} WHERE {} >= ? ORDER BY {} ASC LIMIT {}) SELECT CASE WHEN MAX({}) < ? THEN MAX({}) ELSE NULL END FROM t",
+            "SELECT CASE WHEN {} < ? THEN {} ELSE NULL END FROM {} WHERE {} >= ? ORDER BY {} ASC LIMIT 1 OFFSET {}",
+            Self::quote_column(&split_column.name),
             Self::quote_column(&split_column.name),
             Self::get_normalized_table_name(&self.schema_table_name),
             Self::quote_column(&split_column.name),
             Self::quote_column(&split_column.name),
-            max_split_size,
-            Self::quote_column(&split_column.name),
-            Self::quote_column(&split_column.name),
+            max_split_size
         );
         let params: Vec<Value> = vec![
+            adapt_split_key_scalar_to_mysql_type(Some(max_value.clone()), &split_column.data_type)?,
             adapt_split_key_scalar_to_mysql_type(
                 Some(left_value.clone()),
                 &split_column.data_type,
             )?,
-            adapt_split_key_scalar_to_mysql_type(Some(max_value.clone()), &split_column.data_type)?,
         ];
         let mut conn = self.pool.get_conn().await?;
         let rs_stream = sql

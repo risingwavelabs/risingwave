@@ -390,25 +390,24 @@ impl PostgresExternalTableReader {
         split_column: &Field,
     ) -> ConnectorResult<Option<Datum>> {
         let sql = format!(
-            "WITH t as (SELECT {} FROM {} WHERE {} >= $1 ORDER BY {} ASC LIMIT {}) SELECT CASE WHEN MAX({}) < $2 THEN MAX({}) ELSE NULL END FROM t",
+            "SELECT CASE WHEN {} < $1 THEN {} ELSE NULL END FROM {} WHERE {} >= $2 ORDER BY {} ASC LIMIT 1 OFFSET {}",
+            Self::quote_column(&split_column.name),
             Self::quote_column(&split_column.name),
             Self::get_normalized_table_name(&self.schema_table_name),
             Self::quote_column(&split_column.name),
             Self::quote_column(&split_column.name),
-            max_split_size,
-            Self::quote_column(&split_column.name),
-            Self::quote_column(&split_column.name),
+            max_split_size
         );
         let client = self.client.lock().await;
         let prepared_stmt = client.prepare(&sql).await?;
         let params: Vec<Option<ScalarAdapter>> = vec![
             Some(ScalarAdapter::from_scalar(
-                left_value.as_scalar_ref_impl(),
-                &prepared_stmt.params()[0],
-            )?),
-            Some(ScalarAdapter::from_scalar(
                 max_value.as_scalar_ref_impl(),
                 &prepared_stmt.params()[1],
+            )?),
+            Some(ScalarAdapter::from_scalar(
+                left_value.as_scalar_ref_impl(),
+                &prepared_stmt.params()[0],
             )?),
         ];
         let stream = client.query_raw(&prepared_stmt, &params).await?;
