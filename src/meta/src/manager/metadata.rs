@@ -33,13 +33,13 @@ use tokio::time::{Instant, sleep};
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::{Reschedule, SharedFragmentInfo};
+use crate::barrier::SharedFragmentInfo;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
-use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
+use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 
 #[derive(Clone)]
@@ -388,19 +388,6 @@ impl MetadataManager {
         self.catalog_controller.list_sources().await
     }
 
-    pub async fn post_apply_reschedules(
-        &self,
-        reschedules: HashMap<FragmentId, Reschedule>,
-        post_updates: &JobReschedulePostUpdates,
-    ) -> MetaResult<()> {
-        // temp convert u32 to i32
-        let reschedules = reschedules.into_iter().map(|(k, v)| (k as _, v)).collect();
-
-        self.catalog_controller
-            .post_apply_reschedules(reschedules, post_updates)
-            .await
-    }
-
     pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
@@ -627,8 +614,7 @@ impl MetadataManager {
     ) -> MetaResult<HashSet<ActorId>> {
         let actor_ids = self
             .catalog_controller
-            .get_running_actors_of_fragment(id as _)
-            .await?;
+            .get_running_actors_of_fragment(id as _)?;
         Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
     }
 

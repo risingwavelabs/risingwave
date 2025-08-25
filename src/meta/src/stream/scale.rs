@@ -402,49 +402,49 @@ impl ScaleController {
             .await
     }
 
-    pub async fn render_actors(
-        &self,
-        salt: ObjectId,
-        parallelism: NonZeroUsize,
-        vnode_count: usize,
-        fragment_id: FragmentId,
-        fragment_distribution_type: DistributionType,
-        workers: BTreeMap<WorkerId, NonZeroUsize>,
-    ) -> MetaResult<HashMap<ActorId, InflightActorInfo>> {
-        let fact_parallelism = parallelism.get().min(vnode_count);
-        let assigner = AssignerBuilder::new(salt).build();
-
-        let actors = (0..fact_parallelism).collect_vec();
-        let vnodes = (0..vnode_count).collect_vec();
-
-        let assignment = assigner.assign_hierarchical(&workers, &actors, &vnodes)?;
-
-        let actors = assignment
-            .iter()
-            .flat_map(|(worker_id, actors)| {
-                actors
-                    .iter()
-                    .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
-            })
-            .map(|(&worker_id, &actor_idx, vnodes)| {
-                let vnode_bitmap = match fragment_distribution_type {
-                    DistributionType::Single => None,
-                    DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
-                };
-
-                let actor_id = fragment_id << 16 as ActorId | actor_idx as ActorId;
-                (
-                    actor_id,
-                    InflightActorInfo {
-                        worker_id,
-                        vnode_bitmap,
-                    },
-                )
-            })
-            .collect();
-
-        Ok(actors)
-    }
+    // pub async fn render_actors(
+    //     &self,
+    //     salt: ObjectId,
+    //     parallelism: NonZeroUsize,
+    //     vnode_count: usize,
+    //     fragment_id: FragmentId,
+    //     fragment_distribution_type: DistributionType,
+    //     workers: BTreeMap<WorkerId, NonZeroUsize>,
+    // ) -> MetaResult<HashMap<ActorId, InflightActorInfo>> {
+    //     let fact_parallelism = parallelism.get().min(vnode_count);
+    //     let assigner = AssignerBuilder::new(salt).build();
+    //
+    //     let actors = (0..fact_parallelism).collect_vec();
+    //     let vnodes = (0..vnode_count).collect_vec();
+    //
+    //     let assignment = assigner.assign_hierarchical(&workers, &actors, &vnodes)?;
+    //
+    //     let actors = assignment
+    //         .iter()
+    //         .flat_map(|(worker_id, actors)| {
+    //             actors
+    //                 .iter()
+    //                 .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
+    //         })
+    //         .map(|(&worker_id, &actor_idx, vnodes)| {
+    //             let vnode_bitmap = match fragment_distribution_type {
+    //                 DistributionType::Single => None,
+    //                 DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
+    //             };
+    //
+    //             let actor_id = fragment_id << 16 as ActorId | actor_idx as ActorId;
+    //             (
+    //                 actor_id,
+    //                 InflightActorInfo {
+    //                     worker_id,
+    //                     vnode_bitmap,
+    //                 },
+    //             )
+    //         })
+    //         .collect();
+    //
+    //     Ok(actors)
+    // }
 
     pub fn diff_fragment(
         &self,
