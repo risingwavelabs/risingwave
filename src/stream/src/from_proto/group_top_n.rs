@@ -21,7 +21,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTableBuilder};
 use crate::executor::{ActorContextRef, AppendOnlyGroupTopNExecutor, GroupTopNExecutor};
 use crate::task::AtomicU64Ref;
 
@@ -42,7 +42,10 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
             .collect();
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
+        let state_table = StateTableBuilder::new(table, store, vnodes)
+            .preload_all_rows(false)
+            .build()
+            .await;
         let storage_key = table
             .get_pk()
             .iter()

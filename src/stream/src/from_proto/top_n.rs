@@ -35,10 +35,7 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
 
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = StateTableBuilder::new(table, store, vnodes)
-            .preload_all_rows(false)
-            .build()
-            .await;
+        let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
         let storage_key = table
             .get_pk()
             .iter()
