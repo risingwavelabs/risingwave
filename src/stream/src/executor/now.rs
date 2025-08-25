@@ -96,12 +96,17 @@ impl<S: StateStore> NowExecutor<S> {
             barrier_interval_ms,
         } = self;
 
+        info!(
+            "NowExecutor started. mode: {:?}, progress_ratio: {:?}, barrier_interval_ms: {:?}",
+            mode, progress_ratio, barrier_interval_ms
+        );
+
         let max_chunk_size = crate::config::chunk_size();
 
         // Whether the executor is paused.
         let mut paused = false;
         // The last timestamp **sent** to the downstream.
-        let mut last_timestamp: Datum = None;
+        let mut last_timestamp_datum: Datum = None;
 
         // Whether the first barrier is handled and `last_timestamp` is initialized.
         let mut initialized = false;
@@ -126,7 +131,7 @@ impl<S: StateStore> NowExecutor<S> {
         for barriers in
             UnboundedReceiverStream::new(barrier_receiver).ready_chunks(MAX_MERGE_BARRIER_SIZE)
         {
-            let mut curr_timestamp: Option<ScalarImpl> = None;
+            let mut curr_timestamp_datum: Datum = None;
             if barriers.len() > 1 {
                 warn!(
                     "handle multiple barriers at once in now executor: {}",
@@ -152,7 +157,7 @@ impl<S: StateStore> NowExecutor<S> {
                     yield Message::Barrier(barrier);
                     // Handle the initial barrier.
                     state_table.init_epoch(first_epoch).await?;
-                    last_timestamp = state_table.get_from_one_value_table().await?;
+                    last_timestamp_datum = state_table.get_from_one_value_table().await?;
                     paused = is_pause_on_startup;
                     initialized = true;
                 } else {
@@ -163,21 +168,22 @@ impl<S: StateStore> NowExecutor<S> {
                 }
 
                 // Extract timestamp from the current epoch.
-                if let Some(ScalarImpl::Timestamptz(timestamp)) = &last_timestamp
+                if let Some(datum) = &last_timestamp_datum
                     && let Some(progress_ratio) = progress_ratio
                     && progress_ratio > 1.0
                 {
+                    let last_timestamp = datum.as_timestamptz();
                     // curr_timestamp = min(last_timestamp + barrier_interval * progress_ratio, timestamp from epoch)
                     // to avoid having a big gap between the last timestamp and the current timestamp,
                     // which may cause excessive changes in downstream dynamic filter
-                    let progress_timestamp = timestamp
+                    let progress_timestamp = last_timestamp
                         .timestamp_millis()
                         .checked_add((barrier_interval_ms as f32 * progress_ratio).ceil() as i64)
                         .expect("progress_timestamp is out of i64 range");
                     let adjusted_timestamp = if progress_timestamp
                         < new_timestamp.timestamp_millis()
                     {
-                        info!(
+                        debug!(
                             "adjusted next now timestamp from {} to {}. curr_epoch: {}, barrier_interval_ms: {}, progress_ratio: {}",
                             new_timestamp.timestamp_millis(),
                             progress_timestamp,
@@ -190,9 +196,9 @@ impl<S: StateStore> NowExecutor<S> {
                     } else {
                         new_timestamp
                     };
-                    curr_timestamp = Some(adjusted_timestamp.into());
+                    curr_timestamp_datum = Some(adjusted_timestamp.into());
                 } else {
-                    curr_timestamp = Some(new_timestamp.into());
+                    curr_timestamp_datum = Some(new_timestamp.into());
                 }
 
                 // Update paused state.
@@ -208,9 +214,9 @@ impl<S: StateStore> NowExecutor<S> {
 
             match (&mode, &mut mode_vars) {
                 (NowMode::UpdateCurrent, ModeVars::UpdateCurrent) => {
-                    let chunk = if last_timestamp.is_some() {
-                        let last_row = row::once(&last_timestamp);
-                        let row = row::once(&curr_timestamp);
+                    let chunk = if last_timestamp_datum.is_some() {
+                        let last_row = row::once(&last_timestamp_datum);
+                        let row = row::once(&curr_timestamp_datum);
                         state_table.update(last_row, row);
 
                         StreamChunk::from_rows(
@@ -218,14 +224,14 @@ impl<S: StateStore> NowExecutor<S> {
                             &data_types,
                         )
                     } else {
-                        let row = row::once(&curr_timestamp);
+                        let row = row::once(&curr_timestamp_datum);
                         state_table.insert(row);
 
                         StreamChunk::from_rows(&[(Op::Insert, row)], &data_types)
                     };
 
                     yield Message::Chunk(chunk);
-                    last_timestamp.clone_from(&curr_timestamp)
+                    last_timestamp_datum.clone_from(&curr_timestamp_datum)
                 }
                 (
                     &NowMode::GenerateSeries {
@@ -236,19 +242,19 @@ impl<S: StateStore> NowExecutor<S> {
                         ref add_interval_expr,
                     },
                 ) => {
-                    if last_timestamp.is_none() {
+                    if last_timestamp_datum.is_none() {
                         // We haven't emit any timestamp yet. Let's emit the first one and populate the state table.
                         let first = Some(start_timestamp.into());
                         let first_row = row::once(&first);
                         let _ = chunk_builder.append_row(Op::Insert, first_row);
                         state_table.insert(first_row);
-                        last_timestamp = first;
+                        last_timestamp_datum = first;
                     }
 
                     // Now let's step through the timestamps from the last timestamp to the current timestamp.
                     // We use `last_row` as a temporary cursor to track the progress, and won't touch `last_timestamp`
                     // until the end of the loop, so that `last_timestamp` is always synced with the state table.
-                    let mut last_row = OwnedRow::new(vec![last_timestamp.clone()]);
+                    let mut last_row = OwnedRow::new(vec![last_timestamp_datum.clone()]);
 
                     loop {
                         if chunk_builder.size() >= max_chunk_size {
@@ -262,7 +268,7 @@ impl<S: StateStore> NowExecutor<S> {
 
                         let next = add_interval_expr.eval_row_infallible(&last_row).await;
                         if DefaultOrdered(next.to_datum_ref())
-                            > DefaultOrdered(curr_timestamp.to_datum_ref())
+                            > DefaultOrdered(curr_timestamp_datum.to_datum_ref())
                         {
                             // We only increase the timestamp to the current timestamp.
                             break;
@@ -278,8 +284,8 @@ impl<S: StateStore> NowExecutor<S> {
                     }
 
                     // Update the last timestamp.
-                    state_table.update(row::once(&last_timestamp), &last_row);
-                    last_timestamp = last_row
+                    state_table.update(row::once(&last_timestamp_datum), &last_row);
+                    last_timestamp_datum = last_row
                         .into_inner()
                         .into_vec()
                         .into_iter()
@@ -292,7 +298,7 @@ impl<S: StateStore> NowExecutor<S> {
             yield Message::Watermark(Watermark::new(
                 0,
                 DataType::Timestamptz,
-                curr_timestamp.unwrap(),
+                curr_timestamp_datum.unwrap(),
             ));
         }
     }
