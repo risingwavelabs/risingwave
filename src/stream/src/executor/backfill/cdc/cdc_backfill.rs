@@ -65,43 +65,48 @@ pub fn start_confirm_flush_lsn_monitor(
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(
             CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS,
         ));
+
+        // Create table reader once and reuse it
+        let reader = match external_table.create_table_reader().await {
+            Ok(reader) => reader,
+            Err(e) => {
+                tracing::error!(
+                    "Failed to create table reader for confirmed_flush_lsn query: {}",
+                    e.as_report()
+                );
+                return;
+            }
+        };
+
+        // Only monitor confirmed_flush_lsn for PostgreSQL CDC
+        let pg_reader = match reader {
+            ExternalTableReaderImpl::Postgres(pg_reader) => pg_reader,
+            _ => {
+                tracing::info!(
+                    "Skipping confirmed_flush_lsn monitoring for non-PostgreSQL CDC source"
+                );
+                return;
+            }
+        };
+
         loop {
             interval.tick().await;
 
-            // Try to create a table reader to query confirm_flush_lsn
-            match external_table.create_table_reader().await {
-                Ok(reader) => {
-                    if let ExternalTableReaderImpl::Postgres(pg_reader) = reader {
-                        match pg_reader.query_confirm_flush_lsn(&slot_name).await {
-                            Ok(Some(confirm_flush_lsn)) => {
-                                // Update metrics
-                                streaming_metrics
-                                    .pg_cdc_confirm_flush_lsn
-                                    .with_guarded_label_values(&[
-                                        &source_id.to_string(),
-                                        &slot_name,
-                                    ])
-                                    .set(confirm_flush_lsn as i64);
-                            }
-                            Ok(None) => {
-                                tracing::warn!(
-                                    "No confirmed_flush_lsn found for slot: {}",
-                                    slot_name
-                                );
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Failed to query confirmed_flush_lsn for slot {}: {}",
-                                    slot_name,
-                                    e.as_report()
-                                );
-                            }
-                        }
-                    }
+            match pg_reader.query_confirm_flush_lsn(&slot_name).await {
+                Ok(Some(confirm_flush_lsn)) => {
+                    // Update metrics
+                    streaming_metrics
+                        .pg_cdc_confirm_flush_lsn
+                        .with_guarded_label_values(&[&source_id.to_string(), &slot_name])
+                        .set(confirm_flush_lsn as i64);
+                }
+                Ok(None) => {
+                    tracing::warn!("No confirmed_flush_lsn found for slot: {}", slot_name);
                 }
                 Err(e) => {
                     tracing::error!(
-                        "Failed to create table reader for confirmed_flush_lsn query: {}",
+                        "Failed to query confirmed_flush_lsn for slot {}: {}",
+                        slot_name,
                         e.as_report()
                     );
                 }
