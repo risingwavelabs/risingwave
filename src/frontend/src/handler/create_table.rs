@@ -94,7 +94,7 @@ use risingwave_connector::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
     ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-    SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     parse_partition_by_exprs,
 };
 
@@ -1832,13 +1832,13 @@ pub async fn create_iceberg_engine_table(
                     );
                 }
 
-                if let Some(snapshot_expiration_expire_older_than) = handler_args
+                if let Some(snapshot_expiration_max_age) = handler_args
                     .with_options
-                    .get(SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN)
+                    .get(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
                 {
                     sink_with.insert(
-                        SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN.to_owned(),
-                        snapshot_expiration_expire_older_than.to_owned(),
+                        SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS.to_owned(),
+                        snapshot_expiration_max_age.to_owned(),
                     );
                 }
 
