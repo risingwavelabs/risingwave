@@ -327,7 +327,6 @@ impl SourceManagerCore {
                 let actors = match self
                     .metadata_manager
                     .get_running_actors_of_fragment(fragment_id)
-                    .await
                 {
                     Ok(actors) => {
                         if actors.is_empty() {
