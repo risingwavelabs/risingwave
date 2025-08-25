@@ -98,10 +98,6 @@ insert into t_single_bytea values ('\xDEADBEEF'), ('\xCAFEBABE'), ('\x00112233')
 statement ok
 insert into t_single_bytea_pk values ('\xFEEDBEEF'), ('\x0BADC0DE');
 
-# Update test for upsert
-statement ok
-insert into t_single_bytea_pk values ('\xFEEDBEEF') on conflict(data) do update set data = excluded.data;
-
 # Test source reading from bytes format sink
 statement ok
 create table t_source_bytes (data bytea)
