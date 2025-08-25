@@ -962,7 +962,7 @@ fn build_copy_into_sql(
 ) -> Result<String> {
     let table_name = build_full_table_name(schema_name, table_name);
     let credentials = if let Some(assume_role) = assume_role {
-        assume_role
+        &format!("aws_iam_role={}", assume_role)
     } else if let (Some(access_key), Some(secret_key)) = (access_key, secret_key) {
         &format!(
             "aws_access_key_id={};aws_secret_access_key={}",
