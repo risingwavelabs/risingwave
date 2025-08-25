@@ -97,8 +97,8 @@ impl<S: StateStore> NowExecutor<S> {
         } = self;
 
         info!(
-            "NowExecutor started. mode: {:?}, progress_ratio: {:?}, barrier_interval_ms: {:?}",
-            mode, progress_ratio, barrier_interval_ms
+            "NowExecutor started. progress_ratio: {:?}, barrier_interval_ms: {:?}",
+            progress_ratio, barrier_interval_ms
         );
 
         let max_chunk_size = crate::config::chunk_size();
