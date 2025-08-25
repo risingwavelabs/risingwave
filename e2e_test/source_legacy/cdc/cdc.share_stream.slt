@@ -354,6 +354,65 @@ SELECT c_boolean, c_bit, c_tinyint, c_smallint, c_mediumint, c_integer, c_bigint
 t t -128 -32767 -8388608 -2147483647 -9223372036854775807 -10 -10000 -10000 a b 1001-01-01 00:00:00 1998-01-01 00:00:00 1970-01-01 00:00:01+00:00
 f f NULL NULL -8388608 -2147483647 9223372036854775806 -10 -10000 -10000 c d 1001-01-01 NULL 2000-01-01 00:00:00 NULL
 
+system ok
+mysql --protocol=tcp -u root mytest -e " CREATE TABLE parallelized_cdc_backfill_test (id INT PRIMARY KEY, name VARCHAR(255));
+                                         insert into parallelized_cdc_backfill_test values (1,11),(2,22),(3,33),(4,44),(5,55),(6,66),(7,77),(8,88),(9,99),(10,1010),(11,1111),(15,1515);
+"
+
+statement ok
+CREATE TABLE mysql_parallelized_cdc_backfill_test_table_1 (
+    id INT PRIMARY KEY,
+    name VARCHAR
+)
+WITH (
+    backfill.num_rows_per_split='2',
+    backfill.parallelism='3',
+    backfill.as_even_splits='true'
+)
+FROM mysql_mytest TABLE 'mytest.parallelized_cdc_backfill_test';
+
+statement ok
+CREATE TABLE mysql_parallelized_cdc_backfill_test_table_2 (
+    id INT PRIMARY KEY,
+    name VARCHAR
+)
+WITH (
+    backfill.num_rows_per_split='2',
+    backfill.parallelism='3',
+    backfill.as_even_splits='false'
+)
+FROM mysql_mytest TABLE 'mytest.parallelized_cdc_backfill_test';
+
+sleep 5s
+
+query I
+SELECT COUNT(*) FROM mysql_parallelized_cdc_backfill_test_table_1
+----
+12
+
+query II
+SELECT COUNT(*) FROM mysql_parallelized_cdc_backfill_test_table_2
+----
+12
+
+system ok
+mysql --protocol=tcp -u root mytest -e "insert into parallelized_cdc_backfill_test values (20,22),(30,33),(40,44),(50,55),(60,66),(70,77),(80,88),(90,99),(100,1010),(110,1111),(120,1212);"
+
+system ok
+mysql --protocol=tcp -u root mytest -e "FLUSH LOGS"
+
+sleep 5s
+
+query I
+SELECT COUNT(*) FROM mysql_parallelized_cdc_backfill_test_table_1
+----
+23
+
+query II
+SELECT COUNT(*) FROM mysql_parallelized_cdc_backfill_test_table_2
+----
+23
+
 statement ok
 create secret pg_pwd with (
   backend = 'meta'
@@ -374,6 +433,68 @@ create source pg_source with (
  database.name = '${PGDATABASE:postgres}',
  slot.name = 'pg_slot'
 );
+
+
+# postgres streaming test
+system ok
+psql -c "
+CREATE SCHEMA parallelized_cdc;
+CREATE TABLE parallelized_cdc.parallelized_cdc_backfill_test (id INT PRIMARY KEY, name VARCHAR);
+insert into parallelized_cdc.parallelized_cdc_backfill_test values (1,11),(2,22),(3,33),(4,44),(5,55),(6,66),(7,77),(8,88),(9,99),(10,1010),(11,1111),(15,1515);
+"
+
+statement ok
+CREATE TABLE pg_parallelized_cdc_backfill_test_table_1 (
+    id INT PRIMARY KEY,
+    name VARCHAR
+)
+WITH (
+    backfill.num_rows_per_split='2',
+    backfill.parallelism='3',
+    backfill.as_even_splits='true'
+)
+FROM pg_source TABLE 'parallelized_cdc.parallelized_cdc_backfill_test';
+
+statement ok
+CREATE TABLE pg_parallelized_cdc_backfill_test_table_2 (
+    id INT PRIMARY KEY,
+    name VARCHAR
+)
+WITH (
+    backfill.num_rows_per_split='2',
+    backfill.parallelism='3',
+    backfill.as_even_splits='false'
+)
+FROM pg_source TABLE 'parallelized_cdc.parallelized_cdc_backfill_test';
+
+sleep 5s
+
+query I
+SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
+----
+12
+
+query II
+SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
+----
+12
+
+system ok
+psql -c "
+insert into parallelized_cdc.parallelized_cdc_backfill_test values (20,22),(30,33),(40,44),(50,55),(60,66),(70,77),(80,88),(90,99),(100,1010),(110,1111),(120,1212);
+"
+
+sleep 5s
+
+query I
+SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
+----
+23
+
+query II
+SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
+----
+23
 
 statement ok
 show create source pg_source;
