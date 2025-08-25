@@ -167,7 +167,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "enable_compaction".to_owned(),
             "compaction_interval_sec".to_owned(),
             "enable_snapshot_expiration".to_owned(),
-            "snapshot_expiration_expire_older_than".to_owned(),
+            "snapshot_expiration_max_age_millis".to_owned(),
             "snapshot_expiration_retain_last".to_owned(),
             "snapshot_expiration_clear_expired_files".to_owned(),
             "snapshot_expiration_clear_expired_meta_data".to_owned(),
