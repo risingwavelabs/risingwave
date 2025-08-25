@@ -107,7 +107,7 @@ impl SharedActorInfosInner {
 
 #[derive(Clone, educe::Educe)]
 #[educe(Debug)]
-pub(crate) struct SharedActorInfos {
+pub struct SharedActorInfos {
     inner: Arc<parking_lot::RwLock<SharedActorInfosInner>>,
     #[educe(Debug(ignore))]
     notification_manager: NotificationManagerRef,

@@ -986,7 +986,7 @@ pub async fn refresh_fragment_info_metrics(
             return;
         }
     };
-    let actor_locations = match catalog_controller.list_actor_locations().await {
+    let actor_locations = match catalog_controller.list_actor_locations() {
         Ok(actor_locations) => actor_locations,
         Err(err) => {
             tracing::warn!(error=%err.as_report(), "fail to get actor locations");

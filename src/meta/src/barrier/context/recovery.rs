@@ -20,7 +20,6 @@ use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_common::config::DefaultParallelism;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_pb::plan_common::ExprContext;
 use thiserror_ext::AsReport;
@@ -33,7 +32,7 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightActorInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+use crate::model::{ActorId, StreamActor, StreamJobFragments};
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{SourceChange, StreamFragmentGraph};
 
@@ -645,132 +644,5 @@ impl GlobalBarrierWorkerContextImpl {
             }
         }
         stream_actors
-    }
-}
-
-impl GlobalBarrierWorkerContextImpl {
-    // We infer the new parallelism strategy based on the prior level of parallelism of the table.
-    // If the parallelism strategy is Fixed or Auto, we won't make any modifications.
-    // For Custom, we'll assess the parallelism of the core fragment;
-    // if the parallelism is higher than the currently available parallelism, we'll set it to Adaptive.
-    // If it's lower, we'll set it to Fixed.
-    // If it was previously set to Adaptive, but the default_parallelism in the configuration isn’t Full,
-    // and it matches the actual fragment parallelism, in this case, it will be handled by downgrading to Fixed.
-    fn derive_target_parallelism(
-        available_parallelism: usize,
-        assigned_parallelism: TableParallelism,
-        actual_fragment_parallelism: Option<usize>,
-        default_parallelism: DefaultParallelism,
-    ) -> TableParallelism {
-        match assigned_parallelism {
-            TableParallelism::Custom => {
-                if let Some(fragment_parallelism) = actual_fragment_parallelism {
-                    if fragment_parallelism >= available_parallelism {
-                        TableParallelism::Adaptive
-                    } else {
-                        TableParallelism::Fixed(fragment_parallelism)
-                    }
-                } else {
-                    TableParallelism::Adaptive
-                }
-            }
-            TableParallelism::Adaptive => {
-                match (default_parallelism, actual_fragment_parallelism) {
-                    (DefaultParallelism::Default(n), Some(fragment_parallelism))
-                        if fragment_parallelism == n.get() =>
-                    {
-                        TableParallelism::Fixed(fragment_parallelism)
-                    }
-                    _ => TableParallelism::Adaptive,
-                }
-            }
-            _ => assigned_parallelism,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::num::NonZeroUsize;
-
-    use super::*;
-    #[test]
-    fn test_derive_target_parallelism() {
-        // total 10, assigned custom, actual 5, default full -> fixed(5)
-        assert_eq!(
-            TableParallelism::Fixed(5),
-            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
-                10,
-                TableParallelism::Custom,
-                Some(5),
-                DefaultParallelism::Full,
-            )
-        );
-
-        // total 10, assigned custom, actual 10, default full -> adaptive
-        assert_eq!(
-            TableParallelism::Adaptive,
-            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
-                10,
-                TableParallelism::Custom,
-                Some(10),
-                DefaultParallelism::Full,
-            )
-        );
-
-        // total 10, assigned custom, actual 11, default full -> adaptive
-        assert_eq!(
-            TableParallelism::Adaptive,
-            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
-                10,
-                TableParallelism::Custom,
-                Some(11),
-                DefaultParallelism::Full,
-            )
-        );
-
-        // total 10, assigned fixed(5), actual _, default full -> fixed(5)
-        assert_eq!(
-            TableParallelism::Adaptive,
-            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
-                10,
-                TableParallelism::Custom,
-                None,
-                DefaultParallelism::Full,
-            )
-        );
-
-        // total 10, assigned adaptive, actual _, default full -> adaptive
-        assert_eq!(
-            TableParallelism::Adaptive,
-            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
-                10,
-                TableParallelism::Adaptive,
-                None,
-                DefaultParallelism::Full,
-            )
-        );
-
-        // total 10, assigned adaptive, actual 5, default 5 -> fixed(5)
-        assert_eq!(
-            TableParallelism::Fixed(5),
-            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
-                10,
-                TableParallelism::Adaptive,
-                Some(5),
-                DefaultParallelism::Default(NonZeroUsize::new(5).unwrap()),
-            )
-        );
-
-        // total 10, assigned adaptive, actual 6, default 5 -> adaptive
-        assert_eq!(
-            TableParallelism::Adaptive,
-            GlobalBarrierWorkerContextImpl::derive_target_parallelism(
-                10,
-                TableParallelism::Adaptive,
-                Some(6),
-                DefaultParallelism::Default(NonZeroUsize::new(5).unwrap()),
-            )
-        );
     }
 }
