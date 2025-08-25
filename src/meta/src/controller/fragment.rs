@@ -1825,7 +1825,7 @@ impl CatalogController {
     }
 
     /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
-    pub async fn get_running_actors_of_fragment(
+    pub fn get_running_actors_of_fragment(
         &self,
         fragment_id: FragmentId,
     ) -> MetaResult<Vec<ActorId>> {
@@ -1922,51 +1922,6 @@ impl CatalogController {
             (source_backfill_actor as _, source_actor as _)
         })
         .collect())
-    }
-
-    #[deprecated]
-    pub async fn deprecated_get_actors_by_job_ids(
-        &self,
-        job_ids: Vec<ObjectId>,
-    ) -> MetaResult<Vec<ActorId>> {
-        unreachable!()
-        // let inner = self.inner.read().await;
-        //
-        // let fragment_ids: Vec<FragmentId> = FragmentModel::find()
-        //     .select_only()
-        //     .column(fragment::Column::FragmentId)
-        //     .filter(fragment::Column::JobId.is_in(job_ids.clone()))
-        //     .into_tuple()
-        //     .all(&inner.db)
-        //     .await?;
-        //
-        // let actors_from_cache: Vec<ActorId> = fragment_ids
-        //     .into_iter()
-        //     .filter_map(|fid| inner.actors.actors_by_fragment_id.get(&fid))
-        //     .flat_map(|ids| ids.iter().copied())
-        //     .collect();
-        //
-        // {
-        //     let actors_from_db: Vec<ActorId> = Actor::find()
-        //         .select_only()
-        //         .column(actor::Column::ActorId)
-        //         .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-        //         .filter(fragment::Column::JobId.is_in(job_ids))
-        //         .into_tuple()
-        //         .all(&inner.db)
-        //         .await?;
-        //
-        //     let set_db: HashSet<ActorId> = actors_from_db.into_iter().collect();
-        //     let set_cache: HashSet<ActorId> = actors_from_cache.iter().copied().collect();
-        //
-        //     debug_assert_eq!(
-        //         set_db, set_cache,
-        //         "Actor lists mismatch between DB and cache"
-        //     );
-        // }
-        //
-        // let actors = actors_from_cache;
-        // Ok(actors)
     }
 
     /// Get and filter the "**root**" fragments of the specified jobs.
@@ -2204,127 +2159,6 @@ impl CatalogController {
         }
         Ok(source_fragment_ids)
     }
-
-    // note remove
-    #[deprecated]
-    pub async fn deprecated_load_actor_splits(
-        &self,
-    ) -> MetaResult<HashMap<ActorId, ConnectorSplits>> {
-        Ok(Default::default())
-        // let inner = self.inner.read().await;
-        // let splits_from_cache: Vec<(ActorId, ConnectorSplits)> = inner
-        //     .actors
-        //     .models
-        //     .iter()
-        //     .filter_map(|(&actor_id, model)| model.splits.clone().map(|splits| (actor_id, splits)))
-        //     .collect();
-        //
-        // {
-        //     let splits_from_db: Vec<(ActorId, ConnectorSplits)> = Actor::find()
-        //         .select_only()
-        //         .columns([actor::Column::ActorId, actor::Column::Splits])
-        //         .filter(actor::Column::Splits.is_not_null())
-        //         .into_tuple()
-        //         .all(&inner.db)
-        //         .await?;
-        //
-        //     let set_db: HashSet<(ActorId, _)> = splits_from_db
-        //         .into_iter()
-        //         .flat_map(|(actor_id, splits)| {
-        //             splits
-        //                 .to_protobuf()
-        //                 .splits
-        //                 .into_iter()
-        //                 .map(move |split| (actor_id, split.encoded_split))
-        //         })
-        //         .collect();
-        //
-        //     let set_cache: HashSet<(ActorId, _)> = splits_from_cache
-        //         .iter()
-        //         .cloned()
-        //         .flat_map(|(actor_id, splits)| {
-        //             splits
-        //                 .to_protobuf()
-        //                 .splits
-        //                 .into_iter()
-        //                 .map(move |split| (actor_id, split.encoded_split))
-        //         })
-        //         .collect();
-        //
-        //     debug_assert_eq!(set_db, set_cache, "Splits mismatch between DB and cache");
-        // }
-        //
-        // let splits = splits_from_cache;
-        // Ok(splits.into_iter().collect())
-    }
-
-    // /// Get the actor count of `Materialize` or `Sink` fragment of the specified table.
-    // pub async fn get_actual_job_fragment_parallelism(
-    //     &self,
-    //     job_id: ObjectId,
-    // ) -> MetaResult<Option<usize>> {
-    //     let inner = self.inner.read().await;
-    //     let fragment_info: Vec<(FragmentId, i32)> = FragmentModel::find()
-    //         .select_only()
-    //         .columns([
-    //             fragment::Column::FragmentId,
-    //             fragment::Column::FragmentTypeMask,
-    //         ])
-    //         .filter(fragment::Column::JobId.eq(job_id))
-    //         .into_tuple()
-    //         .all(&inner.db)
-    //         .await?;
-    //
-    //     let fragments_from_cache: Vec<(FragmentId, i32, i64)> = fragment_info
-    //         .into_iter()
-    //         .filter_map(|(fid, fmask)| {
-    //             let count = inner
-    //                 .actors
-    //                 .actors_by_fragment_id
-    //                 .get(&fid)
-    //                 .map(|ids| ids.len() as i64)
-    //                 .unwrap_or(0);
-    //
-    //             (count > 0).then_some((fid, fmask, count))
-    //         })
-    //         .collect();
-    //
-    //     {
-    //         let fragments_from_db: Vec<(FragmentId, i32, i64)> = FragmentModel::find()
-    //             // NOTE(actor): actor usage
-    //             .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
-    //             .select_only()
-    //             .columns([
-    //                 fragment::Column::FragmentId,
-    //                 fragment::Column::FragmentTypeMask,
-    //             ])
-    //             .column_as(actor::Column::ActorId.count(), "count")
-    //             .filter(fragment::Column::JobId.eq(job_id))
-    //             .group_by(fragment::Column::FragmentId)
-    //             .into_tuple()
-    //             .all(&inner.db)
-    //             .await?;
-    //
-    //         let set_db: HashSet<(FragmentId, i32, i64)> = fragments_from_db.into_iter().collect();
-    //         let set_cache: HashSet<(FragmentId, i32, i64)> =
-    //             fragments_from_cache.iter().cloned().collect();
-    //
-    //         debug_assert_eq!(set_db, set_cache, "Fragments mismatch between DB and cache");
-    //     }
-    //
-    //     let mut fragments = fragments_from_cache;
-    //     fragments.retain(|(_, mask, _)| {
-    //         FragmentTypeMask::from(*mask)
-    //             .contains_any([FragmentTypeFlag::Mview, FragmentTypeFlag::Sink])
-    //     });
-    //
-    //     Ok(fragments
-    //         .into_iter()
-    //         .at_most_one()
-    //         .ok()
-    //         .flatten()
-    //         .map(|(_, _, count)| count as usize))
-    // }
 }
 
 #[cfg(test)]
