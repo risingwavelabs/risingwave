@@ -1,7 +1,7 @@
 -- SQL Server CDC timestamp test insert data
 -- This file inserts additional test data during the test process
 
-USE mydb;
+USE sqlserver_timestamp_db;
 GO
 
 -- Insert additional test data (3 rows for update testing)
