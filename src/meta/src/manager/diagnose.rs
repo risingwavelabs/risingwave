@@ -131,7 +131,7 @@ impl DiagnoseCommand {
     }
 
     async fn write_worker_nodes(&self, s: &mut String) {
-        let Ok(worker_actor_count) = self.metadata_manager.worker_actor_count().await else {
+        let Ok(worker_actor_count) = self.metadata_manager.worker_actor_count() else {
             tracing::warn!("failed to get worker actor count");
             return;
         };

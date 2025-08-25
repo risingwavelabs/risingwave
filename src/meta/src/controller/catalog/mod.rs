@@ -449,15 +449,13 @@ impl CatalogController {
             filter_condition
         };
 
-        let object_ids: Vec<ObjectId> = Object::find()
+        let _object_ids: Vec<ObjectId> = Object::find()
             .select_only()
             .column(object::Column::Oid)
             .filter(filter_condition.clone())
             .into_tuple()
             .all(&txn)
             .await?;
-
-        let dirty_fragment_ids = self.get_fragment_ids_by_job_ids(&txn, &object_ids).await?;
 
         Object::delete_many()
             .filter(filter_condition)
@@ -622,10 +620,6 @@ impl CatalogController {
             .filter(table::Column::BelongsToJobId.is_in(to_notify_objs.iter().map(|obj| obj.oid)))
             .into_partial_model()
             .all(&txn)
-            .await?;
-
-        let dirty_fragment_ids = self
-            .get_fragment_ids_by_job_ids(&txn, &dirty_job_ids)
             .await?;
 
         let to_delete_objs: HashSet<ObjectId> = dirty_job_ids
