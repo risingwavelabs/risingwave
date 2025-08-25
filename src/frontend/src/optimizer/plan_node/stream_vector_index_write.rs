@@ -194,6 +194,7 @@ impl StreamVectorIndexWrite {
             clean_watermark_index_in_pk: None,
             refreshable: false,
             vector_index_info: Some(vector_index_info),
+            cdc_table_type: None,
         })
     }
 

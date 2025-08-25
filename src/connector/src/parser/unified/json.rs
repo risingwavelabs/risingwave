@@ -149,6 +149,7 @@ pub struct JsonParseOptions {
     pub varchar_handling: VarcharHandling,
     pub struct_handling: StructHandling,
     pub ignoring_keycase: bool,
+    pub handle_toast_columns: bool,
 }
 
 impl Default for JsonParseOptions {
@@ -174,6 +175,7 @@ impl JsonParseOptions {
         varchar_handling: VarcharHandling::Strict,
         struct_handling: StructHandling::Strict,
         ignoring_keycase: true,
+        handle_toast_columns: false,
     };
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
@@ -188,12 +190,14 @@ impl JsonParseOptions {
         varchar_handling: VarcharHandling::OnlyPrimaryTypes,
         struct_handling: StructHandling::AllowJsonString,
         ignoring_keycase: true,
+        handle_toast_columns: false,
     };
 
     pub fn new_for_debezium(
         timestamptz_handling: TimestamptzHandling,
         timestamp_handling: TimestampHandling,
         time_handling: TimeHandling,
+        handle_toast_columns: bool,
     ) -> Self {
         Self {
             bytea_handling: ByteaHandling::Base64,
@@ -211,6 +215,7 @@ impl JsonParseOptions {
             varchar_handling: VarcharHandling::Strict,
             struct_handling: StructHandling::Strict,
             ignoring_keycase: true,
+            handle_toast_columns,
         }
     }
 
@@ -224,7 +229,6 @@ impl JsonParseOptions {
             got: value.value_type().to_string(),
             value: value.to_string(),
         };
-
         let v: ScalarImpl = match (type_expected, value.value_type()) {
             (_, ValueType::Null) => return Ok(DatumCow::NULL),
             // ---- Boolean -----
@@ -603,23 +607,35 @@ impl JsonParseOptions {
             .into(),
 
             // ---- Bytea -----
-            (DataType::Bytea, ValueType::String) => match self.bytea_handling {
-                ByteaHandling::Standard => str_to_bytea(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into(),
-                ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
-                    .decode(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into_boxed_slice()
-                    .into(),
-            },
+            (DataType::Bytea, ValueType::String) => {
+                let value_str = value.as_str().unwrap();
+
+                match self.bytea_handling {
+                    ByteaHandling::Standard => {
+                        str_to_bytea(value_str).map_err(|_| create_error())?.into()
+                    }
+                    ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
+                        .decode(value_str)
+                        .map_err(|_| create_error())?
+                        .into_boxed_slice()
+                        .into(),
+                }
+            }
             // ---- Jsonb -----
             (DataType::Jsonb, ValueType::String)
                 if matches!(self.json_value_handling, JsonValueHandling::AsString) =>
             {
-                JsonbVal::from_str(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into()
+                // Check if this value is the Debezium unavailable value (TOAST handling for postgres-cdc).
+                // Debezium will base64 encode the bytea type placeholder.
+                // When a placeholder is encountered, it is converted into a jsonb format placeholder to match the original type.
+                match self.handle_toast_columns {
+                    true => JsonbVal::from_debezium_unavailable_value(value.as_str().unwrap())
+                        .map_err(|_| create_error())?
+                        .into(),
+                    false => JsonbVal::from_str(value.as_str().unwrap())
+                        .map_err(|_| create_error())?
+                        .into(),
+                }
             }
             (DataType::Jsonb, _)
                 if matches!(self.json_value_handling, JsonValueHandling::AsValue) =>

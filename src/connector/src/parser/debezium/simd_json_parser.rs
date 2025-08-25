@@ -37,6 +37,7 @@ impl DebeziumJsonAccessBuilder {
         timestamptz_handling: TimestamptzHandling,
         timestamp_handling: TimestampHandling,
         time_handling: TimeHandling,
+        handle_toast_columns: bool,
     ) -> ConnectorResult<Self> {
         Ok(Self {
             value: None,
@@ -44,6 +45,7 @@ impl DebeziumJsonAccessBuilder {
                 timestamptz_handling,
                 timestamp_handling,
                 time_handling,
+                handle_toast_columns,
             ),
         })
     }
@@ -96,6 +98,7 @@ impl DebeziumMongoJsonAccessBuilder {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                false,
             ),
             strong_schema: props.strong_schema,
         })
@@ -165,6 +168,7 @@ mod tests {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };

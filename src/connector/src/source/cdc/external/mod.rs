@@ -46,7 +46,7 @@ use crate::source::cdc::external::sql_server::{
     SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CdcTableType {
     Undefined,
     Mock,
@@ -54,6 +54,7 @@ pub enum CdcTableType {
     Postgres,
     SqlServer,
     Citus,
+    Mongo,
 }
 
 impl CdcTableType {
@@ -64,6 +65,7 @@ impl CdcTableType {
             "postgres-cdc" => Self::Postgres,
             "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
+            "mongodb-cdc" => Self::Mongo,
             _ => Self::Undefined,
         }
     }

@@ -604,6 +604,7 @@ pub(crate) mod tests {
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
             vector_index_info: None,
+            cdc_table_type: None,
         };
         let batch_plan_node = LogicalScan::create(table_catalog.into(), ctx, None)
             .to_batch()

@@ -880,7 +880,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
-    let options = build_cdc_scan_options_with_options(context.with_options(), cdc_table_type)?;
+    let options = build_cdc_scan_options_with_options(context.with_options(), &cdc_table_type)?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name.clone(),
@@ -926,7 +926,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
-
+    table.cdc_table_type = Some(cdc_table_type);
     Ok((materialize.into(), table))
 }
 
@@ -1179,7 +1179,6 @@ pub(super) async fn handle_create_table_plan(
                     let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    // NOTE: if the external table has a default column, we will only treat it as a normal column.
                     (columns, pk_names)
                 }
             };
@@ -1345,6 +1344,7 @@ async fn bind_cdc_table_schema_externally(
     let table = ExternalTableImpl::connect(config)
         .await
         .context("failed to auto derive table schema")?;
+
     Ok((
         table
             .column_descs()
