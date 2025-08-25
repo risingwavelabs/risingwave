@@ -34,7 +34,7 @@ use simd_json::{BorrowedValue, ValueType};
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
-use crate::parser::DatumCow;
+use crate::parser::{DatumCow, HashMap};
 use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 
 #[derive(Clone, Debug)]
@@ -682,6 +682,11 @@ impl Access for JsonAccess<'_> {
     }
 }
 
+thread_local! {
+    static KEY_MAPPING_CACHE: std::cell::RefCell<HashMap<String, String>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
 /// Get a value from a json object by key, case insensitive.
 ///
 /// Returns `None` if the given json value is not an object, or the key is not found.
@@ -694,8 +699,27 @@ fn json_object_get_case_insensitive<'b>(
     if value.is_some() {
         return value; // fast path
     }
+
+    if let Some(v) = KEY_MAPPING_CACHE.with(|cache| {
+        if let Some(cached_key) = cache.borrow().get(key) {
+            if let Some(v) = obj.get(cached_key.as_str()) {
+                return Some(v);
+            } else {
+                // remove the key from cache if the value is not found
+                cache.borrow_mut().remove(key);
+                return None;
+            }
+        }
+        None
+    }) {
+        return Some(v);
+    }
+
     for (k, v) in obj {
         if k.eq_ignore_ascii_case(key) {
+            KEY_MAPPING_CACHE.with(|cache| {
+                cache.borrow_mut().insert(key.to_owned(), k.to_string());
+            });
             return Some(v);
         }
     }
