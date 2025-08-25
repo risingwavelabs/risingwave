@@ -201,7 +201,7 @@ pub struct IcebergConfig {
     #[serde(rename = "snapshot_expiration_max_age_millis", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
-    pub snapshot_expiration_max_age_millis: Option<u64>,
+    pub snapshot_expiration_max_age_millis: Option<i64>,
 
     /// The number of snapshots to retain
     #[serde(rename = "snapshot_expiration_retain_last", default)]
@@ -329,7 +329,7 @@ impl IcebergConfig {
     /// Returns `current_time_ms` - `max_age_millis`
     pub fn snapshot_expiration_timestamp_ms(&self, current_time_ms: i64) -> Option<i64> {
         self.snapshot_expiration_max_age_millis
-            .map(|max_age_millis| current_time_ms - (max_age_millis as i64))
+            .map(|max_age_millis| current_time_ms - max_age_millis)
     }
 }
 
