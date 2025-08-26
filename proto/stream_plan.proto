@@ -54,6 +54,10 @@ message StopMutation {
   repeated uint32 dropped_sink_fragments = 2;
 }
 
+message SinkAddColumns {
+  repeated plan_common.Field fields = 1;
+}
+
 message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
@@ -97,6 +101,7 @@ message UpdateMutation {
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
   // CDC table snapshot splits
   map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
+  map<uint32, SinkAddColumns> sink_add_columns = 8;
 }
 
 message SourceChangeSplitMutation {
