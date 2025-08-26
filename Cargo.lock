@@ -8922,6 +8922,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
+name = "openai_embedding_service"
+version = "2.6.0-alpha"
+dependencies = [
+ "async-openai",
+ "axum",
+ "madsim-tokio",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "opendal"
 version = "0.49.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

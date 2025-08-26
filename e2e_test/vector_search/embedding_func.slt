@@ -1,26 +1,26 @@
 query
-select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, 'first')::vector(3);
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, 'first')::vector(3);
 ----
 [1,2,3]
 
 query
-select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, 'second')::vector(3);
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, 'second')::vector(3);
 ----
 [4,5,6]
 
 query
-select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, 'any other')::vector(3);
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, 'any other')::vector(3);
 ----
 [0,0,0]
 
 query
-select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, null)::vector(3);
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, null)::vector(3);
 ----
 NULL
 
 statement ok
 create function get_embedding(string) returns vector(3) language sql as $$
-select openai_embedding('{"model": "model", "api-base": "http://127.0.0.1:8088/v1"}'::jsonb, $1)::vector(3);
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, $1)::vector(3);
 $$;
 
 query
@@ -52,7 +52,7 @@ explain create materialized view embedding_mv as select id, name, get_embedding(
 ----
 StreamMaterialize { columns: [id, name, get_embedding, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
 └─StreamProject { exprs: [t.id, t.name, $expr1, t._row_id] }
-  └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('{"api-base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, t.name)::Vector(3) as $expr1] }
+  └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, t.name)::Vector(3) as $expr1] }
     └─StreamTableScan { table: t, columns: [id, name, _row_id] }
 
 

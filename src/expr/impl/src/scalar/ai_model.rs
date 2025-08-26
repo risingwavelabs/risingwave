@@ -24,6 +24,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, F32, ScalarImpl};
 use risingwave_expr::expr::{BoxedExpression, Expression};
 use risingwave_expr::{ExprError, Result, build_function};
+use serde::Deserialize;
 use serde_json::Value;
 use thiserror_ext::AsReport;
 
@@ -34,47 +35,41 @@ pub struct OpenAiEmbeddingContext {
     pub model: String,
 }
 
+#[derive(Deserialize)]
+struct OpenAiEmbeddingConfig {
+    model: String,
+    api_key: Option<String>,
+    org_id: Option<String>,
+    project_id: Option<String>,
+    api_base: Option<String>,
+}
+
 impl OpenAiEmbeddingContext {
     /// Create a new `OpenAI` embedding context from `api_key` and model
     pub fn from_config(config: Value) -> Result<Self> {
-        let get_string = |key: &str| -> Result<Option<String>> {
-            config
-                .get(key)
-                .map(|value| {
-                    value
-                        .as_str()
-                        .map(Into::into)
-                        .ok_or_else(|| invalid_param_err(format!("`{}` must be string", key)))
-                })
-                .transpose()
-        };
-
-        let expect_string = |key: &str| -> Result<String> {
-            get_string(key)?.ok_or_else(|| invalid_param_err(format!("`{}` must be set", key)))
-        };
-
-        let model = expect_string("model")?;
-        let api_key = get_string("api-key")?;
-        let org_id = get_string("org-id")?;
-        let proj_id = get_string("project-id")?;
-        let api_base = get_string("api-base")?;
+        let param: OpenAiEmbeddingConfig = serde_json::from_value(config).map_err(|err| {
+            invalid_param_err(format!("failed to parse config: {}", err.as_report()))
+        })?;
 
         let mut config = OpenAIConfig::new();
-        if let Some(api_key) = api_key {
+        if let Some(api_key) = param.api_key {
             config = config.with_api_key(api_key);
         }
-        if let Some(org_id) = org_id {
+        if let Some(org_id) = param.org_id {
             config = config.with_org_id(org_id);
         }
-        if let Some(proj_id) = proj_id {
+        if let Some(proj_id) = param.project_id {
             config = config.with_project_id(proj_id);
         }
-        if let Some(api_base) = api_base {
+        if let Some(api_base) = param.api_base {
             config = config.with_api_base(api_base);
         }
 
         let client = Client::with_config(config);
-        Ok(Self { client, model })
+        Ok(Self {
+            client,
+            model: param.model,
+        })
     }
 }
 
