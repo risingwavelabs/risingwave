@@ -31,7 +31,7 @@ use prometheus::Histogram;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
@@ -51,8 +51,8 @@ use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate}
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
-    PbDispatcher, PbStopMutation, PbStreamMessageBatch, PbUpdateMutation, PbWatermark,
-    ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation,
+    PbDispatcher, PbSinkAddColumns, PbStopMutation, PbStreamMessageBatch, PbUpdateMutation,
+    PbWatermark, ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation,
     SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
@@ -184,6 +184,7 @@ pub type DispatcherMessageStreamItem = StreamExecutorResult<DispatcherMessage>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
@@ -322,6 +323,7 @@ pub struct UpdateMutation {
     pub actor_splits: SplitAssignments,
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
+    pub sink_add_columns: HashMap<SinkId, Vec<Field>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -688,6 +690,23 @@ impl Barrier {
             })
     }
 
+    pub fn as_sink_add_columns(&self, sink_id: SinkId) -> Option<Vec<Field>> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Update(UpdateMutation {
+                    sink_add_columns, ..
+                })
+                | Mutation::AddAndUpdate(
+                    _,
+                    UpdateMutation {
+                        sink_add_columns, ..
+                    },
+                ) => sink_add_columns.get(&sink_id).cloned(),
+                _ => None,
+            })
+    }
+
     pub fn get_curr_epoch(&self) -> Epoch {
         Epoch(self.epoch.curr)
     }
@@ -769,6 +788,7 @@ impl Mutation {
                 actor_splits,
                 actor_new_dispatchers,
                 actor_cdc_table_snapshot_splits,
+                sink_add_columns,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -794,6 +814,17 @@ impl Mutation {
                         actor_cdc_table_snapshot_splits.clone(),
                     )
                     .into(),
+                sink_add_columns: sink_add_columns
+                    .iter()
+                    .map(|(sink_id, add_columns)| {
+                        (
+                            sink_id.sink_id,
+                            PbSinkAddColumns {
+                                fields: add_columns.iter().map(|field| field.to_prost()).collect(),
+                            },
+                        )
+                    })
+                    .collect(),
             }),
             Mutation::Add(AddMutation {
                 adds,
@@ -970,6 +1001,16 @@ impl Mutation {
                             .clone()
                             .unwrap_or_default(),
                     ),
+                sink_add_columns: update
+                    .sink_add_columns
+                    .iter()
+                    .map(|(sink_id, add_columns)| {
+                        (
+                            SinkId::new(*sink_id),
+                            add_columns.fields.iter().map(Field::from_prost).collect(),
+                        )
+                    })
+                    .collect(),
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {

@@ -433,7 +433,7 @@ impl UpstreamSinkUnionExecutor {
                     // If None is returned, it means upstreams is empty, which
                     // means we should continue pending and wait on the second branch.
                     msg = pending_on_none(upstreams.next()) => {
-                        let msg = msg.context("UpstreamSinkUnionExecutor pull upstream failed")?;
+                        let msg = msg?;
                         if let Message::Barrier(barrier) = &msg {
                             let current_barrier = current_barrier.take().unwrap();
                             assert_equal_dispatcher_barrier(&current_barrier, barrier);

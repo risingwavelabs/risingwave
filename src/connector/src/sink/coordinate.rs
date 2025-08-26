@@ -194,6 +194,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                     is_checkpoint,
                     new_vnode_bitmap,
                     is_stop,
+                    add_columns,
                 } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
@@ -204,6 +205,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                         if current_checkpoint >= commit_checkpoint_interval.get()
                             || new_vnode_bitmap.is_some()
                             || is_stop
+                            || add_columns.is_some()
                         {
                             let start_time = Instant::now();
                             let metadata = sink_writer.barrier(true).await?;
@@ -212,7 +214,16 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                                     "should get metadata on checkpoint barrier"
                                 ))
                             })?;
-                            coordinator_stream_handle.commit(epoch, metadata).await?;
+                            if add_columns.is_some() {
+                                assert!(
+                                    is_stop,
+                                    "add columns should stop current sink for sink {}",
+                                    self.param.sink_id
+                                );
+                            }
+                            coordinator_stream_handle
+                                .commit(epoch, metadata, add_columns)
+                                .await?;
                             sink_writer_metrics
                                 .sink_commit_duration
                                 .observe(start_time.elapsed().as_millis() as f64);

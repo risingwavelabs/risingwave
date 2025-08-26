@@ -744,7 +744,6 @@ pub fn check_sink_allow_alter_on_fly_fields(
     }}
     Ok(())
 }}
-
 "#,
         source_entries = source_entries,
         sink_entries = sink_entries
