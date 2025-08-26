@@ -345,7 +345,7 @@ impl HummockManager {
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
-        instance.start_worker(rx).await;
+        instance.start_worker(rx);
         instance.load_meta_store_state().await?;
         instance.release_invalid_contexts().await?;
         // Release snapshots pinned by meta on restarting.

@@ -16,12 +16,12 @@ use risingwave_pb::stream_plan::ChangeLogNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::expr_visitable::ExprVisitable;
-use super::stream::StreamPlanRef;
+use super::stream::StreamPlanNodeMetadata;
 use super::stream::prelude::PhysicalPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, generic};
-use crate::PlanRef;
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::StreamPlanRef as PlanRef;
+use crate::optimizer::property::{MonotonicityMap, StreamKind};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -38,8 +38,8 @@ impl StreamChangeLog {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            // The changelog will convert all delete/update to insert, so it must be true here.
-            true,
+            // The changelog will convert all delete/update to insert, so it must be append-only here.
+            StreamKind::AppendOnly,
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             MonotonicityMap::new(), // TODO: derive monotonicity
@@ -48,7 +48,7 @@ impl StreamChangeLog {
     }
 }
 
-impl PlanTreeNodeUnary for StreamChangeLog {
+impl PlanTreeNodeUnary<Stream> for StreamChangeLog {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -60,7 +60,7 @@ impl PlanTreeNodeUnary for StreamChangeLog {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamChangeLog }
+impl_plan_tree_node_for_unary! { Stream, StreamChangeLog }
 impl_distill_by_unit!(StreamChangeLog, core, "StreamChangeLog");
 
 impl StreamNode for StreamChangeLog {
@@ -71,6 +71,6 @@ impl StreamNode for StreamChangeLog {
     }
 }
 
-impl ExprRewritable for StreamChangeLog {}
+impl ExprRewritable<Stream> for StreamChangeLog {}
 
 impl ExprVisitable for StreamChangeLog {}

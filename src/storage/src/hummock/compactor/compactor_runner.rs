@@ -439,6 +439,7 @@ pub async fn compact_with_agent(
             compaction_catalog_agent_ref.clone(),
             object_id_getter.clone(),
             task_progress_guard.progress.clone(),
+            multi_filter,
         );
 
         tokio::select! {
@@ -581,7 +582,7 @@ pub async fn compact_with_agent(
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn compact(
     compactor_context: CompactorContext,
-    compact_task: CompactTask,
+    mut compact_task: CompactTask,
     shutdown_rx: Receiver<()>,
     object_id_getter: Arc<dyn GetObjectId>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
@@ -593,16 +594,16 @@ pub async fn compact(
     ),
     Option<MemoryTracker>,
 ) {
-    let compact_table_ids = compact_task.build_compact_table_ids();
+    let table_ids_to_be_compacted = compact_task.build_compact_table_ids();
     let compaction_catalog_agent_ref = match compaction_catalog_manager_ref
-        .acquire(compact_table_ids.clone())
+        .acquire(table_ids_to_be_compacted.clone())
         .await
     {
         Ok(compaction_catalog_agent_ref) => {
             let acquire_table_ids: HashSet<StateTableId> =
                 compaction_catalog_agent_ref.table_ids().collect();
-            if acquire_table_ids.len() != compact_table_ids.len() {
-                let diff = compact_table_ids
+            if acquire_table_ids.len() != table_ids_to_be_compacted.len() {
+                let diff = table_ids_to_be_compacted
                     .into_iter()
                     .collect::<HashSet<_>>()
                     .symmetric_difference(&acquire_table_ids)
@@ -641,6 +642,17 @@ pub async fn compact(
             );
         }
     };
+
+    // rewrite compact_task watermarks
+    {
+        compact_task
+            .pk_prefix_table_watermarks
+            .retain(|table_id, _| table_ids_to_be_compacted.contains(table_id));
+
+        compact_task
+            .non_pk_prefix_table_watermarks
+            .retain(|table_id, _| table_ids_to_be_compacted.contains(table_id));
+    }
 
     compact_with_agent(
         compactor_context,

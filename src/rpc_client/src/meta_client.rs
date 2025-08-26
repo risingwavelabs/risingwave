@@ -230,8 +230,15 @@ impl MetaClient {
         Ok(resp.connections)
     }
 
-    pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<WaitVersion> {
-        let request = DropConnectionRequest { connection_id };
+    pub async fn drop_connection(
+        &self,
+        connection_id: ConnectionId,
+        cascade: bool,
+    ) -> Result<WaitVersion> {
+        let request = DropConnectionRequest {
+            connection_id,
+            cascade,
+        };
         let resp = self.inner.drop_connection(request).await?;
         Ok(resp
             .version
@@ -512,6 +519,7 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
         if_not_exists: bool,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<WaitVersion> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
@@ -519,6 +527,7 @@ impl MetaClient {
             source,
             job_type: job_type as _,
             if_not_exists,
+            dependencies: dependencies.into_iter().collect(),
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
@@ -639,6 +648,21 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_cdc_table_backfill_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+    ) -> Result<()> {
+        let request = AlterCdcTableBackfillParallelismRequest {
+            table_id,
+            parallelism: Some(parallelism),
+        };
+        self.inner
+            .alter_cdc_table_backfill_parallelism(request)
+            .await?;
+        Ok(())
+    }
+
     pub async fn alter_resource_group(
         &self,
         table_id: u32,
@@ -717,8 +741,15 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_view(&self, view: PbView) -> Result<WaitVersion> {
-        let request = CreateViewRequest { view: Some(view) };
+    pub async fn create_view(
+        &self,
+        view: PbView,
+        dependencies: HashSet<ObjectId>,
+    ) -> Result<WaitVersion> {
+        let request = CreateViewRequest {
+            view: Some(view),
+            dependencies: dependencies.into_iter().collect(),
+        };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
         Ok(resp
@@ -762,6 +793,18 @@ impl MetaClient {
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn compact_iceberg_table(&self, sink_id: u32) -> Result<u64> {
+        let request = CompactIcebergTableRequest { sink_id };
+        let resp = self.inner.compact_iceberg_table(request).await?;
+        Ok(resp.task_id)
+    }
+
+    pub async fn expire_iceberg_table_snapshots(&self, sink_id: u32) -> Result<()> {
+        let request = ExpireIcebergTableSnapshotsRequest { sink_id };
+        let _resp = self.inner.expire_iceberg_table_snapshots(request).await?;
+        Ok(())
     }
 
     pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<WaitVersion> {
@@ -1706,6 +1749,10 @@ impl MetaClient {
         self.inner.set_sync_log_store_aligned(request).await?;
         Ok(())
     }
+
+    pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
+        self.inner.refresh(request).await
+    }
 }
 
 #[async_trait]
@@ -2301,11 +2348,13 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
+            ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
@@ -2342,6 +2391,8 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
+            ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
+            ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

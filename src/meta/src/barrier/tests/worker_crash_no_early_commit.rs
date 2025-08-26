@@ -123,6 +123,13 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
         unreachable!()
     }
+
+    async fn handle_load_finished_source_ids(
+        &self,
+        _load_finished_source_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        unimplemented!()
+    }
 }
 
 #[tokio::test]
@@ -252,6 +259,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             barrier_interval_ms: None,
             checkpoint_frequency: None,
         }],
+        cdc_table_snapshot_split_assignment: Default::default(),
     })
     .unwrap();
     let make_control_stream_handle = || {

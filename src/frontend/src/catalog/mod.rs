@@ -23,6 +23,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::code::PostgresErrorCode;
 use risingwave_connector::sink::catalog::SinkCatalog;
+use risingwave_pb::user::grant_privilege::Object as PbGrantObject;
 use thiserror::Error;
 
 use crate::error::{ErrorCode, Result, RwError};
@@ -147,4 +148,9 @@ impl OwnedByUserCatalog for SinkCatalog {
     fn owner(&self) -> UserId {
         self.owner.user_id
     }
+}
+
+pub struct OwnedGrantObject {
+    pub owner: UserId,
+    pub object: PbGrantObject,
 }

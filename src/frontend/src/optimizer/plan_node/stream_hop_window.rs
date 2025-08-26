@@ -18,7 +18,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode, generic};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::MonotonicityMap;
@@ -58,7 +60,7 @@ impl StreamHopWindow {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             internal_watermark_columns.map_clone(&internal2output),
             MonotonicityMap::new(), /* hop window start/end jumps, so monotonicity is not propagated */
@@ -82,7 +84,7 @@ impl Distill for StreamHopWindow {
     }
 }
 
-impl PlanTreeNodeUnary for StreamHopWindow {
+impl PlanTreeNodeUnary<Stream> for StreamHopWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -98,7 +100,7 @@ impl PlanTreeNodeUnary for StreamHopWindow {
     }
 }
 
-impl_plan_tree_node_for_unary! {StreamHopWindow}
+impl_plan_tree_node_for_unary! { Stream, StreamHopWindow}
 
 impl StreamNode for StreamHopWindow {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -123,7 +125,7 @@ impl StreamNode for StreamHopWindow {
     }
 }
 
-impl ExprRewritable for StreamHopWindow {
+impl ExprRewritable<Stream> for StreamHopWindow {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

@@ -23,9 +23,9 @@ use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 impl Binder {
     pub(super) fn bind_binary_op(
         &mut self,
-        left: Expr,
-        op: BinaryOperator,
-        mut right: Expr,
+        left: &Expr,
+        op: &BinaryOperator,
+        mut right: &Expr,
     ) -> Result<ExprImpl> {
         let bound_left = self.bind_expr_inner(left)?;
 
@@ -34,11 +34,11 @@ impl Binder {
         right = match right {
             Expr::SomeOp(expr) => {
                 func_types.push(ExprType::Some);
-                *expr
+                expr
             }
             Expr::AllOp(expr) => {
                 func_types.push(ExprType::All);
-                *expr
+                expr
             }
             right => right,
         };
@@ -77,7 +77,7 @@ impl Binder {
     }
 
     fn resolve_binary_operator(
-        op: BinaryOperator,
+        op: &BinaryOperator,
         bound_left: &ExprImpl,
         bound_right: &ExprImpl,
     ) -> Result<Vec<ExprType>> {
@@ -140,6 +140,12 @@ impl Binder {
             BinaryOperator::Custom(name) if name == "||" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                // Dispatching order following PostgreSQL:
+                // 1. array
+                // 2. explicitly string
+                // 3. `T || T` for any T with its own `||` operator
+                // 4. implicitly string (i.e. unknown)
+                // 5. invalid
                 match (left_type, right_type) {
                     // array concatenation
                     (Some(DataType::List { .. }), Some(DataType::List { .. }))
@@ -153,14 +159,23 @@ impl Binder {
                         ExprType::ConcatOp
                     }
 
+                    // jsonb concatenation
                     (Some(DataType::Jsonb), Some(DataType::Jsonb))
                     | (Some(DataType::Jsonb), None)
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbConcat,
 
-                    // bytea (and varbit, tsvector, tsquery)
+                    // bytea concatenation
                     (Some(DataType::Bytea), Some(DataType::Bytea))
                     | (Some(DataType::Bytea), None)
                     | (None, Some(DataType::Bytea)) => ExprType::ByteaConcatOp,
+
+                    // vector/halfvec concatenation
+                    (Some(DataType::Vector(_)), Some(DataType::Vector(_)))
+                    | (Some(DataType::Vector(_)), None)
+                    | (None, Some(DataType::Vector(_))) => ExprType::VecConcat,
+
+                    // TODO: varbit, tsvector, tsquery
+                    // Once these types are supported, they shall go before the unknown-as-string case below.
 
                     // string concatenation
                     (None, _) | (_, None) => ExprType::ConcatOp,
@@ -210,6 +225,12 @@ impl Binder {
                 "?&" => ExprType::JsonbExistsAll,
                 // vector
                 "<->" => ExprType::L2Distance,
+                "<=>" => ExprType::CosineDistance,
+                "<+>" => ExprType::L1Distance,
+                "<#>" => {
+                    func_types.push(ExprType::Neg);
+                    ExprType::InnerProduct
+                }
                 _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
             },
             BinaryOperator::Xor | BinaryOperator::PGQualified(_) => {

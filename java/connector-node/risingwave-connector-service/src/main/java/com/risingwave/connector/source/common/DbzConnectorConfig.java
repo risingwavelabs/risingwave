@@ -134,16 +134,17 @@ public class DbzConnectorConfig {
                         && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
         var waitStreamingStartTimeout =
                 Integer.parseInt(
-                        userProps.getOrDefault(WAIT_FOR_STREAMING_START_TIMEOUT_SECS, "30"));
+                        userProps.getOrDefault(WAIT_FOR_STREAMING_START_TIMEOUT_SECS, "60"));
 
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}",
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}, waitStreamingStartTimeout={}",
                 source,
                 sourceId,
                 startOffset,
                 snapshotDone,
                 isCdcBackfill,
-                isCdcSourceJob);
+                isCdcSourceJob,
+                waitStreamingStartTimeout);
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
@@ -320,11 +321,11 @@ public class DbzConnectorConfig {
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }
-
         var otherProps = extractDebeziumProperties(userProps);
         for (var entry : otherProps.entrySet()) {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
+        LOG.info("Final Debezium properties: {}", dbzProps);
 
         this.sourceId = sourceId;
         this.sourceType = source;

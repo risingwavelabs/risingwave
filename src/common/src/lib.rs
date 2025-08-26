@@ -38,6 +38,8 @@
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
 #![feature(anonymous_lifetime_in_impl_trait)]
+#![feature(vec_into_raw_parts)]
+#![feature(exact_div)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
@@ -87,6 +89,7 @@ pub mod telemetry;
 pub mod test_utils;
 pub mod transaction;
 pub mod types;
+pub mod vector;
 pub mod vnode_mapping;
 
 pub mod test_prelude {

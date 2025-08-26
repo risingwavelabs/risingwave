@@ -32,7 +32,7 @@ use super::{
 use crate::stream::StreamFragmentGraph;
 use crate::{MetaError, MetaResult};
 
-// This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
+// This enum is used to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 #[derive(Debug, Clone, EnumIs, EnumTryAs)]
 pub enum StreamingJob {
@@ -245,21 +245,6 @@ impl StreamingJob {
         }
     }
 
-    // TODO: to be removed, pass all objects uniformly through `dependencies` field instead.
-    pub fn dependent_relations(&self) -> Vec<u32> {
-        match self {
-            StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
-            StreamingJob::Sink(_sink, _) => vec![], /* sink dependencies are now passed via `dependencies` field in `CreateSinkRequest` */
-            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(), /* TODO(rc): record table dependencies via `dependencies` field */
-            StreamingJob::Index(index, index_table) => {
-                // TODO(rc): record index dependencies via `dependencies` field
-                assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
-                vec![]
-            }
-            StreamingJob::Source(_) => vec![],
-        }
-    }
-
     pub fn dependent_connection_ids(&self) -> MetaResult<HashSet<u32>> {
         match self {
             StreamingJob::Source(source) => Ok(get_referred_connection_ids_from_source(source)),
@@ -330,10 +315,18 @@ impl StreamingJob {
                 // No version check for materialized view, since `ALTER MATERIALIZED VIEW AS QUERY`
                 // is a full rewrite.
             }
-            StreamingJob::Sink(_, _) | StreamingJob::Index(_, _) => {
+            StreamingJob::Sink(_, _) => {
+                // No version check for sink, since sink fragment altering is triggered along with Table
+            }
+            StreamingJob::Index(_, _) => {
                 bail_not_implemented!("schema change for {}", self.job_type_str())
             }
         }
         Ok(())
+    }
+
+    // Check whether we should notify the FE about the `CREATING` catalog of this job.
+    pub fn should_notify_creating(&self) -> bool {
+        self.is_materialized_view() || matches!(self.create_type(), CreateType::Background)
     }
 }

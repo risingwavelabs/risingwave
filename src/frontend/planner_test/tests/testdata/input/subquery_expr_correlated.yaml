@@ -693,3 +693,10 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: test case for PullUpCorrelatedProjectValueRule
+  sql: |
+    create table t(a int, b int);
+    select (select a + b) as c from t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan

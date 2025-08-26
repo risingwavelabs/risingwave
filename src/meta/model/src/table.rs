@@ -15,7 +15,7 @@
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbEngine, PbTableType};
-use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
+use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable, PbVectorIndexInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
 use sea_orm::entity::prelude::*;
@@ -39,6 +39,8 @@ pub enum TableType {
     Index,
     #[sea_orm(string_value = "INTERNAL")]
     Internal,
+    #[sea_orm(string_value = "VECTOR_INDEX")]
+    VectorIndex,
 }
 
 impl From<TableType> for PbTableType {
@@ -48,6 +50,7 @@ impl From<TableType> for PbTableType {
             TableType::MaterializedView => Self::MaterializedView,
             TableType::Index => Self::Index,
             TableType::Internal => Self::Internal,
+            TableType::VectorIndex => Self::VectorIndex,
         }
     }
 }
@@ -59,6 +62,7 @@ impl From<PbTableType> for TableType {
             PbTableType::MaterializedView => Self::MaterializedView,
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
+            PbTableType::VectorIndex => Self::VectorIndex,
             PbTableType::Unspecified => unreachable!("Unspecified table type"),
         }
     }
@@ -130,6 +134,8 @@ impl From<PbEngine> for Engine {
     }
 }
 
+crate::derive_from_blob!(VectorIndexInfo, PbVectorIndexInfo);
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "table")]
 pub struct Model {
@@ -166,6 +172,8 @@ pub struct Model {
     pub webhook_info: Option<WebhookSourceInfo>,
     pub engine: Option<Engine>,
     pub clean_watermark_index_in_pk: Option<i32>,
+    pub refreshable: bool,
+    pub vector_index_info: Option<VectorIndexInfo>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -302,6 +310,11 @@ impl From<PbTable> for ActiveModel {
                 .engine
                 .map(|engine| Engine::from(PbEngine::try_from(engine).expect("Invalid engine")))),
             clean_watermark_index_in_pk: Set(pb_table.clean_watermark_index_in_pk),
+            refreshable: Set(pb_table.refreshable),
+            vector_index_info: Set(pb_table
+                .vector_index_info
+                .as_ref()
+                .map(VectorIndexInfo::from)),
         }
     }
 }

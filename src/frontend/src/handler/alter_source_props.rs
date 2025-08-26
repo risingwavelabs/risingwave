@@ -30,7 +30,7 @@ pub async fn handle_alter_table_connector_props(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -110,7 +110,7 @@ pub async fn handle_alter_source_connector_props(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, real_source_name) =
-        Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &source_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);

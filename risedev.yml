@@ -134,6 +134,8 @@ profile:
       - use: grafana
       - use: kafka
         persist-data: true
+      - use: lakekeeper
+        port: 8181
 
   standalone-full-peripherals:
     steps:
@@ -361,6 +363,12 @@ profile:
       - use: compute-node
       - use: frontend
       - use: compactor
+      - use: compactor
+        compactor-mode: "dedicated-iceberg"
+        port: 6661
+        exporter-port: 1261
+      - use: lakekeeper
+        port: 8181
 
   meta-1cn-1fe-sqlite-with-recovery:
     config-path: src/config/ci-recovery.toml
@@ -1460,3 +1468,33 @@ template:
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
     user-managed: false
+
+  # Lakekeeper Apache Iceberg REST Catalog service backed by binary.
+  lakekeeper:
+    # Id to be picked-up by services
+    id: lakekeeper-${port}
+
+    # Address of Lakekeeper
+    address: "127.0.0.1"
+
+    # Listen port of Lakekeeper
+    port: 8181
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+    # Catalog backend - PostgreSQL or other supported backends
+    catalog-backend: "postgres"
+
+    # Encryption key for PostgreSQL backend (should be 32 characters for production)
+    encryption-key: "MySecretEncryptionKeyForDevelopment"
+
+    # PostgreSQL backend config for Lakekeeper catalog
+    provide-postgres-backend: "postgres*"
+
+    # Storage backend - MinIO for S3-compatible storage
+    provide-minio: "minio*"

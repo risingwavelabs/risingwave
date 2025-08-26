@@ -30,11 +30,11 @@ use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
-    ActorId, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array, JobStatus, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap,
-    WorkerId, actor, connection, database, fragment, fragment_relation, function, index, object,
-    object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
-    user_default_privilege, user_privilege, view,
+    ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array,
+    JobStatus, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId,
+    UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment, fragment_relation,
+    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
+    subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -63,6 +63,7 @@ use sea_orm::{
 };
 use thiserror_ext::AsReport;
 
+use crate::barrier::SharedFragmentInfo;
 use crate::controller::ObjectModel;
 use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
 use crate::{MetaError, MetaResult};
@@ -1040,9 +1041,9 @@ where
                 ObjectType::Sink => PbGrantObject::SinkId(oid),
                 ObjectType::View => PbGrantObject::ViewId(oid),
                 ObjectType::Function => PbGrantObject::FunctionId(oid),
-                ObjectType::Connection => unreachable!("connection is not supported yet"),
+                ObjectType::Connection => PbGrantObject::ConnectionId(oid),
                 ObjectType::Subscription => PbGrantObject::SubscriptionId(oid),
-                ObjectType::Secret => unreachable!("secret is not supported yet"),
+                ObjectType::Secret => PbGrantObject::SecretId(oid),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {
@@ -1054,6 +1055,20 @@ where
             }
         })
         .collect())
+}
+
+pub async fn get_table_columns(
+    txn: &impl ConnectionTrait,
+    id: TableId,
+) -> MetaResult<ColumnCatalogArray> {
+    let columns = Table::find_by_id(id)
+        .select_only()
+        .columns([table::Column::Columns])
+        .into_tuple::<ColumnCatalogArray>()
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("table", id))?;
+    Ok(columns)
 }
 
 /// `grant_default_privileges_automatically` grants default privileges automatically
@@ -1516,6 +1531,47 @@ where
         .await?;
 
     Ok(rebuild_fragment_mapping_from_actors(job_actors))
+}
+
+pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerSlotMapping {
+    let fragment_worker_slot_mapping = match fragment.distribution_type {
+        DistributionType::Single => {
+            let actor = fragment.actors.values().exactly_one().unwrap();
+            WorkerSlotMapping::new_single(WorkerSlotId::new(actor.worker_id as _, 0))
+        }
+        DistributionType::Hash => {
+            let actor_bitmaps: HashMap<_, _> = fragment
+                .actors
+                .iter()
+                .map(|(actor_id, actor_info)| {
+                    let vnode_bitmap = actor_info
+                        .vnode_bitmap
+                        .as_ref()
+                        .cloned()
+                        .expect("actor bitmap shouldn't be none in hash fragment");
+
+                    (*actor_id as hash::ActorId, vnode_bitmap)
+                })
+                .collect();
+
+            let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
+
+            let actor_locations = fragment
+                .actors
+                .iter()
+                .map(|(actor_id, actor_info)| {
+                    (*actor_id as hash::ActorId, actor_info.worker_id as u32)
+                })
+                .collect();
+
+            actor_mapping.to_worker_slot(&actor_locations)
+        }
+    };
+
+    PbFragmentWorkerSlotMapping {
+        fragment_id: fragment.fragment_id,
+        mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
+    }
 }
 
 pub fn rebuild_fragment_mapping_from_actors(

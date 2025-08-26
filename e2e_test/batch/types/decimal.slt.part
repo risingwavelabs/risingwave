@@ -43,6 +43,11 @@ select '  -inF '::decimal;
 -Infinity
 
 query R
+select '1.23e-3'::decimal;
+----
+0.00123
+
+query R
 values ('nan'::decimal), ('inf'), ('-inf'), ('2.') order by 1;
 ----
 -Infinity

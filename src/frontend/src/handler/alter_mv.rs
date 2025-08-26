@@ -37,8 +37,7 @@ pub fn fetch_mv_catalog_for_alter(
     mv_name: &ObjectName,
 ) -> Result<Arc<TableCatalog>> {
     let db_name = &session.database();
-    let (schema_name, real_mv_name) =
-        Binder::resolve_schema_qualified_name(db_name, mv_name.clone())?;
+    let (schema_name, real_mv_name) = Binder::resolve_schema_qualified_name(db_name, mv_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
 
@@ -109,7 +108,7 @@ pub async fn handle_alter_mv(
 
     let (dependent_relations, dependent_udfs, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
-        let bound_query = binder.bind_query(*new_query)?;
+        let bound_query = binder.bind_query(&new_query)?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
@@ -205,7 +204,7 @@ async fn handle_alter_mv_bound(
 
         if new_table != original_table {
             return Err(ErrorCode::NotSupported(
-                "incompatible alter".to_owned(),
+                "incompatible altering on the target materialized view".to_owned(),
                 format!(
                     "diff between the original and the new materialized view:\n{}",
                     pretty_assertions::Comparison::new(&original_table, &new_table)

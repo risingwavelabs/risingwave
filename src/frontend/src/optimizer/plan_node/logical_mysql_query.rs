@@ -19,8 +19,9 @@ use risingwave_common::catalog::Schema;
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchMySqlQuery, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    BatchMySqlQuery, BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PredicatePushdown, StreamPlanRef, ToBatch,
+    ToStream, generic,
 };
 use crate::OptimizerContextRef;
 use crate::error::Result;
@@ -66,7 +67,7 @@ impl LogicalMySqlQuery {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalMySqlQuery}
+impl_plan_tree_node_for_leaf! { Logical, LogicalMySqlQuery}
 impl Distill for LogicalMySqlQuery {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![("columns", column_names_pretty(self.schema()))];
@@ -80,7 +81,7 @@ impl ColPrunable for LogicalMySqlQuery {
     }
 }
 
-impl ExprRewritable for LogicalMySqlQuery {}
+impl ExprRewritable<Logical> for LogicalMySqlQuery {}
 
 impl ExprVisitable for LogicalMySqlQuery {}
 
@@ -89,20 +90,20 @@ impl PredicatePushdown for LogicalMySqlQuery {
         &self,
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         // No pushdown.
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 
 impl ToBatch for LogicalMySqlQuery {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         Ok(BatchMySqlQuery::new(self.core.clone()).into())
     }
 }
 
 impl ToStream for LogicalMySqlQuery {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         bail!("mysql_query function is not supported in streaming mode")
     }
 

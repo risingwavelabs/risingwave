@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub(crate) mod cdc;
+mod refresh_manager;
 mod scale;
 mod sink;
 mod source_manager;
@@ -21,6 +23,7 @@ mod stream_manager;
 mod test_fragmenter;
 mod test_scale;
 
+pub use refresh_manager::*;
 pub use scale::*;
 pub use sink::*;
 pub use source_manager::*;

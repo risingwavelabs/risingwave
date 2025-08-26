@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
@@ -226,6 +226,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .cloned()
                     .map(|table_id| (TableId::new(table_id), epoch))
                     .collect(),
+                truncate_tables: HashSet::new(),
             })
             .await
             .map_err(mock_err)?;

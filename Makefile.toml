@@ -2,6 +2,7 @@ extend = [
     { path = "src/risedevtool/grafana.toml" },
     { path = "src/risedevtool/prometheus.toml" },
     { path = "src/risedevtool/minio.toml" },
+    { path = "src/risedevtool/lakekeeper.toml" },
     { path = "src/risedevtool/tempo.toml" },
     { path = "src/risedevtool/gcloud-pubsub.toml" },
     { path = "src/risedevtool/redis.toml" },
@@ -519,6 +520,7 @@ dependencies = [
     "download-tempo",
     "download-mcli",
     "download-minio",
+    "download-lakekeeper",
     "download-prometheus",
     "download-pubsub",
     "download-redis",
@@ -563,18 +565,6 @@ dependencies = [
     "post-build-risingwave",
     "test-system-risingwave",
     "prepare-config",
-]
-
-[tasks.pre-start-benchmark]
-category = "RiseDev - Prepare"
-description = "Download necessary tools to deploy a benchmark env"
-dependencies = [
-    "download-minio",
-    "download-mcli",
-    "download-grafana",
-    "download-prometheus",
-    "download-tempo",
-    "download-redis",
 ]
 
 [tasks.pre-start-playground]
@@ -1495,3 +1485,8 @@ eval "${COMMAND}"
 
 echo "Node ${NODE_NAME} restarted."
 '''
+
+[tasks.sql-bench]
+category = "RiseDev - Benchmark"
+description = "Run a local or remote sql benchmark on a RisingWave instance"
+script = "./develop/sql_bench/main.py $@"
