@@ -119,7 +119,8 @@ impl Binder {
                     return Err(ErrorCode::BindError(format!(
                         "Cross-database function call is not supported: {}",
                         name
-                    )).into());
+                    ))
+                    .into());
                 }
                 let schema_name = schema.real_value();
                 let func_name = name.real_value();
