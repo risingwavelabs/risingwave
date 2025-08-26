@@ -19,6 +19,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
@@ -105,6 +106,7 @@ pub async fn load_fragment_info<C>(
     txn: &C,
     database_id: Option<DatabaseId>,
     worker_nodes: &ActiveStreamingWorkerNodes,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
 ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
 where
     C: ConnectionTrait,
@@ -144,7 +146,7 @@ where
 
     println!("before render");
 
-    render_jobs(txn, jobs, available_workers).await
+    render_jobs(txn, jobs, available_workers, adaptive_parallelism_strategy).await
 }
 
 #[derive(Debug)]
@@ -153,7 +155,7 @@ pub struct TargetResourcePolicy {
     pub parallelism: StreamingParallelism,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WorkerInfo {
     pub weight: NonZeroUsize,
     pub resource_group: Option<String>,
@@ -163,6 +165,7 @@ pub async fn render_jobs<C>(
     txn: &C,
     job_ids: HashSet<ObjectId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
 ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
 where
     C: ConnectionTrait,
@@ -304,7 +307,9 @@ where
         let total_parallelism = workers.values().map(|w| w.get()).sum::<usize>();
 
         let fact_parallelism = match job.parallelism {
-            StreamingParallelism::Adaptive => total_parallelism,
+            StreamingParallelism::Adaptive => {
+                adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
+            }
             StreamingParallelism::Fixed(n) => n,
             StreamingParallelism::Custom => unreachable!(),
         }

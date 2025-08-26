@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
@@ -1372,11 +1373,22 @@ impl CatalogController {
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
+        let adaptive_parallelism_strategy = {
+            let system_params_reader = self.env.system_params_reader().await;
+            system_params_reader.adaptive_parallelism_strategy()
+        };
+
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
         println!("111");
-        let database_fragment_infos = load_fragment_info(&txn, database_id, worker_nodes).await?;
+        let database_fragment_infos = load_fragment_info(
+            &txn,
+            database_id,
+            worker_nodes,
+            adaptive_parallelism_strategy,
+        )
+        .await?;
 
         debug!(?database_fragment_infos, "reload all actors");
 
