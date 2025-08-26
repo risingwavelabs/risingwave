@@ -68,17 +68,6 @@ select id, name, version1, version2, data from t2;
 1 user1_v2_2 2 2 newest_data1
 2 user2 2 1 data2
 
-# Test that both old single version and new multiple version tables coexist
-query I
-select count(*) from t1;
-----
-3
-
-query I
-select count(*) from t2;
-----
-2
-
 # Verify materialized view on old table still updates correctly
 query IIII rowsort
 select id, name, version, data from mv1;
@@ -86,3 +75,31 @@ select id, name, version, data from mv1;
 1 alice_v3 4 newest_data1
 2 bob_v2 3 updated_data2
 3 charlie 2 data3
+
+# Test that tables with on conflict but no version column still work after upgrade
+query III rowsort
+select id, name, data from t2;
+----
+1 user1_updated updated_data1
+2 user2_updated updated_data2
+
+# Test that we can still do conflict resolution on tables without version columns
+statement ok
+insert into t2 values (1, 'user1_post_upgrade', 'post_upgrade_data');
+
+query III rowsort
+select id, name, data from t2;
+----
+1 user1_post_upgrade post_upgrade_data
+2 user2_updated updated_data2
+
+# Verify all table types coexist properly
+query I
+select count(*) from t1; -- single version column table
+----
+3
+
+query I
+select count(*) from t2; -- no version column table
+----
+2

@@ -37,3 +37,23 @@ insert into t1 values (2, 'bob_v2', 3, 'updated_data2');
 
 statement ok
 insert into t1 values (2, 'bob_old', 2, 'should_be_ignored');
+
+# Test 3: Table with on conflict but WITHOUT version column (backward compatibility)
+statement ok
+create table t2 (
+    id int,
+    name varchar,
+    data varchar,
+    primary key(id)
+) on conflict do update if not null;
+
+# Insert initial data
+statement ok
+insert into t2 values (1, 'user1', 'data1'), (2, 'user2', 'data2');
+
+# Test conflict resolution - should update with newer values
+statement ok
+insert into t2 values (1, 'user1_updated', 'updated_data1');
+
+statement ok
+insert into t2 values (2, 'user2_updated', 'updated_data2');

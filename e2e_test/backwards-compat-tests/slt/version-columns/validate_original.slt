@@ -26,3 +26,15 @@ query I
 select count(*) from mv1;
 ----
 3
+
+# Check that table without version column works correctly
+query III rowsort
+select id, name, data from t2;
+----
+1 user1_updated updated_data1
+2 user2_updated updated_data2
+
+query I
+select count(*) from t2;
+----
+2
