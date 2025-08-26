@@ -830,12 +830,12 @@ impl GlobalStreamManager {
             // }
         }
 
-        let database_id = DatabaseId::new(
-            self.metadata_manager
-                .catalog_controller
-                .get_object_database_id(job_id as ObjectId)
-                .await? as _,
-        );
+        // let database_id = DatabaseId::new(
+        //     self.metadata_manager
+        //         .catalog_controller
+        //         .get_object_database_id(job_id as ObjectId)
+        //         .await? as _,
+        // );
 
         let job_id = TableId::new(job_id);
 
@@ -847,16 +847,21 @@ impl GlobalStreamManager {
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
         let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
-        let command = self
+        let commands = self
             .scale_controller
-            .reschedule_x(HashMap::from([(job_id.table_id as _, target)]), workers)
+            .reschedule_update(HashMap::from([(job_id.table_id as _, target)]), workers)
             .await?;
 
         if !deferred {
             println!("before run command");
-            self.barrier_scheduler
-                .run_command(database_id, command)
-                .await?;
+
+            for (database_id, command) in commands {
+                println!("run command for database_id: {:?}", database_id);
+
+                self.barrier_scheduler
+                    .run_command(database_id, command)
+                    .await?;
+            }
         }
 
         println!("after run command");
