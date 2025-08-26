@@ -73,7 +73,7 @@ pub struct UpstreamSinkInfo {
     pub sink_id: ObjectId,
     pub sink_fragment_id: FragmentId,
     pub sink_output_fields: Vec<PbField>,
-    // for forward compatibility
+    // for backwards compatibility
     pub sink_original_target_columns: Vec<PbColumnCatalog>,
     pub project_exprs: Vec<PbExprNode>,
     pub new_sink_downstream: DownstreamFragmentRelation,
@@ -656,7 +656,7 @@ impl GlobalStreamManager {
                 .run_command(
                     database_id,
                     Command::DropStreamingJobs {
-                        table_ids: streaming_job_ids
+                        streaming_job_ids: streaming_job_ids
                             .iter()
                             .map(|job_id| TableId::new(*job_id as _))
                             .collect(),

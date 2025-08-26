@@ -302,7 +302,7 @@ pub enum Command {
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the job fragments info from meta store.
     DropStreamingJobs {
-        table_ids: HashSet<TableId>,
+        streaming_job_ids: HashSet<TableId>,
         actors: Vec<ActorId>,
         unregistered_state_table_ids: HashSet<TableId>,
         unregistered_fragment_ids: HashSet<FragmentId>,
@@ -401,11 +401,13 @@ impl std::fmt::Display for Command {
             Command::Flush => write!(f, "Flush"),
             Command::Pause => write!(f, "Pause"),
             Command::Resume => write!(f, "Resume"),
-            Command::DropStreamingJobs { table_ids, .. } => {
+            Command::DropStreamingJobs {
+                streaming_job_ids, ..
+            } => {
                 write!(
                     f,
                     "DropStreamingJobs: {}",
-                    table_ids.iter().sorted().join(", ")
+                    streaming_job_ids.iter().sorted().join(", ")
                 )
             }
             Command::CreateStreamingJob { info, .. } => {
@@ -1379,9 +1381,11 @@ impl Command {
     }
 
     /// For `CancelStreamingJob`, returns the table id of the target table.
-    pub fn tables_to_drop(&self) -> impl Iterator<Item = TableId> + '_ {
+    pub fn jobs_to_drop(&self) -> impl Iterator<Item = TableId> + '_ {
         match self {
-            Command::DropStreamingJobs { table_ids, .. } => Some(table_ids.iter().cloned()),
+            Command::DropStreamingJobs {
+                streaming_job_ids, ..
+            } => Some(streaming_job_ids.iter().cloned()),
             _ => None,
         }
         .into_iter()

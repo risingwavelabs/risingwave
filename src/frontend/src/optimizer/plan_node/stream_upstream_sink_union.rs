@@ -39,7 +39,7 @@ struct UpstreamSinkUnionInner {
     append_only: bool,
     // `generated_column` is used to generate the `watermark_columns` field and affects the derivation of subsequent
     // operators. Since the project operator of `generated_column` is actually on the sink-fragment, not on the table,
-    // only expr can be retained here to determine the non-decreasing column.
+    // only expr can be retained here to determine the `watermark_columns`.
     generated_column_exprs: Option<Vec<ExprImpl>>,
 }
 
@@ -112,6 +112,9 @@ impl_plan_tree_node_for_leaf! { Stream, StreamUpstreamSinkUnion }
 impl StreamNode for StreamUpstreamSinkUnion {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         PbNodeBody::UpstreamSinkUnion(Box::new(UpstreamSinkUnionNode {
+            // When the table is created, there are no upstreams, so this is empty. When upstream sinks are created
+            // later, the actual upstreams in executor will increase, and during recovery, it will be filled with the
+            // actual upstream infos.
             init_upstreams: vec![],
         }))
     }

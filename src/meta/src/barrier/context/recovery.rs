@@ -251,6 +251,10 @@ impl GlobalBarrierWorkerContextImpl {
         Ok((table_committed_epoch, log_epochs))
     }
 
+    /// For normal DDL operations, the `UpstreamSinkUnion` operator is modified dynamically, and does not persist the
+    /// newly added or deleted upstreams in meta-store. Therefore, when restoring jobs, we need to restore the
+    /// information required by the operator based on the current state of the upstream (sink) and downstream (table) of
+    /// the operator.
     async fn recovery_table_with_upstream_sinks(
         &self,
         inflight_jobs: &mut HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,

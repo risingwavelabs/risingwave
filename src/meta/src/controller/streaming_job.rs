@@ -545,6 +545,8 @@ impl CatalogController {
         Ok(())
     }
 
+    /// Builds a cancel command for the streaming job. If the sink (with target table) needs to be dropped, additional
+    /// information is required to build barrier mutation.
     pub async fn build_cancel_command(
         &self,
         table_fragments: &StreamJobFragments,
@@ -575,7 +577,7 @@ impl CatalogController {
         }
 
         Ok(Command::DropStreamingJobs {
-            table_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
+            streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
             actors: table_fragments.actor_ids(),
             unregistered_state_table_ids: table_fragments
                 .all_table_ids()

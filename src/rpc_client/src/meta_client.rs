@@ -476,11 +476,9 @@ impl MetaClient {
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
-        #[allow(deprecated)]
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
-            affected_table_change: None, // Deprecated field, should be removed in the future.
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
         };
@@ -824,12 +822,7 @@ impl MetaClient {
     }
 
     pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<WaitVersion> {
-        #[allow(deprecated)]
-        let request = DropSinkRequest {
-            sink_id,
-            cascade,
-            affected_table_change: None, // Deprecated field, should be removed in the future.
-        };
+        let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp
             .version

@@ -796,7 +796,16 @@ impl LogicalPlanRoot {
         };
 
         let with_external_source = source_catalog.is_some();
-        let mut union_inputs = if with_external_source {
+        let (dml_source_node, external_source_node) = if with_external_source {
+            let dummy_source_node = LogicalSource::new(
+                None,
+                columns.clone(),
+                row_id_index,
+                SourceNodeKind::CreateTable,
+                context.clone(),
+                None,
+            )
+            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
             let mut external_source_node = stream_plan.plan;
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
@@ -810,43 +819,24 @@ impl LogicalPlanRoot {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
             };
-
-            let dummy_source_node = LogicalSource::new(
-                None,
-                columns.clone(),
-                row_id_index,
-                SourceNodeKind::CreateTable,
-                context.clone(),
-                None,
-            )
-            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
-
-            let dml_node = inject_dml_node(
-                &columns,
-                append_only,
-                dummy_source_node,
-                &pk_column_indices,
-                kind,
-                column_descs.clone(),
-            )?;
-
-            vec![external_source_node, dml_node]
+            (dummy_source_node, Some(external_source_node))
         } else {
-            let dml_node = inject_dml_node(
-                &columns,
-                append_only,
-                stream_plan.plan,
-                &pk_column_indices,
-                kind,
-                column_descs.clone(),
-            )?;
-
-            vec![dml_node]
+            (stream_plan.plan, None)
         };
 
-        let dists = union_inputs
+        let dml_node = inject_dml_node(
+            &columns,
+            append_only,
+            dml_source_node,
+            &pk_column_indices,
+            kind,
+            column_descs,
+        )?;
+
+        let dists = external_source_node
             .iter()
             .map(|input| input.distribution())
+            .chain(std::iter::once(dml_node.distribution()))
             .unique()
             .collect_vec();
 
@@ -861,7 +851,6 @@ impl LogicalPlanRoot {
             }
         };
 
-        let dml_node = union_inputs.last().unwrap();
         let generated_column_exprs =
             LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         let upstream_sink_union = StreamUpstreamSinkUnion::new(
@@ -870,7 +859,11 @@ impl LogicalPlanRoot {
             append_only,
             generated_column_exprs,
         );
-        union_inputs.push(upstream_sink_union.into());
+
+        let union_inputs = external_source_node
+            .into_iter()
+            .chain([dml_node, upstream_sink_union.into()])
+            .collect_vec();
 
         let mut stream_plan = StreamUnion::new_with_dist(
             Union {
