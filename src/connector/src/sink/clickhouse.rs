@@ -22,9 +22,10 @@ use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldLike, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use serde::Serialize;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde_derive::Deserialize;
@@ -603,7 +604,6 @@ impl Sink for ClickHouseSink {
 }
 pub struct ClickHouseSinkWriter {
     pub config: ClickHouseConfig,
-    #[expect(dead_code)]
     schema: Schema,
     #[expect(dead_code)]
     pk_indices: Vec<usize>,
@@ -611,7 +611,7 @@ pub struct ClickHouseSinkWriter {
     #[expect(dead_code)]
     is_append_only: bool,
     // Save some features of the clickhouse column type
-    column_correct_vec: Vec<ClickHouseSchemaFeature>,
+    column_correct_map: HashMap<String, ClickHouseSchemaFeature>,
     rw_fields_name_after_calibration: Vec<String>,
     clickhouse_engine: ClickHouseEngine,
     inserter: Option<Insert<ClickHouseColumn>>,
@@ -637,10 +637,11 @@ impl ClickHouseSinkWriter {
         let (clickhouse_column, clickhouse_engine) =
             query_column_engine_from_ck(client.clone(), &config).await?;
 
-        let column_correct_vec: Result<Vec<ClickHouseSchemaFeature>> = clickhouse_column
-            .iter()
-            .map(Self::build_column_correct_vec)
-            .collect();
+        let column_correct_map: Result<HashMap<String, ClickHouseSchemaFeature>> =
+            clickhouse_column
+                .iter()
+                .map(Self::build_column_correct_map)
+                .collect();
         let mut rw_fields_name_after_calibration = build_fields_name_type_from_schema(&schema)?
             .iter()
             .map(|(a, _)| a.clone())
@@ -658,7 +659,7 @@ impl ClickHouseSinkWriter {
             pk_indices,
             client,
             is_append_only,
-            column_correct_vec: column_correct_vec?,
+            column_correct_map: column_correct_map?,
             rw_fields_name_after_calibration,
             clickhouse_engine,
             inserter: None,
@@ -666,8 +667,10 @@ impl ClickHouseSinkWriter {
     }
 
     /// Check if clickhouse's column is 'Nullable', valid bits of `DateTime64`. And save it in
-    /// `column_correct_vec`
-    fn build_column_correct_vec(ck_column: &SystemColumn) -> Result<ClickHouseSchemaFeature> {
+    /// `column_correct_map`
+    fn build_column_correct_map(
+        ck_column: &SystemColumn,
+    ) -> Result<(String, ClickHouseSchemaFeature)> {
         let can_null = ck_column.r#type.contains("Nullable");
         // `DateTime64` without precision is already displayed as `DateTime(3)` in `system.columns`.
         let accuracy_time = if ck_column.r#type.contains("DateTime64(") {
@@ -719,11 +722,14 @@ impl ClickHouseSinkWriter {
         } else {
             (0_u8, 0_u8)
         };
-        Ok(ClickHouseSchemaFeature {
-            can_null,
-            accuracy_time,
-            accuracy_decimal,
-        })
+        Ok((
+            ck_column.name.clone(),
+            ClickHouseSchemaFeature {
+                can_null,
+                accuracy_time,
+                accuracy_decimal,
+            },
+        ))
     }
 
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -733,13 +739,15 @@ impl ClickHouseSinkWriter {
                 self.rw_fields_name_after_calibration.clone(),
             )?);
         }
+        let fields_name = self.schema.fields().iter().cloned().collect_vec();
         for (op, row) in chunk.rows() {
             let mut clickhouse_filed_vec = vec![];
-            for (index, data) in row.iter().enumerate() {
+            for (data, field) in row.iter().zip_eq_debug(fields_name.iter()) {
                 clickhouse_filed_vec.extend(ClickHouseFieldWithNull::from_scalar_ref(
                     data,
-                    &self.column_correct_vec,
-                    index,
+                    &self.column_correct_map,
+                    field.name(),
+                    &field.data_type(),
                 )?);
             }
             match op {
@@ -917,14 +925,27 @@ enum ClickHouseFieldWithNull {
 impl ClickHouseFieldWithNull {
     pub fn from_scalar_ref(
         data: Option<ScalarRefImpl<'_>>,
-        clickhouse_schema_feature_vec: &Vec<ClickHouseSchemaFeature>,
-        clickhouse_schema_feature_index: usize,
+        clickhouse_schema_feature_map: &HashMap<String, ClickHouseSchemaFeature>,
+        rw_name: &str,
+        rw_type: &DataType,
     ) -> Result<Vec<ClickHouseFieldWithNull>> {
-        let clickhouse_schema_feature = clickhouse_schema_feature_vec
-            .get(clickhouse_schema_feature_index)
-            .ok_or_else(|| SinkError::ClickHouse(format!("No column found from clickhouse table schema, index is {clickhouse_schema_feature_index}")))?;
+        let clickhouse_schema_feature = if !matches!(rw_type, DataType::Struct(_)) {
+            Some(clickhouse_schema_feature_map.get(rw_name).ok_or_else(|| {
+                SinkError::ClickHouse(format!(
+                    "No column found from clickhouse table schema, name is {rw_name}"
+                ))
+            })?)
+        } else {
+            None
+        };
+
         if data.is_none() {
-            if !clickhouse_schema_feature.can_null {
+            if clickhouse_schema_feature.is_none() {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse's nested can not insert null".to_owned(),
+                ));
+            }
+            if !clickhouse_schema_feature.unwrap().can_null {
                 return Err(SinkError::ClickHouse(
                     "Cannot insert null value into non-nullable ClickHouse column".to_owned(),
                 ));
@@ -948,23 +969,23 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
             ScalarRefImpl::Decimal(d) => {
                 let d = if let Decimal::Normalized(d) = d {
-                    let scale =
-                        clickhouse_schema_feature.accuracy_decimal.1 as i32 - d.scale() as i32;
+                    let scale = clickhouse_schema_feature.unwrap().accuracy_decimal.1 as i32
+                        - d.scale() as i32;
                     if scale < 0 {
                         d.mantissa() / 10_i128.pow(scale.unsigned_abs())
                     } else {
                         d.mantissa() * 10_i128.pow(scale as u32)
                     }
-                } else if clickhouse_schema_feature.can_null {
+                } else if clickhouse_schema_feature.unwrap().can_null {
                     warn!("Inf, -Inf, Nan in RW decimal is converted into clickhouse null!");
                     return Ok(vec![ClickHouseFieldWithNull::None]);
                 } else {
                     warn!("Inf, -Inf, Nan in RW decimal is converted into clickhouse 0!");
                     0_i128
                 };
-                if clickhouse_schema_feature.accuracy_decimal.0 <= 9 {
+                if clickhouse_schema_feature.unwrap().accuracy_decimal.0 <= 9 {
                     ClickHouseField::Decimal(ClickHouseDecimal::Decimal32(d as i32))
-                } else if clickhouse_schema_feature.accuracy_decimal.0 <= 18 {
+                } else if clickhouse_schema_feature.unwrap().accuracy_decimal.0 <= 18 {
                     ClickHouseField::Decimal(ClickHouseDecimal::Decimal64(d as i64))
                 } else {
                     ClickHouseField::Decimal(ClickHouseDecimal::Decimal128(d))
@@ -991,13 +1012,16 @@ impl ClickHouseFieldWithNull {
             }
             ScalarRefImpl::Timestamptz(v) => {
                 let micros = v.timestamp_micros();
-                let ticks = match clickhouse_schema_feature.accuracy_time <= 6 {
+                let ticks = match clickhouse_schema_feature.unwrap().accuracy_time <= 6 {
                     true => {
-                        micros / 10_i64.pow((6 - clickhouse_schema_feature.accuracy_time).into())
+                        micros
+                            / 10_i64
+                                .pow((6 - clickhouse_schema_feature.unwrap().accuracy_time).into())
                     }
                     false => micros
                         .checked_mul(
-                            10_i64.pow((clickhouse_schema_feature.accuracy_time - 6).into()),
+                            10_i64
+                                .pow((clickhouse_schema_feature.unwrap().accuracy_time - 6).into()),
                         )
                         .ok_or_else(|| SinkError::ClickHouse("DateTime64 overflow".to_owned()))?,
                 };
@@ -1009,11 +1033,17 @@ impl ClickHouseFieldWithNull {
             }
             ScalarRefImpl::Struct(v) => {
                 let mut struct_vec = vec![];
-                for (index, field) in v.iter_fields_ref().enumerate() {
+                for ((field, struct_field_name), struct_field_type) in v
+                    .iter_fields_ref()
+                    .zip_eq_debug(rw_type.as_struct().names())
+                    .zip_eq_debug(rw_type.as_struct().types())
+                {
+                    let name = format!("{}.{}", rw_name, struct_field_name);
                     let a = Self::from_scalar_ref(
                         field,
-                        clickhouse_schema_feature_vec,
-                        clickhouse_schema_feature_index + index,
+                        clickhouse_schema_feature_map,
+                        &name,
+                        struct_field_type,
                     )?;
                     struct_vec.push(ClickHouseFieldWithNull::WithoutSome(ClickHouseField::List(
                         a,
@@ -1026,8 +1056,9 @@ impl ClickHouseFieldWithNull {
                 for i in v.iter() {
                     vec.extend(Self::from_scalar_ref(
                         i,
-                        clickhouse_schema_feature_vec,
-                        clickhouse_schema_feature_index,
+                        clickhouse_schema_feature_map,
+                        rw_name,
+                        rw_type,
                     )?)
                 }
                 return Ok(vec![ClickHouseFieldWithNull::WithoutSome(
@@ -1050,7 +1081,9 @@ impl ClickHouseFieldWithNull {
                 ));
             }
         };
-        let data = if clickhouse_schema_feature.can_null {
+        let data = if let Some(clickhouse_schema_feature) = clickhouse_schema_feature
+            && clickhouse_schema_feature.can_null
+        {
             vec![ClickHouseFieldWithNull::WithSome(data)]
         } else {
             vec![ClickHouseFieldWithNull::WithoutSome(data)]
