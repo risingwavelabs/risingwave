@@ -66,7 +66,7 @@ pub async fn delete_row_by_sink_id_and_end_epoch(
     let end_epoch_i64: i64 = end_epoch.try_into().unwrap();
     match Entity::delete_many()
         .filter(Column::SinkId.eq(sink_id))
-        .filter(Column::EndEpoch.lt(end_epoch_i64))
+        .filter(Column::EndEpoch.lte(end_epoch_i64))
         .exec(db)
         .await
     {

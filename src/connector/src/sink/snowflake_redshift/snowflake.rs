@@ -68,14 +68,14 @@ pub struct SnowflakeConfig {
     pub snowflake_schema: Option<String>,
 
     #[serde(default = "default_schedule")]
-    #[serde(rename = "schedule_seconds", alias = "merge_into_schedule_seconds")]
+    #[serde(rename = "write.target.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
-    pub snowflake_schedule_seconds: u64,
+    pub writer_target_interval_seconds: u64,
 
     #[serde(default = "default_schedule")]
-    #[serde(rename = "copy_into_schedule_seconds")]
+    #[serde(rename = "write.intermediate.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
-    pub copy_into_schedule_seconds: u64,
+    pub write_intermediate_interval_seconds: u64,
 
     #[serde(rename = "warehouse")]
     pub snowflake_warehouse: Option<String>,
@@ -207,7 +207,7 @@ impl SnowflakeConfig {
                     "intermediate.table.name is required"
                 )))?;
             snowflake_task_ctx.cdc_table_name = Some(cdc_table_name.clone());
-            snowflake_task_ctx.schedule_seconds = self.snowflake_schedule_seconds;
+            snowflake_task_ctx.writer_target_interval_seconds = self.writer_target_interval_seconds;
             snowflake_task_ctx.warehouse = Some(
                 self.snowflake_warehouse
                     .clone()
@@ -307,7 +307,6 @@ impl Sink for SnowflakeSink {
             let client = SnowflakeJniClient::new(client, snowflake_task_ctx);
             client.execute_create_table().await?;
             client.execute_create_pipe().await?;
-            println!("Snowflake sink das");
         }
 
         Ok(())
@@ -572,7 +571,7 @@ pub struct SnowflakeTaskContext {
     // only upsert
     pub task_name: Option<String>,
     pub cdc_table_name: Option<String>,
-    pub schedule_seconds: u64,
+    pub writer_target_interval_seconds: u64,
     pub warehouse: Option<String>,
     pub pk_column_names: Option<Vec<String>>,
     pub all_column_names: Option<Vec<String>>,
@@ -605,7 +604,7 @@ impl SnowflakeSinkCommitter {
                 let periodic_task_handle = tokio::spawn(async move {
                     Self::run_periodic_query_task(
                         snowflake_client,
-                        config.copy_into_schedule_seconds,
+                        config.write_intermediate_interval_seconds,
                         sink_id,
                         shutdown_receiver,
                     )
@@ -629,11 +628,11 @@ impl SnowflakeSinkCommitter {
 
     async fn run_periodic_query_task(
         client: SnowflakeJniClient,
-        copy_into_schedule_seconds: u64,
+        write_intermediate_interval_seconds: u64,
         sink_id: u32,
         mut shutdown_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,
     ) {
-        let mut copy_timer = interval(Duration::from_secs(copy_into_schedule_seconds));
+        let mut copy_timer = interval(Duration::from_secs(write_intermediate_interval_seconds));
         copy_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             tokio::select! {
@@ -970,7 +969,7 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         task_name,
         cdc_table_name,
         target_table_name,
-        schedule_seconds,
+        writer_target_interval_seconds,
         warehouse,
         pk_column_names,
         all_column_names,
@@ -1034,7 +1033,7 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
     format!(
         r#"CREATE OR REPLACE TASK {task_name}
 WAREHOUSE = {warehouse}
-SCHEDULE = '{schedule_seconds} SECONDS'
+SCHEDULE = '{writer_target_interval_seconds} SECONDS'
 AS
 BEGIN
     LET max_row_id STRING;
@@ -1062,7 +1061,7 @@ BEGIN
 END;"#,
         task_name = full_task_name,
         warehouse = warehouse.as_ref().unwrap(),
-        schedule_seconds = schedule_seconds,
+        writer_target_interval_seconds = writer_target_interval_seconds,
         cdc_table_name = full_cdc_table_name,
         target_table_name = full_target_table_name,
         pk_names_str = pk_names_str,
@@ -1086,7 +1085,7 @@ mod tests {
             task_name: Some("test_task".to_owned()),
             cdc_table_name: Some("test_cdc_table".to_owned()),
             target_table_name: "test_target_table".to_owned(),
-            schedule_seconds: 3600,
+            writer_target_interval_seconds: 3600,
             warehouse: Some("test_warehouse".to_owned()),
             pk_column_names: Some(vec!["v1".to_owned()]),
             all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
@@ -1134,7 +1133,7 @@ END;"#;
             task_name: Some("test_task_multi_pk".to_owned()),
             cdc_table_name: Some("cdc_multi_pk".to_owned()),
             target_table_name: "target_multi_pk".to_owned(),
-            schedule_seconds: 300,
+            writer_target_interval_seconds: 300,
             warehouse: Some("multi_pk_warehouse".to_owned()),
             pk_column_names: Some(vec!["id1".to_owned(), "id2".to_owned()]),
             all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),
