@@ -199,6 +199,19 @@ impl BuildingFragment {
                     table_desc.table_id = job_id;
                 }
             }
+            NodeBody::VectorIndexWrite(node) => {
+                let table = node.table.as_mut().unwrap();
+                table.id = job_id;
+                table.database_id = job.database_id();
+                table.schema_id = job.schema_id();
+                table.fragment_id = fragment_id;
+                #[cfg(not(debug_assertions))]
+                {
+                    table.definition = job.name();
+                }
+
+                has_job = true;
+            }
             _ => {}
         });
 
@@ -586,11 +599,6 @@ pub fn rewrite_refresh_schema_sink_fragment(
         })
         .collect();
     merge.upstream_fragment_id = upstream_table_fragment_id;
-    merge.fields.extend(
-        newly_added_columns.iter().map(|col| {
-            Field::new(col.column_desc.name.clone(), col.data_type().clone()).to_prost()
-        }),
-    );
     Ok((new_sink_fragment, new_sink_columns, new_log_store_table))
 }
 
@@ -785,10 +793,13 @@ impl StreamFragmentGraph {
             .zip_eq_fast(old_internal_tables.into_iter())
             .collect::<HashMap<_, _>>();
 
+        // TODO(alter-mv): unify this with `fit_internal_table_ids_with_mapping` after we
+        // confirm the behavior is the same.
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
+                    // XXX: this replaces the entire table, instead of just the id!
                     let target = internal_table_id_map.get(&table.id).cloned().unwrap();
                     *table = target;
                 },
@@ -799,14 +810,16 @@ impl StreamFragmentGraph {
     }
 
     /// Fit the internal tables' `table_id`s according to the given mapping.
-    pub fn fit_internal_table_ids_with_mapping(&mut self, matches: HashMap<u32, u32>) {
+    pub fn fit_internal_table_ids_with_mapping(&mut self, mut matches: HashMap<u32, Table>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
-                    let target = matches.get(&table.id).cloned().unwrap();
-                    // TODO(alter-mv): some other fields may also need to be aligned, like `vnode_count`?
-                    table.id = target;
+                    let target = matches.remove(&table.id).unwrap_or_else(|| {
+                        panic!("no matching table for table {}({})", table.id, table.name)
+                    });
+                    table.id = target.id;
+                    table.maybe_vnode_count = target.maybe_vnode_count;
                 },
             );
         }
@@ -1653,10 +1666,18 @@ impl CompleteStreamFragmentGraph {
                 None
             };
 
+        let vector_index_fragment_id =
+            if inner.fragment_type_mask & FragmentTypeFlag::VectorIndexWrite as u32 != 0 {
+                job_id
+            } else {
+                None
+            };
+
         let state_table_ids = internal_tables
             .iter()
             .map(|t| t.id)
             .chain(materialized_fragment_id)
+            .chain(vector_index_fragment_id)
             .collect();
 
         Fragment {

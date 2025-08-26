@@ -14,16 +14,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use itertools::Itertools;
-
-use crate::PlanRef;
 use crate::catalog::SourceId;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::PlanVisitor;
 use crate::optimizer::plan_node::{
-    LogicalShare, LogicalSource, PlanNodeId, PlanTreeNode, StreamShare,
+    Logical, LogicalPlanRef as PlanRef, LogicalShare, LogicalSource,
 };
-use crate::optimizer::plan_visitor::{DefaultBehavior, DefaultValue};
-use crate::optimizer::{PlanRewriter, PlanVisitor};
+use crate::optimizer::plan_rewriter::PlanRewriter;
+use crate::optimizer::plan_visitor::{DefaultBehavior, DefaultValue, LogicalPlanVisitor};
 
 #[derive(Debug, Clone, Default)]
 pub struct ShareSourceRewriter {
@@ -31,9 +28,6 @@ pub struct ShareSourceRewriter {
     share_ids: HashSet<SourceId>,
     /// Source id to share node.
     share_source: HashMap<SourceId, PlanRef>,
-    /// Original share node plan id to new share node.
-    /// Rewriter will rewrite all nodes, but we need to keep the shape of the DAG.
-    share_map: HashMap<PlanNodeId, PlanRef>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -56,14 +50,11 @@ impl ShareSourceRewriter {
                 .map(|(k, _)| k)
                 .collect(),
             share_source: Default::default(),
-            share_map: Default::default(),
         };
         // Rewrite source to share source
-        share_source_rewriter.rewrite(plan)
+        plan.rewrite_with(&mut share_source_rewriter)
     }
-}
 
-impl PlanRewriter for ShareSourceRewriter {
     fn rewrite_logical_source(&mut self, source: &LogicalSource) -> PlanRef {
         let source_id = match &source.core.catalog {
             Some(s) => s.id,
@@ -85,32 +76,19 @@ impl PlanRewriter for ShareSourceRewriter {
             Some(share_source) => share_source.clone(),
         }
     }
+}
 
-    fn rewrite_logical_share(&mut self, share: &LogicalShare) -> PlanRef {
-        // When we use the plan rewriter, we need to take care of the share operator,
-        // because our plan is a DAG rather than a tree.
-        match self.share_map.get(&share.id()) {
-            None => {
-                let new_inputs = share
-                    .inputs()
-                    .into_iter()
-                    .map(|input| self.rewrite(input))
-                    .collect_vec();
-                let new_share = share.clone_with_inputs(&new_inputs);
-                self.share_map.insert(share.id(), new_share.clone());
-                new_share
-            }
-            Some(new_share) => new_share.clone(),
+impl PlanRewriter<Logical> for ShareSourceRewriter {
+    fn rewrite_with_inputs(&mut self, plan: &PlanRef, inputs: Vec<PlanRef>) -> PlanRef {
+        if let Some(source) = plan.as_logical_source() {
+            self.rewrite_logical_source(source)
+        } else {
+            plan.clone_root_with_inputs(&inputs)
         }
-    }
-
-    fn rewrite_stream_share(&mut self, _share: &StreamShare) -> PlanRef {
-        // We only access logical node here, so stream share is unreachable.
-        unreachable!()
     }
 }
 
-impl PlanVisitor for SourceCounter {
+impl LogicalPlanVisitor for SourceCounter {
     type Result = ();
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

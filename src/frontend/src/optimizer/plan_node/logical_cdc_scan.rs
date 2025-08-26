@@ -16,19 +16,19 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc};
+use risingwave_connector::source::cdc::CdcScanOptions;
 
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
-    generic,
+    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
+    PredicatePushdown, StreamPlanRef, ToBatch, ToStream, generic,
 };
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::CdcScanOptions;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
     ToStreamContext,
@@ -107,7 +107,7 @@ impl LogicalCdcScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalCdcScan}
+impl_plan_tree_node_for_leaf! { Logical, LogicalCdcScan}
 
 impl Distill for LogicalCdcScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -160,7 +160,7 @@ impl ColPrunable for LogicalCdcScan {
     }
 }
 
-impl ExprRewritable for LogicalCdcScan {
+impl ExprRewritable<Logical> for LogicalCdcScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -193,17 +193,17 @@ impl PredicatePushdown for LogicalCdcScan {
 }
 
 impl ToBatch for LogicalCdcScan {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         unreachable!()
     }
 
-    fn to_batch_with_order_required(&self, _required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_with_order_required(&self, _required_order: &Order) -> Result<BatchPlanRef> {
         unreachable!()
     }
 }
 
 impl ToStream for LogicalCdcScan {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         Ok(StreamCdcTableScan::new(self.core.clone()).into())
     }
 

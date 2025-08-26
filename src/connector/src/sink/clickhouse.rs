@@ -481,7 +481,7 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Date => Ok(ck_column.r#type.contains("Date32")),
             risingwave_common::types::DataType::Varchar => Ok(ck_column.r#type.contains("String")),
             risingwave_common::types::DataType::Time => Err(SinkError::ClickHouse(
-                "clickhouse can not support Time".to_owned(),
+                "TIME is not supported for ClickHouse sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Timestamp => Err(SinkError::ClickHouse(
                 "clickhouse does not have a type corresponding to naive timestamp".to_owned(),
@@ -490,7 +490,7 @@ impl ClickHouseSink {
                 Ok(ck_column.r#type.contains("DateTime64"))
             }
             risingwave_common::types::DataType::Interval => Err(SinkError::ClickHouse(
-                "clickhouse can not support Interval".to_owned(),
+                "INTERVAL is not supported for ClickHouse sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Struct(_) => Err(SinkError::ClickHouse(
                 "struct needs to be converted into a list".to_owned(),
@@ -500,23 +500,25 @@ impl ClickHouseSink {
                 Ok(ck_column.r#type.contains("Array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
-                "clickhouse can not support Bytea".to_owned(),
+                "BYTEA is not supported for ClickHouse sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Jsonb => Ok(ck_column.r#type.contains("JSON")),
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
             risingwave_common::types::DataType::Int256 => Err(SinkError::ClickHouse(
-                "clickhouse can not support Int256".to_owned(),
+                "INT256 is not supported for ClickHouse sink.".to_owned(),
             )),
             risingwave_common::types::DataType::Map(_) => Err(SinkError::ClickHouse(
-                "clickhouse can not support Map".to_owned(),
+                "MAP is not supported for ClickHouse sink.".to_owned(),
             )),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::ClickHouse(
+                "VECTOR is not supported for ClickHouse sink.".to_owned(),
+            )),
         };
         if !is_match? {
             return Err(SinkError::ClickHouse(format!(
-                "Column type can not match name is {:?}, risingwave is {:?} and clickhouse is {:?}",
+                "Column type mismatch for column {:?}: RisingWave type is {:?}, ClickHouse type is {:?}",
                 ck_column.name, fields_type, ck_column.r#type
             )));
         }
@@ -924,7 +926,7 @@ impl ClickHouseFieldWithNull {
         if data.is_none() {
             if !clickhouse_schema_feature.can_null {
                 return Err(SinkError::ClickHouse(
-                    "clickhouse column can not insert null".to_owned(),
+                    "Cannot insert null value into non-nullable ClickHouse column".to_owned(),
                 ));
             } else {
                 return Ok(vec![ClickHouseFieldWithNull::None]);
@@ -936,7 +938,7 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Int64(v) => ClickHouseField::Int64(v),
             ScalarRefImpl::Int256(_) => {
                 return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Int256".to_owned(),
+                    "INT256 is not supported for ClickHouse sink.".to_owned(),
                 ));
             }
             ScalarRefImpl::Serial(v) => ClickHouseField::Serial(v),
@@ -970,7 +972,7 @@ impl ClickHouseFieldWithNull {
             }
             ScalarRefImpl::Interval(_) => {
                 return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Interval".to_owned(),
+                    "INTERVAL is not supported for ClickHouse sink. Please convert to VARCHAR or other supported types.".to_owned(),
                 ));
             }
             ScalarRefImpl::Date(v) => {
@@ -979,7 +981,7 @@ impl ClickHouseFieldWithNull {
             }
             ScalarRefImpl::Time(_) => {
                 return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Time".to_owned(),
+                    "TIME is not supported for ClickHouse sink. Please convert to VARCHAR or other supported types.".to_owned(),
                 ));
             }
             ScalarRefImpl::Timestamp(_) => {
@@ -1034,15 +1036,19 @@ impl ClickHouseFieldWithNull {
             }
             ScalarRefImpl::Bytea(_) => {
                 return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Bytea".to_owned(),
+                    "BYTEA is not supported for ClickHouse sink. Please convert to VARCHAR or other supported types.".to_owned(),
                 ));
             }
             ScalarRefImpl::Map(_) => {
                 return Err(SinkError::ClickHouse(
-                    "clickhouse can not support Map".to_owned(),
+                    "MAP is not supported for ClickHouse sink.".to_owned(),
                 ));
             }
-            ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            ScalarRefImpl::Vector(_) => {
+                return Err(SinkError::ClickHouse(
+                    "VECTOR is not supported for ClickHouse sink.".to_owned(),
+                ));
+            }
         };
         let data = if clickhouse_schema_feature.can_null {
             vec![ClickHouseFieldWithNull::WithSome(data)]

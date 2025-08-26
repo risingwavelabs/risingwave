@@ -422,6 +422,7 @@ impl Binder {
                 ("jsonb_path_query_first", raw_call(ExprType::JsonbPathQueryFirst)),
                 ("jsonb_set", raw_call(ExprType::JsonbSet)),
                 ("jsonb_populate_map", raw_call(ExprType::JsonbPopulateMap)),
+                ("jsonb_to_array", raw_call(ExprType::JsonbToArray)),
                 // map
                 ("map_from_entries", raw_call(ExprType::MapFromEntries)),
                 ("map_access", raw_call(ExprType::MapAccess)),
@@ -436,6 +437,11 @@ impl Binder {
                 ("map_length", raw_call(ExprType::MapLength)),
                 // vector
                 ("l2_distance", raw_call(ExprType::L2Distance)),
+                ("cosine_distance", raw_call(ExprType::CosineDistance)),
+                ("l1_distance", raw_call(ExprType::L1Distance)),
+                ("inner_product", raw_call(ExprType::InnerProduct)),
+                ("vector_norm", raw_call(ExprType::L2Norm)),
+                ("l2_normalize", raw_call(ExprType::L2Normalize)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -721,7 +727,8 @@ impl Binder {
                 // internal
                 ("rw_vnode", raw_call(ExprType::VnodeUser)),
                 ("rw_license", raw_call(ExprType::License)),
-                ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
+                ("rw_test_paid_tier", raw_call(ExprType::TestFeature)), // deprecated, kept for compatibility
+                ("rw_test_feature", raw_call(ExprType::TestFeature)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
@@ -730,6 +737,7 @@ impl Binder {
                 ("proctime", proctime()),
                 ("pg_sleep", raw_call(ExprType::PgSleep)),
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
+                ("random", raw_call(ExprType::Random)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
 

@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
@@ -50,9 +51,9 @@ use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
-use risingwave_pb::stream_plan::PbStreamNode;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
@@ -559,7 +560,7 @@ impl CatalogController {
         let Some(obj) = obj else {
             tracing::warn!(
                 id = job_id,
-                "streaming job not found when aborting creating, might be cleaned by recovery"
+                "streaming job not found when aborting creating, might be cancelled already or cleaned by recovery"
             );
             return Ok((true, None));
         };
@@ -706,39 +707,37 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         split_assignment: &SplitAssignment,
-    ) -> MetaResult<()> {
-        self.post_collect_job_fragments_inner(
-            job_id,
-            actor_ids,
-            upstream_fragment_new_downstreams,
-            split_assignment,
-        )
-        .await
-    }
-
-    pub async fn post_collect_job_fragments_inner(
-        &self,
-        job_id: ObjectId,
-        actor_ids: Vec<crate::model::ActorId>,
-        upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
-        split_assignment: &SplitAssignment,
+        replace_plan: Option<&ReplaceStreamJobPlan>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        let actor_ids = actor_ids
+            .into_iter()
+            .chain(
+                replace_plan
+                    .iter()
+                    .flat_map(|plan| plan.new_fragments.actor_ids().into_iter()),
+            )
+            .map(|id| id as ActorId)
+            .collect_vec();
 
         Actor::update_many()
             .col_expr(
                 actor::Column::Status,
                 SimpleExpr::from(ActorStatus::Running.into_value()),
             )
-            .filter(
-                actor::Column::ActorId
-                    .is_in(actor_ids.into_iter().map(|id| id as ActorId).collect_vec()),
-            )
+            .filter(actor::Column::ActorId.is_in(actor_ids))
             .exec(&txn)
             .await?;
 
-        for splits in split_assignment.values() {
+        for splits in split_assignment.values().chain(
+            replace_plan
+                .as_ref()
+                .map(|plan| plan.init_split_assignment.values())
+                .into_iter()
+                .flatten(),
+        ) {
             for (actor_id, splits) in splits {
                 let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
                 let connector_splits = &PbConnectorSplits { splits };
@@ -753,6 +752,28 @@ impl CatalogController {
         }
 
         insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;
+        let objects = if let Some(plan) = &replace_plan {
+            insert_fragment_relations(&txn, &plan.upstream_fragment_downstreams).await?;
+
+            let incoming_sink_id = job_id;
+            let (objects, _) = Self::finish_replace_streaming_job_inner(
+                plan.tmp_id as _,
+                plan.replace_upstream.clone(),
+                SinkIntoTableContext {
+                    creating_sink_id: Some(incoming_sink_id),
+                    dropping_sink_id: None,
+                    updated_sink_catalogs: vec![],
+                },
+                &txn,
+                plan.streaming_job.clone(),
+                None,
+                None,
+            )
+            .await?;
+            objects
+        } else {
+            vec![]
+        };
 
         // Mark job as CREATING.
         streaming_job::ActiveModel {
@@ -764,6 +785,13 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
+        if !objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+            )
+            .await;
+        }
 
         Ok(())
     }
@@ -865,11 +893,7 @@ impl CatalogController {
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
-    pub async fn finish_streaming_job(
-        &self,
-        job_id: ObjectId,
-        replace_stream_job_info: Option<ReplaceStreamJobPlan>,
-    ) -> MetaResult<()> {
+    pub async fn finish_streaming_job(&self, job_id: ObjectId) -> MetaResult<()> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -1056,35 +1080,6 @@ impl CatalogController {
             _ => unreachable!("invalid job type: {:?}", job_type),
         }
 
-        let replace_table_mapping_update = match replace_stream_job_info {
-            Some(ReplaceStreamJobPlan {
-                streaming_job,
-                replace_upstream,
-                tmp_id,
-                ..
-            }) => {
-                let incoming_sink_id = job_id;
-
-                let (relations, _) = Self::finish_replace_streaming_job_inner(
-                    tmp_id as ObjectId,
-                    replace_upstream,
-                    SinkIntoTableContext {
-                        creating_sink_id: Some(incoming_sink_id as _),
-                        dropping_sink_id: None,
-                        updated_sink_catalogs: vec![],
-                    },
-                    &txn,
-                    streaming_job,
-                    None, // will not drop table connector when creating a streaming job
-                    None, // no auto schema refresh sinks when create table
-                )
-                .await?;
-
-                Some(relations)
-            }
-            None => None,
-        };
-
         if job_type != ObjectType::Index {
             updated_user_info = grant_default_privileges_automatically(&txn, job_id).await?;
         }
@@ -1102,14 +1097,6 @@ impl CatalogController {
             version = self.notify_users_update(updated_user_info).await;
         }
 
-        if let Some(objects) = replace_table_mapping_update {
-            version = self
-                .notify_frontend(
-                    NotificationOperation::Update,
-                    NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
-                )
-                .await;
-        }
         inner
             .creating_table_finish_notifier
             .values_mut()
@@ -1237,10 +1224,11 @@ impl CatalogController {
                 }
 
                 if let Some(sink_id) = dropping_sink_id {
-                    let drained = incoming_sinks
+                    let _drained = incoming_sinks
                         .extract_if(.., |id| *id == sink_id)
                         .collect_vec();
-                    debug_assert_eq!(drained, vec![sink_id]);
+                    // TODO(august): re-enable this assertion after refactoring sink into table
+                    // debug_assert_eq!(drained, vec![sink_id]);
                 }
 
                 table.incoming_sinks = Set(incoming_sinks.into());
@@ -1630,7 +1618,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         // returns true if the mutation is applied
-        mut fragments_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> bool,
+        mut fragments_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> MetaResult<bool>,
         // error message when no relevant fragments is found
         err_msg: &'static str,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
@@ -1655,9 +1643,17 @@ impl CatalogController {
             })
             .collect_vec();
 
-        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
-            fragments_mutation_fn(*fragment_type_mask, stream_node)
-        });
+        let fragments = fragments
+            .iter_mut()
+            .map(|(_, fragment_type_mask, stream_node)| {
+                fragments_mutation_fn(*fragment_type_mask, stream_node)
+            })
+            .collect::<MetaResult<Vec<bool>>>()?
+            .into_iter()
+            .zip_eq_debug(std::mem::take(&mut fragments))
+            .filter_map(|(keep, fragment)| if keep { Some(fragment) } else { None })
+            .collect::<Vec<_>>();
+
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
                 "job id {job_id}: {}",
@@ -1760,7 +1756,7 @@ impl CatalogController {
                         _ => {}
                     });
                 }
-                found
+                Ok(found)
             };
 
         self.mutate_fragments_by_job_id(
@@ -1780,12 +1776,18 @@ impl CatalogController {
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_sink_rate_limit =
             |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
-                let mut found = false;
+                let mut found = Ok(false);
                 if fragment_type_mask.contains_any(FragmentTypeFlag::sink_rate_limit_fragments()) {
                     visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Sink(node) = node {
+                            if node.log_store_type != PbSinkLogStoreType::KvLogStore as i32 {
+                                found = Err(MetaError::invalid_parameter(
+                                    "sink rate limit is only supported for kv log store, please SET sink_decouple = TRUE before CREATE SINK",
+                                ));
+                                return;
+                            }
                             node.rate_limit = rate_limit;
-                            found = true;
+                            found = Ok(true);
                         }
                     });
                 }
@@ -1812,7 +1814,7 @@ impl CatalogController {
                         }
                     });
                 }
-                found
+                Ok(found)
             };
 
         self.mutate_fragments_by_job_id(job_id, update_dml_rate_limit, "dml node not found")

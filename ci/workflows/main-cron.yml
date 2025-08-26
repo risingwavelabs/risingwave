@@ -67,7 +67,7 @@ steps:
           <<: *docker-compose
           environment:
           - GITHUB_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "build simulation test"
@@ -164,7 +164,7 @@ steps:
         - "build-other"
       plugins:
         - docker-compose#v5.5.0:
-            <<: *docker-compose-standard
+            <<: *docker-compose
             run: source-test-env
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 25

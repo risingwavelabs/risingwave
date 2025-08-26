@@ -40,8 +40,8 @@ use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
-use crate::executor::StreamConsumer;
 use crate::executor::prelude::*;
+use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, LocalBarrierManager, NewOutputRequest};
 
 mod output_mapping;
@@ -57,14 +57,7 @@ pub struct DispatchExecutor {
 
 struct DispatcherWithMetrics {
     dispatcher: DispatcherImpl,
-    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
-}
-
-impl DispatcherWithMetrics {
-    pub fn record_output_buffer_blocking_duration(&self, duration: Duration) {
-        let ns = duration.as_nanos() as u64;
-        self.actor_output_buffer_blocking_duration_ns.inc_by(ns);
-    }
+    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
 }
 
 impl Debug for DispatcherWithMetrics {
@@ -161,6 +154,34 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
+        macro_rules! await_with_metrics {
+            ($fut:expr, $metrics:expr) => {{
+                let mut start_time = Instant::now();
+                let interval_duration = Duration::from_secs(15);
+                let mut interval =
+                    tokio::time::interval_at(start_time + interval_duration, interval_duration);
+
+                let mut fut = std::pin::pin!($fut);
+
+                loop {
+                    tokio::select! {
+                        biased;
+                        res = &mut fut => {
+                            res?;
+                            let ns = start_time.elapsed().as_nanos() as u64;
+                            $metrics.inc_by(ns);
+                            break;
+                        }
+                        _ = interval.tick() => {
+                            start_time = Instant::now();
+                            $metrics.inc_by(interval_duration.as_nanos() as u64);
+                        }
+                    };
+                }
+                StreamResult::Ok(())
+            }};
+        }
+
         let limit = self
             .local_barrier_manager
             .env
@@ -179,18 +200,16 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher
-                            .dispatch_barriers(
-                                barrier_batch
-                                    .iter()
-                                    .cloned()
-                                    .map(|b| b.into_dispatcher())
-                                    .collect(),
-                            )
-                            .await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
-                        StreamResult::Ok(())
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
+                        let fut = dispatcher_output.dispatch_barriers(
+                            barrier_batch
+                                .iter()
+                                .cloned()
+                                .map(|b| b.into_dispatcher())
+                                .collect(),
+                        );
+                        await_with_metrics!(std::pin::pin!(fut), metrics)
                     })
                     .await?;
                 self.post_mutate_dispatchers(&mutation)?;
@@ -199,10 +218,10 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher.dispatch_watermark(watermark.clone()).await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
-                        StreamResult::Ok(())
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
+                        let fut = dispatcher_output.dispatch_watermark(watermark.clone());
+                        await_with_metrics!(std::pin::pin!(fut), metrics)
                     })
                     .await?;
             }
@@ -210,10 +229,10 @@ impl DispatchExecutorInner {
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
-                        let start_time = Instant::now();
-                        dispatcher.dispatch_data(chunk.clone()).await?;
-                        dispatcher.record_output_buffer_blocking_duration(start_time.elapsed());
-                        StreamResult::Ok(())
+                        let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
+                        let dispatcher_output = &mut dispatcher.dispatcher;
+                        let fut = dispatcher_output.dispatch_data(chunk.clone());
+                        await_with_metrics!(std::pin::pin!(fut), metrics)
                     })
                     .await?;
 
@@ -358,11 +377,11 @@ impl DispatchExecutorInner {
         };
 
         match mutation {
-            Mutation::Stop(stops) => {
+            Mutation::Stop(StopMutation { dropped_actors, .. }) => {
                 // Remove outputs only if this actor itself is not to be stopped.
-                if !stops.contains(&self.actor_id) {
+                if !dropped_actors.contains(&self.actor_id) {
                     for dispatcher in &mut self.dispatchers {
-                        dispatcher.remove_outputs(stops);
+                        dispatcher.remove_outputs(dropped_actors);
                     }
                 }
             }
@@ -1378,12 +1397,7 @@ mod tests {
         let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
             UpdateMutation {
                 dispatchers: dispatcher_updates,
-                merges: Default::default(),
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-                sink_add_columns: Default::default(),
+                ..Default::default()
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);

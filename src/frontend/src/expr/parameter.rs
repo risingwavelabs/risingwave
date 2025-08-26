@@ -58,8 +58,8 @@ impl Expr for Parameter {
             .unwrap_or(DataType::Varchar)
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Parameter should not be serialized to ExprNode")
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
+        Err("Parameter should not be serialized to ExprNode".to_owned())
     }
 }
 

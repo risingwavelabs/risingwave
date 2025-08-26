@@ -17,7 +17,17 @@ message Dispatchers {
   repeated Dispatcher dispatchers = 1;
 }
 
+message UpstreamSinkInfo {
+  uint32 upstream_fragment_id = 1;
+  repeated plan_common.Field sink_output_schema = 2;
+  repeated expr.ExprNode project_exprs = 3;
+}
+
 message AddMutation {
+  message NewUpstreamSink {
+    UpstreamSinkInfo info = 1;
+    repeated common.ActorInfo upstream_actors = 2;
+  }
   // New dispatchers for each actor.
   map<uint32, Dispatchers> actor_dispatchers = 1;
   // All actors to be added (to the main connected component of the graph) in this update.
@@ -32,10 +42,16 @@ message AddMutation {
   repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
   // nodes which should be paused initially.
   repeated uint32 backfill_nodes_to_pause = 6;
+  // CDC table snapshot splits
+  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
+  // Use downstream_fragment_id as keys.
+  map<uint32, NewUpstreamSink> new_upstream_sinks = 8;
 }
 
 message StopMutation {
   repeated uint32 actors = 1;
+  // Only sink-fragment in the sink job is recorded.
+  repeated uint32 dropped_sink_fragments = 2;
 }
 
 message SinkAddColumns {
@@ -83,7 +99,9 @@ message UpdateMutation {
   // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
   // Consistent with the semantics in AddMutation.
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
-  map<uint32, SinkAddColumns> sink_add_columns = 7;
+  // CDC table snapshot splits
+  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
+  map<uint32, SinkAddColumns> sink_add_columns = 8;
 }
 
 message SourceChangeSplitMutation {
@@ -128,6 +146,17 @@ message StartFragmentBackfillMutation {
   repeated uint32 fragment_ids = 1;
 }
 
+message RefreshStartMutation {
+  // Table ID to start refresh operation.
+  uint32 table_id = 1;
+  // Associated source ID for this refresh operation.
+  uint32 associated_source_id = 2;
+}
+message LoadFinishMutation {
+  // Associated source ID for this load operation.
+  uint32 associated_source_id = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -155,6 +184,10 @@ message BarrierMutation {
     // If we use rate limit to pause / resume backfill fragments, if user manually
     // resumes some fragments, this will overwrite the backfill order configuration.
     StartFragmentBackfillMutation start_fragment_backfill = 14;
+    // Start refresh signal for refreshing tables
+    RefreshStartMutation refresh_start = 15;
+    // Load finish signal for refreshing tables
+    LoadFinishMutation load_finish = 16;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
@@ -396,9 +429,11 @@ enum AggNodeVersion {
 }
 
 message SimpleAggNode {
+  // Previously we have this field for stateless simple agg, but it's actually not used.
+  reserved 2;
+  reserved "distribution_key";
+
   repeated expr.AggCall agg_calls = 1;
-  // Only used for stateless simple agg.
-  repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
   catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
@@ -602,8 +637,8 @@ message MergeNode {
   // Type of the upstream dispatcher. If there's always one upstream according to this
   // type, the compute node may use the `ReceiverExecutor` as an optimization.
   DispatcherType upstream_dispatcher_type = 3;
-  // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 4;
+  // The schema of input columns. Already deprecated.
+  repeated plan_common.Field fields = 4 [deprecated = true];
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -689,6 +724,14 @@ message StreamCdcScanOptions {
   uint32 snapshot_barrier_interval = 2;
 
   uint32 snapshot_batch_size = 3;
+
+  uint32 backfill_parallelism = 4;
+
+  uint64 backfill_num_rows_per_split = 5;
+
+  bool backfill_as_even_splits = 6;
+
+  uint32 backfill_split_pk_column_index = 7;
 }
 
 message StreamCdcScanNode {
@@ -914,7 +957,26 @@ message MaterializedExprsNode {
   optional uint32 state_clean_col_idx = 3;
 }
 
+message VectorIndexWriteNode {
+  catalog.Table table = 1;
+}
+
+message UpstreamSinkUnionNode {
+  // It is always empty in the persisted metadata, and get filled before we spawn the actors.
+  // The actual upstream info may be added and removed dynamically at runtime.
+  repeated UpstreamSinkInfo init_upstreams = 1;
+}
+
 message StreamNode {
+  // This field used to be a `bool append_only`.
+  // Enum variants are ordered for backwards compatibility.
+  enum StreamKind {
+    // buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+    STREAM_KIND_RETRACT = 0;
+    STREAM_KIND_APPEND_ONLY = 1;
+    STREAM_KIND_UPSERT = 2;
+  }
+
   oneof node_body {
     SourceNode source = 100;
     ProjectNode project = 101;
@@ -965,6 +1027,8 @@ message StreamNode {
     AsOfJoinNode as_of_join = 147;
     SyncLogStoreNode sync_log_store = 148;
     MaterializedExprsNode materialized_exprs = 149;
+    VectorIndexWriteNode vector_index_write = 150;
+    UpstreamSinkUnionNode upstream_sink_union = 151;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -972,7 +1036,7 @@ message StreamNode {
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
   repeated uint32 stream_key = 2;
-  bool append_only = 24;
+  StreamKind stream_kind = 24;
   string identity = 18;
   // The schema of the plan node
   repeated plan_common.Field fields = 19;

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -24,8 +25,10 @@ use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_connector::parser::{
     ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
-    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
+    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig, TimeHandling,
+    TimestampHandling, TimestamptzHandling,
 };
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 use rw_futures_util::pausable;
@@ -33,7 +36,6 @@ use thiserror_ext::AsReport;
 use tracing::Instrument;
 
 use crate::executor::UpdateMutation;
-use crate::executor::backfill::CdcScanOptions;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
@@ -78,6 +80,8 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 
     options: CdcScanOptions,
+
+    properties: BTreeMap<String, String>,
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
@@ -93,6 +97,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
         options: CdcScanOptions,
+        properties: BTreeMap<String, String>,
     ) -> Self {
         let pk_indices = external_table.pk_indices();
         let upstream_table_id = external_table.table_id().table_id;
@@ -115,6 +120,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             metrics,
             rate_limit_rps,
             options,
+            properties,
         }
     }
 
@@ -201,9 +207,33 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .await
             .expect("Retry create cdc table reader until success.")
         });
-
+        let timestamp_handling: Option<TimestampHandling> = self
+            .properties
+            .get("debezium.time.precision.mode")
+            .map(|v| v == "connect")
+            .unwrap_or(false)
+            .then_some(TimestampHandling::Milli);
+        let timestamptz_handling: Option<TimestamptzHandling> = self
+            .properties
+            .get("debezium.time.precision.mode")
+            .map(|v| v == "connect")
+            .unwrap_or(false)
+            .then_some(TimestamptzHandling::Milli);
+        let time_handling: Option<TimeHandling> = self
+            .properties
+            .get("debezium.time.precision.mode")
+            .map(|v| v == "connect")
+            .unwrap_or(false)
+            .then_some(TimeHandling::Milli);
         // Make sure to use mapping_message after transform_upstream.
-        let mut upstream = transform_upstream(upstream, self.output_columns.clone()).boxed();
+        let mut upstream = transform_upstream(
+            upstream,
+            self.output_columns.clone(),
+            timestamp_handling,
+            timestamptz_handling,
+            time_handling,
+        )
+        .boxed();
         loop {
             if let Some(msg) =
                 build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
@@ -271,7 +301,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             snapshot_row_count = total_snapshot_row_count,
             rate_limit = self.rate_limit_rps,
             disable_backfill = self.options.disable_backfill,
-            snapshot_interval = self.options.snapshot_interval,
+            snapshot_barrier_interval = self.options.snapshot_barrier_interval,
             snapshot_batch_size = self.options.snapshot_batch_size,
             "start cdc backfill",
         );
@@ -393,7 +423,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // increase the barrier count and check whether need to start a new snapshot
                                     barrier_count += 1;
                                     let can_start_new_snapshot =
-                                        barrier_count == self.options.snapshot_interval;
+                                        barrier_count == self.options.snapshot_barrier_interval;
 
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
@@ -767,7 +797,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     }
 }
 
-async fn build_reader_and_poll_upstream(
+pub(crate) async fn build_reader_and_poll_upstream(
     upstream: &mut BoxedMessageStream,
     table_reader: &mut Option<ExternalTableReaderImpl>,
     future: &mut Pin<Box<impl Future<Output = ExternalTableReaderImpl>>>,
@@ -788,11 +818,19 @@ async fn build_reader_and_poll_upstream(
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: Vec<ColumnDesc>) {
+pub async fn transform_upstream(
+    upstream: BoxedMessageStream,
+    output_columns: Vec<ColumnDesc>,
+    timestamp_handling: Option<TimestampHandling>,
+    timestamptz_handling: Option<TimestamptzHandling>,
+    time_handling: Option<TimeHandling>,
+) {
     let props = SpecificParserConfig {
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
-            timestamptz_handling: None,
+            timestamp_handling,
+            timestamptz_handling,
+            time_handling,
         }),
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
@@ -803,7 +841,6 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: Ve
         .iter()
         .map(SourceColumnDesc::from)
         .collect_vec();
-
     let mut parser = DebeziumParser::new(
         props,
         columns_with_meta.clone(),
@@ -892,6 +929,7 @@ impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::str::FromStr;
 
     use futures::{StreamExt, pin_mut};
@@ -900,6 +938,7 @@ mod tests {
     use risingwave_common::types::{DataType, Datum, JsonbVal};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::iter_util::ZipEqFast;
+    use risingwave_connector::source::cdc::CdcScanOptions;
     use risingwave_storage::memory::MemoryStateStore;
 
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
@@ -908,7 +947,7 @@ mod tests {
     use crate::executor::source::default_source_internal_table;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{
-        ActorContext, Barrier, CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable, Message,
+        ActorContext, Barrier, CdcBackfillExecutor, ExternalStorageTable, Message,
     };
 
     #[tokio::test]
@@ -957,7 +996,7 @@ mod tests {
             ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
         ];
 
-        let parsed_stream = transform_upstream(upstream, columns);
+        let parsed_stream = transform_upstream(upstream, columns, None, None, None);
         pin_mut!(parsed_stream);
         // the output chunk must contain the offset column
         if let Some(message) = parsed_stream.next().await {
@@ -1006,6 +1045,7 @@ mod tests {
                 disable_backfill: true,
                 ..CdcScanOptions::default()
             },
+            BTreeMap::default(),
         );
         // cdc.state_impl.init_epoch(EpochPair::new(test_epoch(4), test_epoch(3))).await.unwrap();
         // cdc.state_impl.mutate_state(None, None, 0, true).await.unwrap();

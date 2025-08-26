@@ -44,4 +44,6 @@ pub enum ValueEncodingError {
     ),
     #[error("Invalid flag: {0:b}")]
     InvalidFlag(u8),
+    #[error("Invalid vector item: {0} {1}")]
+    InvalidVectorItem(f32, String),
 }

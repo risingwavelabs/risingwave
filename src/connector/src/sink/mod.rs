@@ -385,6 +385,7 @@ pub struct SinkMetrics {
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec,
     pub iceberg_write_bytes: LabelGuardedIntCounterVec,
+    pub iceberg_snapshot_num: LabelGuardedIntGaugeVec,
 }
 
 impl SinkMetrics {
@@ -510,6 +511,14 @@ impl SinkMetrics {
         )
         .unwrap();
 
+        let iceberg_snapshot_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_snapshot_num",
+            "The snapshot number of iceberg table",
+            &["sink_name", "catalog_name", "table_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             sink_commit_duration,
             connector_sink_rows_received,
@@ -526,6 +535,7 @@ impl SinkMetrics {
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
             iceberg_write_bytes,
+            iceberg_snapshot_num,
         }
     }
 }

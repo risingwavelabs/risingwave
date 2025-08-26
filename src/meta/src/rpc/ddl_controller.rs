@@ -36,6 +36,7 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_common::{bail, bail_not_implemented, must_match};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
@@ -66,7 +67,7 @@ use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage}
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{Semaphore, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -82,6 +83,9 @@ use crate::manager::{
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+};
+use crate::stream::cdc::{
+    is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
 };
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
@@ -175,7 +179,7 @@ pub enum DdlCommand {
     AlterObjectOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
-    DropConnection(ConnectionId),
+    DropConnection(ConnectionId, DropMode),
     CreateSecret(Secret),
     AlterSecret(Secret),
     DropSecret(SecretId),
@@ -209,7 +213,7 @@ impl DdlCommand {
             DdlCommand::AlterObjectOwner(object, _) => Left(format!("{object:?}")),
             DdlCommand::AlterSetSchema(object, _) => Left(format!("{object:?}")),
             DdlCommand::CreateConnection(connection) => Left(connection.name.clone()),
-            DdlCommand::DropConnection(id) => Right(*id),
+            DdlCommand::DropConnection(id, _) => Right(*id),
             DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
             DdlCommand::DropSecret(id) => Right(*id),
@@ -228,7 +232,7 @@ impl DdlCommand {
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
-            | DdlCommand::DropConnection(_)
+            | DdlCommand::DropConnection(_, _)
             | DdlCommand::DropSecret(_)
             | DdlCommand::DropSubscription(_, _)
             | DdlCommand::AlterName(_, _)
@@ -306,11 +310,16 @@ impl CreatingStreamingJobPermit {
                     }
                     Ordering::Equal => continue,
                     Ordering::Greater => {
-                        semaphore_clone
-                            .acquire_many((permits - new_permits) as u32)
-                            .await
-                            .unwrap()
-                            .forget();
+                        let to_release = permits - new_permits;
+                        let reduced = semaphore_clone.forget_permits(to_release);
+                        // TODO: implement dynamic semaphore with limits by ourself.
+                        if reduced != to_release {
+                            tracing::warn!(
+                                "no enough permits to release, expected {}, but reduced {}",
+                                to_release,
+                                reduced
+                            );
+                        }
                     }
                 }
                 tracing::info!(
@@ -429,8 +438,8 @@ impl DdlController {
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
                 }
-                DdlCommand::DropConnection(connection_id) => {
-                    ctrl.drop_connection(connection_id).await
+                DdlCommand::DropConnection(connection_id, drop_mode) => {
+                    ctrl.drop_connection(connection_id, drop_mode).await
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
                 DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
@@ -500,6 +509,20 @@ impl DdlController {
 
         self.stream_manager
             .reschedule_streaming_job(job_id, target, deferred)
+            .await
+    }
+
+    pub async fn reschedule_cdc_table_backfill(
+        &self,
+        job_id: u32,
+        target: JobRescheduleTarget,
+    ) -> MetaResult<()> {
+        tracing::info!("alter CDC table backfill parallelism");
+        if self.barrier_manager.check_status_running().is_err() {
+            return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
+        }
+        self.stream_manager
+            .reschedule_cdc_table_backfill(job_id, target)
             .await
     }
 
@@ -612,14 +635,10 @@ impl DdlController {
     async fn drop_connection(
         &self,
         connection_id: ConnectionId,
+        drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(
-            ObjectType::Connection,
-            connection_id as _,
-            DropMode::Restrict,
-            None,
-        )
-        .await
+        self.drop_object(ObjectType::Connection, connection_id as _, drop_mode, None)
+            .await
     }
 
     async fn alter_database_param(
@@ -761,13 +780,18 @@ impl DdlController {
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
     #[await_tree::instrument]
     pub(crate) async fn validate_cdc_table(
+        &self,
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
-            .filter(|f| f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan))
+            .filter(|f| {
+                f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
+                    || f.fragment_type_mask
+                        .contains(FragmentTypeFlag::StreamCdcScan)
+            })
             .exactly_one()
             .ok()
             .with_context(|| {
@@ -776,16 +800,27 @@ impl DdlController {
                     table_fragments.fragments
                 )
             })?;
-
-        assert_eq!(
-            stream_scan_fragment.actors.len(),
-            1,
-            "Stream scan fragment should have only one actor"
-        );
+        fn assert_parallelism(stream_scan_fragment: &Fragment, node_body: &Option<NodeBody>) {
+            if let Some(NodeBody::StreamCdcScan(node)) = node_body {
+                if let Some(o) = node.options
+                    && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
+                {
+                    // Use parallel CDC backfill.
+                } else {
+                    assert_eq!(
+                        stream_scan_fragment.actors.len(),
+                        1,
+                        "Stream scan fragment should have only one actor"
+                    );
+                }
+            }
+        }
         let mut found_cdc_scan = false;
         match &stream_scan_fragment.nodes.node_body {
             Some(NodeBody::StreamCdcScan(_)) => {
-                if Self::validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
+                assert_parallelism(stream_scan_fragment, &stream_scan_fragment.nodes.node_body);
+                if self
+                    .validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
                     .await?
                 {
                     found_cdc_scan = true;
@@ -794,7 +829,11 @@ impl DdlController {
             // When there's generated columns, the cdc scan node is wrapped in a project node
             Some(NodeBody::Project(_)) => {
                 for input in &stream_scan_fragment.nodes.input {
-                    if Self::validate_cdc_table_inner(&input.node_body, table.id).await? {
+                    assert_parallelism(stream_scan_fragment, &input.node_body);
+                    if self
+                        .validate_cdc_table_inner(&input.node_body, table.id)
+                        .await?
+                    {
                         found_cdc_scan = true;
                     }
                 }
@@ -810,9 +849,11 @@ impl DdlController {
     }
 
     async fn validate_cdc_table_inner(
+        &self,
         node_body: &Option<NodeBody>,
         table_id: u32,
     ) -> MetaResult<bool> {
+        let meta_store = self.env.meta_store_ref();
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
@@ -828,6 +869,20 @@ impl DdlController {
             let _enumerator = props
                 .create_split_enumerator(SourceEnumeratorContext::dummy().into())
                 .await?;
+
+            if is_parallelized_backfill_enabled(stream_cdc_scan) {
+                // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
+                try_init_parallel_cdc_table_snapshot_splits(
+                    table_id,
+                    cdc_table_desc,
+                    meta_store,
+                    &stream_cdc_scan.options,
+                    self.env.opts.cdc_table_split_init_insert_batch_size,
+                    self.env.opts.cdc_table_split_init_sleep_interval_splits,
+                    self.env.opts.cdc_table_split_init_sleep_duration_millis,
+                )
+                .await?;
+            }
 
             tracing::debug!(?table_id, "validate cdc table success");
             Ok(true)
@@ -1022,12 +1077,10 @@ impl DdlController {
                                     }
 
                                     **merge_node = {
-                                        #[expect(deprecated)]
                                         MergeNode {
-                                            upstream_actor_id: vec![],
                                             upstream_fragment_id,
                                             upstream_dispatcher_type: PbDispatcherType::Hash as _,
-                                            fields: sink_fields.to_vec(),
+                                            ..Default::default()
                                         }
                                     };
 
@@ -1087,7 +1140,6 @@ impl DdlController {
             };
         }
         let job_id = streaming_job.id();
-
         tracing::debug!(
             id = job_id,
             definition = streaming_job.definition(),
@@ -1095,10 +1147,12 @@ impl DdlController {
             job_type = ?streaming_job.job_type(),
             "starting streaming job",
         );
-        let _permit = self
+        // TODO: acquire permits for recovered background DDLs.
+        let permit = self
             .creating_streaming_job_permits
             .semaphore
-            .acquire()
+            .clone()
+            .acquire_owned()
             .instrument_await("acquire_creating_streaming_job_permit")
             .await
             .unwrap();
@@ -1119,6 +1173,7 @@ impl DdlController {
                 fragment_graph,
                 affected_table_replace_info,
                 specific_resource_group,
+                permit,
             )
             .await
         {
@@ -1163,6 +1218,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         specific_resource_group: Option<String>,
+        permit: OwnedSemaphorePermit,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1229,7 +1285,8 @@ impl DdlController {
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
-                Self::validate_cdc_table(table, &stream_job_fragments).await?;
+                self.validate_cdc_table(table, &stream_job_fragments)
+                    .await?;
             }
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.
@@ -1304,19 +1361,16 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match (streaming_job.create_type(), &streaming_job) {
-            // TODO(August): Unify background sink into table's creation path with MV below.
-            (CreateType::Unspecified, _)
-            | (CreateType::Foreground, _)
-            | (CreateType::Background, StreamingJob::Sink(_, Some(_))) => {
+        match streaming_job.create_type() {
+            CreateType::Unspecified | CreateType::Foreground => {
                 let version = self
                     .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
                     .await?;
                 Ok(version)
             }
-            (CreateType::Background, _) => {
-                let await_tree_key = format!("Background DDL Worker ({})", streaming_job.id());
+            CreateType::Background => {
+                let await_tree_key = format!("Background DDL Worker ({})", stream_job_id);
                 let await_tree_span =
                     span!("{:?}({})", streaming_job.job_type(), streaming_job.name());
 
@@ -1330,6 +1384,8 @@ impl DdlController {
                         .inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
+                    // drop the permit to release the semaphore
+                    drop(permit);
                 };
 
                 let fut = (self.env.await_tree_reg())

@@ -20,7 +20,9 @@ use risingwave_pb::common::{BatchQueryCommittedEpoch, BatchQueryEpoch};
 
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record, scan_ranges_as_strs};
-use super::{ExprRewritable, PlanBase, PlanRef, ToDistributedBatch, TryToBatchPb, generic};
+use super::{
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, ToDistributedBatch, TryToBatchPb, generic,
+};
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -65,10 +67,7 @@ impl BatchLogSeqScan {
                     if distribution_key.is_empty() {
                         Distribution::Single
                     } else {
-                        Distribution::UpstreamHashShard(
-                            distribution_key,
-                            self.core.table_desc.table_id,
-                        )
+                        Distribution::UpstreamHashShard(distribution_key, self.core.table.id)
                     }
                 }
             },
@@ -83,7 +82,7 @@ impl BatchLogSeqScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { BatchLogSeqScan }
+impl_plan_tree_node_for_leaf! { Batch, BatchLogSeqScan }
 
 impl Distill for BatchLogSeqScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -129,7 +128,7 @@ impl ToDistributedBatch for BatchLogSeqScan {
 impl TryToBatchPb for BatchLogSeqScan {
     fn try_to_batch_prost_body(&self) -> SchedulerResult<NodeBody> {
         Ok(NodeBody::LogRowSeqScan(LogRowSeqScanNode {
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            table_desc: Some(self.core.table.table_desc().try_to_protobuf()?),
             column_ids: self
                 .core
                 .output_column_ids()
@@ -168,7 +167,7 @@ impl ToLocalBatch for BatchLogSeqScan {
         let dist = if let Some(distribution_key) = self.core.distribution_key()
             && !distribution_key.is_empty()
         {
-            Distribution::UpstreamHashShard(distribution_key, self.core.table_desc.table_id)
+            Distribution::UpstreamHashShard(distribution_key, self.core.table.id)
         } else {
             Distribution::SomeShard
         };
@@ -176,6 +175,6 @@ impl ToLocalBatch for BatchLogSeqScan {
     }
 }
 
-impl ExprRewritable for BatchLogSeqScan {}
+impl ExprRewritable<Batch> for BatchLogSeqScan {}
 
 impl ExprVisitable for BatchLogSeqScan {}

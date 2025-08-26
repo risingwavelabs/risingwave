@@ -1269,6 +1269,10 @@ pub enum Statement {
     Truncate {
         table_name: ObjectName,
     },
+    /// Refresh table
+    Refresh {
+        table_name: ObjectName,
+    },
     /// SELECT
     Query(Box<Query>),
     /// INSERT
@@ -1364,10 +1368,12 @@ pub enum Statement {
         name: ObjectName,
         table_name: ObjectName,
         columns: Vec<OrderByExpr>,
+        method: Option<Ident>,
         include: Vec<Ident>,
         distributed_by: Vec<Expr>,
         unique: bool,
         if_not_exists: bool,
+        with_properties: WithProperties,
     },
     /// CREATE SOURCE
     CreateSource {
@@ -1702,11 +1708,12 @@ pub enum Statement {
     Use {
         db_name: ObjectName,
     },
-    /// `VACUUM [database_name][schema_name][object_name]`
+    /// `VACUUM [FULL] [database_name][schema_name][object_name]`
     ///
     /// Note: this is a RisingWave specific statement for iceberg table/sink compaction.
     Vacuum {
         object_name: ObjectName,
+        full: bool,
     },
 }
 
@@ -1798,6 +1805,10 @@ impl Statement {
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {
                 write!(f, "TRUNCATE TABLE {}", table_name)?;
+                Ok(())
+            }
+            Statement::Refresh { table_name } => {
+                write!(f, "REFRESH TABLE {}", table_name)?;
                 Ok(())
             }
             Statement::Analyze { table_name } => {
@@ -2112,17 +2123,24 @@ impl Statement {
                 name,
                 table_name,
                 columns,
+                method,
                 include,
                 distributed_by,
                 unique,
                 if_not_exists,
+                with_properties,
             } => write!(
                 f,
-                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}({columns}){include}{distributed_by}",
+                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}{method}({columns}){include}{distributed_by}{with_properties}",
                 unique = if *unique { "UNIQUE " } else { "" },
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
                 table_name = table_name,
+                method = if let Some(method) = method {
+                    format!(" USING {} ", method)
+                } else {
+                    "".to_owned()
+                },
                 columns = display_comma_separated(columns),
                 include = if include.is_empty() {
                     "".to_owned()
@@ -2136,7 +2154,12 @@ impl Statement {
                         " DISTRIBUTED BY({})",
                         display_separated(distributed_by, ",")
                     )
-                }
+                },
+                with_properties = if !with_properties.0.is_empty() {
+                    format!(" {}", with_properties)
+                } else {
+                    "".to_owned()
+                },
             ),
             Statement::CreateSource { stmt } => write!(f, "CREATE SOURCE {}", stmt,),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
@@ -2446,8 +2469,12 @@ impl Statement {
                 write!(f, "USE {}", db_name)?;
                 Ok(())
             }
-            Statement::Vacuum { object_name } => {
-                write!(f, "VACUUM {}", object_name)?;
+            Statement::Vacuum { object_name, full } => {
+                if *full {
+                    write!(f, "VACUUM FULL {}", object_name)?;
+                } else {
+                    write!(f, "VACUUM {}", object_name)?;
+                }
                 Ok(())
             }
             Statement::AlterFragment {

@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalOverWindow, PlanTreeNodeUnary};
 
 /// Merge chaining `LogicalOverWindow`s with same `PARTITION BY` and `ORDER BY`.
@@ -26,7 +25,7 @@ impl OverWindowMergeRule {
     }
 }
 
-impl Rule for OverWindowMergeRule {
+impl Rule<Logical> for OverWindowMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let over_window = plan.as_logical_over_window()?;
         let mut window_functions_rev = over_window

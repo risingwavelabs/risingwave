@@ -317,6 +317,7 @@ impl Parser<'_> {
                 Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
                 Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
+                Keyword::REFRESH => Ok(self.parse_refresh()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
                 Keyword::DISCARD => Ok(self.parse_discard()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
@@ -373,6 +374,12 @@ impl Parser<'_> {
         Ok(Statement::Truncate { table_name })
     }
 
+    pub fn parse_refresh(&mut self) -> ModalResult<Statement> {
+        self.expect_keyword(Keyword::TABLE)?;
+        let table_name = self.parse_object_name()?;
+        Ok(Statement::Refresh { table_name })
+    }
+
     pub fn parse_analyze(&mut self) -> ModalResult<Statement> {
         let table_name = self.parse_object_name()?;
 
@@ -380,9 +387,10 @@ impl Parser<'_> {
     }
 
     pub fn parse_vacuum(&mut self) -> ModalResult<Statement> {
+        let full = self.parse_keyword(Keyword::FULL);
         let object_name = self.parse_object_name()?;
 
-        Ok(Statement::Vacuum { object_name })
+        Ok(Statement::Vacuum { object_name, full })
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
@@ -2485,6 +2493,12 @@ impl Parser<'_> {
         let index_name = self.parse_object_name()?;
         self.expect_keyword(Keyword::ON)?;
         let table_name = self.parse_object_name()?;
+        let method = if self.parse_keyword(Keyword::USING) {
+            let method = self.parse_identifier()?;
+            Some(method)
+        } else {
+            None
+        };
         self.expect_token(&Token::LParen)?;
         let columns = self.parse_comma_separated(Parser::parse_order_by_expr)?;
         self.expect_token(&Token::RParen)?;
@@ -2500,14 +2514,18 @@ impl Parser<'_> {
             distributed_by = self.parse_comma_separated(Parser::parse_expr)?;
             self.expect_token(&Token::RParen)?;
         }
+        let with_properties = WithProperties(self.parse_with_properties()?);
+
         Ok(Statement::CreateIndex {
             name: index_name,
             table_name,
+            method,
             columns,
             include,
             distributed_by,
             unique,
             if_not_exists,
+            with_properties,
         })
     }
 

@@ -843,10 +843,14 @@ impl DdlService for DdlServiceImpl {
         request: Request<DropConnectionRequest>,
     ) -> Result<Response<DropConnectionResponse>, Status> {
         let req = request.into_inner();
+        let drop_mode = DropMode::from_request_setting(req.cascade);
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(req.connection_id as _))
+            .run_command(DdlCommand::DropConnection(
+                req.connection_id as _,
+                drop_mode,
+            ))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
@@ -906,6 +910,25 @@ impl DdlService for DdlServiceImpl {
     async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
         self.ddl_controller.wait().await?;
         Ok(Response::new(WaitResponse {}))
+    }
+
+    async fn alter_cdc_table_backfill_parallelism(
+        &self,
+        request: Request<AlterCdcTableBackfillParallelismRequest>,
+    ) -> Result<Response<AlterCdcTableBackfillParallelismResponse>, Status> {
+        let req = request.into_inner();
+        let job_id = req.get_table_id();
+        let parallelism = *req.get_parallelism()?;
+        self.ddl_controller
+            .reschedule_cdc_table_backfill(
+                job_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
+                    resource_group: JobResourceGroupTarget::Keep,
+                },
+            )
+            .await?;
+        Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
     }
 
     async fn alter_parallelism(
@@ -1236,6 +1259,26 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(CompactIcebergTableResponse {
             status: None,
             task_id,
+        }))
+    }
+
+    async fn expire_iceberg_table_snapshots(
+        &self,
+        request: Request<ExpireIcebergTableSnapshotsRequest>,
+    ) -> Result<Response<ExpireIcebergTableSnapshotsResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
+
+        // Trigger manual snapshot expiration directly using the sink ID
+        self.iceberg_compaction_manager
+            .check_and_expire_snapshots(&sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!("Failed to expire snapshots: {}", e.as_report()))
+            })?;
+
+        Ok(Response::new(ExpireIcebergTableSnapshotsResponse {
+            status: None,
         }))
     }
 }

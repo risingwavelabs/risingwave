@@ -241,7 +241,7 @@ impl fmt::Display for OrderType {
 /// (`Vec<ColumnOrder>`).
 ///
 /// Corresponds to protobuf [`PbColumnOrder`].
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Copy)]
 pub struct ColumnOrder {
     pub column_index: usize,
     pub order_type: OrderType,
@@ -269,7 +269,7 @@ impl ColumnOrder {
         }
     }
 
-    pub fn to_protobuf(&self) -> PbColumnOrder {
+    pub fn to_protobuf(self) -> PbColumnOrder {
         PbColumnOrder {
             column_index: self.column_index as _,
             order_type: Some(self.order_type.to_protobuf()),

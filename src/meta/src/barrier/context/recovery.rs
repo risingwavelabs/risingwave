@@ -35,6 +35,7 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
     RescheduleOptions, SourceChange, StreamFragmentGraph,
@@ -276,7 +277,6 @@ impl GlobalBarrierWorkerContextImpl {
                                     .catalog_controller
                                     .finish_streaming_job(
                                         stream_job_fragments.stream_job_id().table_id as _,
-                                        None,
                                     )
                                     .await?;
                             } else {
@@ -443,6 +443,17 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // get split assignments for all actors
                     let source_splits = self.source_manager.list_assignments().await;
+                    let cdc_table_backfill_actors = self
+                        .metadata_manager
+                        .catalog_controller
+                        .cdc_table_backfill_actor_ids()
+                        .await?;
+                    let cdc_table_snapshot_split_assignment =
+                        assign_cdc_table_snapshot_splits_pairs(
+                            cdc_table_backfill_actors,
+                            self.env.meta_store_ref(),
+                        )
+                        .await?;
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
@@ -455,6 +466,7 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs,
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
                         database_infos,
+                        cdc_table_snapshot_split_assignment,
                     })
                 }
             }
@@ -513,10 +525,7 @@ impl GlobalBarrierWorkerContextImpl {
                     // If there's no tracking actor in the job, we can finish the job directly.
                     self.metadata_manager
                         .catalog_controller
-                        .finish_streaming_job(
-                            stream_job_fragments.stream_job_id().table_id as _,
-                            None,
-                        )
+                        .finish_streaming_job(stream_job_fragments.stream_job_id().table_id as _)
                         .await?;
                 } else {
                     background_jobs
@@ -572,6 +581,17 @@ impl GlobalBarrierWorkerContextImpl {
 
         // get split assignments for all actors
         let source_splits = self.source_manager.list_assignments().await;
+
+        let cdc_table_backfill_actors = self
+            .metadata_manager
+            .catalog_controller
+            .cdc_table_backfill_actor_ids()
+            .await?;
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
+            cdc_table_backfill_actors,
+            self.env.meta_store_ref(),
+        )
+        .await?;
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,
@@ -581,6 +601,7 @@ impl GlobalBarrierWorkerContextImpl {
             fragment_relations,
             source_splits,
             background_jobs,
+            cdc_table_snapshot_split_assignment,
         }))
     }
 }
@@ -844,9 +865,12 @@ impl GlobalBarrierWorkerContextImpl {
 
             let plan = self
                 .scale_controller
-                .generate_job_reschedule_plan(JobReschedulePolicy {
-                    targets: local_reschedule_targets,
-                })
+                .generate_job_reschedule_plan(
+                    JobReschedulePolicy {
+                        targets: local_reschedule_targets,
+                    },
+                    false,
+                )
                 .await?;
 
             // no need to update

@@ -39,6 +39,7 @@ use crate::sql_gen::SqlGenerator;
 pub mod config;
 pub mod reducer;
 mod sql_gen;
+pub mod sqlreduce;
 pub mod test_runners;
 mod utils;
 pub mod validation;

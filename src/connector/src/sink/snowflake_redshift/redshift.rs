@@ -19,7 +19,6 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::BytesMut;
 use phf::{Set, phf_set};
-use crate::sink::snowflake::AugmentedChunk;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::types::DataType;
