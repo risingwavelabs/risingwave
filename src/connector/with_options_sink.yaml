@@ -603,9 +603,11 @@ IcebergConfig:
     comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     required: false
     default: ICEBERG_WRITE_MODE_MERGE_ON_READ . to_owned ()
-  - name: snapshot_expiration_expire_older_than
+  - name: snapshot_expiration_max_age_millis
     field_type: i64
-    comments: The timestamp (in milliseconds) to expire snapshots older than this
+    comments: |-
+      The maximum age (in milliseconds) for snapshots before they expire
+      For example, if set to 3600000, snapshots older than 1 hour will be expired
     required: false
     default: Default::default
     allow_alter_on_fly: true

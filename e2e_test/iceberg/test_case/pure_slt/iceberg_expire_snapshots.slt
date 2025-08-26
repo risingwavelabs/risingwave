@@ -1,0 +1,99 @@
+control substitution on
+
+statement ok
+create secret lakekeeper_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+# Test lakekeeper catalog connection using the warehouse created by risedev
+statement ok
+create connection lakekeeper_catalog_conn
+with (
+    type = 'iceberg',
+    catalog.type = 'rest',
+    catalog.uri = 'http://127.0.0.1:8181/catalog/',
+    warehouse.path = 'risingwave-warehouse',
+    s3.access.key = secret lakekeeper_secret,
+    s3.secret.key = secret lakekeeper_secret,
+    s3.path.style.access = 'true',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1'
+);
+
+statement ok
+set iceberg_engine_connection = 'public.lakekeeper_catalog_conn';
+
+# Create an Iceberg table with aggressive snapshot expiration settings
+# to facilitate testing of the VACUUM command.
+# The settings ensure that snapshots expire quickly, allowing us to
+# observe the effects of VACUUM in a short time frame.
+statement ok
+create table t_vacuum_test(id int primary key, name varchar, v1 int)
+with(
+    commit_checkpoint_interval = 1,
+    snapshot_expiration_max_age_millis = 0
+) engine = iceberg;
+
+statement ok
+insert into t_vacuum_test values(1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+statement ok
+insert into t_vacuum_test values(4, 'david', 400), (5, 'eve', 500);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+statement ok
+update t_vacuum_test set v1 = 150 where id = 1;
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+statement ok
+insert into t_vacuum_test values(6, 'frank', 600), (7, 'grace', 700);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+statement ok
+update t_vacuum_test set v1 = 250 where id = 2;
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?
+select count(*) from rw_iceberg_snapshots where schema_name = 'public' and source_name = '__iceberg_source_t_vacuum_test';
+----
+5
+
+
+statement ok
+VACUUM t_vacuum_test;
+
+query ?
+select count(*) from rw_iceberg_snapshots where schema_name = 'public' and source_name = '__iceberg_source_t_vacuum_test';
+----
+1
+
+# Cleanup
+statement ok
+DROP TABLE t_vacuum_test;
+
+statement ok
+DROP CONNECTION lakekeeper_catalog_conn;
+
+statement ok
+DROP SECRET lakekeeper_secret;
