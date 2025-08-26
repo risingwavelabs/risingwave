@@ -21,7 +21,6 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use criterion::{Criterion, criterion_group, criterion_main};
-use foyer::Engine;
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
@@ -165,9 +164,11 @@ impl CacheBase for FoyerCache {
                     get_fake_block(sst_object_id, block_idx, latency)
                         .await
                         .map(Arc::new)
+                        .map_err(foyer::Error::other)
                 }
             })
-            .await?;
+            .await
+            .map_err(HummockError::foyer_error)?;
         Ok(entry.value().clone())
     }
 }
@@ -185,7 +186,7 @@ impl FoyerHybridCache {
             .with_eviction_config(foyer::LruConfig {
                 high_priority_pool_ratio: 0.8,
             })
-            .storage(Engine::Large)
+            .storage()
             .build()
             .await
             .unwrap();
@@ -205,7 +206,7 @@ impl FoyerHybridCache {
                 cmsketch_eps: 0.001,
                 cmsketch_confidence: 0.9,
             })
-            .storage(Engine::Large)
+            .storage()
             .build()
             .await
             .unwrap();
@@ -227,7 +228,7 @@ impl CacheBase for FoyerHybridCache {
                     get_fake_block(sst_object_id, block_idx, latency)
                         .await
                         .map(Arc::new)
-                        .map_err(anyhow::Error::from)
+                        .map_err(foyer::Error::other)
                 }
             })
             .await

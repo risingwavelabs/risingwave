@@ -274,15 +274,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
 
 [[package]]
-name = "array-util"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c4dd5139f13c1a8b0e9f52197dcda016bbcd4e877055f93fb9ecd0f6c6136a7"
-dependencies = [
- "arrayvec",
-]
-
-[[package]]
 name = "arrayref"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2899,6 +2890,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "core_affinity"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a034b3a7b624016c6e13f5df875747cc25f884156aad2abd12b6c46797971342"
+dependencies = [
+ "libc",
+ "num_cpus",
+ "winapi",
+]
+
+[[package]]
 name = "cpp_demangle"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4947,11 +4949,10 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.17.3"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "635c7077026867cb5e5ea576c461f29b1c4151fce7a9d7cc3a1b1a9902d95c65"
+checksum = "5d07b8524e9128386e28dec1ac04b4d32b8880a2cb2af1a1a84d15bbf419b7a2"
 dependencies = [
- "anyhow",
  "equivalent",
  "fastrace",
  "foyer-common",
@@ -4961,17 +4962,17 @@ dependencies = [
  "mixtrics",
  "pin-project",
  "serde",
+ "thiserror 2.0.3",
  "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "foyer-common"
-version = "0.17.3"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ed2316785e80137c7b91bb74dab1dc1967c3272df05825397b73ae8fc527041"
+checksum = "c90f5d71437e9b10a865211bb83647433eef15b040b2efd7f99ec8b45cfb3d9f"
 dependencies = [
- "ahash 0.8.11",
  "bincode 1.3.3",
  "bytes",
  "cfg-if",
@@ -4984,6 +4985,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.3",
  "tokio",
+ "twox-hash 2.1.0",
 ]
 
 [[package]]
@@ -4997,11 +4999,10 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.17.3"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "090cf5b89d49fd61e7da9bfae3a1aef605f03196d542b2f8171c74f3add013f4"
+checksum = "49df01afb911fdff0d6729475011ecc117765832205c8141c28673dd50c14205"
 dependencies = [
- "ahash 0.8.11",
  "arc-swap",
  "bitflags 2.9.0",
  "cmsketch",
@@ -5023,18 +5024,16 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.17.3"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "095e857c97d6339d4a4a6424b88d08fe08ad0366bfbfaf65d6ddf55baf3d2a38"
+checksum = "047d7a218cd4f509f61926650be1337c6aed5340f3cdd9277c9a99d18c8b68a7"
 dependencies = [
- "ahash 0.8.11",
  "allocator-api2",
  "anyhow",
- "array-util",
- "auto_enums",
  "bytes",
- "clap",
+ "core_affinity",
  "equivalent",
+ "fastant",
  "fastrace",
  "flume",
  "foyer-common",
@@ -5042,13 +5041,13 @@ dependencies = [
  "fs4",
  "futures-core",
  "futures-util",
+ "hashbrown 0.15.2",
+ "io-uring",
  "itertools 0.14.0",
  "libc",
  "lz4",
  "madsim-tokio",
- "ordered_hash_map",
  "parking_lot 0.12.1",
- "paste",
  "pin-project",
  "rand 0.9.0",
  "serde",
@@ -5741,9 +5740,6 @@ name = "hashbrown"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
-dependencies = [
- "ahash 0.8.11",
-]
 
 [[package]]
 name = "hashbrown"
@@ -6453,6 +6449,17 @@ name = "io-lifetimes"
 version = "2.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a611371471e98973dbcab4e0ec66c31a10bc356eeb4d54a0e05eac8158fe38c"
+
+[[package]]
+name = "io-uring"
+version = "0.7.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d93587f37623a1a17d94ef2bc9ada592f5465fe7732084ab7beefabe5c77c0c4"
+dependencies = [
+ "bitflags 2.9.0",
+ "cfg-if",
+ "libc",
+]
 
 [[package]]
 name = "ipconfig"
@@ -7549,9 +7556,9 @@ dependencies = [
 
 [[package]]
 name = "mixtrics"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "749ed12bab176c8a42c13a679dd2de12876d5ad4abe7525548e31ae001a9ebbf"
+checksum = "adbcddf5a90b959eea97ae505e0391f5c6dd411fbf546d43b9c59ad1c3bd4391"
 dependencies = [
  "itertools 0.14.0",
  "parking_lot 0.12.1",
@@ -8503,15 +8510,6 @@ checksum = "a4d6a8c22fc714f0c2373e6091bf6f5e9b37b1bc0b1184874b7e0a4e303d318f"
 dependencies = [
  "dlv-list",
  "hashbrown 0.14.5",
-]
-
-[[package]]
-name = "ordered_hash_map"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab0e5f22bf6dd04abd854a8874247813a8fa2c8c1260eba6fbb150270ce7c176"
-dependencies = [
- "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -12068,6 +12066,7 @@ dependencies = [
 name = "risingwave_storage"
 version = "2.4.4"
 dependencies = [
+ "ahash 0.8.11",
  "anyhow",
  "arc-swap",
  "async-trait",

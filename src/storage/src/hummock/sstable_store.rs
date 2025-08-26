@@ -21,7 +21,7 @@ use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    Engine, EventListener, FetchState, Hint, HybridCache, HybridCacheBuilder, HybridCacheEntry,
+    EventListener, FetchState, Hint, HybridCache, HybridCacheBuilder, HybridCacheEntry,
     HybridCacheProperties,
 };
 use futures::{StreamExt, future};
@@ -42,7 +42,8 @@ use super::{
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
 };
-use crate::hummock::{BlockHolder, HummockError, HummockResult};
+use crate::hummock::none::NoneRecentFilter;
+use crate::hummock::{BlockHolder, HummockError, HummockResult, RecentFilterTrait};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
 pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
@@ -121,7 +122,7 @@ pub struct SstableStoreConfig {
 
     pub prefetch_buffer_capacity: usize,
     pub max_prefetch_block_number: usize,
-    pub recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
+    pub recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub use_new_object_prefix_strategy: bool,
 
@@ -139,7 +140,7 @@ pub struct SstableStore {
     /// Recent filter for `(sst_obj_id, blk_idx)`.
     ///
     /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
-    recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
+    recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     prefetch_buffer_usage: Arc<AtomicUsize>,
     prefetch_buffer_capacity: usize,
     max_prefetch_block_number: usize,
@@ -190,7 +191,7 @@ impl SstableStore {
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                 u64::BITS as usize / 8 + value.estimate_size()
             })
-            .storage(Engine::Large)
+            .storage()
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -202,7 +203,7 @@ impl SstableStore {
                 // FIXME(MrCroxx): Calculate block weight more accurately.
                 u64::BITS as usize * 2 / 8 + value.raw().len()
             })
-            .storage(Engine::Large)
+            .storage()
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -214,7 +215,7 @@ impl SstableStore {
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: block_cache_capacity,
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
-            recent_filter: None,
+            recent_filter: Arc::new(NoneRecentFilter::default().into()),
             use_new_object_prefix_strategy,
 
             meta_cache,
@@ -405,6 +406,11 @@ impl SstableStore {
             policy
         };
 
+        let idx = SstableBlockIndex {
+            sst_id: object_id,
+            block_idx: block_index as _,
+        };
+
         // future: fetch block if hybrid cache miss
         let fetch_block = move || {
             let range = range.clone();
@@ -423,28 +429,24 @@ impl SstableStore {
                             object_id,
                             file_size
                         );
-                        return Err(anyhow::Error::from(HummockError::from(e)));
+                        return Err(foyer::Error::other(HummockError::from(e)));
                     }
                 };
                 let block = Box::new(
                     Block::decode(block_data, uncompressed_capacity)
-                        .map_err(anyhow::Error::from)?,
+                        .map_err(foyer::Error::other)?,
                 );
                 Ok(block)
             }
         };
 
-        if let Some(filter) = self.recent_filter.as_ref() {
-            filter.extend([(object_id, usize::MAX), (object_id, block_index)]);
-        }
+        self.recent_filter
+            .extend([(object_id, usize::MAX), (object_id, block_index)]);
 
         match policy {
             CachePolicy::Fill(hint) => {
                 let entry = self.block_cache.fetch_with_properties(
-                    SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: block_index as _,
-                    },
+                    idx,
                     HybridCacheProperties::default().with_hint(hint),
                     fetch_block,
                 );
@@ -456,10 +458,7 @@ impl SstableStore {
             CachePolicy::NotFill => {
                 match self
                     .block_cache
-                    .get(&SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: block_index as _,
-                    })
+                    .get(&idx)
                     .await
                     .map_err(HummockError::foyer_error)?
                 {
@@ -551,8 +550,11 @@ impl SstableStore {
             let range = sstable_info_ref.meta_offset as usize..;
             async move {
                 let now = Instant::now();
-                let buf = store.read(&meta_path, range).await?;
-                let meta = SstableMeta::decode(&buf[..])?;
+                let buf = store
+                    .read(&meta_path, range)
+                    .await
+                    .map_err(foyer::Error::other)?;
+                let meta = SstableMeta::decode(&buf[..]).map_err(foyer::Error::other)?;
 
                 let sst = Sstable::new(object_id, meta);
                 let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
@@ -645,12 +647,6 @@ impl SstableStore {
         Ok(BlockDataStream::new(reader, metas.to_vec()))
     }
 
-    pub fn data_recent_filter(
-        &self,
-    ) -> Option<&Arc<RecentFilter<(HummockSstableObjectId, usize)>>> {
-        self.recent_filter.as_ref()
-    }
-
     pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, Box<Sstable>> {
         &self.meta_cache
     }
@@ -659,8 +655,8 @@ impl SstableStore {
         &self.block_cache
     }
 
-    pub fn recent_filter(&self) -> Option<&Arc<RecentFilter<(HummockSstableObjectId, usize)>>> {
-        self.recent_filter.as_ref()
+    pub fn recent_filter(&self) -> &Arc<RecentFilter<(HummockSstableObjectId, usize)>> {
+        &self.recent_filter
     }
 
     pub async fn create_streaming_uploader(
