@@ -112,6 +112,19 @@ impl Binder {
                 };
                 (Some(schema_name), func_name)
             }
+            [database, schema, name] => {
+                // Support database.schema.function qualified names when database matches current database
+                let database_name = database.real_value();
+                if database_name != self.db_name {
+                    return Err(ErrorCode::BindError(format!(
+                        "Cross-database function call is not supported: {}",
+                        name
+                    )).into());
+                }
+                let schema_name = schema.real_value();
+                let func_name = name.real_value();
+                (Some(schema_name), func_name)
+            }
             _ => bail_not_implemented!(issue = 112, "qualified function {}", name),
         };
 
