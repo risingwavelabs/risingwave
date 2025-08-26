@@ -369,10 +369,10 @@ mod test {
             tracker
                 .inner
                 .lock()
-                .table_split_completed_counts
+                .cdc_progress
                 .get(&table_id)
-                .cloned()
-                .unwrap(),
+                .unwrap()
+                .split_completed_count,
             8
         );
 
@@ -399,10 +399,10 @@ mod test {
             tracker
                 .inner
                 .lock()
-                .table_split_completed_counts
+                .cdc_progress
                 .get(&table_id)
-                .cloned()
-                .unwrap(),
+                .unwrap()
+                .split_completed_count,
             0
         );
 
@@ -441,10 +441,10 @@ mod test {
             tracker
                 .inner
                 .lock()
-                .table_split_completed_counts
+                .cdc_progress
                 .get(&table_id)
-                .cloned()
-                .unwrap(),
+                .unwrap()
+                .split_completed_count,
             10
         );
     }
@@ -459,30 +459,31 @@ mod test {
             tracker
                 .inner
                 .lock()
-                .table_split_assignment_generations
+                .cdc_progress
                 .get(&table_id)
-                .cloned()
-                .unwrap(),
+                .unwrap()
+                .split_assignment_generation,
             generation
         );
         assert_eq!(
             tracker
                 .inner
                 .lock()
-                .table_split_total_counts
+                .cdc_progress
                 .get(&table_id)
-                .cloned()
-                .unwrap(),
+                .unwrap()
+                .split_total_count,
             split_count
         );
         assert_eq!(
             tracker
                 .inner
                 .lock()
-                .table_split_completed_counts
+                .cdc_progress
                 .get(&table_id)
                 .cloned()
-                .unwrap(),
+                .unwrap()
+                .split_completed_count,
             0
         );
     }
