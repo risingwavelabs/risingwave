@@ -56,6 +56,7 @@ END { exit !(c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 1 && c6 == 1 && c
   echo "Clickhouse sink check passed"
 else
   echo "The output is not as expected."
+  echo "c1=$c1, c2=$c2, c3=$c3, c4=$c4, c5=$c5, c6=$c6, c7=$c7"
   cat ./query_result.csv
   exit 1
 fi
