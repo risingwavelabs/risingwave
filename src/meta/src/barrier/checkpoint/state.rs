@@ -174,7 +174,7 @@ impl BarrierWorkerState {
             for (table_id, (_, graph_info)) in jobs_to_merge {
                 jobs_to_wait.insert(*table_id);
                 table_ids_to_commit.extend(graph_info.existing_table_ids());
-                self.inflight_graph_info.extend(graph_info.clone());
+                self.inflight_graph_info.add_existing(graph_info.clone());
             }
         }
 

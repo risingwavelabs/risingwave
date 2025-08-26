@@ -24,10 +24,11 @@ use super::utils::{
 };
 use super::{ExprRewritable, generic};
 use crate::expr::Expr;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
-use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::optimizer::plan_node::{
+    PlanBase, PlanTreeNodeBinary, StreamNode, StreamPlanRef as PlanRef,
+};
+use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -46,16 +47,17 @@ impl StreamDynamicFilter {
                 ExprType::LessThan | ExprType::LessThanOrEqual
             );
 
-        let out_append_only = if condition_always_relax {
-            core.left().append_only()
+        let out_kind = if condition_always_relax && core.left().append_only() {
+            StreamKind::AppendOnly
         } else {
-            false
+            // TODO(kind): check if the impl can handle upsert stream.
+            StreamKind::Retract
         };
 
         let base = PlanBase::new_stream_with_core(
             &core,
             core.left().distribution().clone(),
-            out_append_only,
+            out_kind,
             false, // TODO(rc): decide EOWC property
             Self::derive_watermark_columns(&core),
             MonotonicityMap::new(), // TODO: derive monotonicity
@@ -139,7 +141,7 @@ impl Distill for StreamDynamicFilter {
     }
 }
 
-impl PlanTreeNodeBinary for StreamDynamicFilter {
+impl PlanTreeNodeBinary<Stream> for StreamDynamicFilter {
     fn left(&self) -> PlanRef {
         self.core.left().clone()
     }
@@ -153,7 +155,7 @@ impl PlanTreeNodeBinary for StreamDynamicFilter {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamDynamicFilter }
+impl_plan_tree_node_for_binary! { Stream, StreamDynamicFilter }
 
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -182,6 +184,6 @@ impl StreamNode for StreamDynamicFilter {
     }
 }
 
-impl ExprRewritable for StreamDynamicFilter {}
+impl ExprRewritable<Stream> for StreamDynamicFilter {}
 
 impl ExprVisitable for StreamDynamicFilter {}

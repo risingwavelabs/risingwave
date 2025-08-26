@@ -39,9 +39,8 @@ use risingwave_pb::stream_plan::{
 use self::rewrite::build_delta_join_without_arrange;
 use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::reorganize_elements_id;
+use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, reorganize_elements_id};
 use crate::stream_fragmenter::parallelism::derive_parallelism;
 
 /// The mutable state when building fragment graph.
@@ -353,8 +352,7 @@ fn build_fragment(
                 if let Some(source) = node.source_inner.as_ref()
                     && let Some(source_info) = source.info.as_ref()
                     && ((source_info.is_shared() && !source_info.is_distributed)
-                        || source.with_properties.is_new_fs_connector()
-                        || source.with_properties.is_iceberg_connector())
+                        || source.with_properties.requires_singleton())
                 {
                     current_fragment.requires_singleton = true;
                 }

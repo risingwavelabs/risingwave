@@ -645,4 +645,8 @@ impl CreatingStreamingJobControl {
     pub fn state_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         self.graph_info.existing_table_ids()
     }
+
+    pub fn graph_info(&self) -> &InflightStreamingJobInfo {
+        &self.graph_info
+    }
 }

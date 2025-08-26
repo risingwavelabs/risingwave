@@ -65,13 +65,13 @@
         <!-- dependency versions -->
         <protobuf.version>3.25.8</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
         <grpc.version>1.73.0</grpc.version>
-        <log4j.version>2.25.0</log4j.version>
+        <log4j.version>2.25.1</log4j.version>
         <slf4j.version>2.0.17</slf4j.version>
         <debezium.version>2.6.2.Final</debezium.version>
-        <jackson.version>2.19.1</jackson.version>
+        <jackson.version>2.19.2</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <testcontainers.version>1.21.3</testcontainers.version>
-        <aws.version>2.31.77</aws.version>
+        <aws.version>2.32.4</aws.version>
         <jetty.version>12.0.23</jetty.version>
         <parquet.version>1.15.1</parquet.version>
     </properties>
@@ -111,7 +111,7 @@
             <dependency>
                 <groupId>commons-io</groupId>
                 <artifactId>commons-io</artifactId>
-                <version>2.19.0</version>
+                <version>2.20.0</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.commons</groupId>
@@ -309,7 +309,7 @@
             <dependency>
                 <groupId>org.xerial</groupId>
                 <artifactId>sqlite-jdbc</artifactId>
-                <version>3.50.2.0</version>
+                <version>3.50.3.0</version>
             </dependency>
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
@@ -356,7 +356,7 @@
             <dependency>
                 <groupId>org.xerial.snappy</groupId>
                 <artifactId>snappy-java</artifactId>
-                <version>1.1.10.7</version>
+                <version>1.1.10.8</version>
             </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>
@@ -422,7 +422,7 @@
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
-                <version>2.44.5</version>
+                <version>2.46.0</version>
                 <configuration>
                     <java>
                         <googleJavaFormat>

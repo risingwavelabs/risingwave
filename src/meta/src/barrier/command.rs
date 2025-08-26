@@ -39,7 +39,11 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
+<<<<<<< HEAD
     Dispatchers, DropSubscriptionsMutation, PauseMutation, PbSinkAddColumns, ResumeMutation,
+=======
+    Dispatchers, DropSubscriptionsMutation, LoadFinishMutation, PauseMutation, ResumeMutation,
+>>>>>>> main
     SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
@@ -134,8 +138,11 @@ impl ReplaceStreamJobPlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for (fragment_id, new_fragment) in self.new_fragments.new_fragment_info() {
-            let fragment_change =
-                CommandFragmentChanges::NewFragment(self.streaming_job.id().into(), new_fragment);
+            let fragment_change = CommandFragmentChanges::NewFragment {
+                job_id: self.streaming_job.id().into(),
+                info: new_fragment,
+                is_existing: false,
+            };
             fragment_changes
                 .try_insert(fragment_id, fragment_change)
                 .expect("non-duplicate");
@@ -155,10 +162,18 @@ impl ReplaceStreamJobPlan {
         }
         if let Some(sinks) = &self.auto_refresh_schema_sinks {
             for sink in sinks {
+<<<<<<< HEAD
                 let fragment_change = CommandFragmentChanges::NewFragment(
                     TableId::new(sink.original_sink.id as _),
                     sink.new_fragment_info(),
                 );
+=======
+                let fragment_change = CommandFragmentChanges::NewFragment {
+                    job_id: TableId::new(sink.original_sink.id as _),
+                    info: sink.new_fragment_info(),
+                    is_existing: false,
+                };
+>>>>>>> main
                 fragment_changes
                     .try_insert(sink.new_fragment.fragment_id, fragment_change)
                     .expect("non-duplicate");
@@ -366,6 +381,17 @@ pub enum Command {
     StartFragmentBackfill {
         fragment_ids: Vec<FragmentId>,
     },
+
+    /// `Refresh` command generates a barrier to refresh a table by truncating state
+    /// and reloading data from source.
+    Refresh {
+        table_id: TableId,
+        associated_source_id: TableId,
+    },
+    LoadFinish {
+        table_id: TableId,
+        associated_source_id: TableId,
+    },
 }
 
 // For debugging and observability purposes. Can add more details later if needed.
@@ -405,6 +431,22 @@ impl std::fmt::Display for Command {
             } => write!(f, "DropSubscription: {subscription_id}"),
             Command::ConnectorPropsChange(_) => write!(f, "ConnectorPropsChange"),
             Command::StartFragmentBackfill { .. } => write!(f, "StartFragmentBackfill"),
+            Command::Refresh {
+                table_id,
+                associated_source_id,
+            } => write!(
+                f,
+                "Refresh: {} (source: {})",
+                table_id, associated_source_id
+            ),
+            Command::LoadFinish {
+                table_id,
+                associated_source_id,
+            } => write!(
+                f,
+                "LoadFinish: {} (source: {})",
+                table_id, associated_source_id
+            ),
         }
     }
 }
@@ -455,10 +497,11 @@ impl Command {
                     .map(|(fragment_id, fragment_info)| {
                         (
                             fragment_id,
-                            CommandFragmentChanges::NewFragment(
-                                info.streaming_job.id().into(),
-                                fragment_info,
-                            ),
+                            CommandFragmentChanges::NewFragment {
+                                job_id: info.streaming_job.id().into(),
+                                info: fragment_info,
+                                is_existing: false,
+                            },
                         )
                     })
                     .collect();
@@ -522,6 +565,8 @@ impl Command {
             Command::DropSubscription { .. } => None,
             Command::ConnectorPropsChange(_) => None,
             Command::StartFragmentBackfill { .. } => None,
+            Command::Refresh { .. } => None, // Refresh doesn't change fragment structure
+            Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
         }
     }
 
@@ -868,7 +913,10 @@ impl Command {
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
+<<<<<<< HEAD
                         None,
+=======
+>>>>>>> main
                         cdc_table_snapshot_split_assignment,
                     );
 
@@ -935,7 +983,10 @@ impl Command {
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
+<<<<<<< HEAD
                     auto_refresh_schema_sinks.as_ref(),
+=======
+>>>>>>> main
                     cdc_table_snapshot_split_assignment,
                 )
             }
@@ -1101,7 +1152,10 @@ impl Command {
                     dropped_actors,
                     actor_splits,
                     actor_new_dispatchers,
+<<<<<<< HEAD
                     sink_add_columns: Default::default(),
+=======
+>>>>>>> main
                     actor_cdc_table_snapshot_splits,
                 });
                 tracing::debug!("update mutation: {mutation:?}");
@@ -1154,6 +1208,21 @@ impl Command {
                     fragment_ids: fragment_ids.clone(),
                 }),
             ),
+            Command::Refresh {
+                table_id,
+                associated_source_id,
+            } => Some(Mutation::RefreshStart(
+                risingwave_pb::stream_plan::RefreshStartMutation {
+                    table_id: table_id.table_id,
+                    associated_source_id: associated_source_id.table_id,
+                },
+            )),
+            Command::LoadFinish {
+                table_id: _,
+                associated_source_id,
+            } => Some(Mutation::LoadFinish(LoadFinishMutation {
+                associated_source_id: associated_source_id.table_id,
+            })),
         }
     }
 
@@ -1261,7 +1330,10 @@ impl Command {
         merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
+<<<<<<< HEAD
         auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
+=======
+>>>>>>> main
         cdc_table_snapshot_split_assignment: &CdcTableSnapshotSplitAssignment,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
@@ -1282,6 +1354,7 @@ impl Command {
             merge_update: merge_updates.into_values().flatten().collect(),
             dropped_actors,
             actor_splits,
+<<<<<<< HEAD
             sink_add_columns: auto_refresh_schema_sinks
                 .as_ref()
                 .into_iter()
@@ -1300,6 +1373,8 @@ impl Command {
                     })
                 })
                 .collect(),
+=======
+>>>>>>> main
             actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
                 cdc_table_snapshot_split_assignment.clone(),
             ),

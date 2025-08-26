@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
@@ -50,9 +51,9 @@ use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
-use risingwave_pb::stream_plan::PbStreamNode;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
@@ -1630,7 +1631,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         // returns true if the mutation is applied
-        mut fragments_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> bool,
+        mut fragments_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> MetaResult<bool>,
         // error message when no relevant fragments is found
         err_msg: &'static str,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
@@ -1655,9 +1656,17 @@ impl CatalogController {
             })
             .collect_vec();
 
-        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
-            fragments_mutation_fn(*fragment_type_mask, stream_node)
-        });
+        let fragments = fragments
+            .iter_mut()
+            .map(|(_, fragment_type_mask, stream_node)| {
+                fragments_mutation_fn(*fragment_type_mask, stream_node)
+            })
+            .collect::<MetaResult<Vec<bool>>>()?
+            .into_iter()
+            .zip_eq_debug(std::mem::take(&mut fragments))
+            .filter_map(|(keep, fragment)| if keep { Some(fragment) } else { None })
+            .collect::<Vec<_>>();
+
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
                 "job id {job_id}: {}",
@@ -1760,7 +1769,7 @@ impl CatalogController {
                         _ => {}
                     });
                 }
-                found
+                Ok(found)
             };
 
         self.mutate_fragments_by_job_id(
@@ -1780,12 +1789,18 @@ impl CatalogController {
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_sink_rate_limit =
             |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
-                let mut found = false;
+                let mut found = Ok(false);
                 if fragment_type_mask.contains_any(FragmentTypeFlag::sink_rate_limit_fragments()) {
                     visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Sink(node) = node {
+                            if node.log_store_type != PbSinkLogStoreType::KvLogStore as i32 {
+                                found = Err(MetaError::invalid_parameter(
+                                    "sink rate limit is only supported for kv log store, please SET sink_decouple = TRUE before CREATE SINK",
+                                ));
+                                return;
+                            }
                             node.rate_limit = rate_limit;
-                            found = true;
+                            found = Ok(true);
                         }
                     });
                 }
@@ -1812,7 +1827,7 @@ impl CatalogController {
                         }
                     });
                 }
-                found
+                Ok(found)
             };
 
         self.mutate_fragments_by_job_id(job_id, update_dml_rate_limit, "dml node not found")

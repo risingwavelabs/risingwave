@@ -38,6 +38,12 @@ pub(super) enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
+    ReportSourceLoadFinished {
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+        associated_source_id: u32,
+    },
     RegisterBarrierSender {
         actor_id: ActorId,
         barrier_sender: mpsc::UnboundedSender<Barrier>,
@@ -86,6 +92,18 @@ impl LocalBarrierManager {
         )
     }
 
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self::new(
+            DatabaseId {
+                database_id: 114514,
+            },
+            "114514".to_owned(),
+            StreamEnvironment::for_test(),
+        )
+        .0
+    }
+
     /// Event is handled by [`super::barrier_worker::managed_state::DatabaseManagedBarrierState::poll_next_event`]
     fn send_event(&self, event: LocalBarrierEvent) {
         // ignore error, because the current barrier manager maybe a stale one
@@ -130,6 +148,21 @@ impl LocalBarrierManager {
             tx,
         });
         rx
+    }
+
+    pub fn report_source_load_finished(
+        &self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+        associated_source_id: u32,
+    ) {
+        self.send_event(LocalBarrierEvent::ReportSourceLoadFinished {
+            epoch,
+            actor_id,
+            table_id,
+            associated_source_id,
+        });
     }
 }
 

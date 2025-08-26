@@ -156,8 +156,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         // after compacting with the stream key, the two event with the same user defined sink pk must have different stream key.
         // So the delete event is not to delete the inserted record in our internal streaming SQL semantic.
-        let need_advance_delete =
-            stream_key_sink_pk_mismatch && sink_param.sink_type != SinkType::AppendOnly;
+        let need_advance_delete = stream_key_sink_pk_mismatch
+            && !matches!(
+                sink_param.sink_type,
+                SinkType::AppendOnly | SinkType::ForceAppendOnly
+            );
         // NOTE(st1page): reconstruct with sink pk need extra cost to buffer a barrier's data, so currently we bind it with mismatch case.
         let re_construct_with_sink_pk = need_advance_delete
             && sink_param.sink_type == SinkType::Upsert
@@ -445,7 +448,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             for c in StreamChunkCompactor::new(stream_key.clone(), chunks)
                                 .into_compacted_chunks()
                             {
-                                if sink_type != SinkType::ForceAppendOnly {
+                                // We only enter the branch if need_advance_delete, in which case `sink_type` is not ForceAppendOnly or AppendOnly.
+                                {
                                     // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                                     // user forces the sink to be append-only while it is actually not based on
                                     // the frontend derivation result.

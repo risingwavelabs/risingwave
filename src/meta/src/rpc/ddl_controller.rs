@@ -23,9 +23,13 @@ use anyhow::{Context, anyhow};
 use await_tree::{InstrumentAwait, span};
 use either::Either;
 use itertools::Itertools;
+<<<<<<< HEAD
 use risingwave_common::catalog::{
     AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag,
 };
+=======
+use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog, ColumnId, FragmentTypeFlag};
+>>>>>>> main
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
@@ -67,7 +71,7 @@ use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage}
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{Semaphore, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -179,7 +183,7 @@ pub enum DdlCommand {
     AlterObjectOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
-    DropConnection(ConnectionId),
+    DropConnection(ConnectionId, DropMode),
     CreateSecret(Secret),
     AlterSecret(Secret),
     DropSecret(SecretId),
@@ -213,7 +217,7 @@ impl DdlCommand {
             DdlCommand::AlterObjectOwner(object, _) => Left(format!("{object:?}")),
             DdlCommand::AlterSetSchema(object, _) => Left(format!("{object:?}")),
             DdlCommand::CreateConnection(connection) => Left(connection.name.clone()),
-            DdlCommand::DropConnection(id) => Right(*id),
+            DdlCommand::DropConnection(id, _) => Right(*id),
             DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
             DdlCommand::DropSecret(id) => Right(*id),
@@ -232,7 +236,7 @@ impl DdlCommand {
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
-            | DdlCommand::DropConnection(_)
+            | DdlCommand::DropConnection(_, _)
             | DdlCommand::DropSecret(_)
             | DdlCommand::DropSubscription(_, _)
             | DdlCommand::AlterName(_, _)
@@ -310,11 +314,16 @@ impl CreatingStreamingJobPermit {
                     }
                     Ordering::Equal => continue,
                     Ordering::Greater => {
-                        semaphore_clone
-                            .acquire_many((permits - new_permits) as u32)
-                            .await
-                            .unwrap()
-                            .forget();
+                        let to_release = permits - new_permits;
+                        let reduced = semaphore_clone.forget_permits(to_release);
+                        // TODO: implement dynamic semaphore with limits by ourself.
+                        if reduced != to_release {
+                            tracing::warn!(
+                                "no enough permits to release, expected {}, but reduced {}",
+                                to_release,
+                                reduced
+                            );
+                        }
                     }
                 }
                 tracing::info!(
@@ -433,8 +442,8 @@ impl DdlController {
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
                 }
-                DdlCommand::DropConnection(connection_id) => {
-                    ctrl.drop_connection(connection_id).await
+                DdlCommand::DropConnection(connection_id, drop_mode) => {
+                    ctrl.drop_connection(connection_id, drop_mode).await
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
                 DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
@@ -630,14 +639,10 @@ impl DdlController {
     async fn drop_connection(
         &self,
         connection_id: ConnectionId,
+        drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(
-            ObjectType::Connection,
-            connection_id as _,
-            DropMode::Restrict,
-            None,
-        )
-        .await
+        self.drop_object(ObjectType::Connection, connection_id as _, drop_mode, None)
+            .await
     }
 
     async fn alter_database_param(
@@ -1076,12 +1081,10 @@ impl DdlController {
                                     }
 
                                     **merge_node = {
-                                        #[expect(deprecated)]
                                         MergeNode {
-                                            upstream_actor_id: vec![],
                                             upstream_fragment_id,
                                             upstream_dispatcher_type: PbDispatcherType::Hash as _,
-                                            fields: sink_fields.to_vec(),
+                                            ..Default::default()
                                         }
                                     };
 
@@ -1148,10 +1151,12 @@ impl DdlController {
             job_type = ?streaming_job.job_type(),
             "starting streaming job",
         );
-        let _permit = self
+        // TODO: acquire permits for recovered background DDLs.
+        let permit = self
             .creating_streaming_job_permits
             .semaphore
-            .acquire()
+            .clone()
+            .acquire_owned()
             .instrument_await("acquire_creating_streaming_job_permit")
             .await
             .unwrap();
@@ -1172,6 +1177,7 @@ impl DdlController {
                 fragment_graph,
                 affected_table_replace_info,
                 specific_resource_group,
+                permit,
             )
             .await
         {
@@ -1216,6 +1222,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         specific_resource_group: Option<String>,
+        permit: OwnedSemaphorePermit,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1384,6 +1391,8 @@ impl DdlController {
                         .inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
+                    // drop the permit to release the semaphore
+                    drop(permit);
                 };
 
                 let fut = (self.env.await_tree_reg())
@@ -1664,7 +1673,11 @@ impl DdlController {
                     }
                     let original_sink_fragment =
                         sink_job_fragments.fragments.into_values().next().unwrap();
+<<<<<<< HEAD
                     let (new_sink_fragment, new_schema, new_log_store_table) =
+=======
+                    let (new_sink_fragment, new_sink_columns, new_log_store_table) =
+>>>>>>> main
                         rewrite_refresh_schema_sink_fragment(
                             &original_sink_fragment,
                             &sink,
@@ -1711,11 +1724,15 @@ impl DdlController {
                         tmp_sink_id,
                         original_sink: sink,
                         original_fragment: original_sink_fragment,
+<<<<<<< HEAD
                         new_schema,
                         newly_add_fields: newly_added_columns
                             .iter()
                             .map(|col| Field::from(&col.column_desc))
                             .collect(),
+=======
+                        new_columns: new_sink_columns,
+>>>>>>> main
                         new_fragment: new_sink_fragment,
                         new_log_store_table,
                         actor_status,
@@ -1766,7 +1783,11 @@ impl DdlController {
                         .map(|sink| FinishAutoRefreshSchemaSinkContext {
                             tmp_sink_id: sink.tmp_sink_id,
                             original_sink_id: sink.original_sink.id as _,
+<<<<<<< HEAD
                             columns: sink.new_schema.clone(),
+=======
+                            columns: sink.new_columns.clone(),
+>>>>>>> main
                             new_log_store_table: sink
                                 .new_log_store_table
                                 .as_ref()

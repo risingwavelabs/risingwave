@@ -23,9 +23,11 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::expr_visitable::ExprVisitable;
 use super::generic::{AliasedExpr, GenericPlanRef, PhysicalPlanRef};
-use super::stream::StreamPlanRef;
+use super::stream::StreamPlanNodeMetadata;
 use super::utils::{Distill, TableCatalogBuilder, childless_record, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, Stream, StreamNode};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
+};
 use crate::catalog::TableCatalog;
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, collect_input_refs};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -106,7 +108,8 @@ impl StreamMaterializedExprs {
             input.stream_key().map(|v| v.to_vec()),
             fd_set,
             input.distribution().clone(),
-            input.append_only(),
+            // TODO(kind): theoretically, even if input is upsert, the output can be retract
+            input.stream_kind(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
@@ -202,7 +205,7 @@ impl StreamMaterializedExprs {
     }
 }
 
-impl PlanTreeNodeUnary for StreamMaterializedExprs {
+impl PlanTreeNodeUnary<Stream> for StreamMaterializedExprs {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -211,7 +214,7 @@ impl PlanTreeNodeUnary for StreamMaterializedExprs {
         Self::new(input, self.exprs.clone(), self.field_names.clone())
     }
 }
-impl_plan_tree_node_for_unary! { StreamMaterializedExprs }
+impl_plan_tree_node_for_unary! { Stream, StreamMaterializedExprs }
 
 impl StreamNode for StreamMaterializedExprs {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -227,7 +230,7 @@ impl StreamNode for StreamMaterializedExprs {
     }
 }
 
-impl ExprRewritable for StreamMaterializedExprs {
+impl ExprRewritable<Stream> for StreamMaterializedExprs {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

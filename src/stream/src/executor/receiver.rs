@@ -248,7 +248,10 @@ mod tests {
                 dropped_actors: Default::default(),
                 actor_splits: Default::default(),
                 actor_new_dispatchers: Default::default(),
+<<<<<<< HEAD
                 sink_add_columns: Default::default(),
+=======
+>>>>>>> main
                 actor_cdc_table_snapshot_splits: Default::default(),
             },
         ));

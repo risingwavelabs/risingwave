@@ -71,8 +71,10 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
     /// Enable sink decoupling for sink-into-table.
     /// Disable sink decoupling for blackhole sink. It introduces overhead without any benefit
     fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
-        // TODO(kwannoel): also enable by default, once it's shown to be stable
-        Ok(T::SINK_NAME == TABLE_SINK && matches!(user_specified, SinkDecouple::Enable))
+        match user_specified {
+            SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Default | SinkDecouple::Disable => Ok(false),
+        }
     }
 
     fn support_schema_change() -> bool {

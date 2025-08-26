@@ -26,7 +26,8 @@ use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
 use iceberg::spec::{
-    DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
+    DataFile, MAIN_BRANCH, SerializedDataFile, Transform, UnboundPartitionField,
+    UnboundPartitionSpec,
 };
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
@@ -95,9 +96,21 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+pub const ICEBERG_COW_BRANCH: &str = "ingestion";
+pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
+pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
+
+pub const ENABLE_COMPACTION: &str = "enable_compaction";
+pub const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
+pub const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
+pub const WRITE_MODE: &str = "write_mode";
 
 fn default_commit_retry_num() -> u32 {
     8
+}
+
+fn default_iceberg_write_mode() -> String {
+    ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned()
 }
 
 #[serde_as]
@@ -160,6 +173,10 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     #[with_option(allow_alter_on_fly)]
     pub enable_snapshot_expiration: bool,
+
+    /// The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
+    #[serde(default = "default_iceberg_write_mode")]
+    pub write_mode: String,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -216,6 +233,7 @@ impl IcebergConfig {
                     && k != &"catalog.uri"
                     && k != &"catalog.type"
                     && k != &"catalog.name"
+                    && k != &"catalog.header"
             })
             .map(|(k, v)| (k[8..].to_string(), v.clone()))
             .collect();
@@ -1844,7 +1862,11 @@ impl IcebergSinkCommitter {
             let txn = Transaction::new(&table);
             let mut append_action = txn
                 .fast_append(Some(snapshot_id), None, vec![])
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
+                .with_to_branch(commit_branch(
+                    self.config.r#type.as_str(),
+                    self.config.write_mode.as_str(),
+                ));
             append_action
                 .add_data_files(data_files.clone())
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
@@ -2074,6 +2096,18 @@ pub fn parse_partition_by_exprs(
     Ok(partition_columns)
 }
 
+pub fn commit_branch(sink_type: &str, write_mode: &str) -> String {
+    if should_enable_iceberg_cow(sink_type, write_mode) {
+        ICEBERG_COW_BRANCH.to_owned()
+    } else {
+        MAIN_BRANCH.to_owned()
+    }
+}
+
+pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: &str) -> bool {
+    sink_type == SINK_TYPE_UPSERT && write_mode == ICEBERG_WRITE_MODE_COPY_ON_WRITE
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::BTreeMap;
@@ -2083,7 +2117,7 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::IcebergConfig;
+    use crate::sink::iceberg::{ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig};
 
     pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
@@ -2311,6 +2345,7 @@ mod test {
                 azblob_account_name: None,
                 azblob_account_key: None,
                 azblob_endpoint_url: None,
+                header: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
@@ -2327,6 +2362,7 @@ mod test {
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
             enable_snapshot_expiration: true,
+            write_mode: ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

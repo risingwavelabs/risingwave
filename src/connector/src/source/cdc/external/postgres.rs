@@ -709,6 +709,7 @@ fn is_supported_even_split_data_type(data_type: &DataType) -> bool {
         data_type,
         DataType::Int16 | DataType::Int32 | DataType::Int64
     )
+<<<<<<< HEAD
 }
 
 pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
@@ -759,6 +760,8 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         }
     };
     Ok(data_type)
+=======
+>>>>>>> main
 }
 
 #[cfg(test)]

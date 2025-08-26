@@ -907,7 +907,10 @@ async fn test_parallelized_cdc_backfill_reschedule() {
             actor_splits: Default::default(),
             actor_new_dispatchers: Default::default(),
             actor_cdc_table_snapshot_splits,
+<<<<<<< HEAD
             sink_add_columns: Default::default(),
+=======
+>>>>>>> main
         }));
     tx.send_barrier(reschedule_barrier);
 

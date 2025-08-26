@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 
 use super::stream::prelude::*;
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
+use super::{PlanBase, PlanTreeNodeUnary, StreamPlanRef as PlanRef};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
@@ -36,7 +36,7 @@ pub struct StreamFsFetch {
     core: generic::Source,
 }
 
-impl PlanTreeNodeUnary for StreamFsFetch {
+impl PlanTreeNodeUnary<Stream> for StreamFsFetch {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -45,14 +45,14 @@ impl PlanTreeNodeUnary for StreamFsFetch {
         Self::new(input, self.core.clone())
     }
 }
-impl_plan_tree_node_for_unary! { StreamFsFetch }
+impl_plan_tree_node_for_unary! { Stream, StreamFsFetch }
 
 impl StreamFsFetch {
     pub fn new(input: PlanRef, source: generic::Source) -> Self {
         let base = PlanBase::new_stream_with_core(
             &source,
             Distribution::SomeShard,
-            source.catalog.as_ref().is_none_or(|s| s.append_only),
+            source.stream_kind(),
             false,
             WatermarkColumns::new(),
             MonotonicityMap::new(), // TODO: derive monotonicity
@@ -90,7 +90,7 @@ impl Distill for StreamFsFetch {
     }
 }
 
-impl ExprRewritable for StreamFsFetch {}
+impl ExprRewritable<Stream> for StreamFsFetch {}
 
 impl ExprVisitable for StreamFsFetch {}
 

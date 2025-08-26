@@ -18,7 +18,10 @@ use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use super::{
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch,
+};
 use crate::error::Result;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -76,7 +79,7 @@ impl Distill for BatchExchange {
     }
 }
 
-impl PlanTreeNodeUnary for BatchExchange {
+impl PlanTreeNodeUnary<Batch> for BatchExchange {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -90,7 +93,7 @@ impl PlanTreeNodeUnary for BatchExchange {
         )
     }
 }
-impl_plan_tree_node_for_unary! {BatchExchange}
+impl_plan_tree_node_for_unary! { Batch, BatchExchange}
 
 impl ToDistributedBatch for BatchExchange {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -127,6 +130,6 @@ impl ToLocalBatch for BatchExchange {
     }
 }
 
-impl ExprRewritable for BatchExchange {}
+impl ExprRewritable<Batch> for BatchExchange {}
 
 impl ExprVisitable for BatchExchange {}

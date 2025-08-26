@@ -77,14 +77,21 @@ impl Expr for UserDefinedFunction {
         self.catalog.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
-        ExprNode {
+
+        let children = self
+            .args
+            .iter()
+            .map(|arg| arg.try_to_expr_proto())
+            .try_collect()?;
+
+        Ok(ExprNode {
             function_type: Type::Unspecified.into(),
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(RexNode::Udf(Box::new(UserDefinedFunction {
-                children: self.args.iter().map(Expr::to_expr_proto).collect(),
+                children,
                 name: self.catalog.name.clone(),
                 arg_names: self.catalog.arg_names.clone(),
                 arg_types: self
@@ -104,7 +111,7 @@ impl Expr for UserDefinedFunction {
                 is_batched: self.catalog.is_batched,
                 version: PbUdfExprVersion::LATEST as _,
             }))),
-        }
+        })
     }
 }
 
