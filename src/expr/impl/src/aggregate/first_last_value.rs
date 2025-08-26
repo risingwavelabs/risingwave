@@ -83,22 +83,8 @@ fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
     if retract { state } else { input }
 }
 
-#[aggregate(
-    "arg_min() -> any",
-    rewritten,
-    type_infer = "|args| Ok(DataType::Int64)"
-)]
-#[aggregate("arg_min(any) -> any", rewritten)]
 #[aggregate("arg_min(any, any) -> any", rewritten)]
-#[aggregate("arg_min(any, any, any) -> any", rewritten)]
 fn _arg_min() {}
 
-#[aggregate(
-    "arg_max() -> any",
-    rewritten,
-    type_infer = "|args| Ok(DataType::Int64)"
-)]
-#[aggregate("arg_max(any) -> any", rewritten)]
 #[aggregate("arg_max(any, any) -> any", rewritten)]
-#[aggregate("arg_max(any, any, any) -> any", rewritten)]
 fn _arg_max() {}

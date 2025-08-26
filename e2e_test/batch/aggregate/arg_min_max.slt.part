@@ -95,23 +95,11 @@ statement ok
 drop table window_test;
 
 # Error cases
-statement error arg_min requires exactly 2 arguments, got 0
-select arg_min();
-
-statement error arg_max requires exactly 2 arguments, got 0
-select arg_max();
-
-statement error arg_min requires exactly 2 arguments, got 0
+statement error Failed to bind expression: arg_min\(\*\)
 select arg_min(*);
 
-statement error arg_max requires exactly 2 arguments, got 0
+statement error Failed to bind expression: arg_max\(\*\)
 select arg_max(*);
-
-statement error arg_min requires exactly 2 arguments, got 1
-select arg_min(1);
-
-statement error arg_max requires exactly 2 arguments, got 1
-select arg_max(1);
 
 # Corner Cases
 

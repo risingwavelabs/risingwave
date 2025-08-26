@@ -774,14 +774,6 @@ impl LogicalAggBuilder {
             AggType::Builtin(PbAggKind::ArgMin | PbAggKind::ArgMax) => {
                 let mut agg_call = agg_call;
 
-                if agg_call.args.len() != 2 {
-                    bail!(format!(
-                        "{} requires exactly 2 arguments, got {}",
-                        agg_call.agg_type.to_string(),
-                        agg_call.args.len()
-                    ));
-                }
-
                 let comparison_arg_type = agg_call.args[1].return_type();
                 match comparison_arg_type {
                     DataType::Struct(_)
