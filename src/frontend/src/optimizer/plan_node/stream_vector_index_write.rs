@@ -170,7 +170,7 @@ impl StreamVectorIndexWrite {
             value_indices,
             definition,
             conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint,
             version: None,
             watermark_columns,
