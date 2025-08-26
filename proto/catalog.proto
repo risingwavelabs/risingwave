@@ -385,6 +385,7 @@ message Table {
     MATERIALIZED_VIEW = 2;
     INDEX = 3;
     INTERNAL = 4;
+    VECTOR_INDEX = 5;
   }
 
   message TableVersion {

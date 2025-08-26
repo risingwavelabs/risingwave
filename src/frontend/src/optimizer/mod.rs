@@ -11,9 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::num::NonZeroU32;
 use std::ops::DerefMut;
 use std::sync::Arc;
+
+use risingwave_pb::catalog::PbVectorIndexInfo;
 
 pub mod plan_node;
 
@@ -80,7 +83,8 @@ use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker, PlanTreeNode, Stream,
-    StreamExchange, StreamPlanRef, StreamUnion, ToStream, VisitExprsRecursive,
+    StreamExchange, StreamPlanRef, StreamUnion, StreamVectorIndexWrite, ToStream,
+    VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
@@ -996,6 +1000,30 @@ impl LogicalPlanRoot {
             TableType::Index,
             cardinality,
             retention_seconds,
+        )
+    }
+
+    pub fn gen_vector_index_plan(
+        self,
+        index_name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        definition: String,
+        retention_seconds: Option<NonZeroU32>,
+        vector_index_info: PbVectorIndexInfo,
+    ) -> Result<StreamVectorIndexWrite> {
+        let cardinality = self.compute_cardinality();
+        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
+
+        StreamVectorIndexWrite::create(
+            stream_plan,
+            index_name,
+            database_id,
+            schema_id,
+            definition,
+            cardinality,
+            retention_seconds,
+            vector_index_info,
         )
     }
 

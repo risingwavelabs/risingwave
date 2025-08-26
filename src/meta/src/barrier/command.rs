@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
+use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -43,8 +44,8 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
-    Dispatchers, DropSubscriptionsMutation, LoadFinishMutation, PauseMutation, ResumeMutation,
-    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    Dispatchers, DropSubscriptionsMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumns,
+    ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -769,6 +770,7 @@ impl CommandContext {
                     match node.node_body.as_ref().unwrap() {
                         NodeBody::VectorIndexWrite(vector_index_write) => {
                             let index_table = vector_index_write.table.as_ref().unwrap();
+                            assert_eq!(index_table.table_type, PbTableType::VectorIndex as i32);
                             info.vector_index_delta
                                 .try_insert(
                                     index_table.id.into(),
@@ -848,6 +850,7 @@ impl Command {
 
             Command::DropStreamingJobs { actors, .. } => Some(Mutation::Stop(StopMutation {
                 actors: actors.clone(),
+                dropped_sink_fragments: Default::default(),
             })),
 
             Command::CreateStreamingJob {
@@ -906,6 +909,7 @@ impl Command {
                     actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
                         cdc_table_snapshot_split_assignment.clone(),
                     ),
+                    new_upstream_sinks: Default::default(),
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -933,6 +937,7 @@ impl Command {
                         dispatchers,
                         init_split_assignment,
                         cdc_table_snapshot_split_assignment,
+                        None,
                     );
 
                     Some(Mutation::Combined(CombinedMutation {
@@ -999,6 +1004,7 @@ impl Command {
                     dispatchers,
                     init_split_assignment,
                     cdc_table_snapshot_split_assignment,
+                    auto_refresh_schema_sinks.as_ref(),
                 )
             }
 
@@ -1164,6 +1170,7 @@ impl Command {
                     actor_splits,
                     actor_new_dispatchers,
                     actor_cdc_table_snapshot_splits,
+                    sink_add_columns: Default::default(),
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
@@ -1184,6 +1191,7 @@ impl Command {
                 }],
                 backfill_nodes_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: Default::default(),
+                new_upstream_sinks: Default::default(),
             })),
             Command::DropSubscription {
                 upstream_mv_table_id,
@@ -1338,6 +1346,7 @@ impl Command {
         dispatchers: FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
         cdc_table_snapshot_split_assignment: &CdcTableSnapshotSplitAssignment,
+        auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
 
@@ -1360,6 +1369,24 @@ impl Command {
             actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
                 cdc_table_snapshot_split_assignment.clone(),
             ),
+            sink_add_columns: auto_refresh_schema_sinks
+                .as_ref()
+                .into_iter()
+                .flat_map(|sinks| {
+                    sinks.iter().map(|sink| {
+                        (
+                            sink.original_sink.id,
+                            PbSinkAddColumns {
+                                fields: sink
+                                    .newly_add_fields
+                                    .iter()
+                                    .map(|field| field.to_prost())
+                                    .collect(),
+                            },
+                        )
+                    })
+                })
+                .collect(),
             ..Default::default()
         }))
     }

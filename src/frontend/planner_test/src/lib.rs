@@ -486,6 +486,7 @@ impl TestCase {
                 Statement::CreateIndex {
                     name,
                     table_name,
+                    method,
                     columns,
                     include,
                     distributed_by,
@@ -498,6 +499,7 @@ impl TestCase {
                         if_not_exists,
                         name,
                         table_name,
+                        method,
                         columns,
                         include,
                         distributed_by,

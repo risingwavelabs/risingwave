@@ -170,6 +170,7 @@ pub async fn do_handle_explain(
                     Statement::CreateIndex {
                         name,
                         table_name,
+                        method,
                         columns,
                         include,
                         distributed_by,
@@ -183,6 +184,7 @@ pub async fn do_handle_explain(
                             schema_name,
                             table,
                             index_table_name,
+                            method,
                             columns,
                             include,
                             distributed_by,

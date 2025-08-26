@@ -748,14 +748,13 @@ impl Binder {
                 }))),
 
                 // AI model functions
-                ("openai_embedding", guard_by_len(3, raw(|_binder, inputs| {
+                ("openai_embedding", guard_by_len(2, raw(|_binder, inputs| {
                     // check if the first two arguments are constants
-                    if let ExprImpl::Literal(api_key) = &inputs[0] && let Some(ScalarImpl::Utf8(_api_key)) = api_key.get_data()
-                    && let ExprImpl::Literal(model) = &inputs[1] && let Some(ScalarImpl::Utf8(_model)) = model.get_data() {
+                    if let ExprImpl::Literal(config) = &inputs[0] && let Some(ScalarImpl::Jsonb(_config)) = config.get_data() {
                         Ok(FunctionCall::new(ExprType::OpenaiEmbedding, inputs)?.into())
                     } else {
                         Err(ErrorCode::InvalidInputSyntax(
-                            "`api_key` and `model` must be constant strings".to_owned(),
+                            "`embedding_config` must be constant jsonb".to_owned(),
                         ).into())
                     }
                 }))),

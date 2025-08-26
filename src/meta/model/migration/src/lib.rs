@@ -47,6 +47,7 @@ mod m20250702_062029_cdc_table_snapshot_splits;
 mod m20250710_065220_sink_auto_refresh_schema;
 mod m20250722_155040_table_refreshable;
 mod m20250729_174630_add_vector_index_info;
+mod m20250810_000000_add_user_admin_field;
 mod m20250819_014448_add_version_column_indices_to_table;
 mod utils;
 
@@ -133,6 +134,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250710_065220_sink_auto_refresh_schema::Migration),
             Box::new(m20250722_155040_table_refreshable::Migration),
             Box::new(m20250729_174630_add_vector_index_info::Migration),
+            Box::new(m20250810_000000_add_user_admin_field::Migration),
             Box::new(m20250819_014448_add_version_column_indices_to_table::Migration),
         ]
     }

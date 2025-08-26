@@ -298,7 +298,7 @@ select count(*) from rw_iceberg_files where  schema_name = 'public' and source_n
 2
 
 statement ok
-VACUUM t_hosted_catalog;
+VACUUM FULL t_hosted_catalog;
 
 query ?
 select count(*) from rw_iceberg_files where  schema_name = 'public' and source_name = '__iceberg_source_t_hosted_catalog';
@@ -353,7 +353,7 @@ flush;
 sleep 5s
 
 statement ok
-vacuum t_cow;
+VACUUM FULL t_cow;
 
 query ?? rowsort
 select * from t_cow;
@@ -370,7 +370,7 @@ flush;
 sleep 5s
 
 statement ok
-vacuum t_cow;
+VACUUM FULL t_cow;
 
 query ?? rowsort
 select * from t_cow;

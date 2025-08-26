@@ -62,6 +62,7 @@ members = [
     "src/utils/futures_util",
     "src/utils/iter_util",
     "src/utils/local_stats_alloc",
+    "src/utils/openai_embedding_service",
     "src/utils/pgwire",
     "src/utils/resource_util",
     "src/utils/runtime",
@@ -113,6 +114,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88
 ] }
 arc-swap = "1"
 arrow-udf-runtime = "0.8.0"
+async-openai = "0.29.0"
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = { version = "0.3.2-alpha.2", features = ["serde", "attributes"] }
 aws-config = { version = "1", default-features = false, features = [
@@ -152,12 +154,7 @@ criterion = { version = "0.5", features = ["async_futures"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
-# foyer = { version = "0.17.3", features = ["serde", "tracing", "nightly"] }
-foyer = { git = "http://github.com/foyer-rs/foyer", rev = "77eef58d1f231ee50cd601f9ad69c5e3db3415f9", features = [
-    "serde",
-    "tracing",
-    "nightly",
-] }
+foyer = { version = "0.19.0", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.8", default-features = false, features = ["std"] }
 hashbrown = { version = "0.15", features = [

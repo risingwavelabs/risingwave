@@ -900,7 +900,7 @@ impl dyn StreamPlanNode {
                     .map(|x| *x as u32)
                     .collect(),
                 fields: self.schema().to_prost(),
-                append_only: self.plan_base().append_only(),
+                stream_kind: self.plan_base().stream_kind().to_protobuf() as i32,
             })
         })
     }
@@ -1076,11 +1076,13 @@ mod logical_file_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
 
+mod batch_vector_search;
 mod logical_mysql_query;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_union;
+mod stream_vector_index_write;
 pub mod utils;
 
 pub use batch_delete::BatchDelete;
@@ -1116,6 +1118,7 @@ pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
+pub use batch_vector_search::BatchVectorSearch;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
@@ -1192,6 +1195,7 @@ pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 pub use stream_values::StreamValues;
+pub use stream_vector_index_write::StreamVectorIndexWrite;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
@@ -1288,6 +1292,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
+            , { Batch, VectorSearch }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1328,6 +1333,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, AsOfJoin }
             , { Stream, SyncLogStore }
             , { Stream, MaterializedExprs }
+            , { Stream, VectorIndexWrite }
             $(,$rest)*
         }
     };
