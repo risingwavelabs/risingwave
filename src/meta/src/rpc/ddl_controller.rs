@@ -389,7 +389,9 @@ impl DdlController {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
-                DdlCommand::DropFunction(function_id, drop_mode) => ctrl.drop_function(function_id, drop_mode).await,
+                DdlCommand::DropFunction(function_id, drop_mode) => {
+                    ctrl.drop_function(function_id, drop_mode).await
+                }
                 DdlCommand::CreateView(view, dependencies) => {
                     ctrl.create_view(view, dependencies).await
                 }
@@ -592,14 +594,13 @@ impl DdlController {
             .await
     }
 
-    async fn drop_function(&self, function_id: FunctionId, drop_mode: DropMode) -> MetaResult<NotificationVersion> {
-        self.drop_object(
-            ObjectType::Function,
-            function_id as _,
-            drop_mode,
-            None,
-        )
-        .await
+    async fn drop_function(
+        &self,
+        function_id: FunctionId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        self.drop_object(ObjectType::Function, function_id as _, drop_mode, None)
+            .await
     }
 
     async fn create_view(
