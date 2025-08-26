@@ -154,7 +154,7 @@ pub enum DdlCommand {
     CreateNonSharedSource(Source),
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
-    DropFunction(FunctionId),
+    DropFunction(FunctionId, DropMode),
     CreateView(View, HashSet<ObjectId>),
     DropView(ViewId, DropMode),
     CreateStreamingJob {
@@ -199,7 +199,7 @@ impl DdlCommand {
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
             DdlCommand::DropSource(id, _) => Right(*id),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
-            DdlCommand::DropFunction(id) => Right(*id),
+            DdlCommand::DropFunction(id, _) => Right(*id),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
             DdlCommand::DropView(id, _) => Right(*id),
             DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
@@ -227,7 +227,7 @@ impl DdlCommand {
             DdlCommand::DropDatabase(_)
             | DdlCommand::DropSchema(_, _)
             | DdlCommand::DropSource(_, _)
-            | DdlCommand::DropFunction(_)
+            | DdlCommand::DropFunction(_, _)
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
             | DdlCommand::DropConnection(_, _)
@@ -389,7 +389,7 @@ impl DdlController {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
-                DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
+                DdlCommand::DropFunction(function_id, drop_mode) => ctrl.drop_function(function_id, drop_mode).await,
                 DdlCommand::CreateView(view, dependencies) => {
                     ctrl.create_view(view, dependencies).await
                 }
@@ -592,11 +592,11 @@ impl DdlController {
             .await
     }
 
-    async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
+    async fn drop_function(&self, function_id: FunctionId, drop_mode: DropMode) -> MetaResult<NotificationVersion> {
         self.drop_object(
             ObjectType::Function,
             function_id as _,
-            DropMode::Restrict,
+            drop_mode,
             None,
         )
         .await
