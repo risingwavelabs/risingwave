@@ -2518,17 +2518,6 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_with_version_column(&mut self) -> ModalResult<Option<Ident>> {
-        if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
-            self.expect_token(&Token::LParen)?;
-            let name = self.parse_identifier_non_reserved()?;
-            self.expect_token(&Token::RParen)?;
-            Ok(Some(name))
-        } else {
-            Ok(None)
-        }
-    }
-
     pub fn parse_with_version_columns(&mut self) -> ModalResult<Vec<Ident>> {
         if self.parse_keywords(&[Keyword::WITH, Keyword::VERSION, Keyword::COLUMN]) {
             self.expect_token(&Token::LParen)?;
