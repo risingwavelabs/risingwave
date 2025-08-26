@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 #![feature(array_chunks)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
@@ -37,6 +38,7 @@
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 #![feature(min_specialization)]
+#![feature(custom_inner_attributes)]
 
 use std::time::Duration;
 

@@ -75,6 +75,7 @@ message BarrierCompleteResponse {
   // SourceExecutor reports the source load is finished, and then
   // meta will issue a LoadFinished barrier to notify MaterializeExecutor to start diff calculation.
   repeated uint32 load_finished_source_ids = 11;
+  map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
 }
 
 message StreamingControlStreamRequest {

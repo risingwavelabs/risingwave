@@ -109,7 +109,7 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
     .into_executor(schema, vec![0]);
 
     Executor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             source.schema().clone(),
             source.pk_indices().to_vec(),
             "MaterializeExecutor".to_owned(),
@@ -190,7 +190,7 @@ async fn test_lookup_this_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let info = ExecutorInfo::new(
+    let info = ExecutorInfo::for_test(
         Schema::new(vec![
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
@@ -265,7 +265,7 @@ async fn test_lookup_last_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let info = ExecutorInfo::new(
+    let info = ExecutorInfo::for_test(
         Schema::new(vec![
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),

@@ -52,6 +52,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::array::VectorDistanceType;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, Serial, Time, Timestamp, Timestamptz,
@@ -557,6 +558,7 @@ impl IndexSelectionRule {
                 .collect_vec(),
             logical_scan.table().clone(),
             vec![],
+            vec![],
             logical_scan.ctx(),
             Condition {
                 conjunctions: conjunctions.to_vec(),
@@ -597,6 +599,7 @@ impl IndexSelectionRule {
                     .map(|x| x.column_index)
                     .collect_vec(),
                 index.index_table.clone(),
+                vec![],
                 vec![],
                 ctx,
                 new_predicate,
@@ -749,7 +752,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
             DataType::Map(_) => 20,
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(d) => d * size_of::<VectorDistanceType>(),
         }
     }
 

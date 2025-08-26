@@ -27,7 +27,9 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
 };
-use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
+use risingwave_pb::catalog::{
+    PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
+};
 use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -201,6 +203,8 @@ pub struct TableCatalog {
 
     /// Whether the table supports manual refresh operations
     pub refreshable: bool,
+
+    pub vector_index_info: Option<PbVectorIndexInfo>,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -215,6 +219,7 @@ pub enum TableType {
     /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
     /// An index has both a `TableCatalog` and an `IndexCatalog`.
     Index,
+    VectorIndex,
     /// Internal tables for executors.
     Internal,
 }
@@ -233,6 +238,7 @@ impl TableType {
             PbTableType::MaterializedView => Self::MaterializedView,
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
+            PbTableType::VectorIndex => Self::VectorIndex,
             PbTableType::Unspecified => unreachable!(),
         }
     }
@@ -242,6 +248,7 @@ impl TableType {
             Self::Table => PbTableType::Table,
             Self::MaterializedView => PbTableType::MaterializedView,
             Self::Index => PbTableType::Index,
+            Self::VectorIndex => PbTableType::VectorIndex,
             Self::Internal => PbTableType::Internal,
         }
     }
@@ -392,7 +399,7 @@ impl TableCatalog {
             TableType::MaterializedView => {
                 "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
             }
-            TableType::Index => "Use `DROP INDEX` to drop an index.",
+            TableType::Index | TableType::VectorIndex => "Use `DROP INDEX` to drop an index.",
             TableType::Table => "Use `DROP TABLE` to drop a table.",
             TableType::Internal => "Internal tables cannot be dropped.",
         };
@@ -587,6 +594,7 @@ impl TableCatalog {
             engine: Some(self.engine.to_protobuf().into()),
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
+            vector_index_info: self.vector_index_info,
         }
     }
 
@@ -810,6 +818,7 @@ impl From<PbTable> for TableCatalog {
             engine,
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
             refreshable: tb.refreshable,
+            vector_index_info: tb.vector_index_info,
         }
     }
 }
@@ -902,6 +911,7 @@ mod tests {
             engine: Some(PbEngine::Hummock as i32),
             clean_watermark_index_in_pk: None,
             refreshable: false,
+            vector_index_info: None,
         }
         .into();
 
@@ -971,6 +981,7 @@ mod tests {
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
                 refreshable: false,
+                vector_index_info: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost()));

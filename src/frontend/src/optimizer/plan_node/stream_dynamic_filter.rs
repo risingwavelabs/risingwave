@@ -39,7 +39,7 @@ pub struct StreamDynamicFilter {
 }
 
 impl StreamDynamicFilter {
-    pub fn new(core: DynamicFilter<PlanRef>) -> Self {
+    pub fn new(core: DynamicFilter<PlanRef>) -> Result<Self> {
         let right_non_decreasing = core.right().columns_monotonicity()[0].is_non_decreasing();
         let condition_always_relax = right_non_decreasing
             && matches!(
@@ -47,11 +47,12 @@ impl StreamDynamicFilter {
                 ExprType::LessThan | ExprType::LessThanOrEqual
             );
 
-        let out_kind = if condition_always_relax && core.left().append_only() {
-            StreamKind::AppendOnly
-        } else {
-            // TODO(kind): check if the impl can handle upsert stream.
-            StreamKind::Retract
+        // TODO(kind): theoretically, the impl can handle upsert stream.
+        let left_kind = reject_upsert_input!(core.left());
+        let out_kind = match left_kind {
+            StreamKind::AppendOnly if condition_always_relax => StreamKind::AppendOnly,
+            StreamKind::AppendOnly | StreamKind::Retract => StreamKind::Retract,
+            StreamKind::Upsert => unreachable!(),
         };
 
         let base = PlanBase::new_stream_with_core(
@@ -63,11 +64,12 @@ impl StreamDynamicFilter {
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
         let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
-        Self {
+
+        Ok(Self {
             base,
             core,
             cleaned_by_watermark,
-        }
+        })
     }
 
     fn derive_watermark_columns(core: &DynamicFilter<PlanRef>) -> WatermarkColumns {
@@ -151,7 +153,7 @@ impl PlanTreeNodeBinary<Stream> for StreamDynamicFilter {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.core.clone_with_left_right(left, right))
+        Self::new(self.core.clone_with_left_right(left, right)).unwrap()
     }
 }
 

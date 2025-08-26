@@ -127,7 +127,7 @@ impl LogicalTopN {
     fn gen_single_stream_top_n_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
         let input = RequiredDist::single().streaming_enforce_if_not_satisfies(stream_input)?;
         let core = self.core.clone_with_input(input);
-        Ok(StreamTopN::new(core).into())
+        Ok(StreamTopN::new(core)?.into())
     }
 
     fn gen_vnode_two_phase_stream_top_n_plan(
@@ -150,7 +150,7 @@ impl LogicalTopN {
             self.topn_order().clone(),
             vec![vnode_col_idx],
         );
-        let local_top_n = StreamGroupTopN::new(local_top_n, Some(vnode_col_idx));
+        let local_top_n = StreamGroupTopN::new(local_top_n, Some(vnode_col_idx))?;
 
         let exchange =
             RequiredDist::single().streaming_enforce_if_not_satisfies(local_top_n.into())?;
@@ -161,7 +161,7 @@ impl LogicalTopN {
             self.offset(),
             self.topn_order().clone(),
         );
-        let global_top_n = StreamTopN::new(global_top_n);
+        let global_top_n = StreamTopN::new(global_top_n)?;
 
         // use another projection to remove the column we added before.
         assert_eq!(vnode_col_idx, global_top_n.base.schema().len() - 1);
@@ -327,7 +327,7 @@ impl ToStream for LogicalTopN {
             let input = RequiredDist::hash_shard(self.group_key())
                 .streaming_enforce_if_not_satisfies(input)?;
             let core = self.core.clone_with_input(input);
-            StreamGroupTopN::new(core, None).into()
+            StreamGroupTopN::new(core, None)?.into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?
         })

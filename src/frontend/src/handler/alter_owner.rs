@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
-use risingwave_common::catalog::{DEFAULT_SUPER_USER_FOR_ADMIN, is_reserved_admin_user};
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
@@ -28,6 +27,7 @@ use crate::catalog::{CatalogError, OwnedByUserCatalog};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
 use crate::session::SessionImpl;
+use crate::user::UserId;
 use crate::user::user_catalog::UserCatalog;
 
 pub fn check_schema_create_privilege(
@@ -72,12 +72,23 @@ pub async fn handle_alter_owner(
         let new_owner = user_reader
             .get_user_by_name(&new_owner_name)
             .ok_or(CatalogError::NotFound("user", new_owner_name))?;
-        if is_reserved_admin_user(&new_owner.name) {
-            return Err(PermissionDenied(
-                format!("{} is reserved for admin", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
-            )
-            .into());
-        }
+
+        let check_owned_by_admin = |owner: &UserId| -> Result<()> {
+            let user_catalog = user_reader.get_user_by_id(owner).unwrap();
+            if user_catalog.is_admin {
+                return Err(PermissionDenied(
+                    format!(
+                        "Cannot change owner of {} owned by admin user {}",
+                        obj_name.real_value(),
+                        user_catalog.name
+                    )
+                    .to_owned(),
+                )
+                .into());
+            }
+            Ok(())
+        };
+
         let owner_id = new_owner.id;
         (
             match stmt_type {
@@ -95,6 +106,7 @@ pub async fn handle_alter_owner(
                     if table.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
+                    check_owned_by_admin(&table.owner)?;
                     Object::TableId(table.id.table_id)
                 }
                 StatementType::ALTER_VIEW => {
@@ -108,6 +120,7 @@ pub async fn handle_alter_owner(
                     if view.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
+                    check_owned_by_admin(&view.owner)?;
                     Object::ViewId(view.id)
                 }
                 StatementType::ALTER_SOURCE => {
@@ -121,6 +134,7 @@ pub async fn handle_alter_owner(
                     if source.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
+                    check_owned_by_admin(&source.owner())?;
                     Object::SourceId(source.id)
                 }
                 StatementType::ALTER_SINK => {
@@ -137,6 +151,7 @@ pub async fn handle_alter_owner(
                     if sink.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
+                    check_owned_by_admin(&sink.owner())?;
                     Object::SinkId(sink.id.sink_id)
                 }
                 StatementType::ALTER_SUBSCRIPTION => {
@@ -153,6 +168,7 @@ pub async fn handle_alter_owner(
                     if subscription.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
+                    check_owned_by_admin(&subscription.owner())?;
                     Object::SubscriptionId(subscription.id.subscription_id)
                 }
                 StatementType::ALTER_DATABASE => {
@@ -161,6 +177,7 @@ pub async fn handle_alter_owner(
                     if database.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
+                    check_owned_by_admin(&database.owner)?;
                     Object::DatabaseId(database.id())
                 }
                 StatementType::ALTER_SCHEMA => {
@@ -170,6 +187,7 @@ pub async fn handle_alter_owner(
                     if schema.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
+                    check_owned_by_admin(&schema.owner)?;
                     Object::SchemaId(schema.id())
                 }
                 StatementType::ALTER_CONNECTION => {
@@ -182,6 +200,7 @@ pub async fn handle_alter_owner(
                     if connection.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
+                    check_owned_by_admin(&connection.owner)?;
                     Object::ConnectionId(connection.id)
                 }
                 _ => unreachable!(),

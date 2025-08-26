@@ -489,7 +489,7 @@ mod tests {
         let source = source.into_executor(schema, vec![0]);
 
         let ctx = ActorContext::for_test(123);
-        let info = ExecutorInfo::new(
+        let info = ExecutorInfo::for_test(
             source.schema().clone(),
             source.pk_indices().to_vec(),
             "WatermarkFilterExecutor".to_owned(),

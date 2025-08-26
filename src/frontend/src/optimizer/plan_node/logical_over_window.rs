@@ -729,7 +729,8 @@ impl ToStream for LogicalOverWindow {
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .streaming_enforce_if_not_satisfies(stream_input)?;
             let core = self.core.clone_with_input(new_input);
-            Ok(StreamOverWindow::new(core).into())
+
+            Ok(StreamOverWindow::new(core)?.into())
         }
     }
 

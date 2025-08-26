@@ -1,0 +1,208 @@
+# Test iceberg engine with lakekeeper catalog and warehouse
+# This test verifies that RisingWave can properly work with lakekeeper as the Iceberg catalog server
+
+control substitution on
+
+statement ok
+create secret lakekeeper_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+# Test lakekeeper catalog connection using the warehouse created by risedev
+statement ok
+create connection lakekeeper_catalog_conn
+with (
+    type = 'iceberg',
+    catalog.type = 'rest',
+    catalog.uri = 'http://127.0.0.1:8181/catalog/',
+    warehouse.path = 'risingwave-warehouse',
+    s3.access.key = secret lakekeeper_secret,
+    s3.secret.key = secret lakekeeper_secret,
+    s3.path.style.access = 'true',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1'
+);
+
+statement ok
+set iceberg_engine_connection = 'public.lakekeeper_catalog_conn';
+
+# Test basic table creation and operations with lakekeeper
+statement ok
+create table t_lakekeeper_basic(id int primary key, name varchar, v bigint)
+with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_lakekeeper_basic values(1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ??? rowsort
+select * from t_lakekeeper_basic;
+----
+1 alice 100
+2 bob 200
+3 charlie 300
+
+# Test update operations with lakekeeper
+statement ok
+update t_lakekeeper_basic set v = 999 where name = 'alice';
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ??? rowsort
+select * from t_lakekeeper_basic;
+----
+1 alice 999
+2 bob 200
+3 charlie 300
+
+# Test delete operations with lakekeeper
+statement ok
+delete from t_lakekeeper_basic where id = 2;
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ??? rowsort
+select * from t_lakekeeper_basic;
+----
+1 alice 999
+3 charlie 300
+
+# Test time travel with lakekeeper
+query ??? rowsort
+select * from t_lakekeeper_basic for system_time as of '2222-12-10 11:48:06';
+----
+1 alice 999
+3 charlie 300
+
+statement ok
+DROP TABLE t_lakekeeper_basic;
+
+# Test complex data types with lakekeeper
+statement ok
+CREATE TABLE t_lakekeeper_complex (
+id bigint primary key,
+v_int int,
+v_varchar varchar,
+v_bool boolean,
+v_date date,
+v_timestamp timestamptz,
+v_decimal decimal,
+v_map map(int, int),
+v_array int[],
+v_struct struct<a int, b varchar>,
+v_json jsonb
+) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+INSERT INTO t_lakekeeper_complex VALUES
+(1, 42, 'test', true, '2024-01-01', '2024-01-01 12:00:00Z'::timestamptz, 123.45, map {1:100,2:200}, array[1,2,3], row(10,'hello'), '{"key":"value"}'),
+(2, 84, 'another', false, '2024-01-02', '2024-01-02 13:00:00Z'::timestamptz, 678.90, map {3:300}, array[4,5,6], row(20,'world'), '{"foo":"bar"}');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ??????????? rowsort
+select * from t_lakekeeper_complex;
+----
+1 42 test t 2024-01-01 2024-01-01 12:00:00+00:00 123.4500000000 {1:100,2:200} {1,2,3} (10,hello) {"key": "value"}
+2 84 another f 2024-01-02 2024-01-02 13:00:00+00:00 678.9000000000 {3:300} {4,5,6} (20,world) {"foo": "bar"}
+
+# Test aggregations and filtering with lakekeeper
+query ?
+select count(*) from t_lakekeeper_complex where v_int > 50;
+----
+1
+
+query ?
+select max(v_decimal) from t_lakekeeper_complex;
+----
+678.9000000000
+
+statement ok
+DROP TABLE t_lakekeeper_complex;
+
+# Test table without primary key (uses hidden _row_id)
+statement ok
+create table t_lakekeeper_no_pk(name varchar, score int)
+with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_lakekeeper_no_pk values('test1', 85), ('test2', 92), ('test3', 78);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?? rowsort
+select * from t_lakekeeper_no_pk;
+----
+test1 85
+test2 92
+test3 78
+
+query ?
+select count(_row_id) from t_lakekeeper_no_pk;
+----
+3
+
+statement ok
+DROP TABLE t_lakekeeper_no_pk;
+
+# Test partition tables with lakekeeper
+statement ok
+create table t_lakekeeper_partition(
+    c1 int,
+    c2 int,
+    c3 varchar,
+    primary key(c1, c2)
+) with(
+    commit_checkpoint_interval = 1,
+    partition_by='c1'
+) engine = iceberg;
+
+statement ok
+insert into t_lakekeeper_partition values
+(1, 10, 'a'), (1, 20, 'b'), (2, 10, 'c'), (2, 20, 'd');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ??? rowsort
+select * from t_lakekeeper_partition;
+----
+1 10 a
+1 20 b
+2 10 c
+2 20 d
+
+# Test partition filtering
+query ???
+select * from t_lakekeeper_partition where c1 = 1 order by c2;
+----
+1 10 a
+1 20 b
+
+statement ok
+DROP TABLE t_lakekeeper_partition;
+
+# Cleanup connection
+statement ok
+DROP CONNECTION lakekeeper_catalog_conn;
+
+statement ok
+DROP SECRET lakekeeper_secret;

@@ -1,0 +1,44 @@
+statement ok
+CREATE TABLE items (id bigint PRIMARY KEY, embedding vector(3));
+
+statement ok
+INSERT INTO items (embedding, id) VALUES ('[1,2,3]', 1), ('[4,5,6]', 2);
+
+system ok
+rm -rf embedding-file-sink-dest
+
+statement ok
+create sink s from items
+with (
+    connector = 'fs',
+    type = 'upsert',
+    fs.path = 'embedding-file-sink-dest',
+    max_row_count = 1
+) format plain encode parquet(force_append_only = true);
+
+sleep 3s
+
+statement ok
+create table embedding_file_table (id bigint, embedding real[])
+with (
+    connector = 'posix_fs',
+    posix_fs.root = 'embedding-file-sink-dest',
+    refresh.interval.sec = 1
+) format plain encode parquet;
+
+sleep 3s
+
+query
+SELECT id, embedding FROM embedding_file_table ORDER BY id;
+----
+1 {1,2,3}
+2 {4,5,6}
+
+statement ok
+drop table embedding_file_table;
+
+statement ok
+drop sink s;
+
+statement ok
+drop table items;

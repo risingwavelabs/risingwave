@@ -108,8 +108,9 @@ impl Source {
             if catalog.append_only {
                 StreamKind::AppendOnly
             } else {
-                // TODO(kind): this could be upsert.
-                StreamKind::Retract
+                // Always treat source as upsert, as we either don't parse the old record for `Update`, or we don't
+                // trust the old record from external source.
+                StreamKind::Upsert
             }
         } else {
             // `Source` acts only as a barrier receiver. There's no data at all.

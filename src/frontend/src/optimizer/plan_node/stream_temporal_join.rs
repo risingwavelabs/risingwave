@@ -50,11 +50,10 @@ impl StreamTemporalJoin {
         core: generic::Join<PlanRef>,
         eq_join_predicate: EqJoinPredicate,
         is_nested_loop: bool,
-    ) -> Self {
+    ) -> Result<Self> {
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
-        // TODO(kind): reject upsert input
-        // TODO(kind): theoretically, even if input is upsert, the output can be retract
-        let stream_kind = core.left.stream_kind();
+        // TODO(kind): theoretically, the impl can handle upsert stream.
+        let stream_kind = reject_upsert_input!(core.left);
         let append_only = stream_kind.is_append_only();
         assert!(!is_nested_loop || append_only);
 
@@ -102,13 +101,13 @@ impl StreamTemporalJoin {
             columns_monotonicity,
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
             eq_join_predicate,
             append_only,
             is_nested_loop,
-        }
+        })
     }
 
     /// Get join type
@@ -221,7 +220,7 @@ impl PlanTreeNodeBinary<Stream> for StreamTemporalJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone(), self.is_nested_loop)
+        Self::new(core, self.eq_join_predicate.clone(), self.is_nested_loop).unwrap()
     }
 }
 
@@ -287,6 +286,7 @@ impl ExprRewritable<Stream> for StreamTemporalJoin {
             self.eq_join_predicate.rewrite_exprs(r),
             self.is_nested_loop,
         )
+        .unwrap()
         .into()
     }
 }

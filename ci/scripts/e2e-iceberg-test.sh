@@ -21,7 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
+download_and_prepare_rw "$profile" iceberg
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./

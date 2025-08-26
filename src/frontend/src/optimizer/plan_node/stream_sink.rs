@@ -175,6 +175,15 @@ impl StreamSink {
     pub fn new(input: PlanRef, sink_desc: SinkDesc, log_store_type: SinkLogStoreType) -> Self {
         let base = input.plan_base().clone_with_new_plan_id();
 
+        if let SinkType::AppendOnly = sink_desc.sink_type {
+            let kind = input.stream_kind();
+            assert_matches!(
+                kind,
+                StreamKind::AppendOnly,
+                "{kind} stream cannot be used as input of append-only sink",
+            );
+        }
+
         Self {
             base,
             input,

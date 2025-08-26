@@ -381,6 +381,7 @@ pub struct SinkMetrics {
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec,
     pub iceberg_write_bytes: LabelGuardedIntCounterVec,
+    pub iceberg_snapshot_num: LabelGuardedIntGaugeVec,
 }
 
 impl SinkMetrics {
@@ -506,6 +507,14 @@ impl SinkMetrics {
         )
         .unwrap();
 
+        let iceberg_snapshot_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_snapshot_num",
+            "The snapshot number of iceberg table",
+            &["sink_name", "catalog_name", "table_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             sink_commit_duration,
             connector_sink_rows_received,
@@ -522,6 +531,7 @@ impl SinkMetrics {
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
             iceberg_write_bytes,
+            iceberg_snapshot_num,
         }
     }
 }
@@ -781,7 +791,12 @@ pub trait SinkCommitCoordinator {
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()>;
 }
 
 #[deprecated]
@@ -807,7 +822,12 @@ impl SinkCommitCoordinator for NoSinkCommitCoordinator {
         unreachable!()
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
+    async fn commit(
+        &mut self,
+        _epoch: u64,
+        _metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
         unreachable!()
     }
 }

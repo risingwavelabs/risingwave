@@ -336,8 +336,7 @@ async fn fetch_degrees<K: HashKey, S: StateStore>(
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let table_iter = degree_state_table
         .iter_with_prefix(key, sub_range, PrefetchOptions::default())
-        .await
-        .unwrap();
+        .await?;
     #[for_await]
     for entry in table_iter {
         let degree_row = entry?;
@@ -538,7 +537,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
             tracing::trace!("hit cache for join key: {:?}", key);
             // Do not update the LRU statistics here with `peek_mut` since we will put the state
             // back.
-            let mut state = self.inner.peek_mut(key).unwrap();
+            let mut state = self.inner.peek_mut(key).expect("checked contains");
             CacheResult::Hit(state.take())
         } else {
             tracing::trace!("miss cache for join key: {:?}", key);
@@ -651,9 +650,12 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
                                 row_iter.next().await;
                             }
                             Ordering::Equal => {
-                                let row = row_iter.next().await.unwrap();
-                                let degree_row = degree_row_iter.next().await.unwrap();
-
+                                let row =
+                                    row_iter.next().await.expect("we matched some(row) above");
+                                let degree_row = degree_row_iter
+                                    .next()
+                                    .await
+                                    .expect("we matched some(degree_row) above");
                                 let pk = row
                                     .as_ref()
                                     .project(&self.state.pk_indices)
@@ -796,7 +798,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
         // https://github.com/risingwavelabs/risingwave/issues/9233
         if self.inner.contains(key) {
             // Update cache
-            let mut entry = self.inner.get_mut(key).unwrap();
+            let mut entry = self.inner.get_mut(key).expect("checked contains");
             entry
                 .insert(pk, E::encode(&value), inequality_key)
                 .with_context(|| self.state.error_context(&value.row))?;
@@ -859,7 +861,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
         // If no cache maintained, only update the state table.
         let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.delete(row);
-        let degree_state = self.degree_state.as_mut().unwrap();
+        let degree_state = self.degree_state.as_mut().expect("degree table missing");
         degree_state.table.delete(degree);
         Ok(())
     }
@@ -917,7 +919,10 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
     /// # Panics
     /// Panics if the inequality key is not set.
     pub fn check_inequal_key_null(&self, row: &impl Row) -> bool {
-        let desc = self.inequality_key_desc.as_ref().unwrap();
+        let desc = self
+            .inequality_key_desc
+            .as_ref()
+            .expect("inequality key desc missing");
         row.datum_at(desc.idx).is_none()
     }
 
@@ -927,7 +932,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
     pub fn serialize_inequal_key_from_row(&self, row: impl Row) -> InequalKeyType {
         self.inequality_key_desc
             .as_ref()
-            .unwrap()
+            .expect("inequality key desc missing")
             .serialize_inequal_key_from_row(&row)
     }
 
@@ -1071,10 +1076,10 @@ impl<E: JoinEncoding> JoinEntryState<E> {
             }
         } else {
             let mut pk_set = JoinRowSet::default();
-            pk_set.try_insert(pk, ()).unwrap();
+            pk_set.try_insert(pk, ()).expect("pk set should be empty");
             self.inequality_index
                 .try_insert(inequality_key, pk_set)
-                .unwrap();
+                .expect("pk set should be empty");
         }
     }
 

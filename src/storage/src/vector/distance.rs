@@ -15,6 +15,8 @@
 use std::simd::Simd;
 use std::simd::num::SimdFloat;
 
+use risingwave_pb::common::PbDistanceType;
+
 use crate::vector::{
     MeasureDistance, MeasureDistanceBuilder, VectorDistance, VectorItem, VectorRef,
 };
@@ -38,8 +40,24 @@ macro_rules! define_measure {
     ({
         $(($distance_name:ident, $_distance_type:ty),)+
     }) => {
+        #[derive(Clone, Copy)]
         pub enum DistanceMeasurement {
             $($distance_name),+
+        }
+
+        impl From<PbDistanceType> for DistanceMeasurement {
+            fn from(value: PbDistanceType) -> Self {
+                match value {
+                    PbDistanceType::Unspecified => {
+                        unreachable!()
+                    }
+                    $(
+                        PbDistanceType::$distance_name => {
+                            DistanceMeasurement::$distance_name
+                        }
+                    ),+
+                }
+            }
         }
     };
     () => {
@@ -235,17 +253,24 @@ mod tests {
         0.22877127, 0.97690505, 0.44438475,
     ];
 
-    const FLOAT_ALLOWED_BIAS: f32 = 1e-5;
+    const FLOAT_ABS_EPS: f32 = 2e-5;
+    const FLOAT_REL_EPS: f32 = 1e-6;
 
     macro_rules! assert_eq_float {
-        ($first:expr, $second:expr) => {
+        ($first:expr, $second:expr) => {{
+            let a: f32 = $first;
+            let b: f32 = $second;
+            let diff = (a - b).abs();
+            let tol = FLOAT_ABS_EPS.max(FLOAT_REL_EPS * a.abs().max(b.abs()));
             assert!(
-                ($first - $second) < FLOAT_ALLOWED_BIAS,
-                "Expected: {}, Actual: {}",
-                $second,
-                $first
+                diff <= tol,
+                "Expected: {}, Actual: {}, |Δ|={} > tol={}",
+                b,
+                a,
+                diff,
+                tol
             );
-        };
+        }};
     }
 
     #[test]

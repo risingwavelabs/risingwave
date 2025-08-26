@@ -107,7 +107,7 @@ impl ColumnPruningContext {
         !self.share_cache.is_empty()
     }
 
-    pub fn visit_share_at_second_round(&mut self, plan_node_id: PlanNodeId) -> bool {
+    pub fn visit_share_at_first_round(&mut self, plan_node_id: PlanNodeId) -> bool {
         self.share_visited.insert(plan_node_id)
     }
 }

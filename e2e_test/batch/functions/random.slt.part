@@ -1,0 +1,12 @@
+statement ok
+select random();
+
+query I
+SELECT COUNT(*) FROM (SELECT random() FROM generate_series(1, 10));
+----
+10
+
+query T
+SELECT random() >= 0 AND random() < 1;
+----
+t

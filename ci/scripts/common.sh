@@ -1,11 +1,14 @@
+# Get the repository root directory from the script's location
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 export CARGO_TERM_COLOR=always
 export PROTOC_NO_VENDOR=true
-export CARGO_HOME=/risingwave/.cargo
+export CARGO_HOME="${REPO_ROOT}/.cargo"
 export RISINGWAVE_CI=true
 export RUST_BACKTRACE=1
 export ENABLE_TELEMETRY=false
 export RUSTC_WRAPPER=sccache
-export RUSTC_WORKSPACE_WRAPPER=/risingwave/ci/scripts/rustc-workspace-wrapper.sh
+export RUSTC_WORKSPACE_WRAPPER="${REPO_ROOT}/ci/scripts/rustc-workspace-wrapper.sh"
 export SCCACHE_BUCKET=rw-ci-sccache-bucket
 export SCCACHE_REGION=us-east-2
 export SCCACHE_IDLE_TIMEOUT=0
@@ -20,10 +23,10 @@ export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 export SLT_FAIL_FAST=true
 export SLT_KEEP_DB_ON_FAILURE=true
 export SLT_SHUTDOWN_TIMEOUT=10
-export LLVM_PROFILE_FILE='/risingwave/target/risingwave-%p.profraw'
+export LLVM_PROFILE_FILE="${REPO_ROOT}/target/risingwave-%p.profraw"
 export CARGO_LLVM_COV=1
 export CARGO_LLVM_COV_SHOW_ENV=1
-export CARGO_LLVM_COV_TARGET_DIR=/risingwave/target
+export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target"
 
 unset LANG
 
@@ -109,8 +112,8 @@ function download_and_prepare_rw() {
     echo "download_and_prepare_rw: missing argument env"
     exit 1
   fi
-  # env is either common or source
-  if [ "$2" != "common" ] && [ "$2" != "source" ]; then
+  # env is either common, source, or iceberg
+  if [ "$2" != "common" ] && [ "$2" != "source" ] && [ "$2" != "iceberg" ]; then
     echo "download_and_prepare_rw: invalid argument env"
     exit 1
   fi
@@ -136,6 +139,8 @@ function download_and_prepare_rw() {
     cp ci/risedev-components.ci.env risedev-components.user.env
   elif [ "$env" = "source" ]; then
     cp ci/risedev-components.ci.source.env risedev-components.user.env
+  elif [ "$env" = "iceberg" ]; then
+    cp ci/risedev-components.ci.iceberg.env risedev-components.user.env
   fi
 
   echo -e "\033[33mPrepare RiseDev dev cluster\033[0m"
