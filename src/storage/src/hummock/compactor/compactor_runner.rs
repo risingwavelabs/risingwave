@@ -595,7 +595,7 @@ pub async fn compact(
     Option<MemoryTracker>,
 ) {
     let table_ids_to_be_compacted = compact_task.build_compact_table_ids();
-    let (compaction_catalog_agent_ref, acquire_table_ids) = match compaction_catalog_manager_ref
+    let compaction_catalog_agent_ref = match compaction_catalog_manager_ref
         .acquire(table_ids_to_be_compacted.clone())
         .await
     {
@@ -624,7 +624,7 @@ pub async fn compact(
                 );
             }
 
-            (compaction_catalog_agent_ref, acquire_table_ids)
+            compaction_catalog_agent_ref
         }
         Err(e) => {
             tracing::warn!(
@@ -647,11 +647,11 @@ pub async fn compact(
     {
         compact_task
             .pk_prefix_table_watermarks
-            .retain(|table_id, _| acquire_table_ids.contains(table_id));
+            .retain(|table_id, _| table_ids_to_be_compacted.contains(table_id));
 
         compact_task
             .non_pk_prefix_table_watermarks
-            .retain(|table_id, _| acquire_table_ids.contains(table_id));
+            .retain(|table_id, _| table_ids_to_be_compacted.contains(table_id));
     }
 
     compact_with_agent(
