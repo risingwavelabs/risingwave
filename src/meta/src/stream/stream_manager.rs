@@ -521,7 +521,8 @@ impl GlobalStreamManager {
             self.env.meta_store_ref(),
         )
         .await?;
-        if !cdc_table_snapshot_split_assignment.is_empty() {
+        let cdc_table_snapshot_split_assignment = if !cdc_table_snapshot_split_assignment.is_empty()
+        {
             self.env.cdc_table_backfill_tracker.track_new_job(
                 stream_job_fragments.stream_job_id.table_id,
                 cdc_table_snapshot_split_assignment
@@ -539,16 +540,15 @@ impl GlobalStreamManager {
                         .map(|f| f.fragment_id),
                     stream_job_fragments.stream_job_id.table_id,
                 );
-        }
-        let cdc_split_generation = self
-            .env
-            .cdc_table_backfill_tracker
-            .next_generation(iter::once(stream_job_fragments.stream_job_id.table_id));
-        let cdc_table_snapshot_split_assignment =
             CdcTableSnapshotSplitAssignmentWithGeneration::new(
                 cdc_table_snapshot_split_assignment,
-                cdc_split_generation,
-            );
+                self.env
+                    .cdc_table_backfill_tracker
+                    .next_generation(iter::once(stream_job_fragments.stream_job_id.table_id)),
+            )
+        } else {
+            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+        };
 
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),

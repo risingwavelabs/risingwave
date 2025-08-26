@@ -449,11 +449,10 @@ impl GlobalBarrierWorkerContextImpl {
                         .catalog_controller
                         .cdc_table_backfill_actor_ids()
                         .await?;
-                    let cdc_table_ids = cdc_table_backfill_actors.keys().cloned();
-                    let cdc_table_split_assignment_generation = self
-                        .env
-                        .cdc_table_backfill_tracker
-                        .next_generation(cdc_table_ids);
+                    let cdc_table_ids = cdc_table_backfill_actors
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>();
                     let cdc_table_snapshot_split_assignment =
                         assign_cdc_table_snapshot_splits_pairs(
                             cdc_table_backfill_actors,
@@ -462,10 +461,18 @@ impl GlobalBarrierWorkerContextImpl {
                         )
                         .await?;
                     let cdc_table_snapshot_split_assignment =
-                        CdcTableSnapshotSplitAssignmentWithGeneration::new(
-                            cdc_table_snapshot_split_assignment,
-                            cdc_table_split_assignment_generation,
-                        );
+                        if cdc_table_snapshot_split_assignment.is_empty() {
+                            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+                        } else {
+                            let generation = self
+                                .env
+                                .cdc_table_backfill_tracker
+                                .next_generation(cdc_table_ids.into_iter());
+                            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                                cdc_table_snapshot_split_assignment,
+                                generation,
+                            )
+                        };
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
@@ -599,22 +606,27 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .cdc_table_backfill_actor_ids()
             .await?;
-        let cdc_table_ids = cdc_table_backfill_actors.keys().cloned();
-        let cdc_table_split_assignment_generation = self
-            .env
-            .cdc_table_backfill_tracker
-            .next_generation(cdc_table_ids);
+        let cdc_table_ids = cdc_table_backfill_actors
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
             cdc_table_backfill_actors,
             self.env.meta_store_ref(),
             self.env.cdc_table_backfill_tracker.completed_job_ids(),
         )
         .await?;
-        let cdc_table_snapshot_split_assignment =
+        let cdc_table_snapshot_split_assignment = if cdc_table_snapshot_split_assignment.is_empty()
+        {
+            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+        } else {
             CdcTableSnapshotSplitAssignmentWithGeneration::new(
                 cdc_table_snapshot_split_assignment,
-                cdc_table_split_assignment_generation,
-            );
+                self.env
+                    .cdc_table_backfill_tracker
+                    .next_generation(cdc_table_ids.into_iter()),
+            )
+        };
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,

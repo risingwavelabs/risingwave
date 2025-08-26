@@ -17,6 +17,9 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
+use risingwave_connector::source::cdc::{
+    INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID, INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID,
+};
 use risingwave_meta_model::{FragmentId, ObjectId, cdc_table_snapshot_split, fragment};
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
 use risingwave_pb::stream_service::barrier_complete_response::PbCdcTableBackfillProgress;
@@ -32,9 +35,6 @@ pub struct CdcTableBackfillTracker {
     meta_store: SqlMetaStore,
     inner: Mutex<CdcTableBackfillTrackerInner>,
 }
-
-const INVALID_GENERATION_ID: u64 = 0;
-const INITIAL_GENERATION_ID: u64 = 1;
 
 #[derive(Clone)]
 pub struct CdcProgress {
@@ -66,7 +66,7 @@ impl CdcProgress {
             split_total_count,
             split_backfilled_count: 0,
             split_completed_count: 0,
-            split_assignment_generation: INVALID_GENERATION_ID,
+            split_assignment_generation: INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID,
             is_completed: false,
         }
     }
@@ -152,7 +152,7 @@ struct CdcTableBackfillTrackerInner {
 impl CdcTableBackfillTrackerInner {
     async fn new(meta_store: SqlMetaStore) -> MetaResult<Self> {
         // TODO(zw): improve init generation.
-        let init_generation = INITIAL_GENERATION_ID;
+        let init_generation = INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID;
         let restored = restore_progress(&meta_store).await?;
         let fragment_id_to_job_id = load_cdc_fragment_table_mapping(&meta_store).await?;
         let cdc_progress = restored
@@ -194,7 +194,10 @@ impl CdcTableBackfillTrackerInner {
             return vec![];
         }
         let mut pre_completed_jobs = vec![];
-        assert_ne!(progress.generation, INVALID_GENERATION_ID);
+        assert_ne!(
+            progress.generation,
+            INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID
+        );
         if current_progress.split_assignment_generation == progress.generation {
             if progress.done {
                 current_progress.split_completed_count += (1 + progress.split_id_end_inclusive

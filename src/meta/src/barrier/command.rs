@@ -940,14 +940,19 @@ impl Command {
                             upstream_fragment_downstreams.contains_key(fragment_id)
                         })
                         .collect();
-                    let cdc_table_snapshot_split_assignment =
+                    let cdc_table_snapshot_split_assignment = if cdc_table_snapshot_split_assignment
+                        .is_empty()
+                    {
+                        CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+                    } else {
                         CdcTableSnapshotSplitAssignmentWithGeneration::new(
                             cdc_table_snapshot_split_assignment.clone(),
                             control_stream_manager
                                 .env
                                 .cdc_table_backfill_tracker
                                 .next_generation(iter::once(old_fragments.stream_job_id.table_id)),
-                        );
+                        )
+                    };
                     let update = Self::generate_update_mutation_for_replace_table(
                         old_fragments.actor_ids(),
                         merge_updates,
@@ -1004,13 +1009,17 @@ impl Command {
                     })
                     .collect();
                 let cdc_table_snapshot_split_assignment =
-                    CdcTableSnapshotSplitAssignmentWithGeneration::new(
-                        cdc_table_snapshot_split_assignment.clone(),
-                        control_stream_manager
-                            .env
-                            .cdc_table_backfill_tracker
-                            .next_generation(iter::once(old_fragments.stream_job_id.table_id)),
-                    );
+                    if cdc_table_snapshot_split_assignment.is_empty() {
+                        CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+                    } else {
+                        CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                            cdc_table_snapshot_split_assignment.clone(),
+                            control_stream_manager
+                                .env
+                                .cdc_table_backfill_tracker
+                                .next_generation(iter::once(old_fragments.stream_job_id.table_id)),
+                        )
+                    };
                 Self::generate_update_mutation_for_replace_table(
                     old_fragments.actor_ids().into_iter().chain(
                         auto_refresh_schema_sinks
@@ -1189,15 +1198,22 @@ impl Command {
 
                 // we don't create dispatchers in reschedule scenario
                 let actor_new_dispatchers = HashMap::new();
-                let cdc_table_split_assignment_generation = control_stream_manager
-                    .env
-                    .cdc_table_backfill_tracker
-                    .next_generation(cdc_table_ids.into_iter());
-                let actor_cdc_table_snapshot_splits = PbCdcTableSnapshotSplitsWithGeneration {
-                    splits: actor_cdc_table_snapshot_splits,
-                    generation: cdc_table_split_assignment_generation,
-                }
-                .into();
+                let actor_cdc_table_snapshot_splits = if actor_cdc_table_snapshot_splits.is_empty()
+                {
+                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                        CdcTableSnapshotSplitAssignmentWithGeneration::empty(),
+                    )
+                    .into()
+                } else {
+                    PbCdcTableSnapshotSplitsWithGeneration {
+                        splits: actor_cdc_table_snapshot_splits,
+                        generation: control_stream_manager
+                            .env
+                            .cdc_table_backfill_tracker
+                            .next_generation(cdc_table_ids.into_iter()),
+                    }
+                    .into()
+                };
                 let mutation = Mutation::Update(UpdateMutation {
                     dispatcher_update,
                     merge_update,

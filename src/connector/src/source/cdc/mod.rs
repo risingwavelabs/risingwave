@@ -239,6 +239,9 @@ impl<T: CdcSourceTypeTrait> CdcProperties<T> {
 
 pub type CdcTableSnapshotSplitAssignment = HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>;
 
+pub const INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID: u64 = 0;
+pub const INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID: u64 = 1;
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CdcTableSnapshotSplitAssignmentWithGeneration {
     pub splits: HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>,
@@ -248,6 +251,13 @@ pub struct CdcTableSnapshotSplitAssignmentWithGeneration {
 impl CdcTableSnapshotSplitAssignmentWithGeneration {
     pub fn new(splits: HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>, generation: u64) -> Self {
         Self { splits, generation }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            splits: HashMap::default(),
+            generation: INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID,
+        }
     }
 }
 
