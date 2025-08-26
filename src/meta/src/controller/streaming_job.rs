@@ -455,7 +455,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         // Add fragments.
-        let (fragments, actors): (Vec<_>, Vec<_>) = fragment_actors.into_iter().unzip();
+        let (fragments, _): (Vec<_>, Vec<_>) = fragment_actors.into_iter().unzip();
         for fragment in fragments {
             let fragment_id = fragment.fragment_id;
             let state_table_ids = fragment.state_table_ids.inner_ref().clone();
@@ -510,14 +510,6 @@ impl CatalogController {
         }
 
         insert_fragment_relations(&txn, downstreams).await?;
-
-        // Add actors and actor dispatchers.
-        for actors in actors.clone() {
-            for actor in actors {
-                let actor = actor.into_active_model();
-                Actor::insert(actor).exec(&txn).await?;
-            }
-        }
 
         if !for_replace {
             // Update dml fragment id.

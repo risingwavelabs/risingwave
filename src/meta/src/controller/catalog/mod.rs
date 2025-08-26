@@ -691,6 +691,51 @@ impl CatalogController {
         let mut inner = self.inner.write().await;
         inner.complete_dropped_tables(table_ids)
     }
+
+    pub async fn stats(&self) -> MetaResult<CatalogStats> {
+        let inner = self.inner.read().await;
+
+        let mut table_num_map: HashMap<_, _> = Table::find()
+            .select_only()
+            .column(table::Column::TableType)
+            .column_as(table::Column::TableId.count(), "num")
+            .group_by(table::Column::TableType)
+            .having(table::Column::TableType.ne(TableType::Internal))
+            .into_tuple::<(TableType, i64)>()
+            .all(&inner.db)
+            .await?
+            .into_iter()
+            .map(|(table_type, num)| (table_type, num as u64))
+            .collect();
+
+        let source_num = Source::find().count(&inner.db).await?;
+        let sink_num = Sink::find().count(&inner.db).await?;
+        let function_num = Function::find().count(&inner.db).await?;
+        let streaming_job_num = StreamingJob::find().count(&inner.db).await?;
+
+        let actor_num = {
+            let guard = self.env.shared_actor_info.read_guard();
+            let actors = guard
+                .iter_over_fragments()
+                .flat_map(|(_, fragment)| fragment.actors.keys())
+                .collect_vec();
+
+            actors.len() as u64
+        };
+
+        Ok(CatalogStats {
+            table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
+            mview_num: table_num_map
+                .remove(&TableType::MaterializedView)
+                .unwrap_or(0),
+            index_num: table_num_map.remove(&TableType::Index).unwrap_or(0),
+            source_num,
+            sink_num,
+            function_num,
+            streaming_job_num,
+            actor_num,
+        })
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.
@@ -737,44 +782,6 @@ impl CatalogControllerInner {
             ),
             users,
         ))
-    }
-
-    pub async fn stats(&self) -> MetaResult<CatalogStats> {
-        let mut table_num_map: HashMap<_, _> = Table::find()
-            .select_only()
-            .column(table::Column::TableType)
-            .column_as(table::Column::TableId.count(), "num")
-            .group_by(table::Column::TableType)
-            .having(table::Column::TableType.ne(TableType::Internal))
-            .into_tuple::<(TableType, i64)>()
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|(table_type, num)| (table_type, num as u64))
-            .collect();
-
-        let source_num = Source::find().count(&self.db).await?;
-        let sink_num = Sink::find().count(&self.db).await?;
-        let function_num = Function::find().count(&self.db).await?;
-        let streaming_job_num = StreamingJob::find().count(&self.db).await?;
-        // let actor_num_from_db = Actor::find().count(&self.db).await?;
-        // let actor_num = self.actors.models.len() as u64;
-        //
-        // debug_assert_eq!(actor_num_from_db, actor_num);
-        let actor_num = 10000000;
-
-        Ok(CatalogStats {
-            table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
-            mview_num: table_num_map
-                .remove(&TableType::MaterializedView)
-                .unwrap_or(0),
-            index_num: table_num_map.remove(&TableType::Index).unwrap_or(0),
-            source_num,
-            sink_num,
-            function_num,
-            streaming_job_num,
-            actor_num,
-        })
     }
 
     async fn list_databases(&self) -> MetaResult<Vec<PbDatabase>> {

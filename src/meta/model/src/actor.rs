@@ -63,6 +63,17 @@ pub struct Model {
     pub expr_context: ExprContext,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActorModel {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub status: ActorStatus,
+    pub splits: Option<ConnectorSplits>,
+    pub worker_id: WorkerId,
+    pub vnode_bitmap: Option<VnodeBitmap>,
+    pub expr_context: ExprContext,
+}
+
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(

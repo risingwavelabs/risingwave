@@ -449,8 +449,7 @@ impl GlobalBarrierWorkerContextImpl {
                     let cdc_table_backfill_actors = self
                         .metadata_manager
                         .catalog_controller
-                        .cdc_table_backfill_actor_ids()
-                        .await?;
+                        .cdc_table_backfill_actor_ids()?;
                     let cdc_table_snapshot_split_assignment =
                         assign_cdc_table_snapshot_splits_pairs(
                             cdc_table_backfill_actors,
@@ -602,8 +601,7 @@ impl GlobalBarrierWorkerContextImpl {
         let cdc_table_backfill_actors = self
             .metadata_manager
             .catalog_controller
-            .cdc_table_backfill_actor_ids()
-            .await?;
+            .cdc_table_backfill_actor_ids()?;
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
             cdc_table_backfill_actors,
             self.env.meta_store_ref(),

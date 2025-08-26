@@ -65,8 +65,8 @@ impl From<PbFragmentDistributionType> for DistributionType {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::actor::Entity")]
-    Actor,
+    // #[sea_orm(has_many = "super::actor::Entity")]
+    // Actor,
     #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::JobId",
@@ -76,12 +76,11 @@ pub enum Relation {
     )]
     Object,
 }
-
-impl Related<super::actor::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Actor.def()
-    }
-}
+// impl Related<super::actor::Entity> for Entity {
+//     fn to() -> RelationDef {
+//         Relation::Actor.def()
+//     }
+// }
 
 impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
