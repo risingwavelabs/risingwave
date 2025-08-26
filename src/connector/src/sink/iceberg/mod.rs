@@ -1917,6 +1917,15 @@ impl IcebergSinkCommitter {
         .await?;
         self.table = table;
 
+        let snapshot_num = self.table.metadata().snapshots().count();
+        let catalog_name = self.config.common.catalog_name();
+        let table_name = self.table.identifier().to_string();
+        let metrics_labels = [&self.param.sink_name, &catalog_name, &table_name];
+        GLOBAL_SINK_METRICS
+            .iceberg_snapshot_num
+            .with_guarded_label_values(&metrics_labels)
+            .set(snapshot_num as i64);
+
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
         if self.is_exactly_once {
