@@ -1,0 +1,88 @@
+# Validate backwards compatibility after upgrade to multiple version columns support
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# First, re-validate that existing single version column data is intact
+query IIII rowsort
+select id, name, version, data from t1;
+----
+1 alice_v2 2 updated_data1
+2 bob_v2 3 updated_data2
+3 charlie 2 data3
+
+query IIII rowsort
+select id, name, version, data from mv1;
+----
+1 alice_v2 2 updated_data1
+2 bob_v2 3 updated_data2
+3 charlie 2 data3
+
+# Test that single version column tables still work with conflict resolution after upgrade
+statement ok
+insert into t1 values (1, 'alice_v3', 4, 'newest_data1');
+
+# Lower version should still be ignored
+statement ok
+insert into t1 values (1, 'alice_very_old', 1, 'very_old_data');
+
+# Verify single version column still works correctly
+query IIII rowsort
+select id, name, version, data from t1;
+----
+1 alice_v3 4 newest_data1
+2 bob_v2 3 updated_data2
+3 charlie 2 data3
+
+# Test new multiple version columns functionality after upgrade
+statement ok
+create table t2 (
+    id int,
+    name varchar,
+    version1 int,
+    version2 int,
+    data varchar,
+    primary key(id)
+) on conflict do update if not null with version column(version1, version2);
+
+# Insert initial data with multiple version columns
+statement ok
+insert into t2 values (1, 'user1', 1, 1, 'data1'), (2, 'user2', 2, 1, 'data2');
+
+# Test conflict resolution with higher first version column
+statement ok
+insert into t2 values (1, 'user1_v2', 2, 1, 'updated_data1');
+
+# Test conflict resolution with same first version but higher second version
+statement ok
+insert into t2 values (1, 'user1_v2_2', 2, 2, 'newest_data1');
+
+# Test conflict resolution with lower version (should be ignored)
+statement ok
+insert into t2 values (1, 'user1_old', 1, 5, 'old_data');
+
+# Verify multiple version columns work correctly
+query IIIII rowsort
+select id, name, version1, version2, data from t2;
+----
+1 user1_v2_2 2 2 newest_data1
+2 user2 2 1 data2
+
+# Test that both old single version and new multiple version tables coexist
+query I
+select count(*) from t1;
+----
+3
+
+query I
+select count(*) from t2;
+----
+2
+
+# Verify materialized view on old table still updates correctly
+query IIII rowsort
+select id, name, version, data from mv1;
+----
+1 alice_v3 4 newest_data1
+2 bob_v2 3 updated_data2
+3 charlie 2 data3

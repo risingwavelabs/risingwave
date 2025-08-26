@@ -1,0 +1,28 @@
+# Validate that single version column functionality works correctly on the old version
+
+# Check final state of t1 after conflict resolution
+query IIII rowsort
+select id, name, version, data from t1;
+----
+1 alice_v2 2 updated_data1
+2 bob_v2 3 updated_data2
+3 charlie 2 data3
+
+# Check that materialized view reflects the same data
+query IIII rowsort
+select id, name, version, data from mv1;
+----
+1 alice_v2 2 updated_data1
+2 bob_v2 3 updated_data2
+3 charlie 2 data3
+
+# Verify row count
+query I
+select count(*) from t1;
+----
+3
+
+query I
+select count(*) from mv1;
+----
+3

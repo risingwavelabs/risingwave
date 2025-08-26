@@ -1,0 +1,39 @@
+# Backwards compatibility test for version columns
+# This test sets up single version column tables on the old version
+# to ensure they continue working after upgrade to multiple version columns support
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Test 1: Basic single version column with on conflict do update if not null
+statement ok
+create table t1 (
+    id int,
+    name varchar,
+    version int,
+    data varchar,
+    primary key(id)
+) on conflict do update if not null with version column(version);
+
+# Insert initial data
+statement ok
+insert into t1 values (1, 'alice', 1, 'data1'), (2, 'bob', 1, 'data2'), (3, 'charlie', 2, 'data3');
+
+# Test conflict resolution with higher version
+statement ok
+insert into t1 values (1, 'alice_v2', 2, 'updated_data1');
+
+# Test conflict resolution with lower version (should be ignored)
+statement ok
+insert into t1 values (1, 'alice_old', 1, 'old_data1');
+
+# Test 2: Materialized view on version column table
+statement ok
+create materialized view mv1 as select * from t1;
+
+# Insert more conflicting data to test materialized view
+statement ok
+insert into t1 values (2, 'bob_v2', 3, 'updated_data2');
+
+statement ok
+insert into t1 values (2, 'bob_old', 2, 'should_be_ignored');
