@@ -87,10 +87,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]
     async fn finish_cdc_table_backfill(&self, job: TableId) -> MetaResult<()> {
-        self.env
-            .cdc_table_backfill_tracker
-            .finish_backfill(job)
-            .await
+        self.env.cdc_table_backfill_tracker.complete_job(job).await
     }
 
     #[await_tree::instrument("new_control_stream({})", node.id)]

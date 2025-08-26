@@ -1369,6 +1369,7 @@ impl ScaleController {
                         .copied()
                         .collect(),
                     self.env.meta_store_ref(),
+                    None,
                 )
                 .await?
             } else {

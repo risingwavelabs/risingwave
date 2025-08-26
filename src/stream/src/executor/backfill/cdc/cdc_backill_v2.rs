@@ -257,6 +257,14 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     .mutate_state(split.split_id, false, 0, None, None)
                     .await?;
             }
+            let mut should_report_actor_backfill_progress = if next_split_idx > 0 {
+                Some((
+                    actor_snapshot_splits[0].split_id,
+                    actor_snapshot_splits[next_split_idx - 1].split_id,
+                ))
+            } else {
+                None
+            };
 
             // After init the state table and forward the initial barrier to downstream,
             // we now try to create the table reader with retry.
@@ -440,6 +448,18 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                         }
                                         continue 'with_cdc_table_snapshot_splits;
                                     }
+                                    if let Some(split_range) =
+                                        should_report_actor_backfill_progress.take()
+                                        && let Some(ref progress) = self.progress
+                                    {
+                                        progress.update(
+                                            self.actor_ctx.fragment_id,
+                                            self.actor_ctx.id,
+                                            barrier.epoch,
+                                            generation,
+                                            split_range,
+                                        );
+                                    }
                                     // emit barrier and continue to consume the backfill stream
                                     yield Message::Barrier(barrier);
                                 }
@@ -528,6 +548,17 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         split_cdc_offset_high,
                     )
                     .await?;
+                if let Some((_, right_split)) = &mut should_report_actor_backfill_progress {
+                    assert!(
+                        *right_split < split.split_id,
+                        "{} {}",
+                        *right_split,
+                        split.split_id
+                    );
+                    *right_split = split.split_id;
+                } else {
+                    should_report_actor_backfill_progress = Some((split.split_id, split.split_id));
+                }
             }
 
             upstream_table_reader.disconnect().await?;
@@ -550,6 +581,17 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         if is_reset_barrier(&barrier, self.actor_ctx.id) {
                             next_reset_barrier = Some(barrier);
                             continue 'with_cdc_table_snapshot_splits;
+                        }
+                        if let Some(split_range) = should_report_actor_backfill_progress.take()
+                            && let Some(ref progress) = self.progress
+                        {
+                            progress.update(
+                                self.actor_ctx.fragment_id,
+                                self.actor_ctx.id,
+                                barrier.epoch,
+                                generation,
+                                split_range,
+                            );
                         }
                         if should_report_actor_backfill_done {
                             should_report_actor_backfill_done = false;

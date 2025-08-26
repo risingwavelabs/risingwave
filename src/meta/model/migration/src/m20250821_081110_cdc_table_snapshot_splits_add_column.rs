@@ -12,9 +12,9 @@ impl MigrationTrait for Migration {
                     .table(CdcTableSnapshotSplits::Table)
                     .add_column(
                         ColumnDef::new(CdcTableSnapshotSplits::IsBackfillFinished)
-                            .boolean()
+                            .small_integer()
                             .not_null()
-                            .default(false),
+                            .default(0),
                     )
                     .to_owned(),
             )

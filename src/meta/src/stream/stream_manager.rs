@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, span};
@@ -55,8 +54,7 @@ use crate::model::{
     FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::cdc::{
-    assign_cdc_table_snapshot_splits, assign_cdc_table_snapshot_splits_for_replace_table,
-    is_parallelized_backfill_enabled_cdc_scan_fragment,
+    assign_cdc_table_snapshot_splits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -477,13 +475,12 @@ impl GlobalStreamManager {
                 .source_manager
                 .allocate_splits(&stream_job_fragments)
                 .await?;
-            let cdc_table_snapshot_split_assignment =
-                assign_cdc_table_snapshot_splits_for_replace_table(
-                    context.old_fragments.stream_job_id.table_id,
-                    &stream_job_fragments.inner,
-                    self.env.meta_store_ref(),
-                )
-                .await?;
+            let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+                context.old_fragments.stream_job_id.table_id,
+                &stream_job_fragments.inner,
+                self.env.meta_store_ref(),
+            )
+            .await?;
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -518,12 +515,13 @@ impl GlobalStreamManager {
         );
 
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
-            iter::once(stream_job_fragments.deref()),
+            stream_job_fragments.stream_job_id.table_id,
+            &stream_job_fragments,
             self.env.meta_store_ref(),
         )
         .await?;
         if !cdc_table_snapshot_split_assignment.is_empty() {
-            self.env.cdc_table_backfill_tracker.add_split_count(
+            self.env.cdc_table_backfill_tracker.track_new_job(
                 stream_job_fragments.stream_job_id.table_id,
                 cdc_table_snapshot_split_assignment
                     .values()
@@ -629,13 +627,12 @@ impl GlobalStreamManager {
             init_split_assignment
         );
 
-        let cdc_table_snapshot_split_assignment =
-            assign_cdc_table_snapshot_splits_for_replace_table(
-                old_fragments.stream_job_id.table_id,
-                &new_fragments.inner,
-                self.env.meta_store_ref(),
-            )
-            .await?;
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+            old_fragments.stream_job_id.table_id,
+            &new_fragments.inner,
+            self.env.meta_store_ref(),
+        )
+        .await?;
 
         self.barrier_scheduler
             .run_command(

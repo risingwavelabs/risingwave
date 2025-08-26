@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::must_match;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCdcTableBackfillProgress;
 
@@ -21,6 +20,12 @@ use crate::task::{ActorId, FragmentId, LocalBarrierManager};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CdcTableBackfillState {
+    Update {
+        fragment_id: FragmentId,
+        split_id_start_inclusive: i64,
+        split_id_end_inclusive: i64,
+        generation: u64,
+    },
     Finish {
         fragment_id: FragmentId,
         split_id_start_inclusive: i64,
@@ -31,8 +36,27 @@ pub(crate) enum CdcTableBackfillState {
 
 impl CdcTableBackfillState {
     pub fn to_pb(self, actor_id: ActorId, epoch: u64) -> PbCdcTableBackfillProgress {
-        must_match!(self, CdcTableBackfillState::Finish {fragment_id,split_id_start_inclusive,split_id_end_inclusive,generation} => {
-            PbCdcTableBackfillProgress {
+        match self {
+            CdcTableBackfillState::Update {
+                fragment_id,
+                split_id_start_inclusive,
+                split_id_end_inclusive,
+                generation,
+            } => PbCdcTableBackfillProgress {
+                actor_id,
+                epoch,
+                done: false,
+                split_id_start_inclusive,
+                split_id_end_inclusive,
+                generation,
+                fragment_id,
+            },
+            CdcTableBackfillState::Finish {
+                fragment_id,
+                split_id_start_inclusive,
+                split_id_end_inclusive,
+                generation,
+            } => PbCdcTableBackfillProgress {
                 actor_id,
                 epoch,
                 done: true,
@@ -40,8 +64,8 @@ impl CdcTableBackfillState {
                 split_id_end_inclusive,
                 generation,
                 fragment_id,
-            }
-        })
+            },
+        }
     }
 }
 
@@ -52,6 +76,26 @@ pub struct CdcProgressReporter {
 impl CdcProgressReporter {
     pub fn new(barrier_manager: LocalBarrierManager) -> Self {
         Self { barrier_manager }
+    }
+
+    pub fn update(
+        &self,
+        fragment_id: FragmentId,
+        actor_id: ActorId,
+        epoch: EpochPair,
+        generation: u64,
+        split_id_range: (i64, i64),
+    ) {
+        self.barrier_manager.update_cdc_backfill_progress(
+            actor_id,
+            epoch,
+            CdcTableBackfillState::Update {
+                fragment_id,
+                split_id_start_inclusive: split_id_range.0,
+                split_id_end_inclusive: split_id_range.1,
+                generation,
+            },
+        );
     }
 
     pub fn finish(

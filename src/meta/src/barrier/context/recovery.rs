@@ -458,6 +458,7 @@ impl GlobalBarrierWorkerContextImpl {
                         assign_cdc_table_snapshot_splits_pairs(
                             cdc_table_backfill_actors,
                             self.env.meta_store_ref(),
+                            self.env.cdc_table_backfill_tracker.completed_job_ids(),
                         )
                         .await?;
                     let cdc_table_snapshot_split_assignment =
@@ -606,6 +607,7 @@ impl GlobalBarrierWorkerContextImpl {
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
             cdc_table_backfill_actors,
             self.env.meta_store_ref(),
+            self.env.cdc_table_backfill_tracker.completed_job_ids(),
         )
         .await?;
         let cdc_table_snapshot_split_assignment =
