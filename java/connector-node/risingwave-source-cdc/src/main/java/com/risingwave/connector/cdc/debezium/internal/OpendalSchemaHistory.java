@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -57,12 +58,16 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             "schema.history.internal.max.records.per.file";
     private int maxRecordsPerFile = 2048; // default records nums per file
     private String objectDir = "";
+
     private static final Pattern HISTORY_FILE_PATTERN =
             Pattern.compile("schema_history_(\\d+)\\.dat");
 
     // Cache the latest file information to avoid listing files on every store operation
     private String cachedLatestFile = null;
     private int cachedFileRecordCount = 0;
+
+    // Atomic sequence number for thread-safe increment
+    private AtomicLong sequenceNumber = new AtomicLong(0);
 
     // Override ALL_FIELDS to include our custom configuration fields
     // This ensures that our custom fields are properly validated by Debezium
@@ -126,20 +131,24 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     protected void doStart() {
         try {
-            // 1. List and sort history files by timestamp
+            // 1. List and sort history files by sequence number
             List<String> historyFiles = listAndSortHistoryFiles();
 
-            // 2. Simple sequential loading approach - much more efficient than lazy loading
+            // 2. Initialize sequence number from existing files
+            initializeSequenceNumber(historyFiles);
+
+            // 3. Simple sequential loading approach - much more efficient than lazy loading
             // For most cases, loading all records sequentially is faster and simpler
             this.records = loadAllHistoryRecords(historyFiles);
 
-            // 3. Initialize cache for the latest file to optimize future store operations
+            // 4. Initialize cache for the latest file to optimize future store operations
             initializeLatestFileCache(historyFiles);
 
             LOGGER.info(
-                    "Loaded schema history with {} total records from {} files.",
+                    "Loaded schema history with {} total records from {} files. Current sequence number: {}",
                     this.records.size(),
-                    historyFiles.size());
+                    historyFiles.size(),
+                    sequenceNumber.get());
 
         } catch (Exception e) {
             throw new SchemaHistoryException("Failed to initialize schema history", e);
@@ -178,17 +187,20 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                         cachedLatestFile,
                         cachedFileRecordCount);
             } else {
-                // 2. Create new file when current file is full or doesn't exist
-                String newFile =
-                        String.format(
-                                "%s/schema_history_%d.dat", objectDir, System.currentTimeMillis());
+                // 2. Create new file with next sequence number when current file is full or doesn't
+                // exist
+                long nextSequence = sequenceNumber.incrementAndGet();
+                String newFile = String.format("%s/schema_history_%d.dat", objectDir, nextSequence);
                 putObject(newFile, fromHistoryRecords(Collections.singletonList(record)));
 
                 // Update cache to point to new file
                 cachedLatestFile = newFile;
                 cachedFileRecordCount = 1;
 
-                LOGGER.info("Created new schema history file: {}", newFile);
+                LOGGER.info(
+                        "Created new schema history file: {} (sequence: {})",
+                        newFile,
+                        nextSequence);
             }
         } catch (Exception e) {
             throw new SchemaHistoryException("Failed to store schema history record", e);
@@ -253,13 +265,32 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         return result;
     }
 
-    // Extract timestamp from file name
-    private long extractTimestampFromFileName(String fileName) {
+    // Extract sequence number from file name
+    private long extractSequenceFromFileName(String fileName) {
         Matcher m = HISTORY_FILE_PATTERN.matcher(fileName);
         if (m.find()) {
             return Long.parseLong(m.group(1));
         }
         return 0L;
+    }
+
+    /**
+     * Initialize sequence number from existing files. This ensures we don't reuse sequence numbers
+     * that have already been used.
+     */
+    private void initializeSequenceNumber(List<String> historyFiles) {
+        long maxSequence = 0;
+
+        // Find the maximum sequence number from existing files
+        for (String fileName : historyFiles) {
+            long sequence = extractSequenceFromFileName(fileName);
+            if (sequence > maxSequence) {
+                maxSequence = sequence;
+            }
+        }
+
+        sequenceNumber.set(maxSequence);
+        LOGGER.info("Initialized sequence number to {} from existing files", maxSequence);
     }
 
     /**
@@ -290,7 +321,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         return allRecords;
     }
 
-    /** List and sort history files by timestamp. Extracted from doStart() to be reusable. */
+    /** List and sort history files by sequence number. Extracted from doStart() to be reusable. */
     private List<String> listAndSortHistoryFiles() {
         List<String> historyFiles = new ArrayList<>();
         String[] fileArray = listObject(objectDir);
@@ -298,8 +329,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             Collections.addAll(historyFiles, fileArray);
         }
         historyFiles.removeIf(file -> !HISTORY_FILE_PATTERN.matcher(file).find());
-        Collections.sort(
-                historyFiles, Comparator.comparingLong(this::extractTimestampFromFileName));
+        Collections.sort(historyFiles, Comparator.comparingLong(this::extractSequenceFromFileName));
         return historyFiles;
     }
 

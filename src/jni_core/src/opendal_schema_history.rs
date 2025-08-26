@@ -189,7 +189,8 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
                             .key
                             .strip_prefix(DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or(""))
                             .unwrap_or(&obj.key);
-                        let relative_path = if let Some(stripped) = relative_path.strip_prefix('/') {
+                        let relative_path = if let Some(stripped) = relative_path.strip_prefix('/')
+                        {
                             stripped
                         } else {
                             relative_path
