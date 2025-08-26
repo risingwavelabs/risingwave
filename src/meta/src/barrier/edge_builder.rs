@@ -130,7 +130,11 @@ impl FragmentEdgeBuilder {
         }
     }
 
-    fn add_edge(&mut self, fragment_id: FragmentId, downstream: &DownstreamFragmentRelation) {
+    pub(super) fn add_edge(
+        &mut self,
+        fragment_id: FragmentId,
+        downstream: &DownstreamFragmentRelation,
+    ) {
         let fragment = &self
             .fragments
             .get(&fragment_id)

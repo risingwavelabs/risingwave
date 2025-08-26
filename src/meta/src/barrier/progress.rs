@@ -484,7 +484,7 @@ impl CreateMviewProgressTracker {
                 .flat_map(|resp| resp.create_mview_progress.iter()),
             version_stats,
         );
-        for table_id in command.map(Command::tables_to_drop).into_iter().flatten() {
+        for table_id in command.map(Command::jobs_to_drop).into_iter().flatten() {
             // the cancelled command is possibly stashed in `finished_commands` and waiting
             // for checkpoint, we should also clear it.
             self.cancel_command(table_id);
