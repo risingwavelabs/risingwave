@@ -103,12 +103,12 @@ pub struct RedShiftConfig {
     #[serde(default = "default_schedule")]
     #[serde(rename = "write.target.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
-    pub schedule_seconds: u64,
+    pub writer_target_interval_seconds: u64,
 
     #[serde(default = "default_schedule")]
-    #[serde(rename = "copy_into_schedule_seconds")]
+    #[serde(rename = "write.intermediate.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
-    pub copy_into_schedule_seconds: u64,
+    pub write_intermediate_interval_seconds: u64,
 
     #[serde(default = "default_batch_insert_rows")]
     #[serde(rename = "batch.insert.rows")]
@@ -382,7 +382,10 @@ impl RedShiftSinkJdbcWriter {
         let column_descs = &mut param.columns;
         param.properties.remove("create_table_if_not_exists");
         param.properties.remove("write.target.interval.seconds");
-        param.properties.remove("copy_into_schedule_seconds");
+        param
+            .properties
+            .remove("write.intermediate.interval.seconds");
+
         let full_table_name = if is_append_only {
             config.table
         } else {
@@ -461,8 +464,8 @@ pub struct RedshiftSinkCommitter {
     sink_id: u32,
     pk_column_names: Vec<String>,
     all_column_names: Vec<String>,
-    merge_into_schedule_seconds: u64,
-    copy_into_schedule_seconds: u64,
+    writer_target_interval_seconds: u64,
+    write_intermediate_interval_seconds: u64,
     is_append_only: bool,
     periodic_task_handle: Option<tokio::task::JoinHandle<()>>,
     shutdown_sender: Option<tokio::sync::mpsc::UnboundedSender<()>>,
@@ -478,8 +481,8 @@ impl RedshiftSinkCommitter {
         sink_id: u32,
     ) -> Result<Self> {
         let client = config.build_client()?;
-        let merge_into_schedule_seconds = config.schedule_seconds;
-        let copy_into_schedule_seconds = config.copy_into_schedule_seconds;
+        let writer_target_interval_seconds = config.writer_target_interval_seconds;
+        let write_intermediate_interval_seconds = config.write_intermediate_interval_seconds;
 
         let (periodic_task_handle, shutdown_sender) = match (is_append_only, config.with_s3) {
             (true, true) | (false, _) => {
@@ -506,8 +509,9 @@ impl RedshiftSinkCommitter {
                     Self::run_periodic_query_task(
                         task_client,
                         merge_into_sql,
-                        merge_into_schedule_seconds,
-                        copy_into_schedule_seconds,
+                        config.with_s3,
+                        writer_target_interval_seconds,
+                        write_intermediate_interval_seconds,
                         sink_id,
                         config,
                         db,
@@ -528,8 +532,8 @@ impl RedshiftSinkCommitter {
             pk_column_names: pk_column_names.clone(),
             all_column_names: all_column_names.clone(),
             is_append_only,
-            merge_into_schedule_seconds,
-            copy_into_schedule_seconds,
+            writer_target_interval_seconds,
+            write_intermediate_interval_seconds,
             periodic_task_handle,
             shutdown_sender,
         })
@@ -588,76 +592,37 @@ impl RedshiftSinkCommitter {
     async fn run_periodic_query_task(
         client: JdbcJniClient,
         merge_into_sql: Option<Vec<String>>,
-        merge_into_schedule_seconds: u64,
-        copy_into_schedule_seconds: u64,
+        need_copy_into: bool,
+        writer_target_interval_seconds: u64,
+        write_intermediate_interval_seconds: u64,
         sink_id: u32,
         config: RedShiftConfig,
         db: DatabaseConnection,
         mut shutdown_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,
     ) {
-        // <<<<<<< HEAD
-        //         let mut interval_timer = interval(Duration::from_secs(schedule_seconds)); // 1 hour = 3600 seconds
-        //         interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        //         let sql = build_create_merge_into_task_sql(
-        //             schema_name,
-        //             cdc_table_name,
-        //             target_table_name,
-        //             &pk_column_names,
-        //             &all_column_names,
-        //         );
-        //         loop {
-        //             tokio::select! {
-        //                 // Check for shutdown signal
-        //                 _ = shutdown_receiver.recv() => {
-        //                     tracing::info!("Periodic query task received shutdown signal, stopping");
-        //                     break;
-        //                 }
-        //                 // Execute periodic query
-        //                 _ = interval_timer.tick() => {
-        // =======
-        let mut copy_timer = interval(Duration::from_secs(copy_into_schedule_seconds));
+        let mut copy_timer = interval(Duration::from_secs(write_intermediate_interval_seconds));
         copy_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut merge_timer = interval(Duration::from_secs(writer_target_interval_seconds));
+        merge_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        if let Some(sql) = merge_into_sql {
-            let mut merge_timer = interval(Duration::from_secs(merge_into_schedule_seconds));
-            merge_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            loop {
-                tokio::select! {
-                                    _ = shutdown_receiver.recv() => break,
-                                    _ = merge_timer.tick() => {
-                                        if let Err(e) = client.execute_sql_sync(sql.clone()).await {
-                                            tracing::warn!("Failed to execute periodic query for table {}: {}", config.table, e.as_report());
-                                        }
-                // <<<<<<< HEAD
-                //                         Err(e) => {
-                //                             tracing::warn!("Failed to execute periodic query for table {}: {}", target_table_name, e.as_report());
-                // =======
-                                    }
-                                    _ = copy_timer.tick() => {
-                                        if let Err(e) = async {
-                                            let (paths, epoch) = get_file_paths_by_sink_id(&db, sink_id).await?;
-                                            Self::copy_into_from_s3_to_redshift(&client, &config, false, sink_id, paths).await?;
-                                            delete_row_by_sink_id_and_end_epoch(&db, sink_id, epoch).await?;
-                                            Ok::<(),SinkError>(())
-                                        }.await {
-                                            tracing::error!("Failed to execute copy into task for sink id {}: {}", sink_id, e.as_report());
-                                        }
-                                    }
-                                }
-            }
-        } else {
-            loop {
-                tokio::select! {
-                    _ = shutdown_receiver.recv() => break,
-                    _ = copy_timer.tick() => {
-                        if let Err(e) = async {
-                            let (paths, epoch) = get_file_paths_by_sink_id(&db, sink_id).await?;
-                            Self::copy_into_from_s3_to_redshift(&client, &config, true, sink_id, paths).await?;
-                            delete_row_by_sink_id_and_end_epoch(&db, sink_id, epoch).await?;
-                            Ok::<(),SinkError>(())
-                        }.await {
-                            tracing::error!("Failed to execute copy into task for sink id {}: {}", sink_id, e.as_report());
+        loop {
+            tokio::select! {
+                _ = shutdown_receiver.recv() => break,
+                _ = merge_timer.tick(), if merge_into_sql.is_some() => {
+                    if let Some(sql) = &merge_into_sql {
+                        if let Err(e) = client.execute_sql_sync(sql.clone()).await {
+                            tracing::warn!("Failed to execute periodic query for table {}: {}", config.table, e);
                         }
+                    }
+                },
+                _ = copy_timer.tick(), if need_copy_into => {
+                    if let Err(e) = async {
+                        let (paths, epoch) = get_file_paths_by_sink_id(&db, sink_id).await?;
+                        Self::copy_into_from_s3_to_redshift(&client, &config, false, sink_id, paths).await?;
+                        delete_row_by_sink_id_and_end_epoch(&db, sink_id, epoch).await?;
+                        Ok::<(),SinkError>(())
+                    }.await {
+                        tracing::error!("Failed to execute copy into task for sink id {}: {}", sink_id, e.as_report());
                     }
                 }
             }
@@ -799,8 +764,8 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                     &self.pk_column_names,
                     &self.all_column_names,
                 );
-                let merge_into_schedule_seconds = self.merge_into_schedule_seconds;
-                let copy_into_schedule_seconds = self.copy_into_schedule_seconds;
+                let writer_target_interval_seconds = self.writer_target_interval_seconds;
+                let write_intermediate_interval_seconds = self.write_intermediate_interval_seconds;
                 let config = self.config.clone();
                 let db = self.db.clone();
                 let sink_id = self.sink_id;
@@ -808,8 +773,9 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                     Self::run_periodic_query_task(
                         client,
                         Some(merge_into_sql),
-                        merge_into_schedule_seconds,
-                        copy_into_schedule_seconds,
+                        config.with_s3,
+                        writer_target_interval_seconds,
+                        write_intermediate_interval_seconds,
                         sink_id,
                         config,
                         db,
