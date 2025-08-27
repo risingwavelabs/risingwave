@@ -103,8 +103,8 @@ risedev ci-start mysql-offline-schema-change-test
 # Verify data
 # If the bug is reproduced, you won't see rows with k=2 and k=3, check the logs of compute-node!
 
-sleep 10
-risedev psql -c "select * from t1;"
+sleep 20
+risedev psql -c "select * from t;"
 
 sleep 10
-risedev psql -c "select * from t;"
+risedev psql -c "select * from t1;"
