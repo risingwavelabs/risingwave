@@ -20,8 +20,8 @@ import java.sql.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class SnowflakeJDBCRunner {
-    private static final Logger LOG = LoggerFactory.getLogger(SnowflakeJDBCRunner.class);
+public class JDBCSqlRunner {
+    private static final Logger LOG = LoggerFactory.getLogger(JDBCSqlRunner.class);
 
     public static void executeSql(String fullUrl, String[] sqls) throws Exception {
         Connection connection = null;

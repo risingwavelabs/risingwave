@@ -132,6 +132,9 @@ impl SinkWriterCoordinationHandle {
                             prev_epoch
                         )));
                     }
+                    if request.metadata.is_none() {
+                        return Poll::Ready(Err(anyhow!("empty commit metadata")));
+                    };
                     self.prev_epoch = Some(request.epoch);
                 }
                 coordinate_request::Msg::UpdateVnodeRequest(request) => {

@@ -86,7 +86,7 @@ pub struct RedShiftConfig {
     #[serde(rename = "schema")]
     pub schema: Option<String>,
 
-    #[serde(rename = "target.table.name")]
+    #[serde(rename = "table.name")]
     pub table: String,
 
     #[serde(rename = "intermediate.table.name")]
@@ -107,7 +107,7 @@ pub struct RedShiftConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub batch_insert_rows: u32,
 
-    #[serde(default)]
+    #[serde(default = "default_with_s3")]
     #[serde(rename = "with_s3")]
     #[serde_as(as = "DisplayFromStr")]
     pub with_s3: bool,
@@ -122,6 +122,10 @@ fn default_schedule() -> u64 {
 
 fn default_batch_insert_rows() -> u32 {
     4096 // Default batch size
+}
+
+fn default_with_s3() -> bool {
+    true
 }
 
 impl RedShiftConfig {
@@ -540,7 +544,7 @@ impl RedshiftSinkCommitter {
                             tracing::info!("Periodic query executed successfully for table: {}", target_table_name);
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to execute periodic query for table {}: {}", target_table_name, e);
+                            tracing::warn!("Failed to execute periodic query for table {}: {}", target_table_name, e.as_report());
                         }
                     }
                 }
@@ -555,7 +559,10 @@ impl Drop for RedshiftSinkCommitter {
         if let Some(shutdown_sender) = &self.shutdown_sender
             && let Err(e) = shutdown_sender.send(())
         {
-            tracing::warn!("Failed to send shutdown signal to periodic task: {}", e);
+            tracing::warn!(
+                "Failed to send shutdown signal to periodic task: {}",
+                e.as_report()
+            );
         }
         tracing::info!("RedshiftSinkCommitter dropped, periodic task stopped");
     }
@@ -589,8 +596,9 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                     metadata,
                 })) = metadata.metadata
                 {
-                    String::from_utf8(metadata)
-                        .map_err(|e| SinkError::Config(anyhow!("Invalid UTF-8 in metadata: {}", e)))
+                    String::from_utf8(metadata).map_err(|e| {
+                        SinkError::Config(anyhow!("Invalid UTF-8 in metadata: {}", e.as_report()))
+                    })
                 } else {
                     Err(SinkError::Config(anyhow!("Invalid metadata format")))
                 }?;
@@ -645,7 +653,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
             if let Some(shutdown_sender) = &self.shutdown_sender {
                 // Send shutdown signal to the periodic task before altering the table
                 shutdown_sender.send(()).map_err(|e| {
-                    SinkError::Config(anyhow!("Failed to send shutdown signal: {}", e))
+                    SinkError::Config(anyhow!("Failed to send shutdown signal: {}", e.as_report()))
                 })?;
             }
             let sql = build_alter_add_column_sql(
@@ -657,7 +665,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                     .collect::<Vec<_>>(),
             );
             let check_column_exists = |e: anyhow::Error| {
-                let err_str = e.root_cause().to_string();
+                let err_str = e.to_report_string();
                 if regex::Regex::new(".+ of relation .+ already exists")
                     .unwrap()
                     .find(&err_str)

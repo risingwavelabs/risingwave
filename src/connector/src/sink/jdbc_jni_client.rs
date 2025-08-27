@@ -65,7 +65,7 @@ impl JdbcJniClient {
 
                 call_static_method!(
                     env,
-                    { com.risingwave.runner.SnowflakeJDBCRunner },
+                    { com.risingwave.runner.JDBCSqlRunner },
                     { void executeSql(String, String[]) },
                     &full_url,
                     &props

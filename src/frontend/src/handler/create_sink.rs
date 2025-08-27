@@ -32,6 +32,7 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
+use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
@@ -929,6 +930,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 FileSink::<S3Sink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
+                ),
+                FileSink::<SnowflakeSink>::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<GcsSink>::SINK_NAME => hashmap!(

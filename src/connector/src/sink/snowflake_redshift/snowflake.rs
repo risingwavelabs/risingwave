@@ -56,7 +56,7 @@ pub struct SnowflakeV2Config {
     #[serde(rename = "intermediate.table.name")]
     pub snowflake_cdc_table_name: Option<String>,
 
-    #[serde(rename = "target.table.name")]
+    #[serde(rename = "table.name")]
     pub snowflake_target_table_name: Option<String>,
 
     #[serde(rename = "database")]
@@ -100,7 +100,7 @@ pub struct SnowflakeV2Config {
     #[serde_as(as = "DisplayFromStr")]
     pub create_table_if_not_exists: bool,
 
-    #[serde(default)]
+    #[serde(default = "default_with_s3")]
     #[serde(rename = "with_s3")]
     #[serde_as(as = "DisplayFromStr")]
     pub with_s3: bool,
@@ -114,6 +114,10 @@ pub struct SnowflakeV2Config {
 
 fn default_schedule() -> u64 {
     3600 // Default to 1 hour
+}
+
+fn default_with_s3() -> bool {
+    true
 }
 
 impl SnowflakeV2Config {
