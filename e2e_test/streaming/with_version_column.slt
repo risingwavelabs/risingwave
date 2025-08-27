@@ -165,6 +165,10 @@ statement error The with version column syntax cannot be used with the ignore be
 create table t_error4 (id int, v1 int, primary key(id))
 on conflict do nothing with version column(v1);
 
+statement error version columns cannot be empty
+create table t_error5 (id int, v1 int, primary key(id))
+on conflict do update if not null with version column();
+
 # Test multiple version columns with on conflict do update full
 statement ok
 create table t5 (id int, name varchar, version1 int, version2 int, data varchar, primary key(id))

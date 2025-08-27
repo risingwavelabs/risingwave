@@ -2535,6 +2535,9 @@ impl Parser<'_> {
             let columns =
                 self.parse_comma_separated(|parser| parser.parse_identifier_non_reserved())?;
             self.expect_token(&Token::RParen)?;
+            if columns.is_empty() {
+                parser_err!("version columns cannot be empty");
+            }
             Ok(columns)
         } else {
             Ok(Vec::new())
