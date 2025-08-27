@@ -446,6 +446,14 @@ static LIMIT_PUSH_DOWN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static TOP_N_PUSH_DOWN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Push Down TopN",
+        vec![TopNPushDownRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static PULL_UP_HOP: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Pull Up Hop",
@@ -843,7 +851,17 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
 
+        tracing::info!("Before top-n push down, plan: {}", plan.explain_to_string());
+
+        plan = plan.optimize_by_rules(&TOP_N_PUSH_DOWN)?;
+        tracing::info!("After top-n push down, plan: {}", plan.explain_to_string());
+
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX)?;
+
+        tracing::info!(
+            "After topn agg on index, plan: {}",
+            plan.explain_to_string()
+        );
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
 
