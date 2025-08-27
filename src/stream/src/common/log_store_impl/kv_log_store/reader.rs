@@ -489,6 +489,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                     is_checkpoint,
                                     new_vnode_bitmap: None,
                                     is_stop: false,
+                                    add_columns: None,
                                 }
                             }
                         };
@@ -604,6 +605,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         is_checkpoint,
                         new_vnode_bitmap: None,
                         is_stop: false,
+                        add_columns: None,
                     },
                 )
             }

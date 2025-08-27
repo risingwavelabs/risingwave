@@ -1397,12 +1397,7 @@ mod tests {
         let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
             UpdateMutation {
                 dispatchers: dispatcher_updates,
-                merges: Default::default(),
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
+                ..Default::default()
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);
@@ -1510,12 +1505,7 @@ mod tests {
         let b3 = Barrier::new_test_barrier(test_epoch(3)).with_mutation(Mutation::Update(
             UpdateMutation {
                 dispatchers: dispatcher_updates,
-                merges: Default::default(),
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
+                ..Default::default()
             },
         ));
         barrier_test_env.inject_barrier(&b3, [actor_id]);

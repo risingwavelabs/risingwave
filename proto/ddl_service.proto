@@ -337,6 +337,7 @@ message CreateFunctionResponse {
 
 message DropFunctionRequest {
   uint32 function_id = 1;
+  bool cascade = 2;
 }
 
 message DropFunctionResponse {
