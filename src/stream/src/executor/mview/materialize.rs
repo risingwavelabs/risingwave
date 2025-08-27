@@ -27,8 +27,7 @@ use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
 use risingwave_common::row::{CompactedRow, OwnedRow};
-use risingwave_common::types::postgres_type::DEBEZIUM_UNAVAILABLE_VALUE;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
@@ -116,7 +115,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     ) -> Self {
         // Determine if we should handle TOAST based on CDC table type
         // Only handle TOAST for PostgreSQL CDC tables.
-        let handle_toast = table_catalog.cdc_table_type == Some(1);
+        let handle_toast =
+            table_catalog.cdc_table_type() == risingwave_pb::catalog::table::CdcTableType::Postgres;
 
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
@@ -130,6 +130,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, column)| match &column.data_type {
+                    // Currently supports TOAST updates for:
+                    // - jsonb (DataType::Jsonb)
+                    // - varchar (DataType::Varchar)
+                    // - bytea (DataType::Bytea)
+                    // - One-dimensional arrays of the above types (DataType::List)
+                    //   Note: Some array types may not be fully supported yet, see issue  https://github.com/risingwavelabs/risingwave/issues/22916 for details.
+
+                    // For details on how TOAST values are handled, see comments in `is_debezium_unavailable_value`.
                     DataType::Varchar | DataType::List(_) | DataType::Bytea | DataType::Jsonb => {
                         Some(index)
                     }

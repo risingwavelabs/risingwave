@@ -26,7 +26,8 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_pb::catalog::table::{
-    OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
+    CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
+    PbTableVersion,
 };
 use risingwave_pb::catalog::{
     PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
@@ -598,16 +599,7 @@ impl TableCatalog {
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
-            cdc_table_type: self.cdc_table_type.clone().map(
-                |cdc_table_type| match cdc_table_type {
-                    CdcTableType::Undefined | CdcTableType::Mock => 0,
-                    CdcTableType::Postgres => 1,
-                    CdcTableType::MySql => 2,
-                    CdcTableType::SqlServer => 3,
-                    CdcTableType::Mongo => 4,
-                    CdcTableType::Citus => 5,
-                },
-            ),
+            cdc_table_type: self.cdc_table_type.clone().map(Self::cdc_table_type_to_i32),
         }
     }
 
@@ -833,17 +825,7 @@ impl From<PbTable> for TableCatalog {
 
             refreshable: tb.refreshable,
             vector_index_info: tb.vector_index_info,
-            cdc_table_type: tb
-                .cdc_table_type
-                .map(|cdc_table_type| match cdc_table_type {
-                    0 => CdcTableType::Undefined,
-                    1 => CdcTableType::Postgres,
-                    2 => CdcTableType::MySql,
-                    3 => CdcTableType::SqlServer,
-                    4 => CdcTableType::Mongo,
-                    5 => CdcTableType::Citus,
-                    _ => panic!("Invalid CDC table type: {}", cdc_table_type),
-                }),
+            cdc_table_type: tb.cdc_table_type.map(Self::i32_to_cdc_table_type),
         }
     }
 }
@@ -857,6 +839,40 @@ impl From<&PbTable> for TableCatalog {
 impl OwnedByUserCatalog for TableCatalog {
     fn owner(&self) -> UserId {
         self.owner
+    }
+}
+
+impl TableCatalog {
+    fn cdc_table_type_to_i32(cdc_table_type: CdcTableType) -> i32 {
+        let pb_type: PbCdcTableType = match cdc_table_type {
+            CdcTableType::Undefined | CdcTableType::Mock => PbCdcTableType::Unspecified,
+            CdcTableType::Postgres => PbCdcTableType::Postgres,
+            CdcTableType::MySql => PbCdcTableType::Mysql,
+            CdcTableType::SqlServer => PbCdcTableType::Sqlserver,
+            CdcTableType::Mongo => PbCdcTableType::Mongo,
+            CdcTableType::Citus => PbCdcTableType::Citus,
+        };
+        pb_type as i32
+    }
+
+    fn i32_to_cdc_table_type(cdc_table_type: i32) -> CdcTableType {
+        let pb_type = match cdc_table_type {
+            0 => PbCdcTableType::Unspecified,
+            1 => PbCdcTableType::Postgres,
+            2 => PbCdcTableType::Mysql,
+            3 => PbCdcTableType::Sqlserver,
+            4 => PbCdcTableType::Mongo,
+            5 => PbCdcTableType::Citus,
+            _ => panic!("Invalid CDC table type: {}", cdc_table_type),
+        };
+        match pb_type {
+            PbCdcTableType::Unspecified => CdcTableType::Undefined,
+            PbCdcTableType::Postgres => CdcTableType::Postgres,
+            PbCdcTableType::Mysql => CdcTableType::MySql,
+            PbCdcTableType::Sqlserver => CdcTableType::SqlServer,
+            PbCdcTableType::Mongo => CdcTableType::Mongo,
+            PbCdcTableType::Citus => CdcTableType::Citus,
+        }
     }
 }
 

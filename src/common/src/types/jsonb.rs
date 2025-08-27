@@ -21,12 +21,12 @@ use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::EstimateSize;
 use thiserror_ext::AsReport;
 
-use super::postgres_type::DEBEZIUM_UNAVAILABLE_VALUE;
 use super::{
     Datum, F64, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum,
 };
 use crate::types::{
-    DEBEZIUM_UNAVAILABLE_JSON, DataType, Scalar, ScalarRef, StructType, StructValue,
+    DEBEZIUM_UNAVAILABLE_JSON, DEBEZIUM_UNAVAILABLE_VALUE, DataType, Scalar, ScalarRef, StructType,
+    StructValue,
 };
 use crate::util::iter_util::ZipEqDebug;
 
