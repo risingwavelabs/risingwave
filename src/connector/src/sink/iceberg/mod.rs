@@ -62,7 +62,7 @@ use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArr
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -106,7 +106,7 @@ pub const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
 pub const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
 pub const WRITE_MODE: &str = "write_mode";
 pub const SNAPSHOT_EXPIRATION_RETAIN_LAST: &str = "snapshot_expiration_retain_last";
-pub const SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN: &str = "snapshot_expiration_expire_older_than";
+pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_age_millis";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
     "snapshot_expiration_clear_expired_meta_data";
@@ -196,11 +196,12 @@ pub struct IcebergConfig {
     #[serde(rename = "write_mode", default = "default_iceberg_write_mode")]
     pub write_mode: String,
 
-    /// The timestamp (in milliseconds) to expire snapshots older than this
-    #[serde(rename = "snapshot_expiration_expire_older_than", default)]
+    /// The maximum age (in milliseconds) for snapshots before they expire
+    /// For example, if set to 3600000, snapshots older than 1 hour will be expired
+    #[serde(rename = "snapshot_expiration_max_age_millis", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
-    pub snapshot_expiration_expire_older_than: Option<i64>,
+    pub snapshot_expiration_max_age_millis: Option<i64>,
 
     /// The number of snapshots to retain
     #[serde(rename = "snapshot_expiration_retain_last", default)]
@@ -322,6 +323,13 @@ impl IcebergConfig {
     pub fn compaction_interval_sec(&self) -> u64 {
         // default to 1 hour
         self.compaction_interval_sec.unwrap_or(3600)
+    }
+
+    /// Calculate the timestamp (in milliseconds) before which snapshots should be expired
+    /// Returns `current_time_ms` - `max_age_millis`
+    pub fn snapshot_expiration_timestamp_ms(&self, current_time_ms: i64) -> Option<i64> {
+        self.snapshot_expiration_max_age_millis
+            .map(|max_age_millis| current_time_ms - max_age_millis)
     }
 }
 
@@ -1705,8 +1713,21 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         return Ok(None);
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}.");
+        if let Some(add_columns) = add_columns {
+            return Err(anyhow!(
+                "Iceberg sink not support add columns, but got: {:?}",
+                add_columns
+            )
+            .into());
+        }
+
         let write_results: Vec<IcebergCommitResult> = metadata
             .iter()
             .map(IcebergCommitResult::try_from)
@@ -2157,7 +2178,6 @@ mod test {
     use std::collections::BTreeMap;
 
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
-    use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::IcebergCommon;
@@ -2165,7 +2185,7 @@ mod test {
     use crate::sink::iceberg::{
         COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
         ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN,
+        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
         SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     };
 
@@ -2413,7 +2433,7 @@ mod test {
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
             enable_snapshot_expiration: true,
             write_mode: ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
-            snapshot_expiration_expire_older_than: None,
+            snapshot_expiration_max_age_millis: None,
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
             snapshot_expiration_clear_expired_meta_data: true
@@ -2553,8 +2573,8 @@ mod test {
             "snapshot_expiration_retain_last"
         );
         assert_eq!(
-            SNAPSHOT_EXPIRATION_EXPIRE_OLDER_THAN,
-            "snapshot_expiration_expire_older_than"
+            SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
+            "snapshot_expiration_max_age_millis"
         );
         assert_eq!(
             SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
