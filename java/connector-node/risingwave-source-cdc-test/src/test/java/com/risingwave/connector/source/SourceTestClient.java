@@ -153,7 +153,7 @@ public class SourceTestClient {
             String databaseName,
             String tableName) {
         String port = String.valueOf(URI.create(container.getJdbcUrl().substring(5)).getPort());
-        ConnectorServiceProto.GetEventStreamRequest req =
+        ConnectorServiceProto.GetEventStreamRequest.Builder reqBuilder =
                 ConnectorServiceProto.GetEventStreamRequest.newBuilder()
                         .setSourceId(1005)
                         .setSourceType(sourceType)
@@ -166,8 +166,16 @@ public class SourceTestClient {
                         .putProperties("table.name", tableName)
                         .putProperties("schema.name", "public") // pg only
                         .putProperties("slot.name", "orders") // pg only
-                        .putProperties("server.id", "1") // mysql only
-                        .build();
+                        .putProperties("server.id", "1"); // mysql only
+
+        // Override schema history for MySQL tests to use MemorySchemaHistory
+        if (sourceType == ConnectorServiceProto.SourceType.MYSQL) {
+            reqBuilder.putProperties(
+                    "schema.history.internal",
+                    "io.debezium.relational.history.MemorySchemaHistory");
+        }
+
+        ConnectorServiceProto.GetEventStreamRequest req = reqBuilder.build();
         Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
         try {
             responses = blockingStub.getEventStream(req);
