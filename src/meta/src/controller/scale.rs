@@ -31,8 +31,8 @@ use risingwave_meta_model::{
 };
 use risingwave_meta_model_migration::Condition;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbBackend, EntityTrait, JoinType, QueryFilter, QuerySelect,
-    QueryTrait, RelationTrait,
+    ColumnTrait, ConnectionTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, QueryTrait,
+    RelationTrait,
 };
 
 use crate::MetaResult;
@@ -175,15 +175,13 @@ where
     println!("jobs {:?}", job_ids);
     println!("workers {:?}", workers);
 
-    let jobs = StreamingJob::find()
+    let jobs: HashMap<_, _> = StreamingJob::find()
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
         .all(txn)
-        .await?;
-
-    let jobs = jobs
+        .await?
         .into_iter()
         .map(|job| (job.job_id, job))
-        .collect::<HashMap<_, _>>();
+        .collect();
 
     let excluded_fragments_query = FragmentRelation::find()
         .select_only()
@@ -195,16 +193,13 @@ where
         .add(fragment::Column::JobId.is_in(job_ids.clone()))
         .add(fragment::Column::FragmentId.not_in_subquery(excluded_fragments_query));
 
-    let select = Fragment::find()
+    let fragments: Vec<FragmentId> = Fragment::find()
         .select_only()
         .column(fragment::Column::FragmentId)
-        .filter(condition);
-
-    let statement = select.build(DbBackend::Postgres);
-    println!("sql {}", statement);
-    let fragments: Vec<FragmentId> = select.into_tuple().all(txn).await?;
-
-    println!("11111111");
+        .filter(condition)
+        .into_tuple()
+        .all(txn)
+        .await?;
 
     let ensembles = find_fragment_no_shuffle_dags_detailed(txn, &fragments).await?;
 
@@ -218,40 +213,32 @@ where
         .all(txn)
         .await?;
 
-    println!("2222222");
+    let mut fragment_map: HashMap<_, _> = fragments
+        .into_iter()
+        .map(|fragment| (fragment.fragment_id, fragment))
+        .collect();
 
-    let mut fragment_map: HashMap<_, _> =
-        fragments.into_iter().map(|f| (f.fragment_id, f)).collect();
-
-    println!("333333");
-
-    let object_databases: Vec<(ObjectId, DatabaseId)> = StreamingJob::find()
+    let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
         .select_only()
         .column(streaming_job::Column::JobId)
         .column(object::Column::DatabaseId)
         .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
-        //.filter(streaming_job::Column::JobId.is_in(job_ids))
         .into_tuple()
         .all(txn)
-        .await?;
+        .await?
+        .into_iter()
+        .collect();
 
-    println!("obj db {:#?}", object_databases);
-
-    let streaming_job_databases = object_databases.into_iter().collect::<HashMap<_, _>>();
-
-    let database_ids = streaming_job_databases.values().copied().collect_vec();
-
-    println!("444444");
-
-    let databases = Database::find()
-        .filter(database::Column::DatabaseId.is_in(database_ids))
+    let database_map: HashMap<_, _> = Database::find()
+        .filter(
+            database::Column::DatabaseId
+                .is_in(streaming_job_databases.values().copied().collect_vec()),
+        )
         .all(txn)
-        .await?;
-
-    let database_map = databases
+        .await?
         .into_iter()
         .map(|db| (db.database_id, db))
-        .collect::<HashMap<_, _>>();
+        .collect();
 
     let mut result: HashMap<
         DatabaseId,
@@ -275,7 +262,9 @@ where
             .exactly_one()
             .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
 
-        let job = jobs.get(&job_id).unwrap();
+        let job = jobs
+            .get(&job_id)
+            .unwrap_or_else(|| panic!("streaming job {job_id} not found"));
 
         let resource_group = match &job.specific_resource_group {
             None => {
@@ -288,7 +277,7 @@ where
             Some(resource_group) => resource_group.clone(),
         };
 
-        let workers: BTreeMap<WorkerId, NonZeroUsize> = workers
+        let available_workers: BTreeMap<WorkerId, NonZeroUsize> = workers
             .iter()
             .filter_map(|(worker_id, worker)| {
                 if worker
@@ -304,25 +293,24 @@ where
             })
             .collect();
 
-        let total_parallelism = workers.values().map(|w| w.get()).sum::<usize>();
+        let total_parallelism = available_workers.values().map(|w| w.get()).sum::<usize>();
 
-        let fact_parallelism = match job.parallelism {
-            StreamingParallelism::Adaptive => {
+        let actual_parallelism = match job.parallelism {
+            StreamingParallelism::Custom | StreamingParallelism::Adaptive => {
                 adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
             }
             StreamingParallelism::Fixed(n) => n,
-            StreamingParallelism::Custom => unreachable!(),
         }
         .min(total_parallelism) // limit fixed
         .min(job.max_parallelism as usize) // limit max parallelism
-        .min(vnode_count);
+        .min(vnode_count); // limit vnode count
 
         let assigner = AssignerBuilder::new(job_id).build();
 
-        let actors = (0..fact_parallelism).collect_vec();
+        let actors = (0..actual_parallelism).collect_vec();
         let vnodes = (0..vnode_count).collect_vec();
 
-        let assignment = assigner.assign_hierarchical(&workers, &actors, &vnodes)?;
+        let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
 
         for fragment_id in components {
             let fragment::Model {
@@ -335,7 +323,7 @@ where
                 ..
             } = fragment_map.remove(&fragment_id).unwrap();
 
-            let actors: HashMap<crate::model::ActorId, InflightActorInfo> = assignment
+            let actors: HashMap<ActorId, InflightActorInfo> = assignment
                 .iter()
                 .flat_map(|(worker_id, actors)| {
                     actors
@@ -374,9 +362,9 @@ where
                     .collect(),
             };
 
-            println!("all {:#?} job id {}", streaming_job_databases, job_id);
-
-            let database_id = streaming_job_databases[&job_id];
+            let &database_id = streaming_job_databases.get(&job_id).unwrap_or_else(|| {
+                panic!("streaming job {job_id} not found in streaming_job_databases")
+            });
 
             result
                 .entry(database_id)
@@ -386,183 +374,6 @@ where
                 .insert(fragment_id, fragment);
         }
     }
-    Ok(result)
-}
-
-async fn render_inner<C>(
-    txn: &C,
-    ensembles: Vec<NoShuffleEnsemble>,
-    workers: &BTreeMap<WorkerId, NonZeroUsize>,
-) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
-where
-    C: ConnectionTrait,
-{
-    let total_parallelism = workers.values().map(|w| w.get()).sum::<usize>();
-
-    let all_fragment_ids: HashSet<_> = ensembles
-        .iter()
-        .flat_map(|graph| graph.components.iter().cloned())
-        .collect();
-
-    let fragments = Fragment::find()
-        .filter(fragment::Column::FragmentId.is_in(all_fragment_ids.clone()))
-        .all(txn)
-        .await?;
-
-    let mut fragment_map: HashMap<_, _> =
-        fragments.into_iter().map(|f| (f.fragment_id, f)).collect();
-
-    let streaming_jobs = StreamingJob::find()
-        .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
-        .join(JoinType::InnerJoin, object::Relation::Fragment.def())
-        .filter(fragment::Column::FragmentId.is_in(all_fragment_ids))
-        .all(txn)
-        .await?;
-
-    println!("xxxx");
-
-    let streaming_jobs_map: HashMap<_, _> = streaming_jobs
-        .into_iter()
-        .map(|job| (job.job_id, job))
-        .collect();
-
-    // let job_definitions =
-    //     resolve_streaming_job_definition(txn, &streaming_jobs_map.keys().cloned().collect())
-    //         .await?;
-
-    // let object_databases: Vec<(ObjectId, DatabaseId)> = Object::find()
-    //     .columns([object::Column::Oid, object::Column::DatabaseId])
-    //     .filter(object::Column::DatabaseId.is_not_null())
-    //     .into_tuple()
-    //     .all(txn)
-    //     .await?;
-
-    let object_databases: Vec<(ObjectId, DatabaseId)> = StreamingJob::find()
-        .select_only()
-        .column(streaming_job::Column::JobId)
-        .column(object::Column::DatabaseId)
-        .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
-        .into_tuple()
-        .all(txn)
-        .await?;
-
-    let streaming_job_database: HashMap<_, _> = object_databases.into_iter().collect();
-
-    let mut result: HashMap<
-        DatabaseId,
-        HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
-    > = HashMap::new();
-
-    println!("yyyyy");
-
-    for NoShuffleEnsemble {
-        entries,
-        components,
-    } in ensembles
-    {
-        let entry_fragments = entries
-            .iter()
-            .map(|fragment_id| fragment_map.get(fragment_id).unwrap())
-            .collect_vec();
-
-        let (job_id, vnode_count) = entry_fragments
-            .iter()
-            .map(|f| (f.job_id, f.vnode_count as usize))
-            .dedup()
-            .exactly_one()
-            .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
-
-        let job = streaming_jobs_map.get(&job_id).unwrap();
-
-        let parallelism = &job.parallelism;
-        let max_parallelism = job.max_parallelism;
-
-        let fact_parallelism = match parallelism {
-            StreamingParallelism::Fixed(parallelism) => *parallelism,
-            _ => total_parallelism,
-        }
-        .min(max_parallelism as usize)
-        .min(vnode_count);
-
-        let assigner = AssignerBuilder::new(job_id).build();
-
-        let actors = (0..fact_parallelism).collect_vec();
-        let vnodes = (0..vnode_count).collect_vec();
-
-        let assignment = assigner.assign_hierarchical(workers, &actors, &vnodes)?;
-
-        for fragment_id in components {
-            let fragment::Model {
-                fragment_id,
-                job_id,
-                fragment_type_mask,
-                distribution_type,
-                stream_node,
-                state_table_ids,
-                ..
-            } = fragment_map.remove(&fragment_id).unwrap();
-
-            let actors: HashMap<crate::model::ActorId, InflightActorInfo> = assignment
-                .iter()
-                .flat_map(|(worker_id, actors)| {
-                    actors
-                        .iter()
-                        .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
-                })
-                .map(|(&worker_id, &actor_idx, vnodes)| {
-                    let vnode_bitmap = match distribution_type {
-                        DistributionType::Single => None,
-                        DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
-                    };
-
-                    let actor_id = (fragment_id << 16) as u32 | actor_idx as u32;
-                    (
-                        actor_id,
-                        InflightActorInfo {
-                            worker_id,
-                            vnode_bitmap,
-                        },
-                    )
-                })
-                .collect();
-
-            let fragment = InflightFragmentInfo {
-                fragment_id: fragment_id as u32,
-                job_id,
-                distribution_type,
-                fragment_type_mask: fragment_type_mask.into(),
-                vnode_count,
-                nodes: stream_node.to_protobuf(),
-                actors,
-                state_table_ids: state_table_ids
-                    .into_inner()
-                    .into_iter()
-                    .map(|id| catalog::TableId::new(id as _))
-                    .collect(),
-            };
-
-            result
-                .entry(streaming_job_database[&job_id])
-                .or_default()
-                .entry(job_id)
-                .or_default()
-                .insert(fragment_id, fragment);
-        }
-    }
-    Ok(result)
-}
-
-pub async fn render_fragments<C>(
-    txn: &C,
-    fragment_ids: &[FragmentId],
-    workers: BTreeMap<WorkerId, NonZeroUsize>,
-) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
-where
-    C: ConnectionTrait,
-{
-    let graphs = find_fragment_no_shuffle_dags_detailed(txn, fragment_ids).await?;
-
-    let result = render_inner(txn, graphs, &workers).await?;
 
     Ok(result)
 }
@@ -574,12 +385,18 @@ pub struct ActorGraph<'a> {
     pub locations: &'a HashMap<ActorId, WorkerId>,
 }
 
-struct NoShuffleEnsemble {
+pub struct NoShuffleEnsemble {
     entries: HashSet<FragmentId>,
     components: HashSet<FragmentId>,
 }
 
-async fn find_fragment_no_shuffle_dags_detailed(
+impl NoShuffleEnsemble {
+    pub fn fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.components.iter().cloned()
+    }
+}
+
+pub async fn find_fragment_no_shuffle_dags_detailed(
     db: &impl ConnectionTrait,
     initial_fragment_ids: &[FragmentId],
 ) -> MetaResult<Vec<NoShuffleEnsemble>> {

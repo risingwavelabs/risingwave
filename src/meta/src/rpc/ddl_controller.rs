@@ -511,7 +511,7 @@ impl DdlController {
         }
 
         self.stream_manager
-            .reschedule_streaming_job_v2(job_id, target, deferred)
+            .reschedule_streaming_job(job_id, target, deferred)
             .await
     }
 
