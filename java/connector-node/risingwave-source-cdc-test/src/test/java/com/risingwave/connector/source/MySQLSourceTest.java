@@ -64,6 +64,10 @@ public class MySQLSourceTest {
 
     @BeforeClass
     public static void init() {
+        // Set JVM property to indicate this is an embedded connector environment
+        // This prevents JNI library loading attempts when using OpendalSchemaHistory
+        System.setProperty("is_embedded_connector", "true");
+
         // generate orders.tbl test data
         SourceTestClient.genOrdersTable(10000);
         // start connector server and mysql...
