@@ -62,7 +62,7 @@ diamonds_mv	FS_FETCH	{MVIEW,FS_FETCH}	0
 diamonds_mv	SOURCE	{SOURCE}	0
 
 
-sleep 3s
+sleep 10s
 
 query TTTT rowsort
 select * from diamonds;
