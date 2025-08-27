@@ -338,6 +338,8 @@ impl GlobalStreamManager {
                         }
                     })
                     .await?;
+
+                println!("xxxx");
                 let version = stream_manager
                     .metadata_manager
                     .wait_streaming_job_finished(
@@ -372,6 +374,8 @@ impl GlobalStreamManager {
             }
         }
             .in_current_span();
+
+        println!("1111111");
 
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
@@ -460,6 +464,7 @@ impl GlobalStreamManager {
     ) -> MetaResult<(SourceChange, StreamingJob)> {
         let mut replace_table_command = None;
 
+        println!("a1111");
         tracing::debug!(
             table_id = %stream_job_fragments.stream_job_id(),
             "built actors finished"
@@ -498,6 +503,8 @@ impl GlobalStreamManager {
             });
         }
 
+        println!("a2222");
+
         // Here we need to consider:
         // - Shared source
         // - Table with connector
@@ -521,6 +528,8 @@ impl GlobalStreamManager {
             self.env.meta_store_ref(),
         )
         .await?;
+
+        println!("a3333");
 
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
@@ -553,6 +562,8 @@ impl GlobalStreamManager {
             }
         };
 
+        println!("a4444");
+
         let command = Command::CreateStreamingJob {
             info,
             job_type,
@@ -562,6 +573,8 @@ impl GlobalStreamManager {
         self.barrier_scheduler
             .run_command(streaming_job.database_id().into(), command)
             .await?;
+
+        println!("a5555");
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
 
@@ -799,7 +812,7 @@ impl GlobalStreamManager {
         cancelled_ids
     }
 
-    pub(crate) async fn reschedule_streaming_job_v2(
+    pub(crate) async fn reschedule_streaming_job(
         &self,
         job_id: u32,
         target: RescheduleTarget,
@@ -813,28 +826,19 @@ impl GlobalStreamManager {
             .await?;
 
         if !background_jobs.is_empty() {
-            // let related_jobs = self
-            //     .scale_controller
-            //     .resolve_related_no_shuffle_jobs(&background_jobs)
-            //     .await?;
-            //
-            // for job in background_jobs {
-            //     if related_jobs.contains(&job) {
-            //         bail!(
-            //             "Cannot alter the job {} because the related job {} is currently being created",
-            //             job_id,
-            //             job.table_id
-            //         );
-            //     }
-            // }
-        }
+            let related_jobs = self
+                .scale_controller
+                .resolve_related_no_shuffle_jobs(&background_jobs)
+                .await?;
 
-        // let database_id = DatabaseId::new(
-        //     self.metadata_manager
-        //         .catalog_controller
-        //         .get_object_database_id(job_id as ObjectId)
-        //         .await? as _,
-        // );
+            if related_jobs.contains(&(job_id as ObjectId)) {
+                bail!(
+                    "Cannot alter the job {} because the related job {:?} is currently being created",
+                    job_id,
+                    background_jobs,
+                );
+            }
+        }
 
         let job_id = TableId::new(job_id);
 

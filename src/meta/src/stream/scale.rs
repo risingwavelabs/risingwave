@@ -25,7 +25,9 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeMask};
 use risingwave_common::hash;
 use risingwave_common::hash::ActorMapping;
-use risingwave_meta_model::{ObjectId, StreamingParallelism, WorkerId, fragment_relation};
+use risingwave_meta_model::{
+    ObjectId, StreamingParallelism, WorkerId, fragment, fragment_relation,
+};
 use risingwave_pb::common::{PbWorkerNode, WorkerNode, WorkerType};
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -39,7 +41,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
-use crate::controller::scale::{WorkerInfo, render_jobs};
+use crate::controller::scale::{WorkerInfo, find_fragment_no_shuffle_dags_detailed, render_jobs};
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers};
 use crate::serving::{
@@ -77,7 +79,7 @@ use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_meta_model::prelude::{FragmentRelation, StreamingJob};
+use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
 use risingwave_pb::plan_common::PbExprContext;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait};
@@ -112,6 +114,39 @@ impl ScaleController {
             env,
             reschedule_lock: RwLock::new(()),
         }
+    }
+
+    pub async fn resolve_related_no_shuffle_jobs(
+        &self,
+        jobs: &[ObjectId],
+    ) -> MetaResult<HashSet<ObjectId>> {
+        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let fragment_ids: Vec<_> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.is_in(jobs.to_vec()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let ensembles = find_fragment_no_shuffle_dags_detailed(&txn, &fragment_ids).await?;
+        let related_fragments = ensembles
+            .iter()
+            .flat_map(|ensemble| ensemble.fragments())
+            .collect_vec();
+
+        let job_ids: Vec<_> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::JobId)
+            .filter(fragment::Column::FragmentId.is_in(related_fragments))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let job_ids = job_ids.into_iter().collect();
+
+        Ok(job_ids)
     }
 
     // pub async fn render_actors(
@@ -161,7 +196,7 @@ impl ScaleController {
     pub fn diff_fragment(
         &self,
         prev_fragment_info: &SharedFragmentInfo,
-        curr_actors: &HashMap<crate::model::ActorId, InflightActorInfo>,
+        curr_actors: &HashMap<ActorId, InflightActorInfo>,
         upstream_fragments: HashMap<FragmentId, DispatcherType>,
         downstream_fragments: HashMap<FragmentId, DispatcherType>,
         all_actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
@@ -1150,27 +1185,27 @@ impl GlobalStreamManager {
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        // let background_streaming_jobs = self
-        //     .metadata_manager
-        //     .list_background_creating_jobs()
-        //     .await?;
-        //
-        // let skipped_jobs = if !background_streaming_jobs.is_empty() {
-        //     let jobs = self
-        //         .scale_controller
-        //         .resolve_related_no_shuffle_jobs(&background_streaming_jobs)
-        //         .await?;
-        //
-        //     tracing::info!(
-        //         "skipping parallelism control of background jobs {:?} and associated jobs {:?}",
-        //         background_streaming_jobs,
-        //         jobs
-        //     );
-        //
-        //     jobs
-        // } else {
-        //     HashSet::new()
-        // };
+        let background_streaming_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        let skipped_jobs = if !background_streaming_jobs.is_empty() {
+            let jobs = self
+                .scale_controller
+                .resolve_related_no_shuffle_jobs(&background_streaming_jobs)
+                .await?;
+
+            tracing::info!(
+                "skipping parallelism control of background jobs {:?} and associated jobs {:?}",
+                background_streaming_jobs,
+                jobs
+            );
+
+            jobs
+        } else {
+            HashSet::new()
+        };
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<ObjectId>> = self
             .metadata_manager
@@ -1190,6 +1225,7 @@ impl GlobalStreamManager {
                 idx_a.cmp(idx_b).then(database_a.cmp(database_b))
             })
             .map(|(_, database_id, job_id)| (*database_id, *job_id))
+            .filter(|(_, job_id)| !skipped_jobs.contains(job_id))
             .collect_vec();
 
         if job_ids.is_empty() {

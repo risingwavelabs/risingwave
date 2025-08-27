@@ -32,7 +32,6 @@ use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl};
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
-use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::table::TableType;
@@ -50,7 +49,6 @@ use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::secret::PbSecretRef;
-use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
@@ -60,7 +58,7 @@ use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::{
-    ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
+    ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
     IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
     RelationTrait, TransactionTrait,
 };
@@ -704,52 +702,51 @@ impl CatalogController {
     pub async fn post_collect_job_fragments(
         &self,
         job_id: ObjectId,
-        actor_ids: Vec<crate::model::ActorId>,
+        _actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
-        split_assignment: &SplitAssignment,
+        _split_assignment: &SplitAssignment,
         replace_plan: Option<&ReplaceStreamJobPlan>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+        // let actor_ids = actor_ids
+        //     .into_iter()
+        //     .chain(
+        //         replace_plan
+        //             .iter()
+        //             .flat_map(|plan| plan.new_fragments.actor_ids().into_iter()),
+        //     )
+        //     .map(|id| id as ActorId)
+        //     .collect_vec();
 
-        let actor_ids = actor_ids
-            .into_iter()
-            .chain(
-                replace_plan
-                    .iter()
-                    .flat_map(|plan| plan.new_fragments.actor_ids().into_iter()),
-            )
-            .map(|id| id as ActorId)
-            .collect_vec();
+        // Actor::update_many()
+        //     .col_expr(
+        //         actor::Column::Status,
+        //         SimpleExpr::from(ActorStatus::Running.into_value()),
+        //     )
+        //     .filter(actor::Column::ActorId.is_in(actor_ids))
+        //     .exec(&txn)
+        //     .await?;
 
-        Actor::update_many()
-            .col_expr(
-                actor::Column::Status,
-                SimpleExpr::from(ActorStatus::Running.into_value()),
-            )
-            .filter(actor::Column::ActorId.is_in(actor_ids))
-            .exec(&txn)
-            .await?;
-
-        for splits in split_assignment.values().chain(
-            replace_plan
-                .as_ref()
-                .map(|plan| plan.init_split_assignment.values())
-                .into_iter()
-                .flatten(),
-        ) {
-            for (actor_id, splits) in splits {
-                let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-                let connector_splits = &PbConnectorSplits { splits };
-                actor::ActiveModel {
-                    actor_id: Set(*actor_id as _),
-                    splits: Set(Some(connector_splits.into())),
-                    ..Default::default()
-                }
-                .update(&txn)
-                .await?;
-            }
-        }
+        // for splits in split_assignment.values().chain(
+        //     replace_plan
+        //         .as_ref()
+        //         .map(|plan| plan.init_split_assignment.values())
+        //         .into_iter()
+        //         .flatten(),
+        // ) {
+        //     for (actor_id, splits) in splits {
+        //         let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
+        //         let connector_splits = &PbConnectorSplits { splits };
+        //         actor::ActiveModel {
+        //             actor_id: Set(*actor_id as _),
+        //             splits: Set(Some(connector_splits.into())),
+        //             ..Default::default()
+        //         }
+        //         .update(&txn)
+        //         .await?;
+        //     }
+        // }
 
         insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;
         let objects = if let Some(plan) = &replace_plan {
