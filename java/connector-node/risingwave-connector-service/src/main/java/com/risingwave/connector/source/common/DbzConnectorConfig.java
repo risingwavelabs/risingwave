@@ -329,6 +329,18 @@ public class DbzConnectorConfig {
         for (var entry : otherProps.entrySet()) {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
+
+        // Special handling for test environment: override schema history for MySQL tests
+        if (source == SourceTypeE.MYSQL && otherProps.containsKey("schema.history.internal")) {
+            String testSchemaHistory = otherProps.get("schema.history.internal");
+            if (testSchemaHistory.contains("MemorySchemaHistory")) {
+                LOG.info(
+                        "Test environment detected: overriding schema history to {}",
+                        testSchemaHistory);
+                dbzProps.put("schema.history.internal", testSchemaHistory);
+            }
+        }
+
         LOG.info("Final Debezium properties: {}", dbzProps);
 
         this.sourceId = sourceId;

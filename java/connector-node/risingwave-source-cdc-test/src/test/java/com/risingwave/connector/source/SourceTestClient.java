@@ -171,7 +171,7 @@ public class SourceTestClient {
         // Override schema history for MySQL tests to use MemorySchemaHistory
         if (sourceType == ConnectorServiceProto.SourceType.MYSQL) {
             reqBuilder.putProperties(
-                    "schema.history.internal",
+                    "debezium.schema.history.internal",
                     "io.debezium.relational.history.MemorySchemaHistory");
         }
 
