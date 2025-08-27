@@ -53,6 +53,7 @@ itoa = "1.0"
 jiff = "0.1.15"
 jni = { workspace = true }
 jsonbb = { workspace = true }
+linkme = { workspace = true }
 lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
