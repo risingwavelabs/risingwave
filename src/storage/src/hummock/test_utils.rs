@@ -18,8 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use foyer::{
-    Engine, Hint, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
-    StorageValue as HybridValue,
+    Hint, HybridCache, HybridCacheBuilder, StorageKey as HybridKey, StorageValue as HybridValue,
 };
 use futures::TryFutureExt;
 use itertools::Itertools;
@@ -477,7 +476,7 @@ where
 {
     HybridCacheBuilder::new()
         .memory(10)
-        .storage(Engine::Large)
+        .storage()
         .build()
         .await
         .unwrap()
