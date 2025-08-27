@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 
 use async_trait::async_trait;
@@ -38,7 +38,8 @@ pub struct MqttSplitEnumerator {
 }
 
 struct MqttConnectionCheck {
-    _client: AsyncClient,
+    #[expect(dead_code)]
+    client: AsyncClient,
     connected: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
 }
@@ -46,7 +47,7 @@ struct MqttConnectionCheck {
 impl MqttConnectionCheck {
     fn new(client: AsyncClient, event_loop: EventLoop, topic: String) -> Self {
         let this = Self {
-            _client: client,
+            client,
             connected: Arc::new(AtomicBool::new(false)),
             stopped: Arc::new(AtomicBool::new(false)),
         };
@@ -55,19 +56,20 @@ impl MqttConnectionCheck {
     }
 
     fn is_connected(&self) -> bool {
-        self.connected.load(std::sync::atomic::Ordering::Relaxed)
+        self.connected.load(Ordering::Relaxed)
     }
 
     fn spawn_client_loop(&self, mut event_loop: EventLoop, topic: String) {
         let connected_clone = self.connected.clone();
         let stopped_clone = self.stopped.clone();
         tokio::spawn(async move {
-            while !stopped_clone.load(std::sync::atomic::Ordering::Relaxed) {
+            while !stopped_clone.load(Ordering::Relaxed) {
                 match event_loop.poll().await {
-                    Ok(Event::Incoming(Incoming::ConnAck(_)))
-                        if !connected_clone.load(std::sync::atomic::Ordering::Relaxed) =>
-                    {
-                        connected_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                        // Atomic operation that sets connected to true if it is currently false
+                        connected_clone
+                            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                            .ok();
                     }
                     Ok(_)
                     | Err(ConnectionError::Timeout(_))
@@ -108,34 +110,34 @@ impl SplitEnumerator for MqttSplitEnumerator {
         SHARED_MQTT_CLIENT
             .entry_by_ref(&properties.common.url)
             .and_try_compute_with::<_, _, ConnectorError>(|entry| async {
-                if let Some(_connection_check) = entry.and_then(|e| e.into_value().upgrade()) {
+                if let Some(cached) = entry.and_then(|e| e.into_value().upgrade()) {
                     // return if the client is already built
                     tracing::debug!("reuse existing mqtt client for {}", broker_url);
-                    connection_check = Some(_connection_check);
+                    connection_check = Some(cached);
                     Ok(Op::Nop)
                 } else {
                     tracing::debug!("build new mqtt client for {}", broker_url);
                     let (new_client, event_loop) =
                         properties.common.build_client(context.info.source_id, 0)?;
-                    let _connection_check = Arc::new(MqttConnectionCheck::new(
+                    let new_connection_check = Arc::new(MqttConnectionCheck::new(
                         new_client,
                         event_loop,
                         properties.topic.clone(),
                     ));
-                    connection_check = Some(_connection_check.clone());
-                    Ok(Op::Put(Arc::downgrade(&_connection_check)))
+                    connection_check = Some(new_connection_check.clone());
+                    Ok(Op::Put(Arc::downgrade(&new_connection_check)))
                 }
             })
             .await?;
 
-        let Some(client_wrapper) = connection_check else {
+        let Some(connection_check) = connection_check else {
             bail!("failed to create or get mqtt client for {}", broker_url);
         };
 
         Ok(Self {
             topic: properties.topic,
             broker: broker_url,
-            connection_check: client_wrapper,
+            connection_check,
         })
     }
 
