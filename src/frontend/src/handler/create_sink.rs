@@ -32,6 +32,7 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
+use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink;
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
@@ -211,8 +212,10 @@ pub async fn gen_sink_plan(
                         "auto schema change not supported for sink-into-table".to_owned(),
                     )));
                 }
-                match connecto.as_str() {
-                    RedshiftSink::SINK_NAME | SnowflakeSink::SINK_NAME => {}
+                match connector.as_str() {
+                    RedshiftSink::SINK_NAME
+                    | SnowflakeSink::SINK_NAME
+                    | ElasticSearchSink::SINK_NAME => {}
                     _ => {
                         return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
                             "auto schema change not supported for {}",
