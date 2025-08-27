@@ -36,7 +36,7 @@ select id, name, version, data from t1;
 
 # Test new multiple version columns functionality after upgrade
 statement ok
-create table t2 (
+create table t3 (
     id int,
     name varchar,
     version1 int,
@@ -47,23 +47,23 @@ create table t2 (
 
 # Insert initial data with multiple version columns
 statement ok
-insert into t2 values (1, 'user1', 1, 1, 'data1'), (2, 'user2', 2, 1, 'data2');
+insert into t3 values (1, 'user1', 1, 1, 'data1'), (2, 'user2', 2, 1, 'data2');
 
 # Test conflict resolution with higher first version column
 statement ok
-insert into t2 values (1, 'user1_v2', 2, 1, 'updated_data1');
+insert into t3 values (1, 'user1_v2', 2, 1, 'updated_data1');
 
 # Test conflict resolution with same first version but higher second version
 statement ok
-insert into t2 values (1, 'user1_v2_2', 2, 2, 'newest_data1');
+insert into t3 values (1, 'user1_v2_2', 2, 2, 'newest_data1');
 
 # Test conflict resolution with lower version (should be ignored)
 statement ok
-insert into t2 values (1, 'user1_old', 1, 5, 'old_data');
+insert into t3 values (1, 'user1_old', 1, 5, 'old_data');
 
 # Verify multiple version columns work correctly
 query IIIII rowsort
-select id, name, version1, version2, data from t2;
+select id, name, version1, version2, data from t3;
 ----
 1 user1_v2_2 2 2 newest_data1
 2 user2 2 1 data2
@@ -101,5 +101,10 @@ select count(*) from t1; -- single version column table
 
 query I
 select count(*) from t2; -- no version column table
+----
+2
+
+query I
+select count(*) from t3; -- multiple version columns table
 ----
 2
