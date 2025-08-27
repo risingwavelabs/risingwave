@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::generic::PhysicalPlanRef;
-use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
 
 /// A subtrait of [`PhysicalPlanRef`] for stream plans.
 ///
@@ -24,8 +24,11 @@ use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 ///
 /// [`GenericPlanRef`]: super::generic::GenericPlanRef
 #[auto_impl::auto_impl(&)]
-pub trait StreamPlanRef: PhysicalPlanRef {
-    fn append_only(&self) -> bool;
+pub trait StreamPlanNodeMetadata: PhysicalPlanRef {
+    fn stream_kind(&self) -> StreamKind;
+    fn append_only(&self) -> bool {
+        self.stream_kind().is_append_only()
+    }
     fn emit_on_window_close(&self) -> bool;
     fn watermark_columns(&self) -> &WatermarkColumns;
     fn columns_monotonicity(&self) -> &MonotonicityMap;
@@ -35,5 +38,8 @@ pub trait StreamPlanRef: PhysicalPlanRef {
 pub mod prelude {
     pub use super::super::Stream;
     pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
-    pub use super::StreamPlanRef;
+    pub use super::StreamPlanNodeMetadata;
+    pub use crate::error::Result;
+    pub use crate::optimizer::property::StreamKind;
+    pub(crate) use crate::optimizer::property::reject_upsert_input;
 }

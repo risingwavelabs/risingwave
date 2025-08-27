@@ -43,7 +43,7 @@ fn build_no_shuffle_exchange_for_delta_join(
             )),
         }))),
         input: vec![],
-        append_only: upstream.append_only,
+        stream_kind: upstream.stream_kind,
     }
 }
 
@@ -64,7 +64,7 @@ fn build_consistent_hash_shuffle_exchange_for_delta_join(
             )),
         }))),
         input: vec![],
-        append_only: upstream.append_only,
+        stream_kind: upstream.stream_kind,
     }
 }
 
@@ -104,7 +104,7 @@ fn build_lookup_for_delta_join(
             exchange_node_arrangement.clone(),
             exchange_node_stream.clone(),
         ],
-        append_only: exchange_node_stream.append_only,
+        stream_kind: exchange_node_stream.stream_kind,
     }
 }
 
@@ -287,7 +287,7 @@ fn build_delta_join_inner(
             order: vec![1, 0],
         }))),
         input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
-        append_only: node.append_only,
+        stream_kind: node.stream_kind,
     };
 
     state.fragment_graph.add_edge(

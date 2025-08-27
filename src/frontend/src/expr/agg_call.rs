@@ -131,13 +131,13 @@ impl Expr for AggCall {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> std::result::Result<risingwave_pb::expr::ExprNode, String> {
         // This function is always called on the physical planning step, where
         // `ExprImpl::AggCall` must have been rewritten to aggregate operators.
 
-        unreachable!(
+        Err(format!(
             "AggCall {:?} has not been rewritten to physical aggregate operators",
             self
-        )
+        ))
     }
 }

@@ -2059,7 +2059,7 @@
       │                         └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr4))) as $expr5] }
-          └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr4)), count] }
+          └─StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count($expr4)), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr4)] }
                 └─StreamHashAgg [append_only] { group_key: [$expr4], aggs: [count] }
@@ -2110,7 +2110,7 @@
 
     Fragment 5
     StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr4))) as $expr5] }
-    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr4)), count] } { tables: [ SimpleAggState: 9 ] }
+    └── StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count($expr4)), count] } { tables: [ SimpleAggState: 9 ] }
         └── StreamExchange Single from 6
 
     Fragment 6

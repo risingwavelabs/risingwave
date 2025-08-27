@@ -12,18 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::iter;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use futures::future::try_join_all;
 use pin_project::pin_project;
-use risingwave_expr::expr::NonStrictExpression;
+use risingwave_common::catalog::Field;
+use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
+use risingwave_pb::common::PbActorInfo;
+use risingwave_pb::expr::PbExprNode;
+use risingwave_pb::plan_common::PbField;
+use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
+use rw_futures_util::pending_on_none;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::executor::exchange::input::{Input, new_input};
+use crate::executor::exchange::input::{Input, assert_equal_dispatcher_barrier, new_input};
 use crate::executor::prelude::*;
 use crate::executor::project::apply_project_exprs;
-use crate::executor::{BarrierMutationType, BoxedMessageInput, DynamicReceivers, MergeExecutor};
-use crate::task::{FragmentId, LocalBarrierManager};
+use crate::executor::{
+    BarrierMutationType, BoxedMessageInput, DynamicReceivers, MergeExecutor, Message,
+};
+use crate::task::{ActorEvalErrorReport, FragmentId, LocalBarrierManager};
 
 type ProcessedMessageStream = impl Stream<Item = MessageStreamItem>;
 
@@ -101,10 +113,42 @@ impl Stream for SinkHandlerInput {
 
 /// Information about an upstream fragment including its schema and projection expressions.
 #[derive(Debug)]
-pub struct UpstreamInfo {
+pub struct UpstreamFragmentInfo {
     pub upstream_fragment_id: FragmentId,
+    pub upstream_actors: Vec<PbActorInfo>,
     pub merge_schema: Schema,
     pub project_exprs: Vec<NonStrictExpression>,
+}
+
+impl UpstreamFragmentInfo {
+    pub fn new(
+        upstream_fragment_id: FragmentId,
+        initial_upstream_actors: &HashMap<FragmentId, UpstreamActors>,
+        sink_output_schema: &[PbField],
+        project_exprs: &[PbExprNode],
+        error_report: impl EvalErrorReport + 'static,
+    ) -> StreamResult<Self> {
+        let actors = initial_upstream_actors
+            .get(&upstream_fragment_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "upstream fragment {} not found in initial upstream actors",
+                    upstream_fragment_id
+                )
+            })?;
+        let merge_schema = sink_output_schema.iter().map(Field::from).collect();
+        let project_exprs = project_exprs
+            .iter()
+            .map(|e| build_non_strict_from_prost(e, error_report.clone()))
+            .try_collect()
+            .map_err(|err| anyhow::anyhow!(err))?;
+        Ok(Self {
+            upstream_fragment_id,
+            upstream_actors: actors.actors.clone(),
+            merge_schema,
+            project_exprs,
+        })
+    }
 }
 
 type BoxedSinkInput = BoxedMessageInput<FragmentId, BarrierMutationType>;
@@ -134,13 +178,22 @@ pub struct UpstreamSinkUnionExecutor {
     chunk_size: usize,
 
     /// The initial inputs to the executor.
-    upstream_infos: Vec<UpstreamInfo>,
+    initial_upstream_infos: Vec<UpstreamFragmentInfo>,
+
+    /// The error report for evaluation errors.
+    eval_error_report: ActorEvalErrorReport,
+
+    /// Used to get barriers directly from the `BarrierManager`.
+    barrier_rx: UnboundedReceiver<Barrier>,
+
+    /// Used to send barriers to the merge executors of upstream fragments.
+    barrier_tx_map: HashMap<FragmentId, UnboundedSender<Barrier>>,
 }
 
 impl Debug for UpstreamSinkUnionExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UpstreamSinkUnionExecutor")
-            .field("upstream_infos", &self.upstream_infos)
+            .field("initial_upstream_infos", &self.initial_upstream_infos)
             .finish()
     }
 }
@@ -157,23 +210,19 @@ impl UpstreamSinkUnionExecutor {
         local_barrier_manager: LocalBarrierManager,
         executor_stats: Arc<StreamingMetrics>,
         chunk_size: usize,
-        upstream_infos: Vec<(FragmentId, Schema, Vec<NonStrictExpression>)>,
+        initial_upstream_infos: Vec<UpstreamFragmentInfo>,
+        eval_error_report: ActorEvalErrorReport,
     ) -> Self {
+        let barrier_rx = local_barrier_manager.subscribe_barrier(ctx.id);
         Self {
             actor_context: ctx,
             local_barrier_manager,
             executor_stats,
             chunk_size,
-            upstream_infos: upstream_infos
-                .into_iter()
-                .map(
-                    |(upstream_fragment_id, merge_schema, project_exprs)| UpstreamInfo {
-                        upstream_fragment_id,
-                        merge_schema,
-                        project_exprs,
-                    },
-                )
-                .collect(),
+            initial_upstream_infos,
+            eval_error_report,
+            barrier_rx,
+            barrier_tx_map: Default::default(),
         }
     }
 
@@ -185,28 +234,41 @@ impl UpstreamSinkUnionExecutor {
     ) -> Self {
         let metrics = StreamingMetrics::unused();
         let actor_ctx = ActorContext::for_test(actor_id);
+        let barrier_rx = local_barrier_manager.subscribe_barrier(actor_id);
         Self {
-            actor_context: actor_ctx,
+            actor_context: actor_ctx.clone(),
             local_barrier_manager,
             executor_stats: metrics.into(),
             chunk_size,
-            upstream_infos: vec![],
+            initial_upstream_infos: vec![],
+            eval_error_report: ActorEvalErrorReport {
+                actor_context: actor_ctx,
+                identity: format!("UpstreamSinkUnionExecutor-{}", actor_id).into(),
+            },
+            barrier_rx,
+            barrier_tx_map: Default::default(),
         }
     }
 
-    #[allow(dead_code)]
-    async fn new_sink_input(
-        &self,
-        upstream_info: UpstreamInfo,
-    ) -> StreamExecutorResult<BoxedSinkInput> {
-        let (upstream_fragment_id, merge_schema, project_exprs) = (
-            upstream_info.upstream_fragment_id,
-            upstream_info.merge_schema,
-            upstream_info.project_exprs,
-        );
+    fn subscribe_local_barrier(&mut self, fragment_id: FragmentId) -> UnboundedReceiver<Barrier> {
+        let (tx, rx) = unbounded_channel();
+        self.barrier_tx_map
+            .try_insert(fragment_id, tx)
+            .expect("non-duplicate");
+        rx
+    }
 
+    async fn new_sink_input(
+        &mut self,
+        UpstreamFragmentInfo {
+            upstream_fragment_id,
+            upstream_actors,
+            merge_schema,
+            project_exprs,
+        }: UpstreamFragmentInfo,
+    ) -> StreamExecutorResult<BoxedSinkInput> {
         let merge_executor = self
-            .new_merge_executor(upstream_fragment_id, merge_schema)
+            .new_merge_executor(upstream_fragment_id, upstream_actors, merge_schema)
             .await?;
 
         Ok(SinkHandlerInput::new(
@@ -218,32 +280,23 @@ impl UpstreamSinkUnionExecutor {
     }
 
     async fn new_merge_executor(
-        &self,
+        &mut self,
         upstream_fragment_id: FragmentId,
+        upstream_actors: Vec<PbActorInfo>,
         schema: Schema,
     ) -> StreamExecutorResult<MergeExecutor> {
-        let barrier_rx = self
-            .local_barrier_manager
-            .subscribe_barrier(self.actor_context.id);
+        let barrier_rx = self.subscribe_local_barrier(upstream_fragment_id);
 
-        let inputs: Vec<_> = try_join_all(
-            self.actor_context
-                .initial_upstream_actors
-                .get(&upstream_fragment_id)
-                .map(|actors| actors.actors.iter())
-                .into_iter()
-                .flatten()
-                .map(|upstream_actor| {
-                    new_input(
-                        &self.local_barrier_manager,
-                        self.executor_stats.clone(),
-                        self.actor_context.id,
-                        self.actor_context.fragment_id,
-                        upstream_actor,
-                        upstream_fragment_id,
-                    )
-                }),
-        )
+        let inputs = try_join_all(upstream_actors.iter().map(|actor| {
+            new_input(
+                &self.local_barrier_manager,
+                self.executor_stats.clone(),
+                self.actor_context.id,
+                self.actor_context.fragment_id,
+                actor,
+                upstream_fragment_id,
+            )
+        }))
         .await?;
 
         let upstreams =
@@ -265,16 +318,17 @@ impl UpstreamSinkUnionExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         let inputs: Vec<_> = {
-            let upstream_infos = std::mem::take(&mut self.upstream_infos);
-            let mut inputs = Vec::with_capacity(upstream_infos.len());
-            for UpstreamInfo {
+            let initial_upstream_infos = std::mem::take(&mut self.initial_upstream_infos);
+            let mut inputs = Vec::with_capacity(initial_upstream_infos.len());
+            for UpstreamFragmentInfo {
                 upstream_fragment_id,
+                upstream_actors,
                 merge_schema,
                 project_exprs,
-            } in upstream_infos
+            } in initial_upstream_infos
             {
                 let merge_executor = self
-                    .new_merge_executor(upstream_fragment_id, merge_schema)
+                    .new_merge_executor(upstream_fragment_id, upstream_actors, merge_schema)
                     .await?;
 
                 let input = SinkHandlerInput::new(
@@ -296,8 +350,61 @@ impl UpstreamSinkUnionExecutor {
         }
     }
 
+    async fn handle_update(
+        &mut self,
+        upstreams: &mut DynamicReceivers<FragmentId, BarrierMutationType>,
+        barrier: &Barrier,
+    ) -> StreamExecutorResult<()> {
+        let fragment_id = self.actor_context.fragment_id;
+        if let Some(new_upstream_sink) = barrier.as_new_upstream_sink(fragment_id) {
+            // Create new inputs for the newly added upstream sinks.
+            let info = new_upstream_sink.get_info().unwrap();
+            let merge_schema = info
+                .get_sink_output_schema()
+                .iter()
+                .map(Field::from)
+                .collect();
+            let project_exprs = info
+                .get_project_exprs()
+                .iter()
+                .map(|e| build_non_strict_from_prost(e, self.eval_error_report.clone()))
+                .try_collect()
+                .map_err(|err| anyhow::anyhow!(err))?;
+            let mut new_input = self
+                .new_sink_input(UpstreamFragmentInfo {
+                    upstream_fragment_id: info.get_upstream_fragment_id(),
+                    upstream_actors: new_upstream_sink.get_upstream_actors().clone(),
+                    merge_schema,
+                    project_exprs,
+                })
+                .await?;
+            self.barrier_tx_map
+                .get(&info.get_upstream_fragment_id())
+                .unwrap()
+                .send(barrier.clone())
+                .map_err(|e| StreamExecutorError::from(anyhow::anyhow!(e)))?;
+
+            let new_barrier = expect_first_barrier(&mut new_input).await?;
+            assert_equal_dispatcher_barrier(barrier, &new_barrier);
+
+            upstreams.add_upstreams_from(iter::once(new_input));
+        }
+
+        if let Some(dropped_upstream_sinks) = barrier.as_dropped_upstream_sinks()
+            && !dropped_upstream_sinks.is_empty()
+        {
+            // Remove the upstream sinks that are no longer needed.
+            upstreams.remove_upstreams(dropped_upstream_sinks);
+            for upstream_fragment_id in dropped_upstream_sinks {
+                self.barrier_tx_map.remove(upstream_fragment_id);
+            }
+        }
+
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_with_inputs(self: Box<Self>, inputs: Vec<BoxedSinkInput>) {
+    async fn execute_with_inputs(mut self: Box<Self>, inputs: Vec<BoxedSinkInput>) {
         let actor_id = self.actor_context.id;
         let fragment_id = self.actor_context.fragment_id;
 
@@ -311,25 +418,75 @@ impl UpstreamSinkUnionExecutor {
                 "UpstreamSinkUnion",
             ]);
 
-        let upstreams = DynamicReceivers::new(inputs, Some(barrier_align), None);
+        let upstreams = DynamicReceivers::new(inputs, Some(barrier_align.clone()), None);
         pin_mut!(upstreams);
 
-        while let Some(msg) = upstreams.next().await {
-            yield msg?;
+        let mut current_barrier = None;
+
+        // Here, `tokio::select` cannot be used directly in `try_stream` function.
+        // Err for breaking the loop. Ok(None) for continuing the loop.
+        let mut select_once = async || -> StreamExecutorResult<Message> {
+            loop {
+                tokio::select! {
+                    biased;
+
+                    // If None is returned, it means upstreams is empty, which
+                    // means we should continue pending and wait on the second branch.
+                    msg = pending_on_none(upstreams.next()) => {
+                        let msg = msg?;
+                        if let Message::Barrier(barrier) = &msg {
+                            let current_barrier = current_barrier.take().unwrap();
+                            assert_equal_dispatcher_barrier(&current_barrier, barrier);
+                            self.handle_update(&mut upstreams, barrier).await?;
+                        }
+                        return Ok(msg);
+                    }
+
+                    barrier = self.barrier_rx.recv(), if current_barrier.is_none() => {
+                        let barrier = barrier.context("Failed to receive barrier from barrier_rx")?;
+                        // Here, if there's no upstream, we should process the barrier directly and send it out.
+                        // Otherwise, we need to forward the barrier to the upstream and then wait in the first branch
+                        // until the upstreams have processed the barrier.
+                        if upstreams.is_empty() {
+                            self.handle_update(&mut upstreams, &barrier).await?;
+                            return Ok(Message::Barrier(barrier.clone()));
+                        } else {
+                            for tx in self.barrier_tx_map.values() {
+                                tx.send(barrier.clone())
+                                    .map_err(|e| StreamExecutorError::from(anyhow::anyhow!(e)))?;
+                            }
+                            current_barrier = Some(barrier);
+                            continue;
+                        }
+                    }
+                }
+            }
+        };
+
+        loop {
+            yield select_once().await?;
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
+    use futures::FutureExt;
     use risingwave_common::array::{Op, StreamChunkTestExt};
     use risingwave_common::catalog::Field;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
+    use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 
     use super::*;
-    use crate::executor::MessageInner;
     use crate::executor::exchange::permit::{Sender, channel_for_test};
     use crate::executor::test_utils::expr::build_from_pretty;
+    use crate::executor::{AddMutation, MessageInner, StopMutation};
+    use crate::task::NewOutputRequest;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
+    use crate::task::test_utils::helper_make_local_actor;
 
     #[tokio::test]
     async fn test_sink_input() {
@@ -358,6 +515,7 @@ mod tests {
             test_env.local_barrier_manager.clone(),
             schema.clone(),
             5,
+            None,
         );
 
         let test_expr = build_from_pretty("$1:int8");
@@ -401,17 +559,19 @@ mod tests {
     fn new_input_for_test(
         actor_id: ActorId,
         local_barrier_manager: LocalBarrierManager,
-    ) -> (BoxedSinkInput, Sender) {
+    ) -> (BoxedSinkInput, Sender, UnboundedSender<Barrier>) {
         let (tx, rx) = channel_for_test();
+        let (barrier_tx, barrier_rx) = unbounded_channel();
         let merge = MergeExecutor::for_test(
             actor_id,
             vec![rx],
             local_barrier_manager,
             Schema::new(vec![]),
             10,
+            Some(barrier_rx),
         );
         let input = SinkHandlerInput::new(actor_id, Box::new(merge), vec![]).boxed_input();
-        (input, tx)
+        (input, tx, barrier_tx)
     }
 
     fn build_test_chunk(size: u64) -> StreamChunk {
@@ -432,10 +592,13 @@ mod tests {
 
         let mut inputs = Vec::with_capacity(3);
         let mut txs = Vec::with_capacity(3);
+        let mut barrier_txs = Vec::with_capacity(3);
         for _ in 0..3 {
-            let (input, tx) = new_input_for_test(actor_id, test_env.local_barrier_manager.clone());
+            let (input, tx, barrier_tx) =
+                new_input_for_test(actor_id, test_env.local_barrier_manager.clone());
             inputs.push(input);
             txs.push(tx);
+            barrier_txs.push(barrier_tx);
         }
 
         let sink_union = UpstreamSinkUnionExecutor::for_test(
@@ -443,6 +606,8 @@ mod tests {
             test_env.local_barrier_manager.clone(),
             10,
         );
+        // Flush subscribe_barrier events to ensure the executor is ready.
+        test_env.flush_all_events().await;
         let mut sink_union = Box::new(sink_union).execute_with_inputs(inputs).boxed();
 
         for tx in txs {
@@ -463,9 +628,107 @@ mod tests {
             assert_eq!(msg.as_chunk().unwrap().ops().len(), 10);
         }
 
+        // Because the barrier has not been emitted yet, it should not be received.
+        assert!(sink_union.next().now_or_never().is_none());
+
+        for barrier_tx in barrier_txs {
+            barrier_tx.send(b1.clone()).unwrap();
+        }
+
         let msg = sink_union.next().await.unwrap().unwrap();
         assert!(msg.is_barrier());
         let barrier = msg.as_barrier().unwrap();
         assert_eq!(barrier.epoch, b1.epoch);
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_upstreams() {
+        let test_env = LocalBarrierTestEnv::for_test().await;
+
+        let actor_id = 2;
+        let fragment_id = 0; // from ActorContext::for_test
+        let upstream_fragment_id = 11;
+        let upstream_actor_id = 101;
+
+        let upstream_actor = helper_make_local_actor(upstream_actor_id);
+
+        let add_upstream = PbNewUpstreamSink {
+            info: Some(PbUpstreamSinkInfo {
+                upstream_fragment_id,
+                sink_output_schema: vec![],
+                project_exprs: vec![],
+            }),
+            upstream_actors: vec![upstream_actor],
+        };
+
+        let b1 = Barrier::new_test_barrier(test_epoch(1));
+        let b2 =
+            Barrier::new_test_barrier(test_epoch(2)).with_mutation(Mutation::Add(AddMutation {
+                new_upstream_sinks: HashMap::from([(fragment_id, add_upstream)]),
+                ..Default::default()
+            }));
+        let b3 = Barrier::new_test_barrier(test_epoch(3));
+        let b4 =
+            Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Stop(StopMutation {
+                dropped_sink_fragments: HashSet::from([upstream_fragment_id]),
+                ..Default::default()
+            }));
+        for barrier in [&b1, &b2, &b3, &b4] {
+            test_env.inject_barrier(barrier, [actor_id]);
+        }
+        test_env.flush_all_events().await;
+
+        let executor = UpstreamSinkUnionExecutor::for_test(
+            actor_id,
+            test_env.local_barrier_manager.clone(),
+            10,
+        );
+        // Flush subscribe_barrier events to ensure the executor is ready.
+        test_env.flush_all_events().await;
+
+        // No upstream, but should still forward the barrier.
+        let mut exec_stream = Box::new(executor).execute_inner().boxed();
+        let msg = exec_stream.next().await.unwrap().unwrap();
+        assert_eq!(msg.as_barrier().unwrap().epoch, b1.epoch);
+
+        // Add new upstream.
+        // The barrier should not be emitted because the executor is waiting for new upstream.
+        assert!(exec_stream.next().now_or_never().is_none());
+
+        let mut output_req = test_env
+            .take_pending_new_output_requests(upstream_actor_id)
+            .await;
+        let (_, req) = output_req.pop().unwrap();
+        let tx = match req {
+            NewOutputRequest::Local(tx) => tx,
+            NewOutputRequest::Remote(_) => unreachable!(),
+        };
+
+        tx.send(MessageInner::Barrier(b2.clone().into_dispatcher()).into())
+            .await
+            .unwrap();
+        // Now the executor should emit the barrier.
+        let msg = exec_stream.next().await.unwrap().unwrap();
+        assert_eq!(msg.as_barrier().unwrap().epoch, b2.epoch);
+
+        tx.send(MessageInner::Chunk(build_test_chunk(10)).into())
+            .await
+            .unwrap();
+        let msg = exec_stream.next().await.unwrap().unwrap();
+        assert!(msg.is_chunk());
+
+        tx.send(MessageInner::Barrier(b3.clone().into_dispatcher()).into())
+            .await
+            .unwrap();
+        let msg = exec_stream.next().await.unwrap().unwrap();
+        assert_eq!(msg.as_barrier().unwrap().epoch, b3.epoch);
+
+        // Remove upstream.
+        tx.send(MessageInner::Barrier(b4.clone().into_dispatcher()).into())
+            .await
+            .unwrap();
+        // The executor should emit the barrier with the removal update.
+        let msg = exec_stream.next().await.unwrap().unwrap();
+        assert_eq!(msg.as_barrier().unwrap().epoch, b4.epoch);
     }
 }

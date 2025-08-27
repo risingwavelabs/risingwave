@@ -59,6 +59,7 @@ const fn default_use_https() -> bool {
     false
 }
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct StarrocksCommon {
     /// The `StarRocks` host address.
@@ -86,6 +87,7 @@ pub struct StarrocksCommon {
     /// Whether to use https to connect to the `StarRocks` server.
     #[serde(rename = "starrocks.use_https")]
     #[serde(default = "default_use_https")]
+    #[serde_as(as = "DisplayFromStr")]
     pub use_https: bool,
 }
 
@@ -279,7 +281,9 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
                 "MAP is not supported for Starrocks sink.".to_owned(),
             )),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::Starrocks(
+                "VECTOR is not supported for Starrocks sink.".to_owned(),
+            )),
         }
     }
 }

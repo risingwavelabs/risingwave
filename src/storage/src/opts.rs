@@ -100,10 +100,12 @@ pub struct StorageOpts {
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
     pub cache_refill_concurrency: usize,
+    pub cache_refill_recent_filter_shards: usize,
     pub cache_refill_recent_filter_layers: usize,
     pub cache_refill_recent_filter_rotate_interval_ms: usize,
     pub cache_refill_unit: usize,
     pub cache_refill_threshold: f64,
+    pub cache_refill_skip_recent_filter: bool,
 
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
@@ -162,6 +164,8 @@ pub struct StorageOpts {
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     pub iceberg_compaction_max_file_count_per_partition: u32,
+    pub iceberg_compaction_small_file_threshold_mb: u32,
+    pub iceberg_compaction_max_task_total_size_mb: u32,
 
     /// The ratio of iceberg compaction max parallelism to the number of CPU cores
     pub iceberg_compaction_task_parallelism_ratio: f32,
@@ -259,6 +263,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
+            cache_refill_recent_filter_shards: c.storage.cache_refill.recent_filter_shards,
             cache_refill_recent_filter_layers: c.storage.cache_refill.recent_filter_layers,
             cache_refill_recent_filter_rotate_interval_ms: c
                 .storage
@@ -266,6 +271,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .recent_filter_rotate_interval_ms,
             cache_refill_unit: c.storage.cache_refill.unit,
             cache_refill_threshold: c.storage.cache_refill.threshold,
+            cache_refill_skip_recent_filter: c.storage.cache_refill.skip_recent_filter,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
 
@@ -307,6 +313,12 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_file_count_per_partition: c
                 .storage
                 .iceberg_compaction_max_file_count_per_partition,
+            iceberg_compaction_small_file_threshold_mb: c
+                .storage
+                .iceberg_compaction_small_file_threshold_mb,
+            iceberg_compaction_max_task_total_size_mb: c
+                .storage
+                .iceberg_compaction_max_task_total_size_mb,
             iceberg_compaction_task_parallelism_ratio: c
                 .storage
                 .iceberg_compaction_task_parallelism_ratio,

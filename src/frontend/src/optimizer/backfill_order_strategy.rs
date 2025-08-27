@@ -15,10 +15,10 @@
 use risingwave_pb::stream_plan::BackfillOrder;
 use risingwave_sqlparser::ast::BackfillOrderStrategy;
 
-use crate::PlanRef;
 use crate::error::Result;
 use crate::optimizer::backfill_order_strategy::auto::plan_auto_strategy;
 use crate::optimizer::backfill_order_strategy::fixed::plan_fixed_strategy;
+use crate::optimizer::plan_node::StreamPlanRef;
 use crate::session::SessionImpl;
 
 pub mod auto {
@@ -27,9 +27,8 @@ pub mod auto {
     use risingwave_common::catalog::ObjectId;
     use risingwave_pb::common::Uint32Vector;
 
-    use crate::PlanRef;
-    use crate::optimizer::PlanNodeType;
     use crate::optimizer::backfill_order_strategy::common::has_cycle;
+    use crate::optimizer::plan_node::{StreamPlanNodeType, StreamPlanRef};
     use crate::session::SessionImpl;
 
     #[derive(Debug)]
@@ -50,10 +49,10 @@ pub mod auto {
     /// TODO: Handle stream share
     fn plan_graph_to_backfill_tree(
         session: &SessionImpl,
-        plan: PlanRef,
+        plan: StreamPlanRef,
     ) -> Option<BackfillTreeNode> {
         match plan.node_type() {
-            PlanNodeType::StreamHashJoin => {
+            StreamPlanNodeType::StreamHashJoin => {
                 assert_eq!(plan.inputs().len(), 2);
                 let mut inputs = plan.inputs().into_iter();
                 let l = inputs.next().unwrap();
@@ -63,17 +62,17 @@ pub mod auto {
                     rhs: Box::new(plan_graph_to_backfill_tree(session, r)?),
                 })
             }
-            PlanNodeType::StreamTableScan => {
+            StreamPlanNodeType::StreamTableScan => {
                 let table_scan = plan.as_stream_table_scan().expect("table scan");
                 let relation_id = table_scan.core().table_catalog.id().into();
                 Some(BackfillTreeNode::Scan { id: relation_id })
             }
-            PlanNodeType::StreamSourceScan => {
+            StreamPlanNodeType::StreamSourceScan => {
                 let source_scan = plan.as_stream_source_scan().expect("source scan");
                 let relation_id = source_scan.source_catalog().id;
                 Some(BackfillTreeNode::Scan { id: relation_id })
             }
-            PlanNodeType::StreamUnion => {
+            StreamPlanNodeType::StreamUnion => {
                 let inputs = plan.inputs();
                 let mut children = Vec::with_capacity(inputs.len());
                 for child in inputs {
@@ -217,7 +216,7 @@ pub mod auto {
 
     pub(super) fn plan_auto_strategy(
         session: &SessionImpl,
-        plan: PlanRef,
+        plan: StreamPlanRef,
     ) -> HashMap<ObjectId, Uint32Vector> {
         if let Some(tree) = plan_graph_to_backfill_tree(session, plan) {
             let order = fold_backfill_tree_to_partial_order(tree);
@@ -419,7 +418,7 @@ pub mod display {
 pub fn plan_backfill_order(
     session: &SessionImpl,
     backfill_order_strategy: BackfillOrderStrategy,
-    plan: PlanRef,
+    plan: StreamPlanRef,
 ) -> Result<BackfillOrder> {
     let order = match backfill_order_strategy {
         BackfillOrderStrategy::Default | BackfillOrderStrategy::None => Default::default(),
@@ -433,7 +432,7 @@ pub fn plan_backfill_order(
 pub fn explain_backfill_order_in_dot_format(
     session: &SessionImpl,
     backfill_order_strategy: BackfillOrderStrategy,
-    plan: PlanRef,
+    plan: StreamPlanRef,
 ) -> Result<String> {
     let order = plan_backfill_order(session, backfill_order_strategy, plan)?;
     let dot_formatted_backfill_order =

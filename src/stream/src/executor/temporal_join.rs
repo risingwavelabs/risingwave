@@ -86,6 +86,8 @@ impl JoinEntry {
         if let Entry::Vacant(e) = self.cached.entry(key) {
             self.kv_heap_size.add(e.key(), &value);
             e.insert(value);
+        } else {
+            panic!("value {:?} double insert", value);
         }
     }
 
@@ -849,7 +851,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                         &self.right_join_keys,
                         &right_stream_key_indices,
                     )?;
-                    prev_epoch = Some(barrier_epoch.curr);
+                    prev_epoch = Some(barrier_epoch.prev);
                 }
             }
         }

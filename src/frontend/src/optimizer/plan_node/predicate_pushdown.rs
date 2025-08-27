@@ -14,12 +14,9 @@
 
 use std::collections::HashMap;
 
-use paste::paste;
-
 use super::*;
-use crate::optimizer::PlanVisitor;
 use crate::optimizer::plan_visitor::ShareParentCounter;
-use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
+use crate::optimizer::{LogicalPlanRef as PlanRef, PlanVisitor};
 
 /// The trait for predicate pushdown, only logical plan node will use it, though all plan node impl
 /// it.
@@ -46,22 +43,8 @@ pub trait PredicatePushdown {
     ) -> PlanRef;
 }
 
-macro_rules! ban_predicate_pushdown {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl PredicatePushdown for [<$convention $name>] {
-                fn predicate_pushdown(&self, _predicate: Condition, _ctx: &mut PredicatePushdownContext) -> PlanRef {
-                    unreachable!("predicate pushdown is only allowed on logical plan")
-                }
-            })*
-        }
-    }
-}
-for_batch_plan_nodes! {ban_predicate_pushdown}
-for_stream_plan_nodes! {ban_predicate_pushdown}
-
 #[inline]
-pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
+pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary<Logical> + LogicalPlanNode>(
     node: &T,
     filter_predicate: Condition,
     pushed_predicate: Condition,

@@ -682,13 +682,10 @@
     create table t2 (b int, c int);
     select a, (select t1.a), c from t1, t2 where t1.b = t2.b order by c;
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.a, t1.a), output: [t1.a, t1.a, t2.c] }
-    ├─LogicalJoin { type: Inner, on: (t1.b = t2.b), output: [t1.a, t2.c] }
-    │ ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
-    │ └─LogicalScan { table: t2, columns: [t2.b, t2.c] }
-    └─LogicalProject { exprs: [t1.a, t1.a] }
-      └─LogicalAgg { group_key: [t1.a], aggs: [] }
-        └─LogicalScan { table: t1, columns: [t1.a] }
+    LogicalProject { exprs: [t1.a, t1.a, t2.c] }
+    └─LogicalJoin { type: Inner, on: (t1.b = t2.b), output: [t1.a, t2.c] }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
+      └─LogicalScan { table: t2, columns: [t2.b, t2.c] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -750,9 +747,10 @@
     create table t2(x int, y int);
     select t1.x, (select y from t2 where t2._row_id = t1._row_id) from t1;
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: (t2._row_id = t1._row_id), output: [t1.x, t2.y] }
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1._row_id, t2._row_id), output: [t1.x, t2.y] }
     ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
-    └─LogicalScan { table: t2, columns: [t2.y, t2._row_id] }
+    └─LogicalProject { exprs: [t2._row_id, t2.y] }
+      └─LogicalScan { table: t2, columns: [t2.y, t2._row_id], predicate: IsNotNull(t2._row_id) }
 - name: issue 4762 correlated input in agg order by
   sql: |
     CREATE TABLE strings(v1 VARCHAR);
@@ -1048,15 +1046,14 @@
         └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id IS NOT DISTINCT FROM rw_users.id, output: all }
           ├─BatchExchange { order: [], dist: HashShard(rw_users.id) }
           │ └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
-          │   └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login], distribution: Single }
+          │   └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login], distribution: Single }
           └─BatchProject { exprs: [rw_users.id, Coalesce(array_agg(rw_users.name) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr1] }
             └─BatchHashAgg { group_key: [rw_users.id], aggs: [array_agg(rw_users.name) filter(IsNotNull(1:Int32))] }
               └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id IS NOT DISTINCT FROM rw_users.id, output: [rw_users.id, rw_users.name, 1:Int32] }
                 ├─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
                 │ └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                │   └─BatchProject { exprs: [rw_users.id] }
-                │     └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
-                │       └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+                │   └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
+                │     └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
                 └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
                   └─BatchProject { exprs: [rw_users.id, rw_users.name, 1:Int32] }
                     └─BatchHashJoin { type: Inner, predicate: null:Int32 = rw_users.id, output: [rw_users.id, rw_users.name] }
@@ -1066,11 +1063,12 @@
                       │     ├─BatchExchange { order: [], dist: Single }
                       │     │ └─BatchHashAgg { group_key: [rw_users.id], aggs: [] }
                       │     │   └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                      │     │     └─BatchValues { rows: [] }
+                      │     │     └─BatchFilter { predicate: false:Boolean }
+                      │     │       └─BatchSysScan { table: rw_users, columns: [rw_users.id], distribution: Single }
                       │     └─BatchFilter { predicate: false:Boolean }
                       │       └─BatchValues { rows: [] }
                       └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
-                        └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
+                        └─BatchSysScan { table: rw_users, columns: [rw_users.id, rw_users.name], distribution: Single }
 - name: correlated array subquery (issue 14423)
   sql: |
     CREATE TABLE array_types ( x BIGINT[] );
@@ -2525,3 +2523,15 @@
                             └─StreamProject { exprs: ['{}':Jsonb] }
                               └─StreamShare { id: 1 }
                                 └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
+- name: test case for PullUpCorrelatedProjectValueRule
+  sql: |
+    create table t(a int, b int);
+    select (select a + b) as c from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [(t.a + t.b) as $expr1] }
+      └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [c, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [(t.a + t.b) as $expr1, t._row_id] }
+      └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

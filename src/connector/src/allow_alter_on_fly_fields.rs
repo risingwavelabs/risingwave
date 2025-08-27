@@ -15,6 +15,8 @@
 // THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 // UPDATE WITH: ./risedev generate-with-options
 
+#![rustfmt::skip]
+
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use crate::error::ConnectorError;
@@ -94,6 +96,24 @@ mod sink_properties {
 pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     use source_properties::*;
     let mut map = HashMap::new();
+    // CDC Properties - added for schema.change.failure.policy
+    map.try_insert(
+        std::any::type_name::<MysqlCdcProperties>().to_owned(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+    ).unwrap();
+    map.try_insert(
+        std::any::type_name::<PostgresCdcProperties>().to_owned(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+    ).unwrap();
+    map.try_insert(
+        std::any::type_name::<SqlServerCdcProperties>().to_owned(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+    ).unwrap();
+
+    map.try_insert(
+        std::any::type_name::<MongodbCdcProperties>().to_owned(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+    ).unwrap();
     // KafkaProperties
     map.try_insert(
         std::any::type_name::<KafkaProperties>().to_owned(),
@@ -147,6 +167,10 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "enable_compaction".to_owned(),
             "compaction_interval_sec".to_owned(),
             "enable_snapshot_expiration".to_owned(),
+            "snapshot_expiration_max_age_millis".to_owned(),
+            "snapshot_expiration_retain_last".to_owned(),
+            "snapshot_expiration_clear_expired_files".to_owned(),
+            "snapshot_expiration_clear_expired_meta_data".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig
@@ -301,4 +325,3 @@ pub fn check_sink_allow_alter_on_fly_fields(
     }
     Ok(())
 }
-

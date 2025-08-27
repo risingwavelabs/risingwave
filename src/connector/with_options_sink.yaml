@@ -603,6 +603,30 @@ IcebergConfig:
     comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     required: false
     default: ICEBERG_WRITE_MODE_MERGE_ON_READ . to_owned ()
+  - name: snapshot_expiration_max_age_millis
+    field_type: i64
+    comments: |-
+      The maximum age (in milliseconds) for snapshots before they expire
+      For example, if set to 3600000, snapshots older than 1 hour will be expired
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: snapshot_expiration_retain_last
+    field_type: i32
+    comments: The number of snapshots to retain
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: snapshot_expiration_clear_expired_files
+    field_type: bool
+    required: false
+    default: 'true'
+    allow_alter_on_fly: true
+  - name: snapshot_expiration_clear_expired_meta_data
+    field_type: bool
+    required: false
+    default: 'true'
+    allow_alter_on_fly: true
 KafkaConfig:
   fields:
   - name: topic

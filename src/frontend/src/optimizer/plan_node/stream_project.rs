@@ -18,7 +18,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode, generic};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -118,7 +120,7 @@ impl StreamProject {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             out_watermark_columns,
             out_monotonicity_map,
@@ -146,7 +148,7 @@ impl StreamProject {
     }
 }
 
-impl PlanTreeNodeUnary for StreamProject {
+impl PlanTreeNodeUnary<Stream> for StreamProject {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -157,7 +159,7 @@ impl PlanTreeNodeUnary for StreamProject {
         Self::new_inner(core, self.noop_update_hint)
     }
 }
-impl_plan_tree_node_for_unary! {StreamProject}
+impl_plan_tree_node_for_unary! { Stream, StreamProject}
 
 impl StreamNode for StreamProject {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -176,7 +178,7 @@ impl StreamNode for StreamProject {
     }
 }
 
-impl ExprRewritable for StreamProject {
+impl ExprRewritable<Stream> for StreamProject {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

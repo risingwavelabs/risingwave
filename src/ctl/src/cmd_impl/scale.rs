@@ -15,3 +15,26 @@
 mod resize;
 
 pub use resize::*;
+use risingwave_pb::meta::table_parallelism::FixedParallelism;
+use risingwave_pb::meta::{TableParallelism, table_parallelism};
+
+use crate::common::CtlContext;
+
+pub async fn set_cdc_table_backfill_parallelism(
+    context: &CtlContext,
+    table_id: u32,
+    parallelism: u32,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client
+        .alter_cdc_table_backfill_parallelism(
+            table_id,
+            TableParallelism {
+                parallelism: Some(table_parallelism::Parallelism::Fixed(FixedParallelism {
+                    parallelism,
+                })),
+            },
+        )
+        .await?;
+    Ok(())
+}

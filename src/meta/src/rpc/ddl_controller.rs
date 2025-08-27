@@ -23,7 +23,9 @@ use anyhow::{Context, anyhow};
 use await_tree::{InstrumentAwait, span};
 use either::Either;
 use itertools::Itertools;
-use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog, ColumnId, FragmentTypeFlag};
+use risingwave_common::catalog::{
+    AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag,
+};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
@@ -34,6 +36,7 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_common::{bail, bail_not_implemented, must_match};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
@@ -80,6 +83,9 @@ use crate::manager::{
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+};
+use crate::stream::cdc::{
+    is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
 };
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
@@ -150,7 +156,7 @@ pub enum DdlCommand {
     CreateNonSharedSource(Source),
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
-    DropFunction(FunctionId),
+    DropFunction(FunctionId, DropMode),
     CreateView(View, HashSet<ObjectId>),
     DropView(ViewId, DropMode),
     CreateStreamingJob {
@@ -195,7 +201,7 @@ impl DdlCommand {
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
             DdlCommand::DropSource(id, _) => Right(*id),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
-            DdlCommand::DropFunction(id) => Right(*id),
+            DdlCommand::DropFunction(id, _) => Right(*id),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
             DdlCommand::DropView(id, _) => Right(*id),
             DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
@@ -223,7 +229,7 @@ impl DdlCommand {
             DdlCommand::DropDatabase(_)
             | DdlCommand::DropSchema(_, _)
             | DdlCommand::DropSource(_, _)
-            | DdlCommand::DropFunction(_)
+            | DdlCommand::DropFunction(_, _)
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
             | DdlCommand::DropConnection(_, _)
@@ -385,7 +391,9 @@ impl DdlController {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
-                DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
+                DdlCommand::DropFunction(function_id, drop_mode) => {
+                    ctrl.drop_function(function_id, drop_mode).await
+                }
                 DdlCommand::CreateView(view, dependencies) => {
                     ctrl.create_view(view, dependencies).await
                 }
@@ -506,6 +514,20 @@ impl DdlController {
             .await
     }
 
+    pub async fn reschedule_cdc_table_backfill(
+        &self,
+        job_id: u32,
+        target: JobRescheduleTarget,
+    ) -> MetaResult<()> {
+        tracing::info!("alter CDC table backfill parallelism");
+        if self.barrier_manager.check_status_running().is_err() {
+            return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
+        }
+        self.stream_manager
+            .reschedule_cdc_table_backfill(job_id, target)
+            .await
+    }
+
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         self.drop_object(
             ObjectType::Database,
@@ -574,14 +596,13 @@ impl DdlController {
             .await
     }
 
-    async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
-        self.drop_object(
-            ObjectType::Function,
-            function_id as _,
-            DropMode::Restrict,
-            None,
-        )
-        .await
+    async fn drop_function(
+        &self,
+        function_id: FunctionId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        self.drop_object(ObjectType::Function, function_id as _, drop_mode, None)
+            .await
     }
 
     async fn create_view(
@@ -760,13 +781,18 @@ impl DdlController {
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
     #[await_tree::instrument]
     pub(crate) async fn validate_cdc_table(
+        &self,
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
-            .filter(|f| f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan))
+            .filter(|f| {
+                f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
+                    || f.fragment_type_mask
+                        .contains(FragmentTypeFlag::StreamCdcScan)
+            })
             .exactly_one()
             .ok()
             .with_context(|| {
@@ -775,16 +801,27 @@ impl DdlController {
                     table_fragments.fragments
                 )
             })?;
-
-        assert_eq!(
-            stream_scan_fragment.actors.len(),
-            1,
-            "Stream scan fragment should have only one actor"
-        );
+        fn assert_parallelism(stream_scan_fragment: &Fragment, node_body: &Option<NodeBody>) {
+            if let Some(NodeBody::StreamCdcScan(node)) = node_body {
+                if let Some(o) = node.options
+                    && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
+                {
+                    // Use parallel CDC backfill.
+                } else {
+                    assert_eq!(
+                        stream_scan_fragment.actors.len(),
+                        1,
+                        "Stream scan fragment should have only one actor"
+                    );
+                }
+            }
+        }
         let mut found_cdc_scan = false;
         match &stream_scan_fragment.nodes.node_body {
             Some(NodeBody::StreamCdcScan(_)) => {
-                if Self::validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
+                assert_parallelism(stream_scan_fragment, &stream_scan_fragment.nodes.node_body);
+                if self
+                    .validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
                     .await?
                 {
                     found_cdc_scan = true;
@@ -793,7 +830,11 @@ impl DdlController {
             // When there's generated columns, the cdc scan node is wrapped in a project node
             Some(NodeBody::Project(_)) => {
                 for input in &stream_scan_fragment.nodes.input {
-                    if Self::validate_cdc_table_inner(&input.node_body, table.id).await? {
+                    assert_parallelism(stream_scan_fragment, &input.node_body);
+                    if self
+                        .validate_cdc_table_inner(&input.node_body, table.id)
+                        .await?
+                    {
                         found_cdc_scan = true;
                     }
                 }
@@ -809,9 +850,11 @@ impl DdlController {
     }
 
     async fn validate_cdc_table_inner(
+        &self,
         node_body: &Option<NodeBody>,
         table_id: u32,
     ) -> MetaResult<bool> {
+        let meta_store = self.env.meta_store_ref();
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
@@ -827,6 +870,20 @@ impl DdlController {
             let _enumerator = props
                 .create_split_enumerator(SourceEnumeratorContext::dummy().into())
                 .await?;
+
+            if is_parallelized_backfill_enabled(stream_cdc_scan) {
+                // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
+                try_init_parallel_cdc_table_snapshot_splits(
+                    table_id,
+                    cdc_table_desc,
+                    meta_store,
+                    &stream_cdc_scan.options,
+                    self.env.opts.cdc_table_split_init_insert_batch_size,
+                    self.env.opts.cdc_table_split_init_sleep_interval_splits,
+                    self.env.opts.cdc_table_split_init_sleep_duration_millis,
+                )
+                .await?;
+            }
 
             tracing::debug!(?table_id, "validate cdc table success");
             Ok(true)
@@ -1084,7 +1141,6 @@ impl DdlController {
             };
         }
         let job_id = streaming_job.id();
-
         tracing::debug!(
             id = job_id,
             definition = streaming_job.definition(),
@@ -1230,7 +1286,8 @@ impl DdlController {
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
-                Self::validate_cdc_table(table, &stream_job_fragments).await?;
+                self.validate_cdc_table(table, &stream_job_fragments)
+                    .await?;
             }
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.
@@ -1305,19 +1362,16 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match (streaming_job.create_type(), &streaming_job) {
-            // TODO(August): Unify background sink into table's creation path with MV below.
-            (CreateType::Unspecified, _)
-            | (CreateType::Foreground, _)
-            | (CreateType::Background, StreamingJob::Sink(_, Some(_))) => {
+        match streaming_job.create_type() {
+            CreateType::Unspecified | CreateType::Foreground => {
                 let version = self
                     .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
                     .await?;
                 Ok(version)
             }
-            (CreateType::Background, _) => {
-                let await_tree_key = format!("Background DDL Worker ({})", streaming_job.id());
+            CreateType::Background => {
+                let await_tree_key = format!("Background DDL Worker ({})", stream_job_id);
                 let await_tree_span =
                     span!("{:?}({})", streaming_job.job_type(), streaming_job.name());
 
@@ -1613,7 +1667,7 @@ impl DdlController {
                     }
                     let original_sink_fragment =
                         sink_job_fragments.fragments.into_values().next().unwrap();
-                    let (new_sink_fragment, new_sink_columns, new_log_store_table) =
+                    let (new_sink_fragment, new_schema, new_log_store_table) =
                         rewrite_refresh_schema_sink_fragment(
                             &original_sink_fragment,
                             &sink,
@@ -1660,7 +1714,11 @@ impl DdlController {
                         tmp_sink_id,
                         original_sink: sink,
                         original_fragment: original_sink_fragment,
-                        new_columns: new_sink_columns,
+                        new_schema,
+                        newly_add_fields: newly_added_columns
+                            .iter()
+                            .map(|col| Field::from(&col.column_desc))
+                            .collect(),
                         new_fragment: new_sink_fragment,
                         new_log_store_table,
                         actor_status,
@@ -1711,7 +1769,7 @@ impl DdlController {
                         .map(|sink| FinishAutoRefreshSchemaSinkContext {
                             tmp_sink_id: sink.tmp_sink_id,
                             original_sink_id: sink.original_sink.id as _,
-                            columns: sink.new_columns.clone(),
+                            columns: sink.new_schema.clone(),
                             new_log_store_table: sink
                                 .new_log_store_table
                                 .as_ref()

@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use super::{DefaultBehavior, LogicalPlanVisitor, Merge};
-use crate::PlanRef;
 use crate::error::{ErrorCode, RwError};
-use crate::optimizer::plan_node::{LogicalApply, PlanTreeNodeBinary};
+use crate::optimizer::plan_node::{LogicalApply, LogicalPlanRef as PlanRef, PlanTreeNodeBinary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 pub struct HasMaxOneRowApply();

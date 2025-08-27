@@ -224,6 +224,13 @@ pub struct StorageConfig {
     /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
     #[serde(default = "default::storage::iceberg_compaction_size_estimation_smoothing_factor")]
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
+    // For Small File Compaction
+    /// The threshold for small file compaction in MB.
+    #[serde(default = "default::storage::iceberg_compaction_small_file_threshold_mb")]
+    pub iceberg_compaction_small_file_threshold_mb: u32,
+    /// The maximum total size of tasks in small file compaction in MB.
+    #[serde(default = "default::storage::iceberg_compaction_max_task_total_size_mb")]
+    pub iceberg_compaction_max_task_total_size_mb: u32,
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
@@ -329,6 +336,10 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::threshold")]
     pub threshold: f64,
 
+    /// Recent filter layer shards.
+    #[serde(default = "default::cache_refill::recent_filter_shards")]
+    pub recent_filter_shards: usize,
+
     /// Recent filter layer count.
     #[serde(default = "default::cache_refill::recent_filter_layers")]
     pub recent_filter_layers: usize,
@@ -336,6 +347,12 @@ pub struct CacheRefillConfig {
     /// Recent filter layer rotate interval.
     #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
     pub recent_filter_rotate_interval_ms: usize,
+
+    /// Skip check recent filter on data refill.
+    ///
+    /// This option is suitable for a single compute node or debugging.
+    #[serde(default = "default::cache_refill::skip_recent_filter")]
+    pub skip_recent_filter: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1034,6 +1051,14 @@ pub mod default {
         pub fn iceberg_compaction_size_estimation_smoothing_factor() -> f64 {
             0.3
         }
+
+        pub fn iceberg_compaction_small_file_threshold_mb() -> u32 {
+            32
+        }
+
+        pub fn iceberg_compaction_max_task_total_size_mb() -> u32 {
+            50 * 1024 // 50GB
+        }
     }
 
     pub mod file_cache {
@@ -1126,12 +1151,20 @@ pub mod default {
             0.5
         }
 
+        pub fn recent_filter_shards() -> usize {
+            16
+        }
+
         pub fn recent_filter_layers() -> usize {
             6
         }
 
         pub fn recent_filter_rotate_interval_ms() -> usize {
             10000
+        }
+
+        pub fn skip_recent_filter() -> bool {
+            false
         }
     }
 

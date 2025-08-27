@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::iter;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, span};
@@ -20,7 +22,7 @@ use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, Field, TableId};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -50,6 +52,9 @@ use crate::manager::{
 use crate::model::{
     ActorId, Fragment, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle,
     FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+};
+use crate::stream::cdc::{
+    assign_cdc_table_snapshot_splits, assign_cdc_table_snapshot_splits_for_replace_table,
 };
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -167,6 +172,11 @@ impl CreatingStreamingJobInfo {
         }
         (receivers, recovered_job_ids)
     }
+
+    async fn check_job_exists(&self, job_id: TableId) -> bool {
+        let jobs = self.streaming_jobs.lock().await;
+        jobs.contains_key(&job_id)
+    }
 }
 
 type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
@@ -176,7 +186,8 @@ pub struct AutoRefreshSchemaSinkContext {
     pub tmp_sink_id: ObjectId,
     pub original_sink: PbSink,
     pub original_fragment: Fragment,
-    pub new_columns: Vec<PbColumnCatalog>,
+    pub new_schema: Vec<PbColumnCatalog>,
+    pub newly_add_fields: Vec<Field>,
     pub new_fragment: Fragment,
     pub new_log_store_table: Option<PbTable>,
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
@@ -465,6 +476,13 @@ impl GlobalStreamManager {
                 .source_manager
                 .allocate_splits(&stream_job_fragments)
                 .await?;
+            let cdc_table_snapshot_split_assignment =
+                assign_cdc_table_snapshot_splits_for_replace_table(
+                    context.old_fragments.stream_job_id.table_id,
+                    &stream_job_fragments.inner,
+                    self.env.meta_store_ref(),
+                )
+                .await?;
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -476,6 +494,7 @@ impl GlobalStreamManager {
                 tmp_id: tmp_table_id.table_id,
                 to_drop_state_table_ids: Vec::new(), /* the create streaming job command will not drop any state table */
                 auto_refresh_schema_sinks: None,
+                cdc_table_snapshot_split_assignment,
             });
         }
 
@@ -497,6 +516,12 @@ impl GlobalStreamManager {
                 .await?,
         );
 
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+            iter::once(stream_job_fragments.deref()),
+            self.env.meta_store_ref(),
+        )
+        .await?;
+
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
         };
@@ -510,6 +535,7 @@ impl GlobalStreamManager {
             job_type,
             create_type,
             fragment_backfill_ordering,
+            cdc_table_snapshot_split_assignment,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
@@ -574,6 +600,14 @@ impl GlobalStreamManager {
             init_split_assignment
         );
 
+        let cdc_table_snapshot_split_assignment =
+            assign_cdc_table_snapshot_splits_for_replace_table(
+                old_fragments.stream_job_id.table_id,
+                &new_fragments.inner,
+                self.env.meta_store_ref(),
+            )
+            .await?;
+
         self.barrier_scheduler
             .run_command(
                 streaming_job.database_id().into(),
@@ -595,6 +629,7 @@ impl GlobalStreamManager {
                         }
                     },
                     auto_refresh_schema_sinks,
+                    cdc_table_snapshot_split_assignment,
                 }),
             )
             .await?;
@@ -613,6 +648,23 @@ impl GlobalStreamManager {
         state_table_ids: Vec<risingwave_meta_model::TableId>,
         fragment_ids: HashSet<FragmentId>,
     ) {
+        // TODO(august): This is a workaround for canceling SITT via drop, remove it after refactoring SITT.
+        for &job_id in &streaming_job_ids {
+            if self
+                .creating_job_info
+                .check_job_exists(TableId::new(job_id as _))
+                .await
+            {
+                tracing::info!(
+                    ?job_id,
+                    "streaming job is creating, cancel it with drop directly"
+                );
+                self.metadata_manager
+                    .notify_cancelled(database_id, job_id)
+                    .await;
+            }
+        }
+
         if !removed_actors.is_empty()
             || !streaming_job_ids.is_empty()
             || !state_table_ids.is_empty()
@@ -853,15 +905,18 @@ impl GlobalStreamManager {
         } else {
             let reschedule_plan = self
                 .scale_controller
-                .generate_job_reschedule_plan(JobReschedulePolicy {
-                    targets: HashMap::from([(
-                        job_id.table_id,
-                        JobRescheduleTarget {
-                            parallelism: parallelism_change,
-                            resource_group: resource_group_change,
-                        },
-                    )]),
-                })
+                .generate_job_reschedule_plan(
+                    JobReschedulePolicy {
+                        targets: HashMap::from([(
+                            job_id.table_id,
+                            JobRescheduleTarget {
+                                parallelism: parallelism_change,
+                                resource_group: resource_group_change,
+                            },
+                        )]),
+                    },
+                    false,
+                )
                 .await?;
 
             if reschedule_plan.reschedules.is_empty() {
@@ -885,6 +940,83 @@ impl GlobalStreamManager {
                 .await?;
             }
         };
+
+        Ok(())
+    }
+
+    /// This method is copied from `GlobalStreamManager::reschedule_streaming_job` and modified to handle reschedule CDC table backfill.
+    pub(crate) async fn reschedule_cdc_table_backfill(
+        &self,
+        job_id: u32,
+        target: JobRescheduleTarget,
+    ) -> MetaResult<()> {
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+        let JobRescheduleTarget {
+            parallelism: parallelism_change,
+            resource_group: resource_group_change,
+        } = target;
+        let database_id = DatabaseId::new(
+            self.metadata_manager
+                .catalog_controller
+                .get_object_database_id(job_id as ObjectId)
+                .await? as _,
+        );
+        let job_id = TableId::new(job_id);
+        if let JobParallelismTarget::Update(parallelism) = &parallelism_change {
+            match parallelism {
+                TableParallelism::Fixed(_) => {}
+                TableParallelism::Custom => {
+                    bail_invalid_parameter!("should not alter parallelism to custom")
+                }
+                TableParallelism::Adaptive => {
+                    bail_invalid_parameter!("should not alter parallelism to adaptive")
+                }
+            }
+        } else {
+            bail_invalid_parameter!("should not refresh")
+        }
+        match &resource_group_change {
+            JobResourceGroupTarget::Update(_) => {
+                bail_invalid_parameter!("should not update resource group")
+            }
+            JobResourceGroupTarget::Keep => {}
+        };
+        // Only generate reschedule for fragment of CDC table backfill.
+        let reschedule_plan = self
+            .scale_controller
+            .generate_job_reschedule_plan(
+                JobReschedulePolicy {
+                    targets: HashMap::from([(
+                        job_id.table_id,
+                        JobRescheduleTarget {
+                            parallelism: parallelism_change,
+                            resource_group: resource_group_change,
+                        },
+                    )]),
+                },
+                true,
+            )
+            .await?;
+        if reschedule_plan.reschedules.is_empty() {
+            tracing::debug!(
+                ?job_id,
+                post_updates = ?reschedule_plan.post_updates,
+                "Empty reschedule plan generated for job.",
+            );
+            self.scale_controller
+                .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
+                .await?;
+        } else {
+            self.reschedule_actors(
+                database_id,
+                reschedule_plan,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: false,
+                    skip_create_new_actors: false,
+                },
+            )
+            .await?;
+        }
 
         Ok(())
     }

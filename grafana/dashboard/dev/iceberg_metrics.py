@@ -94,6 +94,16 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Iceberg Snapshot Number",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_snapshot_num')}",
+                            "{{sink_name}} @ {{catalog_name}} {{table_name}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]

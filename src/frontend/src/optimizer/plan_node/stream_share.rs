@@ -21,10 +21,12 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::stream::prelude::*;
 use super::utils::Distill;
 use super::{
-    ExprRewritable, PlanRef, PlanTreeNodeUnary, ShareNode, StreamExchange, StreamNode, generic,
+    ExprRewritable, PlanTreeNodeUnary, ShareNode, StreamExchange, StreamNode,
+    StreamPlanRef as PlanRef, generic,
 };
 use crate::Explain;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::Share;
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -45,7 +47,7 @@ impl StreamShare {
             PlanBase::new_stream_with_core(
                 &core,
                 dist,
-                input.append_only(),
+                input.stream_kind(),
                 input.emit_on_window_close(),
                 input.watermark_columns().clone(),
                 input.columns_monotonicity().clone(),
@@ -69,7 +71,7 @@ impl Distill for StreamShare {
     }
 }
 
-impl PlanTreeNodeUnary for StreamShare {
+impl PlanTreeNodeUnary<Stream> for StreamShare {
     fn input(&self) -> PlanRef {
         self.core.input.borrow().clone()
     }
@@ -79,8 +81,8 @@ impl PlanTreeNodeUnary for StreamShare {
     }
 }
 
-impl ShareNode for StreamShare {
-    fn new_share(core: generic::Share<PlanRef>) -> PlanRef {
+impl ShareNode<Stream> for StreamShare {
+    fn new_share(core: Share<PlanRef>) -> PlanRef {
         Self::new(core).into()
     }
 
@@ -89,7 +91,7 @@ impl ShareNode for StreamShare {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamShare }
+impl_plan_tree_node_for_unary! { Stream, StreamShare }
 
 impl StreamNode for StreamShare {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -130,7 +132,7 @@ impl StreamShare {
                         .map(|x| *x as u32)
                         .collect(),
                     fields: self.schema().to_prost(),
-                    append_only: self.append_only(),
+                    stream_kind: self.stream_kind().to_protobuf() as i32,
                 };
 
                 state.add_share_stream_node(operator_id, stream_node.clone());
@@ -142,6 +144,6 @@ impl StreamShare {
     }
 }
 
-impl ExprRewritable for StreamShare {}
+impl ExprRewritable<Stream> for StreamShare {}
 
 impl ExprVisitable for StreamShare {}

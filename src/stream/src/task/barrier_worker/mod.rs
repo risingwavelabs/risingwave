@@ -76,7 +76,7 @@ use crate::task::barrier_worker::managed_state::{
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
-/// Collect result of some barrier on current compute node. Will be reported to the meta service in [`LocalBarrierWorker::next_completed_epoch`].
+/// Collect result of some barrier on current compute node. Will be reported to the meta service in [`LocalBarrierWorker::on_epoch_completed`].
 #[derive(Debug)]
 pub struct BarrierCompleteResult {
     /// The result returned from `sync` of `StateStore`.
@@ -84,6 +84,9 @@ pub struct BarrierCompleteResult {
 
     /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
+
+    /// The source IDs that have finished loading data for refreshable batch sources.
+    pub load_finished_source_ids: Vec<u32>,
 }
 
 /// Lives in [`crate::task::barrier_worker::LocalBarrierWorker`],
@@ -367,6 +370,8 @@ impl LocalBarrierWorker {
                             partial_graph_id,
                             barrier,
                         } => {
+                            // update await_epoch_completed_futures
+                            // handled below in next_completed_epoch
                             self.complete_barrier(database_id, partial_graph_id, barrier.epoch.prev);
                         }
                         ManagedBarrierStateEvent::ActorError{
@@ -629,6 +634,7 @@ mod await_epoch_completed_future {
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
         create_mview_progress: Vec<PbCreateMviewProgress>,
+        load_finished_source_ids: Vec<u32>,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -646,6 +652,7 @@ mod await_epoch_completed_future {
                 result.map(|sync_result| BarrierCompleteResult {
                     sync_result,
                     create_mview_progress,
+                    load_finished_source_ids,
                 }),
             )
         });
@@ -664,6 +671,7 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdds;
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
 use crate::executor::exchange::permit;
@@ -716,7 +724,7 @@ impl LocalBarrierWorker {
             else {
                 return;
             };
-            let (barrier, table_ids, create_mview_progress) =
+            let (barrier, table_ids, create_mview_progress, load_finished_source_ids) =
                 database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
@@ -748,6 +756,7 @@ impl LocalBarrierWorker {
                         barrier,
                         self.actor_manager.await_tree_reg.as_ref(),
                         create_mview_progress,
+                        load_finished_source_ids,
                     )
                 });
         }
@@ -763,14 +772,16 @@ impl LocalBarrierWorker {
         let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
+            load_finished_source_ids,
         } = result;
 
-        let (synced_sstables, table_watermarks, old_value_ssts) = sync_result
+        let (synced_sstables, table_watermarks, old_value_ssts, vector_index_adds) = sync_result
             .map(|sync_result| {
                 (
                     sync_result.uncommitted_ssts,
                     sync_result.table_watermarks,
                     sync_result.old_value_ssts,
+                    sync_result.vector_index_adds,
                 )
             })
             .unwrap_or_default();
@@ -808,6 +819,18 @@ impl LocalBarrierWorker {
                             .map(|sst| sst.sst_info.into())
                             .collect(),
                         database_id: database_id.database_id,
+                        load_finished_source_ids,
+                        vector_index_adds: vector_index_adds
+                            .into_iter()
+                            .map(|(table_id, adds)| {
+                                (
+                                    table_id.table_id,
+                                    PbVectorIndexAdds {
+                                        adds: adds.into_iter().map(|add| add.into()).collect(),
+                                    },
+                                )
+                            })
+                            .collect(),
                     },
                 )
             }

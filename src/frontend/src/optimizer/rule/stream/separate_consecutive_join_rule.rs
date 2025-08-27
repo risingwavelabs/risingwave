@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use super::prelude::*;
-use crate::optimizer::plan_node::{
-    LogicalJoin, PlanTreeNodeBinary, StreamExchange, StreamHashJoin,
-};
+use crate::optimizer::plan_node::generic::Join;
+use crate::optimizer::plan_node::{PlanTreeNodeBinary, StreamExchange, StreamHashJoin};
 
 /// Separate consecutive stream hash joins by no-shuffle exchange
 pub struct SeparateConsecutiveJoinRule {}
@@ -38,18 +37,16 @@ impl Rule<Stream> for SeparateConsecutiveJoinRule {
             right_input
         };
 
-        let new_logical_join = LogicalJoin::new(
+        let core = Join::with_full_output(
             new_left,
             new_right,
             join.join_type(),
             join.eq_join_predicate().all_cond(),
         );
         Some(
-            StreamHashJoin::new(
-                new_logical_join.core().clone(),
-                join.eq_join_predicate().clone(),
-            )
-            .into(),
+            StreamHashJoin::new(core, join.eq_join_predicate().clone())
+                .unwrap()
+                .into(),
         )
     }
 }
