@@ -12017,6 +12017,7 @@ dependencies = [
  "risingwave_connector",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
+ "risingwave_jni_core",
  "risingwave_meta",
  "risingwave_meta_model",
  "risingwave_object_store",
