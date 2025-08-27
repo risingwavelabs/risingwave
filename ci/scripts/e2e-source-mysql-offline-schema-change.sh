@@ -97,8 +97,8 @@ risedev kill
 
 echo "\n\n\n-------------Resume RW CDC------------\n\n\n"
 sleep 5
-# Start cluster without CI mode to avoid strict cluster_id checks
-unset RISINGWAVE_CI
+# Delete cluster_id file from minio to avoid conflict
+risedev mc rm --recursive --force hummock-minio/hummock001/cluster_id/
 # Resume RW CDC without cleaning data
 risedev dev mysql-offline-schema-change-test
 
