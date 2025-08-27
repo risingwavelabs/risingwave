@@ -7,10 +7,10 @@ export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 echo "\n\n\n-------------Run mysql offline schema change test------------\n\n\n"
 
 # Cleanup
-risedev k && risedev clean-data
+risedev kill && risedev clean-data
 
 # Setup CDC table with initial schema
-risedev ci-start mysql-offline-schema-change-test
+risedev dev mysql-offline-schema-change-test
 echo "\n\n\n-------------RW started------------\n\n\n"
 
 mysql -e "
@@ -80,7 +80,7 @@ risedev psql -c "select * from t1;"
 
 echo "\n\n\n-------------Take RW offline------------\n\n\n"
 #
-risedev k
+risedev kill
 
 # Resume MySQL only, perform some writes, then schema change, then some more writes
 risedev dev mysql-only
@@ -93,12 +93,12 @@ echo "\n\n\n-------------Change Schema------------\n\n\n"
 mysql -u root -D risedev -e "insert into t values (2, 'def'); alter table t add column v2 int default 42; insert into t values (3, 'ghi', 88);"
 mysql -u root -D test_db -e "insert into t1 values (2, 'def'); alter table t1 add column v2 int default 55; insert into t1 values (4, 'ghi', 88);"
 
-./risedev k
+risedev kill
 
 echo "\n\n\n-------------Resume RW CDC------------\n\n\n"
 sleep 5
 # Resume RW CDC without cleaning data
-risedev ci-resume mysql-offline-schema-change-test
+risedev dev mysql-offline-schema-change-test
 
 # Verify data
 # If the bug is reproduced, you won't see rows with k=2 and k=3, check the logs of compute-node!
