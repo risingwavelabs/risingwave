@@ -43,13 +43,13 @@ use crate::sink::{
     SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
-pub const SNOWFLAKE_SINK: &str = "snowflake";
+pub const SNOWFLAKE_SINK_V2: &str = "snowflake_v2";
 pub const SNOWFLAKE_SINK_ROW_ID: &str = "__row_id";
 pub const SNOWFLAKE_SINK_OP: &str = "__op";
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
-pub struct SnowflakeConfig {
+pub struct SnowflakeV2Config {
     #[serde(rename = "type")]
     pub r#type: String,
 
@@ -116,10 +116,10 @@ fn default_schedule() -> u64 {
     3600 // Default to 1 hour
 }
 
-impl SnowflakeConfig {
+impl SnowflakeV2Config {
     pub fn from_btreemap(properties: &BTreeMap<String, String>) -> Result<Self> {
         let config =
-            serde_json::from_value::<SnowflakeConfig>(serde_json::to_value(properties).unwrap())
+            serde_json::from_value::<SnowflakeV2Config>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
@@ -230,7 +230,7 @@ impl SnowflakeConfig {
     }
 }
 
-impl EnforceSecret for SnowflakeConfig {
+impl EnforceSecret for SnowflakeV2Config {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "username",
         "password",
@@ -239,31 +239,31 @@ impl EnforceSecret for SnowflakeConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct SnowflakeSink {
-    config: SnowflakeConfig,
+pub struct SnowflakeV2Sink {
+    config: SnowflakeV2Config,
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
     param: SinkParam,
 }
 
-impl EnforceSecret for SnowflakeSink {
+impl EnforceSecret for SnowflakeV2Sink {
     fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::sink::ConnectorResult<()> {
         for prop in prop_iter {
-            SnowflakeConfig::enforce_one(prop)?;
+            SnowflakeV2Config::enforce_one(prop)?;
         }
         Ok(())
     }
 }
 
-impl TryFrom<SinkParam> for SnowflakeSink {
+impl TryFrom<SinkParam> for SnowflakeV2Sink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = SnowflakeConfig::from_btreemap(&param.properties)?;
+        let config = SnowflakeV2Config::from_btreemap(&param.properties)?;
         let is_append_only = param.sink_type.is_append_only();
         let pk_indices = param.downstream_pk.clone();
         Ok(Self {
@@ -276,11 +276,11 @@ impl TryFrom<SinkParam> for SnowflakeSink {
     }
 }
 
-impl Sink for SnowflakeSink {
+impl Sink for SnowflakeV2Sink {
     type Coordinator = SnowflakeSinkCommitter;
     type LogSinker = CoordinatedLogSinker<SnowflakeSinkWriter>;
 
-    const SINK_NAME: &'static str = SNOWFLAKE_SINK;
+    const SINK_NAME: &'static str = SNOWFLAKE_SINK_V2;
 
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::SnowflakeSink
@@ -305,7 +305,7 @@ impl Sink for SnowflakeSink {
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
-        SnowflakeConfig::from_btreemap(config)?;
+        SnowflakeV2Config::from_btreemap(config)?;
         Ok(())
     }
 
@@ -361,7 +361,7 @@ pub enum SnowflakeSinkWriter {
 
 impl SnowflakeSinkWriter {
     pub async fn new(
-        config: SnowflakeConfig,
+        config: SnowflakeV2Config,
         is_append_only: bool,
         writer_param: SinkWriterParam,
         param: SinkParam,
@@ -441,7 +441,7 @@ pub struct SnowflakeSinkJdbcWriter {
 
 impl SnowflakeSinkJdbcWriter {
     pub async fn new(
-        config: SnowflakeConfig,
+        config: SnowflakeV2Config,
         is_append_only: bool,
         writer_param: SinkWriterParam,
         mut param: SinkParam,
@@ -573,7 +573,7 @@ pub struct SnowflakeSinkCommitter {
 
 impl SnowflakeSinkCommitter {
     pub fn new(
-        config: SnowflakeConfig,
+        config: SnowflakeV2Config,
         schema: &Schema,
         pk_indices: &Vec<usize>,
         is_append_only: bool,
