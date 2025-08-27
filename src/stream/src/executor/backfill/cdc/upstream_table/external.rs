@@ -137,6 +137,10 @@ impl ExternalStorageTable {
         self.database_name.as_str()
     }
 
+    pub fn table_type(&self) -> &CdcTableType {
+        &self.table_type
+    }
+
     pub async fn current_cdc_offset(
         &self,
         table_reader: &ExternalTableReaderImpl,

@@ -29,7 +29,9 @@ use risingwave_connector::parser::{
     TimestampHandling, TimestamptzHandling,
 };
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
+use risingwave_connector::source::cdc::external::{
+    CdcOffset, CdcTableType, ExternalTableReaderImpl,
+};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
@@ -226,11 +228,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .unwrap_or(false)
             .then_some(TimeHandling::Milli);
         // Only postgres-cdc connector may trigger TOAST.
-        let handle_toast_columns: bool = self
-            .properties
-            .get("connector")
-            .map(|v| v == "postgres-cdc")
-            .unwrap_or(false);
+        let handle_toast_columns: bool =
+            self.external_table.table_type() == &CdcTableType::Postgres;
         // Make sure to use mapping_message after transform_upstream.
         let mut upstream = transform_upstream(
             upstream,

@@ -74,9 +74,6 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     /// Indices of TOAST-able columns for PostgreSQL CDC tables. None means either non-CDC table or CDC table without TOAST-able columns.
     toastable_column_indices: Option<Vec<usize>>,
-
-    /// Whether to handle TOAST for PostgreSQL CDC tables.
-    handle_toast: bool,
 }
 
 fn get_op_consistency_level(
@@ -113,11 +110,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         version_column_index: Option<u32>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        // Determine if we should handle TOAST based on CDC table type
-        // Only handle TOAST for PostgreSQL CDC tables.
-        let handle_toast =
-            table_catalog.cdc_table_type() == risingwave_pb::catalog::table::CdcTableType::Postgres;
-
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
@@ -125,7 +117,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             .collect();
 
         // Extract TOAST-able column indices from table columns.
-        let toastable_column_indices = {
+        // Only for PostgreSQL CDC tables.
+        let toastable_column_indices = if table_catalog.cdc_table_type()
+            == risingwave_pb::catalog::table::CdcTableType::Postgres
+        {
             let toastable_indices: Vec<usize> = table_columns
                 .iter()
                 .enumerate()
@@ -150,6 +145,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             } else {
                 Some(toastable_indices)
             }
+        } else {
+            None
         };
 
         let row_serde: BasicSerde = BasicSerde::new(
@@ -209,7 +206,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             depended_subscription_ids,
             metrics: mv_metrics,
             toastable_column_indices,
-            handle_toast,
         }
     }
 
@@ -298,7 +294,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     self.conflict_behavior,
                                     &self.metrics,
                                     self.toastable_column_indices.as_deref(),
-                                    self.handle_toast,
                                 )
                                 .await?;
 
@@ -465,7 +460,6 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
             metrics,
-            handle_toast: false,
         }
     }
 }
@@ -717,7 +711,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         conflict_behavior: ConflictBehavior,
         metrics: &MaterializeMetrics,
         toastable_column_indices: Option<&[usize]>,
-        handle_toast: bool,
     ) -> StreamExecutorResult<ChangeBuffer> {
         assert_matches!(conflict_behavior, checked_conflict_behaviors!());
 
@@ -770,18 +763,17 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             };
 
                             if need_overwrite {
-                                let final_row = if handle_toast
-                                    && let Some(toastable_indices) = toastable_column_indices
-                                {
-                                    // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
-                                    handle_toast_columns_for_postgres_cdc(
-                                        &old_row_deserialized,
-                                        &new_row_deserialized,
-                                        toastable_indices,
-                                    )
-                                } else {
-                                    new_row_deserialized
-                                };
+                                let final_row =
+                                    if let Some(toastable_indices) = toastable_column_indices {
+                                        // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
+                                        handle_toast_columns_for_postgres_cdc(
+                                            &old_row_deserialized,
+                                            &new_row_deserialized,
+                                            toastable_indices,
+                                        )
+                                    } else {
+                                        new_row_deserialized
+                                    };
 
                                 change_buffer.update(
                                     key.clone(),
@@ -827,9 +819,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 let mut updated_row = OwnedRow::new(row_deserialized_vec);
 
                                 // Apply TOAST column fix for CDC tables with TOAST columns
-                                if handle_toast
-                                    && let Some(toastable_indices) = toastable_column_indices
-                                {
+                                if let Some(toastable_indices) = toastable_column_indices {
                                     // Note: we need to use old_row_deserialized again, but it was moved above
                                     // So we re-deserialize the old row
                                     let old_row_deserialized_again =
