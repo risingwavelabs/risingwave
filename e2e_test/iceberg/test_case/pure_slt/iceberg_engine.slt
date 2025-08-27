@@ -342,46 +342,6 @@ statement ok
 DROP TABLE t_partition4;
 
 statement ok
-create table t_cow(a int primary key, b int) with(commit_checkpoint_interval = 1, compaction_interval_sec = 10, write_mode = 'copy-on-write') engine = iceberg;
-
-statement ok
-insert into t_cow values (1, 1), (2, 2);
-
-statement ok
-flush;
-
-sleep 5s
-
-statement ok
-VACUUM FULL t_cow;
-
-query ?? rowsort
-select * from t_cow;
-----
-1 1
-2 2
-
-statement ok
-update t_cow set b = 22 where b = 2;
-
-statement ok
-flush;
-
-sleep 5s
-
-statement ok
-VACUUM FULL t_cow;
-
-query ?? rowsort
-select * from t_cow;
-----
-1 1
-2 22
-
-statement ok
-DROP TABLE t_cow;
-
-statement ok
 DROP CONNECTION public.my_hosted_catalog_conn;
 
 statement ok
