@@ -484,7 +484,7 @@ impl SnowflakeSinkJdbcWriter {
         };
         let new_properties = BTreeMap::from([
             ("table.name".to_owned(), full_table_name),
-            ("connector".to_owned(), "snowflake".to_owned()),
+            ("connector".to_owned(), "snowflake_v2".to_owned()),
             (
                 "jdbc.url".to_owned(),
                 config.jdbc_url.clone().unwrap_or_default(),
