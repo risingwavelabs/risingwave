@@ -219,8 +219,7 @@ impl CommandContext {
                 cross_db_snapshot_backfill_info,
             } => {
                 match job_type {
-                    CreateStreamingJobType::SinkIntoTable(_) => {}
-                    CreateStreamingJobType::Normal => {
+                    CreateStreamingJobType::SinkIntoTable(_) | CreateStreamingJobType::Normal => {
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller

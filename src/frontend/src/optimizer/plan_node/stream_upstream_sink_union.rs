@@ -22,7 +22,7 @@ use super::stream::prelude::*;
 use crate::OptimizerContextRef;
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::{Distill, childless_record};
+use crate::optimizer::plan_node::utils::{Distill, childless_record, watermark_pretty};
 use crate::optimizer::plan_node::{ExprRewritable, PlanBase, Stream, StreamNode};
 use crate::optimizer::property::{
     Distribution, FunctionalDependencySet, MonotonicityDerivation, MonotonicityMap,
@@ -36,6 +36,7 @@ struct UpstreamSinkUnionInner {
     #[educe(PartialEq(ignore), Hash(ignore))]
     ctx: OptimizerContextRef,
     schema: Schema,
+    stream_key: Option<Vec<usize>>,
     dist: Distribution,
     stream_kind: StreamKind,
     // `generated_column` is used to generate the `watermark_columns` field and affects the derivation of subsequent
@@ -54,6 +55,7 @@ impl StreamUpstreamSinkUnion {
     pub fn new(
         ctx: OptimizerContextRef,
         schema: &Schema,
+        stream_key: Option<&[usize]>,
         dist: Distribution,
         append_only: bool,
         user_defined_pk: bool,
@@ -69,6 +71,7 @@ impl StreamUpstreamSinkUnion {
         let inner = UpstreamSinkUnionInner {
             ctx,
             schema: schema.clone(),
+            stream_key: stream_key.map(|keys| keys.to_vec()),
             dist,
             stream_kind,
             generated_column_exprs,
@@ -95,7 +98,7 @@ impl StreamUpstreamSinkUnion {
         let base = PlanBase::new_stream(
             inner.ctx.clone(),
             inner.schema.clone(),
-            Some(vec![]), // stream_key
+            inner.stream_key.clone(),
             FunctionalDependencySet::new(inner.schema.fields().len()),
             inner.dist.clone(),
             inner.stream_kind,
@@ -110,7 +113,12 @@ impl StreamUpstreamSinkUnion {
 
 impl Distill for StreamUpstreamSinkUnion {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        childless_record("StreamUpstreamSinkUnion", vec![])
+        let verbose = self.base.ctx().is_explain_verbose();
+        let mut vec = Vec::new();
+        if verbose && let Some(ow) = watermark_pretty(self.watermark_columns(), self.schema()) {
+            vec.push(("output_watermarks", ow));
+        }
+        childless_record("StreamUpstreamSinkUnion", vec)
     }
 }
 

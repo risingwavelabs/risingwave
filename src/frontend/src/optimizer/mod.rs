@@ -856,6 +856,7 @@ impl LogicalPlanRoot {
         let upstream_sink_union = StreamUpstreamSinkUnion::new(
             context.clone(),
             dml_node.schema(),
+            dml_node.stream_key(),
             dist.clone(), // should always be the same as dist of `Union`
             append_only,
             row_id_index.is_none(),
