@@ -246,7 +246,7 @@ impl MergeExecutor {
             metrics
                 .actor_input_buffer_blocking_duration_ns
                 .inc_by(start_time.elapsed().as_nanos() as u64);
-            let msg: DispatcherMessage = msg.context("MergeExecutor pull upstream failed")?;
+            let msg: DispatcherMessage = msg?;
             let mut msg: Message = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
 
             match &mut msg {
@@ -718,13 +718,8 @@ mod tests {
 
         let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
             UpdateMutation {
-                dispatchers: Default::default(),
                 merges: merge_updates,
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
+                ..Default::default()
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);

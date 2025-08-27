@@ -1230,6 +1230,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(1)
     }
 
+    async fn expire_iceberg_table_snapshots(&self, _sink_id: SinkId) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
         Ok(RefreshResponse { status: None })
     }
