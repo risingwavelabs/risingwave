@@ -22,7 +22,6 @@ use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
-
 use risingwave_common::catalog::{DatabaseId, Field, TableId};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_meta_model::ObjectId;
