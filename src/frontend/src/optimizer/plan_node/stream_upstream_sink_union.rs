@@ -36,7 +36,8 @@ struct UpstreamSinkUnionInner {
     #[educe(PartialEq(ignore), Hash(ignore))]
     ctx: OptimizerContextRef,
     schema: Schema,
-    append_only: bool,
+    dist: Distribution,
+    stream_kind: StreamKind,
     // `generated_column` is used to generate the `watermark_columns` field and affects the derivation of subsequent
     // operators. Since the project operator of `generated_column` is actually on the sink-fragment, not on the table,
     // only expr can be retained here to determine the `watermark_columns`.
@@ -53,13 +54,23 @@ impl StreamUpstreamSinkUnion {
     pub fn new(
         ctx: OptimizerContextRef,
         schema: &Schema,
+        dist: Distribution,
         append_only: bool,
+        user_defined_pk: bool,
         generated_column_exprs: Option<Vec<ExprImpl>>,
     ) -> Self {
+        // For upstream sink creating, we require that when the table defines pk or the table is `append_only`, the
+        // upstream sink must be `append_only`.
+        let stream_kind = if append_only || user_defined_pk {
+            StreamKind::AppendOnly
+        } else {
+            StreamKind::Upsert
+        };
         let inner = UpstreamSinkUnionInner {
             ctx,
             schema: schema.clone(),
-            append_only,
+            dist,
+            stream_kind,
             generated_column_exprs,
         };
 
@@ -86,12 +97,8 @@ impl StreamUpstreamSinkUnion {
             inner.schema.clone(),
             Some(vec![]), // stream_key
             FunctionalDependencySet::new(inner.schema.fields().len()),
-            Distribution::SomeShard,
-            if inner.append_only {
-                StreamKind::AppendOnly
-            } else {
-                StreamKind::Retract
-            },
+            inner.dist.clone(),
+            inner.stream_kind,
             false, // emit_on_window_close
             out_watermark_columns,
             out_monotonicity_map,

@@ -30,7 +30,7 @@ use risingwave_connector::source::cdc::{
 };
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
-use risingwave_meta_model::{SinkId, WorkerId};
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
@@ -306,8 +306,6 @@ pub enum Command {
         actors: Vec<ActorId>,
         unregistered_state_table_ids: HashSet<TableId>,
         unregistered_fragment_ids: HashSet<FragmentId>,
-        // used to update catalog in existing table
-        dropped_sink_in_existing_table: HashMap<SinkId, risingwave_meta_model::TableId>,
         // sink_fragment -> target_fragment
         dropped_sink_fragment_with_targets: Vec<(FragmentId, FragmentId)>,
     },

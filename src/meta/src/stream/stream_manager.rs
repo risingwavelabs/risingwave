@@ -23,7 +23,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_meta_model::{ObjectId, SinkId};
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::expr::PbExprNode;
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -627,7 +627,6 @@ impl GlobalStreamManager {
         streaming_job_ids: Vec<ObjectId>,
         state_table_ids: Vec<risingwave_meta_model::TableId>,
         fragment_ids: HashSet<FragmentId>,
-        dropped_sink_in_existing_table: HashMap<SinkId, risingwave_meta_model::TableId>,
         dropped_sink_fragment_with_targets: Vec<(FragmentId, FragmentId)>,
     ) {
         // TODO(august): This is a workaround for canceling SITT via drop, remove it after refactoring SITT.
@@ -666,7 +665,6 @@ impl GlobalStreamManager {
                             .map(|table_id| TableId::new(*table_id as _))
                             .collect(),
                         unregistered_fragment_ids: fragment_ids,
-                        dropped_sink_in_existing_table,
                         dropped_sink_fragment_with_targets,
                     },
                 )

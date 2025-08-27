@@ -554,27 +554,26 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let mut dropped_sink_in_existing_table = HashMap::new();
-
-        if let Some((sink_id, table_id)) =
+        let dropped_sink_fragment_with_targets = if let Some((sink_id, _table_id)) =
             try_get_sink_into_table(&txn, table_fragments.stream_job_id.table_id as _).await?
         {
-            dropped_sink_in_existing_table = HashMap::from([(sink_id, table_id)]);
-        }
-
-        let dropped_sink_fragments =
-            get_sink_fragment_by_id(&txn, dropped_sink_in_existing_table.keys().copied()).await?;
-        let mut dropped_sink_fragment_with_targets =
-            Vec::with_capacity(dropped_sink_fragments.len());
-        for sink_fragment_id in dropped_sink_fragments {
-            let target_fragment = fetch_target_fragments(&txn, sink_fragment_id).await?;
-            assert_eq!(
-                target_fragment.len(),
-                1,
-                "sink should have only one downstream fragment"
-            );
-            dropped_sink_fragment_with_targets.push((sink_fragment_id, target_fragment[0]));
-        }
+            let dropped_sink_fragments =
+                get_sink_fragment_by_id(&txn, std::iter::once(sink_id)).await?;
+            let mut dropped_sink_fragment_with_targets =
+                Vec::with_capacity(dropped_sink_fragments.len());
+            for sink_fragment_id in dropped_sink_fragments {
+                let target_fragment = fetch_target_fragments(&txn, sink_fragment_id).await?;
+                assert_eq!(
+                    target_fragment.len(),
+                    1,
+                    "sink should have only one downstream fragment"
+                );
+                dropped_sink_fragment_with_targets.push((sink_fragment_id, target_fragment[0]));
+            }
+            dropped_sink_fragment_with_targets
+        } else {
+            Vec::new()
+        };
 
         Ok(Command::DropStreamingJobs {
             streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
@@ -584,7 +583,6 @@ impl CatalogController {
                 .map(catalog::TableId::new)
                 .collect(),
             unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
-            dropped_sink_in_existing_table,
             dropped_sink_fragment_with_targets: dropped_sink_fragment_with_targets
                 .into_iter()
                 .map(|(sink, target)| (sink as _, target as _))

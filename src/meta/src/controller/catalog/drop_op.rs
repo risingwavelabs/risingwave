@@ -276,7 +276,7 @@ impl CatalogController {
         let (removed_source_fragments, removed_actors, removed_fragments) =
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
-        let mut removed_sink_in_existing_table = HashMap::new();
+        let mut removed_sink_by_table: HashMap<TableId, Vec<SinkId>> = HashMap::new();
         for obj in removed_objects.values() {
             if obj.obj_type != ObjectType::Sink {
                 continue;
@@ -288,12 +288,47 @@ impl CatalogController {
             if let Some(target_table_id) = sink.target_table
                 && !removed_streaming_job_ids.contains(&target_table_id)
             {
-                removed_sink_in_existing_table.insert(sink.sink_id, target_table_id);
+                removed_sink_by_table
+                    .entry(target_table_id)
+                    .or_default()
+                    .push(sink.sink_id);
             }
         }
 
+        let mut update_table_objects = Vec::with_capacity(removed_sink_by_table.len());
+        for (&table_id, removed_sink_ids) in &removed_sink_by_table {
+            let table = Table::find_by_id(table_id)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+
+            let mut incoming_sinks = table.incoming_sinks.inner_ref().clone();
+
+            incoming_sinks.retain(|&id| !removed_sink_ids.contains(&id));
+
+            Table::update(table::ActiveModel {
+                table_id: Set(table_id),
+                incoming_sinks: Set(incoming_sinks.into()),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+
+            let (table, table_obj) = Table::find_by_id(table_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+            let pb_table = ObjectModel(table, table_obj.unwrap()).into();
+
+            update_table_objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Table(pb_table)),
+            });
+        }
+
         let removed_sink_fragments =
-            get_sink_fragment_by_id(&txn, removed_sink_in_existing_table.keys().copied()).await?;
+            get_sink_fragment_by_id(&txn, removed_sink_by_table.values().flatten().copied())
+                .await?;
         let mut removed_sink_fragment_with_targets =
             Vec::with_capacity(removed_sink_fragments.len());
         for sink_fragment_id in removed_sink_fragments {
@@ -349,6 +384,17 @@ impl CatalogController {
         inner
             .dropped_tables
             .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
+
+        if !update_table_objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: update_table_objects,
+                }),
+            )
+            .await;
+        }
+
         let version = match object_type {
             ObjectType::Database => {
                 // TODO: Notify objects in other databases when the cross-database query is supported.
@@ -395,7 +441,6 @@ impl CatalogController {
                 removed_source_fragments,
                 removed_actors,
                 removed_fragments,
-                removed_sink_in_existing_table,
                 removed_sink_fragment_with_targets,
             },
             version,

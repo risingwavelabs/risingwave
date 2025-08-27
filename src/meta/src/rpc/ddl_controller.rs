@@ -1159,7 +1159,6 @@ impl DdlController {
             removed_source_fragments,
             removed_actors,
             removed_fragments,
-            removed_sink_in_existing_table,
             removed_sink_fragment_with_targets,
         } = release_ctx;
 
@@ -1171,7 +1170,6 @@ impl DdlController {
                 removed_streaming_job_ids,
                 removed_state_table_ids,
                 removed_fragments.iter().map(|id| *id as _).collect(),
-                removed_sink_in_existing_table,
                 removed_sink_fragment_with_targets
                     .into_iter()
                     .map(|(sink, target)| (sink as _, target as _))
