@@ -27,6 +27,7 @@ risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_jni_core = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_meta_model = { workspace = true }
 risingwave_object_store = { workspace = true }
