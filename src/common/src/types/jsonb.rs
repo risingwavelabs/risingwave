@@ -25,14 +25,10 @@ use super::postgres_type::DEBEZIUM_UNAVAILABLE_VALUE;
 use super::{
     Datum, F64, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum,
 };
-use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
+use crate::types::{
+    DEBEZIUM_UNAVAILABLE_JSON, DataType, Scalar, ScalarRef, StructType, StructValue,
+};
 use crate::util::iter_util::ZipEqDebug;
-// Pre-built JSON value for Debezium unavailable value to avoid rebuilding it every time
-static DEBEZIUM_UNAVAILABLE_JSON: std::sync::LazyLock<JsonbVal> = std::sync::LazyLock::new(|| {
-    let mut builder = jsonbb::Builder::default();
-    builder.add_string(DEBEZIUM_UNAVAILABLE_VALUE);
-    JsonbVal(builder.finish())
-});
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbVal(pub(crate) Value);

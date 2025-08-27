@@ -772,7 +772,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                         toastable_indices,
                                     )
                                 } else {
-                                    new_row_deserialized.clone()
+                                    new_row_deserialized
                                 };
 
                                 change_buffer.update(
