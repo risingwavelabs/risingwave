@@ -80,6 +80,9 @@ enum Commands {
     Profile(ProfileCommands),
     #[clap(subcommand)]
     Throttle(ThrottleCommands),
+    /// Commands for Self-testing
+    #[clap(subcommand, hide = true)]
+    Test(TestCommands),
 }
 
 #[derive(Subcommand)]
@@ -496,6 +499,12 @@ pub enum AwaitTreeCommands {
         #[clap(long = "path")]
         path: String,
     },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+enum TestCommands {
+    /// Test if JVM and Java libraries are working
+    Jvm,
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -919,6 +928,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             set_cdc_table_backfill_parallelism(context, table_id, parallelism).await?;
         }
+        Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }
     Ok(())
 }
