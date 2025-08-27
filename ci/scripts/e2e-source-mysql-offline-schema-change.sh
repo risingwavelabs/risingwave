@@ -97,6 +97,8 @@ risedev kill
 
 echo "\n\n\n-------------Resume RW CDC------------\n\n\n"
 sleep 5
+# Clean cluster_id file from S3/MinIO to avoid conflict with existing data
+mcli rm hummock001/cluster_id/0
 # Resume RW CDC without cleaning data
 risedev dev mysql-offline-schema-change-test
 
