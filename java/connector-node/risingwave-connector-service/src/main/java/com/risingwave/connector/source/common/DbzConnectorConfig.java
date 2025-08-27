@@ -151,6 +151,7 @@ public class DbzConnectorConfig {
 
             // Enable schema history for all MySQL CDC modes to handle schema changes properly
             mysqlProps.setProperty(OpendalSchemaHistory.SOURCE_ID, String.valueOf(sourceId));
+            mysqlProps.setProperty(OpendalSchemaHistory.MAX_RECORDS_PER_FILE_CONFIG, "2048");
 
             if (isCdcBackfill) {
                 // disable snapshot locking at all
