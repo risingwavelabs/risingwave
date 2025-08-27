@@ -217,6 +217,7 @@ impl CommandContext {
                 job_type,
                 cross_db_snapshot_backfill_info,
             } => {
+                println!("b11111");
                 let mut replace_plan = None;
                 match job_type {
                     CreateStreamingJobType::SinkIntoTable(plan) => {
@@ -267,6 +268,7 @@ impl CommandContext {
                     }
                 }
 
+                println!("b22222");
                 // Do `post_collect_job_fragments` of the original streaming job in the end, so that in any previous failure,
                 // we won't mark the job as `Creating`, and then the job will be later clean by the recovery triggered by the returned error.
                 let CreateStreamingJobCommandInfo {
@@ -287,6 +289,8 @@ impl CommandContext {
                     )
                     .await?;
 
+                println!("b33333");
+
                 if let Some(plan) = replace_plan {
                     barrier_manager_context
                         .source_manager
@@ -299,6 +303,8 @@ impl CommandContext {
                         .await;
                 }
 
+                println!("b4444");
+
                 let source_change = SourceChange::CreateJob {
                     added_source_fragments: stream_job_fragments.stream_source_fragments(),
                     added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
@@ -309,6 +315,8 @@ impl CommandContext {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
+
+                println!("b55555");
             }
             Command::RescheduleFragment { reschedules, .. } => {
                 println!("before post collect");

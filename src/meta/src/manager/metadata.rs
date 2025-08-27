@@ -346,16 +346,15 @@ impl MetadataManager {
         Ok(ret)
     }
 
-    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
+    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<ObjectId>> {
         let jobs = self
             .catalog_controller
             .list_background_creating_jobs(false)
             .await?;
 
-        Ok(jobs
-            .into_iter()
-            .map(|(id, _, _)| TableId::from(id as u32))
-            .collect())
+        let jobs = jobs.into_iter().map(|(id, _, _)| id).collect();
+
+        Ok(jobs)
     }
 
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
@@ -820,11 +819,11 @@ impl MetadataManager {
 
     pub async fn get_job_backfill_scan_types(
         &self,
-        job_id: &TableId,
+        job_id: ObjectId,
     ) -> MetaResult<HashMap<FragmentId, PbStreamScanType>> {
         let backfill_types = self
             .catalog_controller
-            .get_job_fragment_backfill_scan_type(job_id.table_id as _)
+            .get_job_fragment_backfill_scan_type(job_id)
             .await?;
         Ok(backfill_types)
     }

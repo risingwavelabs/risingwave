@@ -624,6 +624,10 @@ impl CatalogController {
         // Build (FragmentModel, Vec<ActorModel>) from the in-memory cache
         let fragment_actors_from_cache: Vec<(_, Vec<ActorModel>)> = {
             let info = self.env.shared_actor_infos().read_guard();
+
+            let x = info.iter_over_fragments().collect_vec();
+
+            println!("all fragments {:?}", x);
             fragments
                 .into_iter()
                 .map(|fm| {
@@ -1028,8 +1032,10 @@ impl CatalogController {
         )
         .await?;
 
+        println!("calling table_fragments");
         let mut table_fragments = BTreeMap::new();
         for job in jobs {
+            println!("\tcalling table_fragments for job {}", job.job_id);
             let fragments = FragmentModel::find()
                 .filter(fragment::Column::JobId.eq(job.job_id))
                 .all(&inner.db)
@@ -1041,7 +1047,17 @@ impl CatalogController {
                 fragments
                     .into_iter()
                     .map(|fragment| {
+                        println!(
+                            "\t\tcalling table_fragments for job {} fragment {}",
+                            job.job_id, fragment.fragment_id
+                        );
+
                         let fragment_info = guard.get_fragment(fragment.fragment_id as _).unwrap();
+
+                        for (actor_id, actor) in &fragment_info.actors {
+                            println!("\t\t\tactor id {} worker id {}", actor_id, actor.worker_id);
+                        }
+
                         let actors = fragment_info
                             .actors
                             .iter()
@@ -1258,7 +1274,9 @@ impl CatalogController {
                 .actors
                 .len();
 
-            let upstreams = all_upstreams.remove(&fragment_desc.fragment_id).unwrap();
+            let upstreams = all_upstreams
+                .remove(&fragment_desc.fragment_id)
+                .unwrap_or_default();
 
             let fragment = FragmentDistribution {
                 fragment_id: fragment_desc.fragment_id as _,
@@ -1378,12 +1396,15 @@ impl CatalogController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let id_gen = self.env.id_gen_manager();
+
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
         println!("111");
         let database_fragment_infos = load_fragment_info(
             &txn,
+            id_gen,
             database_id,
             worker_nodes,
             adaptive_parallelism_strategy,
@@ -1796,9 +1817,11 @@ impl CatalogController {
         fragment_id: FragmentId,
     ) -> MetaResult<Vec<ActorId>> {
         let info = self.env.shared_actor_infos().read_guard();
-        let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id as _).unwrap();
 
-        let actors = actors.keys().map(|id| *id as _).collect();
+        let actors = info
+            .get_fragment(fragment_id as _)
+            .map(|SharedFragmentInfo { actors, .. }| actors.keys().map(|id| *id as _).collect_vec())
+            .unwrap_or_default();
 
         Ok(actors)
     }
