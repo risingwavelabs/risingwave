@@ -763,31 +763,37 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             };
 
                             if need_overwrite {
-                                let final_row =
-                                    if let Some(toastable_indices) = toastable_column_indices {
-                                        // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
-                                        handle_toast_columns_for_postgres_cdc(
-                                            &old_row_deserialized,
-                                            &new_row_deserialized,
-                                            toastable_indices,
-                                        )
-                                    } else {
-                                        new_row_deserialized
-                                    };
+                                if let Some(toastable_indices) = toastable_column_indices {
+                                    // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
+                                    let final_row = handle_toast_columns_for_postgres_cdc(
+                                        &old_row_deserialized,
+                                        &new_row_deserialized,
+                                        toastable_indices,
+                                    );
 
-                                change_buffer.update(
-                                    key.clone(),
-                                    old_row_deserialized,
-                                    final_row.clone(),
-                                );
-                                let final_row_bytes =
-                                    Bytes::from(row_serde.serializer.serialize(final_row));
-                                self.lru_cache.put(
-                                    key.clone(),
-                                    Some(CompactedRow {
-                                        row: final_row_bytes,
-                                    }),
-                                );
+                                    change_buffer.update(
+                                        key.clone(),
+                                        old_row_deserialized,
+                                        final_row.clone(),
+                                    );
+                                    let final_row_bytes =
+                                        Bytes::from(row_serde.serializer.serialize(final_row));
+                                    self.lru_cache.put(
+                                        key.clone(),
+                                        Some(CompactedRow {
+                                            row: final_row_bytes,
+                                        }),
+                                    );
+                                } else {
+                                    // No TOAST columns, use the original row bytes directly to avoid unnecessary serialization
+                                    change_buffer.update(
+                                        key.clone(),
+                                        old_row_deserialized,
+                                        new_row_deserialized,
+                                    );
+                                    self.lru_cache
+                                        .put(key.clone(), Some(CompactedRow { row: row.clone() }));
+                                }
                             };
                         }
                         ConflictBehavior::IgnoreConflict => {
