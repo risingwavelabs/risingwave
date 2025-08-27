@@ -211,7 +211,7 @@ pub async fn gen_sink_plan(
                         "auto schema change not supported for sink-into-table".to_owned(),
                     )));
                 }
-                match connector {
+                match connecto.as_str() {
                     RedshiftSink::SINK_NAME | SnowflakeSink::SINK_NAME => {}
                     _ => {
                         return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
