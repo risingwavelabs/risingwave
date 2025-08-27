@@ -295,33 +295,11 @@ impl CatalogController {
             }
         }
 
-        let mut update_table_objects = Vec::with_capacity(removed_sink_by_table.len());
-        for (&table_id, removed_sink_ids) in &removed_sink_by_table {
-            let table = Table::find_by_id(table_id)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
-
-            let mut incoming_sinks = table.incoming_sinks.inner_ref().clone();
-
-            incoming_sinks.retain(|&id| !removed_sink_ids.contains(&id));
-
-            Table::update(table::ActiveModel {
-                table_id: Set(table_id),
-                incoming_sinks: Set(incoming_sinks.into()),
-                ..Default::default()
-            })
-            .exec(&txn)
-            .await?;
-
-            let (table, table_obj) = Table::find_by_id(table_id)
-                .find_also_related(Object)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
-            let pb_table = ObjectModel(table, table_obj.unwrap()).into();
-
-            update_table_objects.push(PbObject {
+        let mut updated_objects = Vec::with_capacity(removed_sink_by_table.len());
+        for (table_id, removed_sink_ids) in &removed_sink_by_table {
+            let pb_table =
+                update_table_incoming_sinks(&txn, *table_id, &[], removed_sink_ids).await?;
+            updated_objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Table(pb_table)),
             });
         }
@@ -385,11 +363,11 @@ impl CatalogController {
             .dropped_tables
             .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
 
-        if !update_table_objects.is_empty() {
+        if !updated_objects.is_empty() {
             self.notify_frontend(
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: update_table_objects,
+                    objects: updated_objects,
                 }),
             )
             .await;

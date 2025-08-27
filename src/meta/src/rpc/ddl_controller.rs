@@ -39,8 +39,8 @@ use risingwave_connector::source::{
 use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
-    ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, ObjectId, SchemaId,
-    SecretId, SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId, WorkerId,
+    ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
+    SchemaId, SecretId, SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId, WorkerId,
 };
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
@@ -1517,14 +1517,40 @@ impl DdlController {
             StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
         };
 
-        let version = self.drop_object(object_type, object_id, drop_mode).await?;
-        #[cfg(not(madsim))]
-        if let StreamingJobId::Sink(sink_id) = job_id {
-            // delete system table for exactly once iceberg sink
-            // todo(wcy-fdu): optimize the logic to be Iceberg unique.
-            let db = self.env.meta_store_ref().conn.clone();
-            clean_all_rows_by_sink_id(&db, sink_id).await?;
-        }
+        let job_status = self
+            .metadata_manager
+            .catalog_controller
+            .get_streaming_job_status(job_id.id())
+            .await?;
+        let version = match job_status {
+            JobStatus::Initial => {
+                unreachable!(
+                    "Job with Initial status should not notify frontend and therefore should not arrive here"
+                );
+            }
+            JobStatus::Creating => {
+                let canceled_jobs = self
+                    .stream_manager
+                    .cancel_streaming_jobs(vec![(job_id.id() as u32).into()])
+                    .await;
+                if canceled_jobs.is_empty() {
+                    tracing::warn!(job_id = job_id.id(), "failed to cancel streaming job");
+                }
+                IGNORED_NOTIFICATION_VERSION
+            }
+            JobStatus::Created => {
+                let version = self.drop_object(object_type, object_id, drop_mode).await?;
+                #[cfg(not(madsim))]
+                if let StreamingJobId::Sink(sink_id) = job_id {
+                    // delete system table for exactly once iceberg sink
+                    // todo(wcy-fdu): optimize the logic to be Iceberg unique.
+                    let db = self.env.meta_store_ref().conn.clone();
+                    clean_all_rows_by_sink_id(&db, sink_id).await?;
+                }
+                version
+            }
+        };
+
         Ok(version)
     }
 

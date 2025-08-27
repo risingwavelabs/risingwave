@@ -75,7 +75,7 @@ use crate::controller::utils::{
     check_sink_into_table_cycle, ensure_object_id, ensure_user_id, fetch_target_fragments,
     get_fragment_actor_ids, get_internal_tables_by_id, get_sink_fragment_by_id, get_table_columns,
     grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
-    try_get_sink_into_table,
+    try_get_sink_into_table, update_table_incoming_sinks,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -671,6 +671,8 @@ impl CatalogController {
             objs.extend(internal_table_objs);
         }
 
+        let mut updated_objects = Vec::new();
+
         // Check if the job is creating sink into table.
         if table_obj.is_none()
             && let Some(Some(target_table_id)) = Sink::find_by_id(job_id)
@@ -680,6 +682,12 @@ impl CatalogController {
                 .one(&txn)
                 .await?
         {
+            let pb_table =
+                update_table_incoming_sinks(&txn, target_table_id, &[], &[job_id]).await?;
+            updated_objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Table(pb_table)),
+            });
+
             let tmp_id: Option<ObjectId> = ObjectDependency::find()
                 .select_only()
                 .column(object_dependency::Column::UsedBy)
@@ -743,75 +751,16 @@ impl CatalogController {
             self.notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
                 .await;
         }
+        if !updated_objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: updated_objects,
+                }),
+            )
+            .await;
+        }
         Ok((true, Some(database_id)))
-    }
-
-    pub async fn update_table_remove_incoming_sinks(
-        &self,
-        removed_sink_in_existing_table: &HashMap<SinkId, TableId>,
-    ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-
-        let mut removed_sink_by_table = HashMap::new();
-        for (sink_id, table_id) in removed_sink_in_existing_table {
-            removed_sink_by_table
-                .entry(*table_id)
-                .or_insert_with(Vec::new)
-                .push(*sink_id);
-        }
-        let mut objects = Vec::with_capacity(removed_sink_by_table.len());
-        for (table_id, sink_ids) in removed_sink_by_table {
-            let obj =
-                Self::update_table_incoming_sinks_inner(&txn, table_id, vec![], sink_ids).await?;
-            objects.push(obj);
-        }
-
-        txn.commit().await?;
-
-        self.notify_frontend(
-            NotificationOperation::Update,
-            NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
-        )
-        .await;
-
-        Ok(())
-    }
-
-    // Returns the object that needs to notify fe to update.
-    async fn update_table_incoming_sinks_inner(
-        txn: &DatabaseTransaction,
-        table_id: TableId,
-        added_incoming_sinks: Vec<SinkId>,
-        removed_incoming_sinks: Vec<SinkId>,
-    ) -> MetaResult<PbObject> {
-        let table = Table::find_by_id(table_id)
-            .one(txn)
-            .await?
-            .ok_or(MetaError::catalog_id_not_found("table", table_id))?;
-
-        let mut incoming_sinks = table.incoming_sinks.inner_ref().clone();
-
-        incoming_sinks.retain(|&id| !removed_incoming_sinks.contains(&id));
-        incoming_sinks.extend(added_incoming_sinks.iter());
-
-        Table::update(table::ActiveModel {
-            table_id: Set(table_id),
-            incoming_sinks: Set(incoming_sinks.into()),
-            ..Default::default()
-        })
-        .exec(txn)
-        .await?;
-        let (table, table_obj) = Table::find_by_id(table_id)
-            .find_also_related(Object)
-            .one(txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
-        let pb_table = ObjectModel(table, table_obj.unwrap()).into();
-
-        Ok(PbObject {
-            object_info: Some(PbObjectInfo::Table(pb_table)),
-        })
     }
 
     #[await_tree::instrument]
@@ -856,14 +805,11 @@ impl CatalogController {
         let mut objects = vec![];
         if let Some((target_table_id, downstreams)) = sink_update_ctx {
             insert_fragment_relations(&txn, &downstreams).await?;
-            let obj = Self::update_table_incoming_sinks_inner(
-                &txn,
-                target_table_id,
-                vec![job_id as _],
-                vec![],
-            )
-            .await?;
-            objects.push(obj);
+            let pb_table =
+                update_table_incoming_sinks(&txn, target_table_id, &[job_id], &[]).await?;
+            objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Table(pb_table)),
+            });
         }
 
         // Mark job as CREATING.

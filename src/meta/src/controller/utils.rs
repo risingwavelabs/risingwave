@@ -2260,6 +2260,38 @@ where
     )
 }
 
+pub async fn update_table_incoming_sinks<C>(
+    txn: &C,
+    table_id: TableId,
+    added_sink_ids: &[SinkId],
+    removed_sink_ids: &[SinkId],
+) -> MetaResult<PbTable>
+where
+    C: ConnectionTrait,
+{
+    let (table, table_obj) = Table::find_by_id(table_id)
+        .find_also_related(Object)
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+
+    let mut incoming_sinks = table.incoming_sinks.inner_ref().clone();
+
+    incoming_sinks.retain(|&id| !removed_sink_ids.contains(&id));
+    incoming_sinks.extend(added_sink_ids.iter());
+
+    let new_table = Table::update(table::ActiveModel {
+        table_id: Set(table_id),
+        incoming_sinks: Set(incoming_sinks.into()),
+        ..Default::default()
+    })
+    .exec(txn)
+    .await?;
+
+    let pb_table = ObjectModel(new_table, table_obj.unwrap()).into();
+    Ok(pb_table)
+}
+
 pub fn build_select_node_list(
     from: &[ColumnCatalog],
     to: &[ColumnCatalog],

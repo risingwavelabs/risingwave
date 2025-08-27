@@ -274,12 +274,11 @@ impl GlobalBarrierWorkerContextImpl {
         // Only `Table` will be returned here, ignoring other catalog objects.
         let tables = self
             .metadata_manager
-            .get_table_catalog_by_ids(&job_ids)
+            .catalog_controller
+            .get_user_created_table_by_ids(job_ids.into_iter().map(|id| id as _).collect())
             .await?;
         for table in tables {
-            if table.table_type() != PbTableType::Table {
-                continue;
-            }
+            assert_eq!(table.table_type(), PbTableType::Table);
             let fragments = jobs.get_mut(&table.id).unwrap();
             let mut union_fragment_id = None;
             for fragment in fragments.fragment_infos.values_mut() {
