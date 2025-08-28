@@ -90,3 +90,35 @@ steps:
           - GITHUB_TOKEN
     timeout_in_minutes: 120
     retry: *auto-retry
+    
+  - label: "build (deterministic simulation)"
+    command: "ci/scripts/build-simulation.sh"
+    key: "build-simulation"
+    plugins:
+      - *cargo-cache
+      - docker-compose#v5.5.0: *docker-compose
+    retry: *auto-retry
+
+  - label: "docslt"
+    command: "ci/scripts/docslt.sh"
+    key: "docslt"
+    plugins:
+      - *cargo-cache
+      - docker-compose#v5.5.0: *docker-compose
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end test"
+    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 35
+    parallelism: 4
+    retry: *auto-retry
