@@ -47,6 +47,10 @@ struct Args {
     /// For consecutive strategy, number of elements to reduce at once (used only when strategy = consecutive)
     #[arg(short, long, default_value_t = 2)]
     consecutive_k: usize,
+
+    /// Command to restore RW
+    #[clap(long)]
+    run_rw_cmd: String,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
@@ -82,7 +86,13 @@ async fn main() {
         ReductionStrategy::Consecutive => Strategy::Consecutive(args.consecutive_k),
     };
 
-    shrink_file(&args.input_file, &args.output_file, strategy, &client)
-        .await
-        .unwrap();
+    shrink_file(
+        &args.input_file,
+        &args.output_file,
+        strategy,
+        client,
+        &args.run_rw_cmd,
+    )
+    .await
+    .unwrap();
 }
