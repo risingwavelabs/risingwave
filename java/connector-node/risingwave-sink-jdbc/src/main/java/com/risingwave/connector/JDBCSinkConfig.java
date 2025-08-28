@@ -53,13 +53,11 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     public JDBCSinkConfig(
             @JsonProperty(value = "jdbc.url") String jdbcUrl,
             @JsonProperty(value = "table.name") String tableName,
-            @JsonProperty(value = "type") String sinkType,
-            @JsonProperty(value = "database.name") String databaseName) {
+            @JsonProperty(value = "type") String sinkType) {
         this.jdbcUrl = jdbcUrl;
         this.tableName = tableName;
         this.sinkType = sinkType;
         this.isUpsertSink = "upsert".equalsIgnoreCase(sinkType);
-        this.databaseName = databaseName;
     }
 
     public String getSchemaName() {

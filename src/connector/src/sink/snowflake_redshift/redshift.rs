@@ -596,9 +596,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                     metadata,
                 })) = metadata.metadata
                 {
-                    String::from_utf8(metadata).map_err(|e| {
-                        SinkError::Config(anyhow!("Invalid UTF-8 in metadata: {}", e.as_report()))
-                    })
+                    String::from_utf8(metadata).map_err(|e| SinkError::Config(anyhow!(e)))
                 } else {
                     Err(SinkError::Config(anyhow!("Invalid metadata format")))
                 }?;
@@ -652,9 +650,9 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
         if let Some(add_columns) = add_columns {
             if let Some(shutdown_sender) = &self.shutdown_sender {
                 // Send shutdown signal to the periodic task before altering the table
-                shutdown_sender.send(()).map_err(|e| {
-                    SinkError::Config(anyhow!("Failed to send shutdown signal: {}", e.as_report()))
-                })?;
+                shutdown_sender
+                    .send(())
+                    .map_err(|e| SinkError::Config(anyhow!(e)))?;
             }
             let sql = build_alter_add_column_sql(
                 self.config.schema.as_deref(),
