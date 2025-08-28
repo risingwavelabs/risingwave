@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::large_futures)]
+
 use itertools::Itertools;
 use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
