@@ -87,9 +87,15 @@ risedev dev mysql-only
 
 # Delete cluster_id file from minio to avoid conflict when restarting RW
 sleep 3
-risedev mc rm --recursive --force hummock-minio/hummock001/cluster_id/
+echo "\n\n\n-------------Delete cluster_id in minio------------\n\n\n"
 
-# docker exec -it risedev-mysql-8306 mysql -u root -p -D risedev  "USE risedev; DROP TABLE IF EXISTS t; CREATE TABLE t (k int primary key, v text);"
+risedev mc rm --recursive --force hummock001/cluster_id/
+echo "After first deletion - listing hummock001:"
+risedev mc ls hummock001/cluster_id/
+
+risedev mc rm --recursive --force hummock-minio/hummock001/cluster_id/
+echo "After second deletion - listing hummock-minio/hummock001:"
+risedev mc ls hummock-minio/hummock-minio/hummock001/
 
 echo "\n\n\n-------------Change Schema------------\n\n\n"
 
@@ -112,3 +118,4 @@ risedev psql -c "select * from t;"
 
 sleep 10
 risedev psql -c "select * from t1;"
+
