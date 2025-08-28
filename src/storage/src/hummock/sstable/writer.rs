@@ -26,8 +26,8 @@ use super::multi_builder::UploadJoinHandle;
 use super::{Block, BlockMeta};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
-    CachePolicy, HummockResult, SstableBlockIndex, SstableBuilderOptions, SstableMeta,
-    SstableStore, SstableStoreRef,
+    CachePolicy, HummockResult, RecentFilterTrait, SstableBlockIndex, SstableBuilderOptions,
+    SstableMeta, SstableStore, SstableStoreRef,
 };
 
 /// A consumer of SST data.
@@ -217,9 +217,9 @@ impl SstableWriter for BatchUploadWriter {
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
             // Only update recent filter with sst obj id is okay here, for l0 is only filter by sst obj id with recent filter.
-            if let Some(filter) = self.sstable_store.recent_filter() {
-                filter.insert((self.object_id, usize::MAX));
-            }
+            self.sstable_store
+                .recent_filter()
+                .insert((self.object_id, usize::MAX));
 
             // Add block cache.
             if let CachePolicy::Fill(hint) = self.policy {
