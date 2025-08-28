@@ -89,13 +89,9 @@ risedev dev mysql-only
 sleep 3
 echo "\n\n\n-------------Delete cluster_id in minio------------\n\n\n"
 
-risedev mc rm --recursive --force hummock001/cluster_id/
-echo "After first deletion - listing hummock001:"
-risedev mc ls hummock001/cluster_id/
+risedev mc rm hummock-minio/hummock001/hummock_001/cluster_id/
 
-risedev mc rm --recursive --force hummock-minio/hummock001/cluster_id/
-echo "After second deletion - listing hummock-minio/hummock001:"
-risedev mc ls hummock-minio/hummock-minio/hummock001/
+risedev mc ls hummock-minio/hummock001/hummock_001/cluster_id/
 
 echo "\n\n\n-------------Change Schema------------\n\n\n"
 
