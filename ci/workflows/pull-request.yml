@@ -8,6 +8,23 @@ anchors:
           signal_reason: none
           limit: 3
   - plugins:
+    - cargo-cache: &cargo-cache
+        nienbo/cache#v2.4.20:
+          id: cargo
+          key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+          restore-keys:
+            - "v1-cache-{{ id }}-{{ runner.os }}-"
+            - "v1-cache-{{ id }}-"
+          backend: s3
+          s3:
+            bucket: "${AWS_CARGO_CACHE_BUCKET}" 
+            endpoint: "${AWS_ENDPOINT_URL}"  
+            region: "${AWS_DEFAULT_REGION}" 
+            args: "--no-progress"
+          paths:
+            - ".cargo/registry/index"
+            - ".cargo/registry/cache"
+            - ".cargo/git"  
     # we need to override args, so didn't include image here in the anchor
     - docker-compose: &docker-compose
         run: rw-build-env
@@ -57,6 +74,7 @@ steps:
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
     plugins:
+      - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 120
     retry: *auto-retry
