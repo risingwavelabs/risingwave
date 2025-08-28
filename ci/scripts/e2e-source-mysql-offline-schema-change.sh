@@ -89,7 +89,7 @@ risedev dev mysql-only
 sleep 3
 echo "\n\n\n-------------Delete cluster_id in minio------------\n\n\n"
 
-risedev mc rm hummock-minio/hummock001/hummock_001/cluster_id/
+risedev mc rm hummock-minio/hummock001/hummock_001/cluster_id/0
 
 risedev mc ls hummock-minio/hummock001/hummock_001/cluster_id/
 
