@@ -285,11 +285,9 @@ create function unknown_parameter(a INT) returns int language sql as 'select a +
 ----
 db error: ERROR: Failed to run the query
 
-Caused by:
-  Invalid input syntax: Failed to conduct semantic check
-Bind error: [sql udf] failed to find named parameter aa
-In SQL UDF definition: `select a + aa + a`
-                                   ^^
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: a + aa + a
+  2: Bind error: failed to find named parameter aa
 
 
 # With unnamed parameter
@@ -298,11 +296,9 @@ create function unnamed_param_hint(INT, INT) returns int language sql as 'select
 ----
 db error: ERROR: Failed to run the query
 
-Caused by:
-  Invalid input syntax: Failed to conduct semantic check
-Bind error: [sql udf] failed to find unnamed parameter $3
-In SQL UDF definition: `select $1 + $3 + $2`
-                                    ^^
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: $1 + $3 + $2
+  2: Bind error: failed to find unnamed parameter $3
 
 
 # A mixture of both
@@ -311,11 +307,9 @@ create function mix_hint(INT, aa INT, INT) returns int language sql as 'select $
 ----
 db error: ERROR: Failed to run the query
 
-Caused by:
-  Invalid input syntax: Failed to conduct semantic check
-Bind error: [sql udf] failed to find named parameter a
-In SQL UDF definition: `select $1 + aa + a + $2`
-                                         ^
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: $1 + aa + a + $2
+  2: Bind error: failed to find named parameter a
 
 
 # Long invalid parameter
@@ -325,11 +319,9 @@ create function long_invalid_param(i_am_valid INT) returns int language sql as
 ----
 db error: ERROR: Failed to run the query
 
-Caused by:
-  Invalid input syntax: Failed to conduct semantic check
-Bind error: [sql udf] failed to find named parameter _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_
-In SQL UDF definition: `select i_am_valid + _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_ + i_am_valid`
-                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: i_am_valid + _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_ + i_am_valid
+  2: Bind error: failed to find named parameter _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_
 
 
 # sql udf with non-existent function
@@ -338,11 +330,9 @@ create function call_non_existent_function(INT) returns int language sql as 'sel
 ----
 db error: ERROR: Failed to run the query
 
-Caused by:
-  Invalid input syntax: Failed to conduct semantic check
-function non_existent(integer) does not exist
-In SQL UDF definition: `select 1 + non_existent(1) + 1`
-                                   ^^^^^^^^^^^^
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: 1 + non_existent(1) + 1
+  2: function non_existent(integer) does not exist
 
 
 # First display invalid parameter
@@ -353,11 +343,9 @@ create function param_func_mix(a INT, b INT) returns int language sql as 'select
 ----
 db error: ERROR: Failed to run the query
 
-Caused by:
-  Invalid input syntax: Failed to conduct semantic check
-Bind error: [sql udf] failed to find named parameter c
-In SQL UDF definition: `select a + b + c + not_be_displayed(c)`
-                                       ^
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: a + b + c + not_be_displayed(c)
+  2: Bind error: failed to find named parameter c
 
 
 statement error expected end of statement, found: 💩
@@ -369,20 +357,25 @@ create function recursive(INT, INT) returns int language sql as 'select recursiv
 ----
 db error: ERROR: Failed to run the query
 
-Caused by:
-  Invalid input syntax: Failed to conduct semantic check
-function recursive(integer, integer) does not exist
-In SQL UDF definition: `select recursive($1, $2) + recursive($1, $2)`
-                               ^^^^^^^^^
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: recursive($1, $2) + recursive($1, $2)
+  2: function recursive(integer, integer) does not exist
 
 
 # Complex but error-prone definition, recursive & normal sql udfs interleaving
-statement error Failed to conduct semantic check
+statement error
 create function recursive_non_recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + sub($1, $2)';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: recursive($1, $2) + sub($1, $2)
+  2: function recursive(integer, integer) does not exist
+
 
 # Create a valid recursive function
 # Please note we do NOT support actual running the recursive sql udf at present
-statement error Failed to conduct semantic check
+statement error
 create function fib(INT) returns int
  language sql as 'select case
         when $1 = 0 then 0
@@ -391,10 +384,24 @@ create function fib(INT) returns int
         when $1 = 3 then 2
       else fib($1 - 1) + fib($1 - 2)
       end;';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: CASE WHEN $1 = 0 THEN 0 WHEN $1 = 1 THEN 1 WHEN $1 = 2 THEN 1 WHEN $1 = 3 THEN 2 ELSE fib($1 - 1) + fib($1 - 2) END
+  2: function fib(integer) does not exist
+
 
 # Calling a non-existent function
-statement error Failed to conduct semantic check
+statement error
 create function non_exist(INT) returns int language sql as 'select yo(114514)';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: yo(114514)
+  2: function yo(integer) does not exist
+
 
 # Try to create an sql udf with unnamed parameters whose return type mismatches with the sql body definition
 statement error return type mismatch detected
@@ -622,3 +629,21 @@ drop table t2;
 
 statement ok
 drop table t3;
+
+# test add function with schema 's'
+statement ok
+create schema s;
+
+statement ok
+create function s.add(INT, INT) returns int language sql as $$select $1 + $2$$;
+
+query I
+select s.add(1, -1);
+----
+0
+
+statement ok
+drop function s.add;
+
+statement ok
+drop schema s;

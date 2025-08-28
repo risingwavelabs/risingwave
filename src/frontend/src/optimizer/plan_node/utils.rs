@@ -43,8 +43,7 @@ use risingwave_pb::plan_common::{PbAsOf, as_of};
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
-use super::pretty_config;
-use crate::PlanRef;
+use super::{BatchPlanRef, StreamPlanRef, pretty_config};
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
@@ -220,6 +219,8 @@ impl TableCatalogBuilder {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            refreshable: false,                // Internal tables are not refreshable
+            vector_index_info: None,
         }
     }
 
@@ -300,8 +301,8 @@ pub struct IndicesDisplay<'a> {
 
 impl<'a> IndicesDisplay<'a> {
     /// Returns `None` means all
-    pub fn from_join<'b, PlanRef: GenericPlanRef>(
-        join: &'a generic::Join<PlanRef>,
+    pub fn from_join<'b>(
+        join: &'a generic::Join<impl GenericPlanRef>,
         input_schema: &'a Schema,
     ) -> Pretty<'b> {
         let col_num = join.internal_column_num();
@@ -326,8 +327,8 @@ impl<'a> IndicesDisplay<'a> {
     }
 }
 
-pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
-    let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
+pub(crate) fn sum_affected_row(dml: BatchPlanRef) -> Result<BatchPlanRef> {
+    let dml = RequiredDist::single().batch_enforce_if_not_satisfies(dml, &Order::any())?;
     // Accumulate the affected rows.
     let sum_agg = PlanAggCall {
         agg_type: PbAggKind::Sum.into(),
@@ -365,7 +366,7 @@ macro_rules! plan_node_name {
 pub(crate) use plan_node_name;
 
 pub fn infer_kv_log_store_table_catalog_inner(
-    input: &PlanRef,
+    input: &StreamPlanRef,
     columns: &[ColumnCatalog],
 ) -> TableCatalog {
     let mut table_catalog_builder = TableCatalogBuilder::default();
@@ -416,7 +417,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
 }
 
 pub fn infer_synced_kv_log_store_table_catalog_inner(
-    input: &PlanRef,
+    input: &StreamPlanRef,
     columns: &[Field],
 ) -> TableCatalog {
     let mut table_catalog_builder = TableCatalogBuilder::default();
@@ -464,7 +465,7 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
 /// since that plan node maps to `backfill` executor, which supports recovery.
 /// Some other leaf nodes like `StreamValues` do not support recovery, and they
 /// cannot use background ddl.
-pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
+pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
     if plan.inputs().is_empty() {
         if plan.as_stream_source_scan().is_some()
             || plan.as_stream_now().is_some()
@@ -489,9 +490,7 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
     let Some(a) = a else {
         return Ok(None);
     };
-    Feature::TimeTravel
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
+    Feature::TimeTravel.check_available()?;
     let as_of_type = match a {
         AsOf::ProcessTime => {
             return Err(ErrorCode::NotSupported(
@@ -540,7 +539,7 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
         AsOf::ProcessTimeWithInterval((value, leading_field)) => {
             let interval = Interval::parse_with_fields(
                 value,
-                Some(crate::Binder::bind_date_time_field(leading_field.clone())),
+                Some(crate::Binder::bind_date_time_field(*leading_field)),
             )
             .map_err(|_| anyhow!("fail to parse interval"))?;
             let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;

@@ -19,7 +19,7 @@ use std::future::{Future, pending, poll_fn};
 use std::mem::replace;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use futures::FutureExt;
@@ -33,13 +33,13 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use super::progress::BackfillState;
 use crate::error::{StreamError, StreamResult};
 use crate::executor::Barrier;
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::progress::BackfillState;
 use crate::task::{
-    ActorId, LocalBarrierManager, NewOutputRequest, PartialGraphId, StreamActorManager,
-    UpDownActorIds,
+    ActorId, LocalBarrierEvent, LocalBarrierManager, NewOutputRequest, PartialGraphId,
+    StreamActorManager, UpDownActorIds,
 };
 
 struct IssuedState {
@@ -64,7 +64,10 @@ enum ManagedBarrierStateInner {
     Issued(IssuedState),
 
     /// The barrier has been collected by all remaining actors
-    AllCollected(Vec<PbCreateMviewProgress>),
+    AllCollected {
+        create_mview_progress: Vec<PbCreateMviewProgress>,
+        load_finished_source_ids: Vec<u32>,
+    },
 }
 
 #[derive(Debug)]
@@ -85,8 +88,8 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
 
 use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
-use crate::task::barrier_manager::await_epoch_completed_future::AwaitEpochCompletedFuture;
-use crate::task::barrier_manager::{LocalBarrierEvent, ScoredStreamError};
+use crate::task::barrier_worker::ScoredStreamError;
+use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
     running_actors: BTreeSet<ActorId>,
@@ -149,7 +152,7 @@ impl Display for &'_ PartialGraphManagedBarrierState {
                     }
                     write!(f, "]")?;
                 }
-                ManagedBarrierStateInner::AllCollected(_) => {
+                ManagedBarrierStateInner::AllCollected { .. } => {
                     write!(f, "AllCollected")?;
                 }
             }
@@ -193,7 +196,7 @@ pub(crate) struct InflightActorState {
     actor_id: ActorId,
     barrier_senders: Vec<mpsc::UnboundedSender<Barrier>>,
     /// `prev_epoch` -> partial graph id
-    pub(super) inflight_barriers: BTreeMap<u64, PartialGraphId>,
+    pub(crate) inflight_barriers: BTreeMap<u64, PartialGraphId>,
     status: InflightActorStatus,
     /// Whether the actor has been issued a stop barrier
     is_stopping: bool,
@@ -290,7 +293,8 @@ impl InflightActorState {
     }
 }
 
-pub(super) struct PartialGraphManagedBarrierState {
+/// Part of [`DatabaseManagedBarrierState`]
+pub(crate) struct PartialGraphManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
     /// The key is `prev_epoch`, and the first value is `curr_epoch`
@@ -302,9 +306,16 @@ pub(super) struct PartialGraphManagedBarrierState {
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     ///
-    /// This is updated by [`super::CreateMviewProgressReporter::update`] and will be reported to meta
-    /// in [`crate::task::barrier_manager::BarrierCompleteResult`].
-    pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
+    /// The process of progress reporting is as follows:
+    /// 1. updated by [`crate::task::barrier_manager::CreateMviewProgressReporter::update`]
+    /// 2. converted to [`ManagedBarrierStateInner`] in [`Self::may_have_collected_all`]
+    /// 3. handled by [`Self::pop_barrier_to_complete`]
+    /// 4. put in [`crate::task::barrier_worker::BarrierCompleteResult`] and reported to meta.
+    pub(crate) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
+
+    /// Record the source load finished reports for each epoch of concurrent checkpoints.
+    /// Used for refreshable batch source.
+    pub(crate) load_finished_source_ids: HashMap<u64, HashSet<u32>>,
 
     state_store: StateStoreImpl,
 
@@ -325,6 +336,7 @@ impl PartialGraphManagedBarrierState {
             prev_barrier_table_ids: None,
             mv_depended_subscriptions: Default::default(),
             create_mview_progress: Default::default(),
+            load_finished_source_ids: Default::default(),
             state_store,
             streaming_metrics,
         }
@@ -575,13 +587,17 @@ impl ManagedBarrierState {
     }
 }
 
+/// Per-database barrier state manager. Handles barriers for one specific database.
+/// Part of [`ManagedBarrierState`] in [`super::LocalBarrierWorker`].
+///
+/// See [`crate::task`] for architecture overview.
 pub(crate) struct DatabaseManagedBarrierState {
     database_id: DatabaseId,
-    pub(super) actor_states: HashMap<ActorId, InflightActorState>,
+    pub(crate) actor_states: HashMap<ActorId, InflightActorState>,
     pub(super) actor_pending_new_output_requests:
         HashMap<ActorId, Vec<(ActorId, NewOutputRequest)>>,
 
-    pub(super) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
+    pub(crate) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
 
     table_ids: HashSet<TableId>,
 
@@ -900,6 +916,7 @@ impl DatabaseManagedBarrierState {
         }
     }
 
+    /// Handles [`LocalBarrierEvent`] from [`crate::task::barrier_manager::LocalBarrierManager`].
     pub(super) fn poll_next_event(
         &mut self,
         cx: &mut Context<'_>,
@@ -933,6 +950,19 @@ impl DatabaseManagedBarrierState {
                     state,
                 } => {
                     self.update_create_mview_progress(epoch, actor, state);
+                }
+                LocalBarrierEvent::ReportSourceLoadFinished {
+                    epoch,
+                    actor_id,
+                    table_id,
+                    associated_source_id,
+                } => {
+                    self.report_source_load_finished(
+                        epoch,
+                        actor_id,
+                        table_id,
+                        associated_source_id,
+                    );
                 }
                 LocalBarrierEvent::RegisterBarrierSender {
                     actor_id,
@@ -1001,11 +1031,69 @@ impl DatabaseManagedBarrierState {
         Barrier,
         Option<HashSet<TableId>>,
         Vec<PbCreateMviewProgress>,
+        Vec<u32>,
     ) {
         self.graph_states
             .get_mut(&partial_graph_id)
             .expect("should exist")
             .pop_barrier_to_complete(prev_epoch)
+    }
+
+    /// Collect actor errors for a while and find the one that might be the root cause.
+    ///
+    /// Returns `None` if there's no actor error received.
+    async fn try_find_root_actor_failure(
+        &mut self,
+        first_failure: Option<(Option<ActorId>, StreamError)>,
+    ) -> Option<ScoredStreamError> {
+        let mut later_errs = vec![];
+        // fetch more actor errors within a timeout
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            let mut uncollected_actors: HashSet<_> = self.actor_states.keys().cloned().collect();
+            if let Some((Some(failed_actor), _)) = &first_failure {
+                uncollected_actors.remove(failed_actor);
+            }
+            while !uncollected_actors.is_empty()
+                && let Some((actor_id, error)) = self.actor_failure_rx.recv().await
+            {
+                uncollected_actors.remove(&actor_id);
+                later_errs.push(error);
+            }
+        })
+        .await;
+
+        first_failure
+            .into_iter()
+            .map(|(_, err)| err)
+            .chain(later_errs.into_iter())
+            .map(|e| e.with_score())
+            .max_by_key(|e| e.score)
+    }
+
+    /// Report that a source has finished loading for a specific epoch
+    pub(super) fn report_source_load_finished(
+        &mut self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        _table_id: u32,
+        associated_source_id: u32,
+    ) {
+        // Find the correct partial graph state by matching the actor's partial graph id
+        if let Some(actor_state) = self.actor_states.get(&actor_id)
+            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
+            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
+        {
+            graph_state
+                .load_finished_source_ids
+                .entry(epoch.curr)
+                .or_default()
+                .insert(associated_source_id);
+        } else {
+            warn!(
+                ?epoch,
+                actor_id, associated_source_id, "ignore source load finished"
+            );
+        }
     }
 }
 
@@ -1019,7 +1107,7 @@ impl PartialGraphManagedBarrierState {
                 ManagedBarrierStateInner::Issued(IssuedState {
                     remaining_actors, ..
                 }) if remaining_actors.is_empty() => {}
-                ManagedBarrierStateInner::AllCollected(_) => {
+                ManagedBarrierStateInner::AllCollected { .. } => {
                     continue;
                 }
                 ManagedBarrierStateInner::Issued(_) => {
@@ -1037,9 +1125,19 @@ impl PartialGraphManagedBarrierState {
                 .map(|(actor, state)| state.to_pb(actor))
                 .collect();
 
+            let load_finished_source_ids = self
+                .load_finished_source_ids
+                .remove(&barrier_state.barrier.epoch.curr)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+
             let prev_state = replace(
                 &mut barrier_state.inner,
-                ManagedBarrierStateInner::AllCollected(create_mview_progress),
+                ManagedBarrierStateInner::AllCollected {
+                    create_mview_progress,
+                    load_finished_source_ids,
+                },
             );
 
             must_match!(prev_state, ManagedBarrierStateInner::Issued(IssuedState {
@@ -1061,6 +1159,7 @@ impl PartialGraphManagedBarrierState {
         Barrier,
         Option<HashSet<TableId>>,
         Vec<PbCreateMviewProgress>,
+        Vec<u32>,
     ) {
         let (popped_prev_epoch, barrier_state) = self
             .epoch_barrier_state_map
@@ -1069,13 +1168,17 @@ impl PartialGraphManagedBarrierState {
 
         assert_eq!(prev_epoch, popped_prev_epoch);
 
-        let create_mview_progress = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected(create_mview_progress) => {
-            create_mview_progress
+        let (create_mview_progress, load_finished_source_ids) = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected {
+            create_mview_progress,
+            load_finished_source_ids,
+        } => {
+            (create_mview_progress, load_finished_source_ids)
         });
         (
             barrier_state.barrier,
             barrier_state.table_ids,
             create_mview_progress,
+            load_finished_source_ids,
         )
     }
 }
@@ -1222,7 +1325,7 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
 
     use crate::executor::Barrier;
-    use crate::task::barrier_manager::managed_state::PartialGraphManagedBarrierState;
+    use crate::task::barrier_worker::managed_state::PartialGraphManagedBarrierState;
 
     #[tokio::test]
     async fn test_managed_state_add_actor() {

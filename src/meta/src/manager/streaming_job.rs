@@ -315,7 +315,10 @@ impl StreamingJob {
                 // No version check for materialized view, since `ALTER MATERIALIZED VIEW AS QUERY`
                 // is a full rewrite.
             }
-            StreamingJob::Sink(_, _) | StreamingJob::Index(_, _) => {
+            StreamingJob::Sink(_, _) => {
+                // No version check for sink, since sink fragment altering is triggered along with Table
+            }
+            StreamingJob::Index(_, _) => {
                 bail_not_implemented!("schema change for {}", self.job_type_str())
             }
         }
@@ -325,9 +328,5 @@ impl StreamingJob {
     // Check whether we should notify the FE about the `CREATING` catalog of this job.
     pub fn should_notify_creating(&self) -> bool {
         self.is_materialized_view() || matches!(self.create_type(), CreateType::Background)
-    }
-
-    pub fn is_sink_into_table(&self) -> bool {
-        matches!(self, Self::Sink(_, Some(_)))
     }
 }

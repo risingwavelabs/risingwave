@@ -27,12 +27,14 @@ use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::source::{PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplits};
+use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
-use crate::source::{SourceProperties, SplitImpl, TryFromBTreeMap};
+use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
 /// Policy for handling schema change failures
@@ -82,11 +84,16 @@ pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
 pub const CDC_BACKFILL_ENABLE_KEY: &str = "snapshot";
 pub const CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY: &str = "snapshot.interval";
 pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
+pub const CDC_BACKFILL_PARALLELISM: &str = "backfill.parallelism";
+pub const CDC_BACKFILL_NUM_ROWS_PER_SPLIT: &str = "backfill.num_rows_per_split";
+pub const CDC_BACKFILL_AS_EVEN_SPLITS: &str = "backfill.as_even_splits";
+pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_index";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
 pub const CDC_AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
 pub const CDC_SCHEMA_CHANGE_FAILURE_POLICY_KEY: &str = "schema.change.failure.policy";
+pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 
 // User can set strong-schema='true' to enable strong schema for mongo cdc source
 pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
@@ -278,5 +285,113 @@ impl<T: CdcSourceTypeTrait> crate::source::UnknownFields for CdcProperties<T> {
 impl<T: CdcSourceTypeTrait> CdcProperties<T> {
     pub fn get_source_type_pb(&self) -> SourceType {
         SourceType::from(T::source_type())
+    }
+}
+
+pub type CdcTableSnapshotSplitAssignment = HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>;
+
+pub fn build_pb_actor_cdc_table_snapshot_splits(
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
+) -> HashMap<u32, PbCdcTableSnapshotSplits> {
+    cdc_table_snapshot_split_assignment
+        .into_iter()
+        .map(|(actor_id, splits)| {
+            let splits = PbCdcTableSnapshotSplits {
+                splits: splits
+                    .into_iter()
+                    .map(|s| PbCdcTableSnapshotSplit {
+                        split_id: s.split_id,
+                        left_bound_inclusive: s.left_bound_inclusive,
+                        right_bound_exclusive: s.right_bound_exclusive,
+                    })
+                    .collect(),
+            };
+            (actor_id, splits)
+        })
+        .collect()
+}
+
+pub fn build_actor_cdc_table_snapshot_splits(
+    pb_cdc_table_snapshot_split_assignment: HashMap<u32, PbCdcTableSnapshotSplits>,
+) -> CdcTableSnapshotSplitAssignment {
+    pb_cdc_table_snapshot_split_assignment
+        .into_iter()
+        .map(|(actor_id, splits)| {
+            let splits = splits
+                .splits
+                .into_iter()
+                .map(|s| CdcTableSnapshotSplitRaw {
+                    split_id: s.split_id,
+                    left_bound_inclusive: s.left_bound_inclusive,
+                    right_bound_exclusive: s.right_bound_exclusive,
+                })
+                .collect();
+            (actor_id, splits)
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Hash, PartialEq)]
+pub struct CdcScanOptions {
+    /// Used by Used in non-parallel backfill, i.e. backfill V1.
+    pub disable_backfill: bool,
+    /// Used by non-parallelized backfill. The frequency of snapshot read resets for consuming the WAL backlog.
+    pub snapshot_barrier_interval: u32,
+    /// Used by non-parallelized backfill. The number of rows to fetch in a single batch when reading from an external table.
+    pub snapshot_batch_size: u32,
+    /// Used by parallelized backfill, i.e. backfill V2. The initial parallelism of parallel backfill.
+    pub backfill_parallelism: u32,
+    /// Used by parallelized backfill. The estimated number of rows per split used in splits generation.
+    pub backfill_num_rows_per_split: u64,
+    /// Used by parallelized backfill. For supported split column data type, assume an uniform distribution and adopt a much faster splits generation method.
+    pub backfill_as_even_splits: bool,
+    /// Used by parallelized backfill. Specify the index of primary key column to use as split column.
+    pub backfill_split_pk_column_index: u32,
+}
+
+impl Default for CdcScanOptions {
+    fn default() -> Self {
+        Self {
+            disable_backfill: false,
+            snapshot_barrier_interval: 1,
+            snapshot_batch_size: 1000,
+            backfill_parallelism: 1,
+            // 0 means disable backfill v2.
+            backfill_num_rows_per_split: 0,
+            backfill_as_even_splits: true,
+            backfill_split_pk_column_index: 0,
+        }
+    }
+}
+
+impl CdcScanOptions {
+    pub fn to_proto(&self) -> StreamCdcScanOptions {
+        StreamCdcScanOptions {
+            disable_backfill: self.disable_backfill,
+            snapshot_barrier_interval: self.snapshot_barrier_interval,
+            snapshot_batch_size: self.snapshot_batch_size,
+            backfill_parallelism: self.backfill_parallelism,
+            backfill_num_rows_per_split: self.backfill_num_rows_per_split,
+            backfill_as_even_splits: self.backfill_as_even_splits,
+            backfill_split_pk_column_index: self.backfill_split_pk_column_index,
+        }
+    }
+
+    pub fn from_proto(proto: &StreamCdcScanOptions) -> Self {
+        Self {
+            disable_backfill: proto.disable_backfill,
+            snapshot_barrier_interval: proto.snapshot_barrier_interval,
+            snapshot_batch_size: proto.snapshot_batch_size,
+            backfill_parallelism: proto.backfill_parallelism,
+            backfill_num_rows_per_split: proto.backfill_num_rows_per_split,
+            backfill_as_even_splits: proto.backfill_as_even_splits,
+            backfill_split_pk_column_index: proto.backfill_split_pk_column_index,
+        }
+    }
+
+    pub fn is_parallelized_backfill(&self) -> bool {
+        !self.disable_backfill
+            && self.backfill_num_rows_per_split > 0
+            && self.backfill_parallelism > 0
     }
 }

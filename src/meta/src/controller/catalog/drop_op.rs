@@ -198,9 +198,13 @@ impl CatalogController {
                 .count(&txn)
                 .await?;
             if creating != 0 {
-                return Err(MetaError::permission_denied(format!(
-                    "can not drop {creating} creating streaming job, please cancel them firstly"
-                )));
+                if creating == 1 && object_type == ObjectType::Sink {
+                    info!("dropping creating sink job, it will be cancelled");
+                } else {
+                    return Err(MetaError::permission_denied(format!(
+                        "can not drop {creating} creating streaming job, please cancel them firstly"
+                    )));
+                }
             }
         }
 
@@ -350,17 +354,6 @@ impl CatalogController {
                     .await
             }
         };
-
-        let fragment_mappings = removed_fragments
-            .iter()
-            .map(|fragment_id| PbFragmentWorkerSlotMapping {
-                fragment_id: *fragment_id as _,
-                mapping: None,
-            })
-            .collect();
-
-        self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
-            .await;
 
         Ok((
             ReleaseContext {

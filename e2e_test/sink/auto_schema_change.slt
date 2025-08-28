@@ -1,0 +1,266 @@
+# test auto schema change on table without specified pk
+
+statement ok
+create table t(id int, name string);
+
+statement error sink with auto schema change should have same pk as upstream table
+create sink s from t with (connector = 'blackhole', primary_key = 'id', auto.schema.change = 'true');
+
+statement error kafka sink does not support schema change
+create sink s from t with (connector = 'kafka', auto.schema.change = 'true');
+
+statement error auto schema change not supported for CREATE SINK AS QUERY
+create sink s as select * from t with (connector = 'blackhole', auto.schema.change = 'true');
+
+## test error on auto schema change on MV
+
+statement ok
+create materialized view m1 as select * from t;
+
+statement error auto schema change only support on TABLE, but got MaterializedView
+create sink s from m1 with (connector = 'blackhole', auto.schema.change = 'true');
+
+statement ok
+drop materialized view m1;
+
+## end
+
+## test error on generated columns and sink-into-table
+
+statement ok
+create table t1 (id int primary key, name string, g int  as id + 1);
+
+statement error auto schema change not supported for sink-into-table
+create sink s into t1 from t with (connector = 'blackhole', auto.schema.change = 'true');
+
+statement error auto schema change not supported for table with non-hidden generated column or sys column
+create sink s from t1 with (connector = 'blackhole', auto.schema.change = 'true');
+
+statement ok
+drop table t1;
+
+## end
+
+## test only support backfill type as ArrangementBackfill
+
+statement ok
+SET STREAMING_USE_ARRANGEMENT_BACKFILL=false;
+
+statement error auto schema change only support for ArrangementBackfill
+create sink s from t with (connector = 'blackhole', auto.schema.change = 'true');
+
+statement ok
+SET STREAMING_USE_ARRANGEMENT_BACKFILL=true;
+
+## end
+
+## test successful create sink and alter
+
+statement ok
+create sink s from t with (connector = 'blackhole', auto.schema.change = 'true');
+
+query TTTT
+describe s;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+"t._row_id"         serial              true      NULL
+distribution key    t._row_id           NULL      NULL
+table description   s                   NULL      NULL
+
+statement ok
+create sink s_unchange from t with (connector = 'blackhole');
+
+query TTTT
+describe s_unchange;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+"t._row_id"         serial              true      NULL
+distribution key    t._row_id           NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+alter table t add column name1 string;
+
+query TTTT
+describe s;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+"t._row_id"         serial              true      NULL
+name1               character varying   false     NULL
+distribution key    t._row_id           NULL      NULL
+table description   s                   NULL      NULL
+
+query TTTT
+describe s_unchange;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+"t._row_id"         serial              true      NULL
+distribution key    t._row_id           NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+drop sink s;
+
+statement ok
+drop sink s_unchange;
+
+statement ok
+drop table t
+
+# end
+
+# test auto schema change on table with specified pk
+
+statement ok
+create table t_with_pk(id int primary key, name string);
+
+statement error sink with auto schema change should have same pk as upstream table
+create sink s from t_with_pk with (connector = 'blackhole', primary_key = 'name', auto.schema.change = 'true');
+
+statement ok
+create sink s from t_with_pk with (connector = 'blackhole', primary_key = 'id',auto.schema.change = 'true');
+
+statement ok
+drop sink s;
+
+## test successful create sink and alter
+
+statement ok
+create sink s from t_with_pk with (connector = 'blackhole', auto.schema.change = 'true');
+
+query TTTT
+describe s;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+distribution key    id                  NULL      NULL
+table description   s                   NULL      NULL
+
+statement ok
+create sink s_unchange from t_with_pk with (connector = 'blackhole');
+
+query TTTT
+describe s_unchange;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+distribution key    id                  NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+alter table t_with_pk add column name1 string;
+
+query TTTT
+describe s;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+name1               character varying   false     NULL
+distribution key    id                  NULL      NULL
+table description   s                   NULL      NULL
+
+query TTTT
+describe s_unchange;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+distribution key    id                  NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+drop sink s;
+
+statement ok
+drop sink s_unchange;
+
+statement ok
+drop table t_with_pk;
+
+# end
+
+# test auto schema change on empty table
+
+statement ok
+create table empty_table;
+
+statement ok
+create sink s from empty_table with (connector = 'blackhole', auto.schema.change = 'true');
+
+
+query TTTT
+describe s;
+----
+"empty_table._row_id"         serial              true      NULL
+distribution key         empty_table._row_id           NULL      NULL
+table description       s                   NULL      NULL
+
+statement ok
+create sink s_unchange from empty_table with (connector = 'blackhole');
+
+query TTTT
+describe s_unchange;
+----
+"empty_table._row_id"         serial              true      NULL
+distribution key    empty_table._row_id           NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+alter table empty_table add column name1 string;
+
+query TTTT
+describe s;
+----
+"empty_table._row_id"         serial              true      NULL
+name1               character varying   false     NULL
+distribution key    empty_table._row_id           NULL      NULL
+table description   s                   NULL      NULL
+
+query TTTT
+describe s_unchange;
+----
+"empty_table._row_id"         serial              true      NULL
+distribution key    empty_table._row_id           NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+drop sink s;
+
+statement ok
+drop sink s_unchange;
+
+statement ok
+drop table empty_table;
+
+# end
+
+# error on auto schema change on cross database table
+statement ok
+create database d1;
+
+statement ok
+create database d2;
+
+statement ok
+set database to d1;
+
+statement ok
+create table table_in_other_database(id int, name string);
+
+statement ok
+set database to d2;
+
+statement error auto schema change sink does not support created from cross database table
+create sink s from d1.public.table_in_other_database with (connector = 'blackhole', auto.schema.change = 'true');
+
+statement ok
+drop database d1;
+
+connection other
+statement ok
+drop database d2;
+
+#end

@@ -26,8 +26,9 @@ use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     AlterDatabaseParam, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId,
-    PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME, TableId,
+    DEFAULT_SUPER_USER_FOR_ADMIN, DEFAULT_SUPER_USER_FOR_ADMIN_ID, DEFAULT_SUPER_USER_ID,
+    FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
@@ -62,7 +63,7 @@ use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
     EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    SystemParams,
+    RefreshRequest, RefreshResponse, SystemParams,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -75,7 +76,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
+use crate::catalog::{DatabaseId, SchemaId, SecretId, SinkId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
@@ -574,7 +575,7 @@ impl CatalogWriter for MockCatalogWriter {
             schema_catalog.get_index_by_id(&index_id).unwrap().clone()
         };
 
-        let index_table_id = index.index_table.id;
+        let index_table_id = index.index_table().id;
         let (database_id, schema_id) = self.drop_table_or_index_id(index_id.index_id);
         self.catalog
             .write()
@@ -585,11 +586,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
+    async fn drop_function(&self, _function_id: FunctionId, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
-    async fn drop_connection(&self, _connection_id: ConnectionId) -> Result<()> {
+    async fn drop_connection(&self, _connection_id: u32, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
@@ -932,6 +933,7 @@ impl UserInfoWriter for MockUserInfoWriter {
             UpdateField::CreateUser => user_info.can_create_user = update_user.can_create_user,
             UpdateField::AuthInfo => user_info.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => user_info.name.clone_from(&update_user.name),
+            UpdateField::Admin => user_info.is_admin = update_user.is_admin,
             UpdateField::Unspecified => unreachable!(),
         });
         lock.update_user(update_user);
@@ -1004,6 +1006,16 @@ impl MockUserInfoWriter {
             can_create_db: true,
             can_create_user: true,
             can_login: true,
+            ..Default::default()
+        });
+        user_info.write().create_user(UserInfo {
+            id: DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+            name: DEFAULT_SUPER_USER_FOR_ADMIN.to_owned(),
+            is_super: true,
+            can_create_db: true,
+            can_create_user: true,
+            can_login: true,
+            is_admin: true,
             ..Default::default()
         });
         Self {
@@ -1214,8 +1226,16 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 
-    async fn compact_table(&self, _table_id: TableId) -> RpcResult<u64> {
+    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<u64> {
         Ok(1)
+    }
+
+    async fn expire_iceberg_table_snapshots(&self, _sink_id: SinkId) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
+        Ok(RefreshResponse { status: None })
     }
 }
 

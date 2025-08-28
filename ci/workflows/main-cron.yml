@@ -67,7 +67,7 @@ steps:
           <<: *docker-compose
           environment:
           - GITHUB_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "build simulation test"
@@ -164,7 +164,7 @@ steps:
         - "build-other"
       plugins:
         - docker-compose#v5.5.0:
-            <<: *docker-compose-standard
+            <<: *docker-compose
             run: source-test-env
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 25
@@ -241,7 +241,7 @@ steps:
           <<: *docker-compose
           environment:
           - CODECOV_TOKEN
-    timeout_in_minutes: 22
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "unit test (madsim)"
@@ -253,7 +253,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/
     plugins:
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 50
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   - label: "integration test (madsim) - scale"

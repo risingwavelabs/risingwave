@@ -62,6 +62,7 @@ members = [
     "src/utils/futures_util",
     "src/utils/iter_util",
     "src/utils/local_stats_alloc",
+    "src/utils/openai_embedding_service",
     "src/utils/pgwire",
     "src/utils/resource_util",
     "src/utils/runtime",
@@ -113,6 +114,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88
 ] }
 arc-swap = "1"
 arrow-udf-runtime = "0.8.0"
+async-openai = "0.29.0"
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = { version = "0.3.2-alpha.2", features = ["serde", "attributes"] }
 aws-config = { version = "1", default-features = false, features = [
@@ -152,12 +154,7 @@ criterion = { version = "0.5", features = ["async_futures"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
-# foyer = { version = "0.17.3", features = ["serde", "tracing", "nightly"] }
-foyer = { git = "http://github.com/foyer-rs/foyer", rev = "77eef58d1f231ee50cd601f9ad69c5e3db3415f9", features = [
-    "serde",
-    "tracing",
-    "nightly",
-] }
+foyer = { version = "0.19.0", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.8", default-features = false, features = ["std"] }
 hashbrown = { version = "0.15", features = [
@@ -167,13 +164,14 @@ hashbrown = { version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a43641762eafe135498b886db2257102f3069484", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "49e9814409752db218dbed1aa552c2efe80ee2a3", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a43641762eafe135498b886db2257102f3069484" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a43641762eafe135498b886db2257102f3069484" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "49e9814409752db218dbed1aa552c2efe80ee2a3" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "49e9814409752db218dbed1aa552c2efe80ee2a3" }
+
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = "0.1.4"
@@ -203,6 +201,7 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
 ] }
 redis = { version = "0.28" }
 regex = "1.11"
+reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
 risingwave_batch_executors = { path = "./src/batch/executors" }
@@ -273,11 +272,11 @@ sqlx = { version = "0.8.2", default-features = false, features = [
 ] }
 thiserror = { git = "https://github.com/BugenZhao/thiserror.git", tag = "bz-provide-3" }
 thiserror-ext = { version = "0.3", features = ["backtrace"] }
-tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
+tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",
     "stats",
-], rev = "64a2d9" }
+], rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = [
     "net",
     "fs",
@@ -392,7 +391,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "793d612e8f660fcb29c06b689177c588a9c2dd81" }
+faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.

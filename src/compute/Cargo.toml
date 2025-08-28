@@ -62,6 +62,7 @@ futures-async-stream = { workspace = true }
 rand = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_stream = { workspace = true, features = ["test"] }
 tempfile = "3"
 tokio-retry = "0.3"
 

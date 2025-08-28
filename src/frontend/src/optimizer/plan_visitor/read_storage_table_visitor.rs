@@ -16,9 +16,9 @@ use std::collections::HashSet;
 
 use risingwave_common::catalog::TableId;
 
-use super::{DefaultBehavior, DefaultValue};
+use super::{BatchPlanVisitor, DefaultBehavior, DefaultValue};
 use crate::optimizer::BatchPlanRoot;
-use crate::optimizer::plan_node::{BatchLogSeqScan, BatchLookupJoin};
+use crate::optimizer::plan_node::{BatchLogSeqScan, BatchLookupJoin, BatchVectorSearch};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
@@ -34,7 +34,7 @@ impl ReadStorageTableVisitor {
     }
 }
 
-impl PlanVisitor for ReadStorageTableVisitor {
+impl BatchPlanVisitor for ReadStorageTableVisitor {
     type Result = ();
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
@@ -44,14 +44,18 @@ impl PlanVisitor for ReadStorageTableVisitor {
     }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        self.tables.insert(plan.core().table_desc.table_id);
+        self.tables.insert(plan.core().table_catalog.id);
     }
 
     fn visit_batch_log_seq_scan(&mut self, plan: &BatchLogSeqScan) -> Self::Result {
-        self.tables.insert(plan.core().table_desc.table_id);
+        self.tables.insert(plan.core().table.id);
     }
 
     fn visit_batch_lookup_join(&mut self, plan: &BatchLookupJoin) -> Self::Result {
-        self.tables.insert(plan.right_table_desc().table_id);
+        self.tables.insert(plan.right_table().id);
+    }
+
+    fn visit_batch_vector_search(&mut self, plan: &BatchVectorSearch) -> Self::Result {
+        self.tables.insert(plan.core.index_table_id);
     }
 }

@@ -33,14 +33,12 @@ pub async fn handle_alter_resource_group(
     let session = handler_args.session;
     let db_name = session.database();
     let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(&db_name, obj_name.clone())?;
+        Binder::resolve_schema_qualified_name(&db_name, &obj_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    risingwave_common::license::Feature::ResourceGroup
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
+    risingwave_common::license::Feature::ResourceGroup.check_available()?;
 
     let table_id = {
         let reader = session.env().catalog_reader().read_guard();

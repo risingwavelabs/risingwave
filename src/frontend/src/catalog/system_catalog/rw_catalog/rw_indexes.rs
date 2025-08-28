@@ -15,6 +15,7 @@
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 
+use crate::catalog::index_catalog::IndexType;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
@@ -47,16 +48,19 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
 
     Ok(schemas
         .flat_map(|schema| {
-            schema
-                .iter_index_with_acl(current_user)
-                .map(|index| RwIndex {
+            schema.iter_index_with_acl(current_user).map(|index| {
+                let (index_table, index_columns_len) = match &index.index_type {
+                    IndexType::Table(index) => (&index.index_table, index.index_columns_len),
+                    IndexType::Vector(index) => (&index.index_table, 1),
+                };
+                RwIndex {
                     id: index.id.index_id as i32,
                     name: index.name.clone(),
                     primary_table_id: index.primary_table.id().table_id as i32,
                     key_columns: index
                         .index_item
                         .iter()
-                        .take(index.index_columns_len as usize)
+                        .take(index_columns_len as usize)
                         .map(|index| {
                             let ind = if let Some(input_ref) = index.as_input_ref() {
                                 input_ref.index() + 1
@@ -69,7 +73,7 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                     include_columns: index
                         .index_item
                         .iter()
-                        .skip(index.index_columns_len as usize)
+                        .skip(index_columns_len as usize)
                         .map(|index| {
                             let ind = if let Some(input_ref) = index.as_input_ref() {
                                 input_ref.index() + 1
@@ -80,14 +84,15 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                         })
                         .collect(),
                     schema_id: schema.id() as i32,
-                    owner: index.index_table.owner as i32,
-                    definition: index.index_table.create_sql(),
+                    owner: index.index_table().owner as i32,
+                    definition: index_table.create_sql(),
                     acl: vec![],
                     initialized_at: index.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: index.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: index.initialized_at_cluster_version.clone(),
                     created_at_cluster_version: index.created_at_cluster_version.clone(),
-                })
+                }
+            })
         })
         .collect())
 }

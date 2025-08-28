@@ -286,6 +286,13 @@ message AlterParallelismRequest {
 
 message AlterParallelismResponse {}
 
+message AlterCdcTableBackfillParallelismRequest {
+  uint32 table_id = 1;
+  meta.TableParallelism parallelism = 2;
+}
+
+message AlterCdcTableBackfillParallelismResponse {}
+
 message AlterResourceGroupRequest {
   uint32 table_id = 1;
   optional string resource_group = 2;
@@ -330,6 +337,7 @@ message CreateFunctionResponse {
 
 message DropFunctionRequest {
   uint32 function_id = 1;
+  bool cascade = 2;
 }
 
 message DropFunctionResponse {
@@ -503,6 +511,7 @@ message ListConnectionsResponse {
 
 message DropConnectionRequest {
   uint32 connection_id = 1;
+  bool cascade = 2;
 }
 
 message DropConnectionResponse {
@@ -569,14 +578,22 @@ message AlterDatabaseParamResponse {
   WaitVersion version = 2;
 }
 
-message CompactTableRequest {
-  uint32 table_id = 1;
+message CompactIcebergTableRequest {
+  uint32 sink_id = 1;
 }
 
-message CompactTableResponse {
+message CompactIcebergTableResponse {
   common.Status status = 1;
   // The compaction task ID that was triggered
   uint64 task_id = 2;
+}
+
+message ExpireIcebergTableSnapshotsRequest {
+  uint32 sink_id = 1;
+}
+
+message ExpireIcebergTableSnapshotsResponse {
+  common.Status status = 1;
 }
 
 service DdlService {
@@ -622,5 +639,7 @@ service DdlService {
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
-  rpc CompactTable(CompactTableRequest) returns (CompactTableResponse);
+  rpc CompactIcebergTable(CompactIcebergTableRequest) returns (CompactIcebergTableResponse);
+  rpc ExpireIcebergTableSnapshots(ExpireIcebergTableSnapshotsRequest) returns (ExpireIcebergTableSnapshotsResponse);
+  rpc AlterCdcTableBackfillParallelism(AlterCdcTableBackfillParallelismRequest) returns (AlterCdcTableBackfillParallelismResponse);
 }

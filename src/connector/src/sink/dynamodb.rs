@@ -35,7 +35,7 @@ use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
-use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
+use super::{Result, Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::AwsAuthProps;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
@@ -122,7 +122,6 @@ impl EnforceSecret for DynamoDbSink {
 }
 
 impl Sink for DynamoDbSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<DynamoDbSinkWriter>;
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
@@ -364,7 +363,9 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
         DataType::Map(_m) => {
             return Err(SinkError::DynamoDb(anyhow!("map is not supported yet")));
         }
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Vector(_) => {
+            return Err(SinkError::DynamoDb(anyhow!("vector is not supported yet")));
+        }
     };
     Ok(attr)
 }

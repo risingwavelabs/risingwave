@@ -367,6 +367,7 @@ pub mod data_types {
                 | DataType::Jsonb
                 | DataType::Serial
                 | DataType::Int256
+                | DataType::Vector(_)
         };
     }
     pub use _simple_data_types as simple;
@@ -384,13 +385,16 @@ pub mod data_types {
     fn _simple_composite_data_types_exhausted(dt: DataType) {
         match dt {
             simple!() => {}
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             composite!() => {}
         }
     }
 }
 
 impl DataType {
+    /// Same as pgvector; unsure how it was chosen there
+    /// <https://github.com/pgvector/pgvector/blob/v0.8.0/README.md#vector-type>
+    pub const VEC_MAX_SIZE: usize = 16000;
+
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
 
@@ -601,8 +605,6 @@ impl DataType {
     pub fn can_alter(&self) -> Option<bool> {
         match self {
             data_types::simple!() => None,
-            DataType::Vector(_) => None,
-
             DataType::Struct(struct_type) => {
                 // As long as we meet a struct type, we can check its `ids` field to determine if
                 // it can be altered.
@@ -1040,8 +1042,7 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
-            DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
+            DataType::Vector(_) | DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
         };
@@ -1181,7 +1182,7 @@ impl ScalarRefImpl<'_> {
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
             Self::Map(v) => v.memcmp_serialize(ser)?,
-            Self::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            Self::Vector(v) => v.memcmp_serialize(ser)?,
         };
         Ok(())
     }
@@ -1237,7 +1238,9 @@ impl ScalarImpl {
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
             Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
-            Ty::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            Ty::Vector(dimension) => {
+                VectorVal::memcmp_deserialize(*dimension, de)?.to_scalar_value()
+            }
         })
     }
 
@@ -1415,11 +1418,17 @@ mod tests {
                     ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
                 ),
+                DataTypeName::Vector => (
+                    ScalarImpl::Vector(VectorVal::from_iter(
+                        (0..VectorVal::TEST_VECTOR_DIMENSION)
+                            .map(|i| ((i + 1) as f32).try_into().unwrap()),
+                    )),
+                    DataType::Vector(VectorVal::TEST_VECTOR_DIMENSION),
+                ),
                 DataTypeName::Map => {
                     // map is not hashable
                     continue;
                 }
-                DataTypeName::Vector => continue, // todo!("VECTOR_PLACEHOLDER"),
             };
 
             test(Some(scalar), data_type.clone());

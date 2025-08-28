@@ -14,13 +14,13 @@
 
 use itertools::Itertools;
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
+use crate::optimizer::plan_node::*;
 use crate::utils::IndexSet;
 
 /// Merge [`LogicalAgg`] <- [`LogicalProject`] to [`LogicalAgg`].
 pub struct AggProjectMergeRule {}
-impl Rule for AggProjectMergeRule {
+impl Rule<Logical> for AggProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_logical_agg()?;
         let agg = agg.core().clone();

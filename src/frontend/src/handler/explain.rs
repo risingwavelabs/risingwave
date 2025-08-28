@@ -35,7 +35,7 @@ use crate::handler::create_table::handle_create_table_plan;
 use crate::optimizer::OptimizerContext;
 use crate::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Convention, Explain};
+use crate::optimizer::plan_node::{BatchPlanRef, Explain, StreamPlanRef};
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::{explain_stream_graph, explain_stream_graph_as_dot};
@@ -51,6 +51,11 @@ pub async fn do_handle_explain(
     let mut batch_plan_fragmenter_fmt = ExplainFormat::Json;
 
     let session = handler_args.session.clone();
+
+    enum PhysicalPlanRef {
+        Stream(StreamPlanRef),
+        Batch(BatchPlanRef),
+    }
 
     {
         let (plan, table, context) = match stmt {
@@ -79,7 +84,7 @@ pub async fn do_handle_explain(
                     explain_options,
                     format_encode,
                     cdc_table_info,
-                    name.clone(),
+                    &name,
                     columns,
                     wildcard_idx,
                     constraints,
@@ -93,14 +98,14 @@ pub async fn do_handle_explain(
                 )
                 .await?;
                 let context = plan.ctx();
-                (Ok(plan), Some(table), context)
+                (Ok(PhysicalPlanRef::Stream(plan)), Some(table), context)
             }
             Statement::CreateSink { stmt } => {
                 let plan = gen_sink_plan(handler_args, stmt, Some(explain_options), false)
                     .await
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
-                (Ok(plan), None, context)
+                (Ok(PhysicalPlanRef::Stream(plan)), None, context)
             }
 
             Statement::FetchCursor {
@@ -115,7 +120,7 @@ pub async fn do_handle_explain(
                     .await
                     .map(|x| x.plan)?;
                 let context = plan.ctx();
-                (Ok(plan), None, context)
+                (Ok(PhysicalPlanRef::Batch(plan)), None, context)
             }
 
             // For other queries without `await` point, we can keep a copy of reference to the
@@ -142,7 +147,7 @@ pub async fn do_handle_explain(
                         columns,
                         emit_mode,
                     )
-                    .map(|(plan, table)| (plan, Some(table))),
+                    .map(|(plan, table)| (PhysicalPlanRef::Stream(plan), Some(table))),
                     Statement::CreateView {
                         materialized: false,
                         ..
@@ -162,6 +167,7 @@ pub async fn do_handle_explain(
                     Statement::CreateIndex {
                         name,
                         table_name,
+                        method,
                         columns,
                         include,
                         distributed_by,
@@ -175,25 +181,32 @@ pub async fn do_handle_explain(
                             schema_name,
                             table,
                             index_table_name,
+                            method,
                             columns,
                             include,
                             distributed_by,
                         )
                     }
-                    .map(|(plan, index_table, _index)| (plan, Some(index_table))),
+                    .map(|(plan, index_table, _index)| {
+                        (PhysicalPlanRef::Stream(plan), Some(index_table))
+                    }),
 
                     // -- Batch Queries --
                     Statement::Insert { .. }
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context, stmt).map(|x| (x.plan, None))
+                        gen_batch_plan_by_statement(&session, context, stmt)
+                            .map(|x| (PhysicalPlanRef::Batch(x.plan), None))
                     }
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
                 }?;
 
-                let context = plan.ctx().clone();
+                let context = match &plan {
+                    PhysicalPlanRef::Stream(plan) => plan.ctx(),
+                    PhysicalPlanRef::Batch(plan) => plan.ctx(),
+                };
 
                 (Ok(plan) as Result<_>, table, context)
             }
@@ -213,9 +226,8 @@ pub async fn do_handle_explain(
         match explain_type {
             ExplainType::DistSql => {
                 if let Ok(plan) = &plan {
-                    match plan.convention() {
-                        Convention::Logical => unreachable!(),
-                        Convention::Batch => {
+                    match plan {
+                        PhysicalPlanRef::Batch(plan) => {
                             let worker_node_manager_reader = WorkerNodeSelector::new(
                                 session.env().worker_node_manager_ref(),
                                 session.is_barrier_read(),
@@ -233,7 +245,7 @@ pub async fn do_handle_explain(
                                 ExplainFormat::Json
                             }
                         }
-                        Convention::Stream => {
+                        PhysicalPlanRef::Stream(plan) => {
                             let graph = build_graph(plan.clone(), None)?;
                             let table = table.map(|x| x.to_prost());
                             if explain_format == ExplainFormat::Dot {
@@ -251,7 +263,11 @@ pub async fn do_handle_explain(
             }
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
-                if !explain_trace && let Ok(plan) = &plan {
+                if !explain_trace && let Ok(physical_plan) = &plan {
+                    let plan = match &physical_plan {
+                        PhysicalPlanRef::Stream(plan) => plan as &dyn Explain,
+                        PhysicalPlanRef::Batch(plan) => plan as &dyn Explain,
+                    };
                     match explain_format {
                         ExplainFormat::Text => {
                             blocks.push(plan.explain_to_string());
@@ -260,7 +276,8 @@ pub async fn do_handle_explain(
                         ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
                         ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
                         ExplainFormat::Dot => {
-                            if explain_backfill {
+                            if explain_backfill && let PhysicalPlanRef::Stream(plan) = physical_plan
+                            {
                                 let dot_formatted_backfill_order =
                                     explain_backfill_order_in_dot_format(
                                         &session,

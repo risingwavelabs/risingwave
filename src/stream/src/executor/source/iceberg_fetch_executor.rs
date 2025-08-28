@@ -79,6 +79,8 @@ struct ChunksWithState {
 
 pub(super) use state::PersistedFileScanTask;
 mod state {
+    use std::sync::Arc;
+
     use anyhow::Context;
     use iceberg::expr::BoundPredicate;
     use iceberg::scan::FileScanTask;
@@ -178,7 +180,7 @@ mod state {
                 predicate,
                 deletes: deletes
                     .into_iter()
-                    .map(PersistedFileScanTask::to_task)
+                    .map(|task| Arc::new(PersistedFileScanTask::to_task(task)))
                     .collect(),
                 sequence_number,
                 equality_ids,
@@ -216,11 +218,34 @@ mod state {
                 predicate,
                 deletes: deletes
                     .into_iter()
-                    .map(PersistedFileScanTask::from_task)
+                    .map(PersistedFileScanTask::from_task_ref)
                     .collect(),
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+            }
+        }
+
+        fn from_task_ref(task: Arc<FileScanTask>) -> Self {
+            Self {
+                start: task.start,
+                length: task.length,
+                record_count: task.record_count,
+                data_file_path: task.data_file_path.clone(),
+                data_file_content: task.data_file_content,
+                data_file_format: task.data_file_format,
+                schema: task.schema.clone(),
+                project_field_ids: task.project_field_ids.clone(),
+                predicate: task.predicate.clone(),
+                deletes: task
+                    .deletes
+                    .iter()
+                    .cloned()
+                    .map(PersistedFileScanTask::from_task_ref)
+                    .collect(),
+                sequence_number: task.sequence_number,
+                equality_ids: task.equality_ids.clone(),
+                file_size_in_bytes: task.file_size_in_bytes,
             }
         }
     }

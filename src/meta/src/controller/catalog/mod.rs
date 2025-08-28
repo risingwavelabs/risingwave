@@ -58,7 +58,7 @@ use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
+use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
@@ -433,9 +433,6 @@ impl CatalogController {
         } else {
             filter_condition
         };
-
-        // Find `Creating` background streaming job of sink into table, they need to be cleaned up.
-        // TODO(August): remove it when background sink into table is unified.
 
         let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
@@ -1088,6 +1085,16 @@ impl CatalogControllerInner {
                 .flat_map(|(_, txs)| txs.into_iter())
             {
                 let _ = tx.send(Err(err.clone()));
+            }
+        }
+    }
+
+    pub(crate) fn notify_cancelled(&mut self, database_id: DatabaseId, id: ObjectId) {
+        if let Some(creating_tables) = self.creating_table_finish_notifier.get_mut(&database_id)
+            && let Some(tx_list) = creating_tables.remove(&id)
+        {
+            for tx in tx_list {
+                let _ = tx.send(Err("Cancelled".to_owned()));
             }
         }
     }
