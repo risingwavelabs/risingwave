@@ -23,11 +23,15 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::expr_visitable::ExprVisitable;
 use super::generic::{AliasedExpr, GenericPlanRef, PhysicalPlanRef};
-use super::stream::StreamPlanRef;
+use super::stream::StreamPlanNodeMetadata;
 use super::utils::{Distill, TableCatalogBuilder, childless_record, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, Stream, StreamNode};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
+};
 use crate::catalog::TableCatalog;
+use crate::error::Result;
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, collect_input_refs};
+use crate::optimizer::property::reject_upsert_input;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
@@ -72,7 +76,11 @@ impl Distill for StreamMaterializedExprs {
 
 impl StreamMaterializedExprs {
     /// Creates a new `StreamMaterializedExprs` node.
-    pub fn new(input: PlanRef, exprs: Vec<ExprImpl>, field_names: BTreeMap<usize, String>) -> Self {
+    pub fn new(
+        input: PlanRef,
+        exprs: Vec<ExprImpl>,
+        field_names: BTreeMap<usize, String>,
+    ) -> Result<Self> {
         let input_watermark_cols = input.watermark_columns();
 
         // Determine if we have a watermark column for state cleaning
@@ -106,19 +114,21 @@ impl StreamMaterializedExprs {
             input.stream_key().map(|v| v.to_vec()),
             fd_set,
             input.distribution().clone(),
-            input.append_only(),
+            // Note: even though we persist the evaluation results, there are still passthrough columns.
+            // We still cannot handle upsert input.
+            reject_upsert_input!(input),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
 
-        Self {
+        Ok(Self {
             base,
             input,
             exprs,
             field_names,
             state_clean_col_idx,
-        }
+        })
     }
 
     fn derive_schema(
@@ -202,16 +212,16 @@ impl StreamMaterializedExprs {
     }
 }
 
-impl PlanTreeNodeUnary for StreamMaterializedExprs {
+impl PlanTreeNodeUnary<Stream> for StreamMaterializedExprs {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.exprs.clone(), self.field_names.clone())
+        Self::new(input, self.exprs.clone(), self.field_names.clone()).unwrap()
     }
 }
-impl_plan_tree_node_for_unary! { StreamMaterializedExprs }
+impl_plan_tree_node_for_unary! { Stream, StreamMaterializedExprs }
 
 impl StreamNode for StreamMaterializedExprs {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -227,7 +237,7 @@ impl StreamNode for StreamMaterializedExprs {
     }
 }
 
-impl ExprRewritable for StreamMaterializedExprs {
+impl ExprRewritable<Stream> for StreamMaterializedExprs {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -238,7 +248,9 @@ impl ExprRewritable for StreamMaterializedExprs {
             .iter()
             .map(|e| r.rewrite_expr(e.clone()))
             .collect();
-        Self::new(self.input.clone(), new_exprs, self.field_names.clone()).into()
+        Self::new(self.input.clone(), new_exprs, self.field_names.clone())
+            .unwrap()
+            .into()
     }
 }
 

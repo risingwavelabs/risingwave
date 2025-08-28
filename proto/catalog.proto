@@ -187,7 +187,8 @@ message Sink {
   repeated plan_common.ColumnCatalog columns = 5;
   // Primary key derived from the SQL by the frontend.
   repeated common.ColumnOrder plan_pk = 6;
-  repeated uint32 dependent_relations = 7 [deprecated = true];
+  reserved 7;
+  reserved "dependent_relations";
   repeated int32 distribution_key = 8;
   // User-defined primary key indices for the upsert sink.
   repeated int32 downstream_pk = 9;
@@ -221,6 +222,8 @@ message Sink {
 
   // only for the sink whose target is a table. Columns of the target table when the sink is created. At this point all the default columns of the target table are all handled by the project operator in the sink plan.
   repeated plan_common.ColumnCatalog original_target_columns = 26;
+
+  optional uint32 auto_refresh_schema_from_table = 27;
 }
 
 message Subscription {
@@ -344,6 +347,10 @@ message Function {
   optional bool is_async = 20;
   optional bool is_batched = 21;
 
+  optional uint64 created_at_epoch = 22;
+  // Cluster version (tracked by git commit) when created
+  optional string created_at_cluster_version = 23;
+
   oneof kind {
     ScalarFunction scalar = 11;
     TableFunction table = 12;
@@ -352,6 +359,17 @@ message Function {
   message ScalarFunction {}
   message TableFunction {}
   message AggregateFunction {}
+}
+
+message FlatIndexConfig {}
+
+message VectorIndexInfo {
+  uint32 dimension = 1;
+  common.DistanceType distance_type = 2;
+  oneof config {
+    // reserve 64 general configs
+    FlatIndexConfig flat = 65;
+  }
 }
 
 // Includes full information about a table.
@@ -367,6 +385,7 @@ message Table {
     MATERIALIZED_VIEW = 2;
     INDEX = 3;
     INTERNAL = 4;
+    VECTOR_INDEX = 5;
   }
 
   message TableVersion {
@@ -390,8 +409,8 @@ message Table {
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
   repeated common.ColumnOrder pk = 6;
-  // For cdc table created from a cdc source, here records the source id.
-  repeated uint32 dependent_relations = 8; // TODO(rc): deprecate this by passing dependencies via `Request` message
+  reserved 8;
+  reserved "dependent_relations";
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
   }
@@ -495,6 +514,13 @@ message Table {
   // NOTICE: when it is "None", the watermark column should be the first column in the pk
   optional int32 clean_watermark_index_in_pk = 44;
 
+  // Whether the table supports manual refresh operation:
+  // reload data from external source and emit messages based on the diff with current data.
+  bool refreshable = 45;
+
+  // only exist when table_type is VECTOR_INDEX.
+  optional VectorIndexInfo vector_index_info = 46;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
@@ -517,7 +543,8 @@ message View {
   uint32 owner = 5;
   map<string, string> properties = 6;
   string sql = 7;
-  repeated uint32 dependent_relations = 8;
+  reserved 8;
+  reserved "dependent_relations";
   // User-specified column names.
   repeated plan_common.Field columns = 9;
 }

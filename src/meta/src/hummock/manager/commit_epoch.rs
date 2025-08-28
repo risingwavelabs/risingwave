@@ -16,8 +16,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::default::compaction_config;
+use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
@@ -64,6 +65,8 @@ pub struct CommitEpochInfo {
     pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
+
+    pub truncate_tables: HashSet<TableId>,
 }
 
 impl HummockManager {
@@ -78,6 +81,7 @@ impl HummockManager {
             change_log_delta,
             vector_index_delta,
             tables_to_commit,
+            truncate_tables,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
         let _timer = start_measure_real_process_timer!(self, "commit_epoch");
@@ -194,6 +198,22 @@ impl HummockManager {
         let group_id_to_sub_levels =
             rewrite_commit_sstables_to_sub_level(commit_sstables, &group_id_to_config);
 
+        // build group_id to truncate tables
+        let mut group_id_to_truncate_tables: HashMap<u64, Vec<TableId>> = HashMap::new();
+        for table_id in &truncate_tables {
+            if let Some(compaction_group_id) = table_compaction_group_mapping.get(table_id) {
+                group_id_to_truncate_tables
+                    .entry(*compaction_group_id)
+                    .or_default()
+                    .push(*table_id);
+            } else {
+                bail!(
+                    "table {} doesn't belong to any compaction group, skip truncating",
+                    table_id
+                );
+            }
+        }
+
         let time_travel_delta = version.pre_commit_epoch(
             &tables_to_commit,
             new_compaction_groups,
@@ -202,7 +222,9 @@ impl HummockManager {
             new_table_watermarks,
             change_log_delta,
             vector_index_delta,
+            group_id_to_truncate_tables,
         );
+
         if should_mark_next_time_travel_version_snapshot(&time_travel_delta) {
             // Unable to invoke mark_next_time_travel_version_snapshot because versioning is already mutable borrowed.
             versioning.time_travel_snapshot_interval_counter = u64::MAX;

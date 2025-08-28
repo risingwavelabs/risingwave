@@ -14,8 +14,7 @@
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalHopWindow};
 use crate::utils::Condition;
 
@@ -41,7 +40,7 @@ use crate::utils::Condition;
 ///  Domain        Input
 /// ```
 pub struct ApplyHopWindowTransposeRule {}
-impl Rule for ApplyHopWindowTransposeRule {
+impl Rule<Logical> for ApplyHopWindowTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =

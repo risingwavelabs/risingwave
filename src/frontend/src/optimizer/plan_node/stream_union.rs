@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, watermark_pretty};
-use super::{ExprRewritable, PlanRef, generic};
+use super::{ExprRewritable, StreamPlanRef as PlanRef, generic};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
@@ -44,6 +44,12 @@ impl StreamUnion {
     }
 
     pub fn new_with_dist(core: generic::Union<PlanRef>, dist: Distribution) -> Self {
+        assert!(
+            core.all,
+            "After UnionToDistinctRule, union should become union all"
+        );
+        assert!(!core.inputs.is_empty());
+
         let inputs = &core.inputs;
         let ctx = core.ctx();
 
@@ -64,10 +70,34 @@ impl StreamUnion {
             watermark_columns.insert(idx, ctx.next_watermark_group_id());
         }
 
+        let kind = if core.source_col.is_some() {
+            // There's no handling on key conflict in executor implementation. However, in most cases
+            // there's a `source_col` as a part of stream key, indicating which input the row comes from,
+            // there won't be actual key conflict and we can safely call `merge`.
+            (inputs.iter().map(|i| i.stream_kind()))
+                .reduce(StreamKind::merge)
+                .unwrap()
+        } else {
+            // No `source_col`, typically used in a `TABLE` plan to merge inputs from external source,
+            // upstream sink-into-table jobs, and DML.
+            if inputs.len() == 1 {
+                // Single input. Follow the input's kind.
+                inputs[0].stream_kind()
+            } else if inputs.iter().all(|x| x.stream_kind().is_append_only()) {
+                // Special case for append-only table. Either there will be a `RowIdGen` following the `Union`,
+                // or there will be a `Materialize` with conflict handling enabled. In both cases there
+                // will be no key conflict, so we can treat the merged stream as append-only here.
+                StreamKind::AppendOnly
+            } else {
+                // Otherwise we must treat it as upsert.
+                StreamKind::Upsert
+            }
+        };
+
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            inputs.iter().all(|x| x.append_only()),
+            kind,
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
             MonotonicityMap::new(),
@@ -87,12 +117,12 @@ impl Distill for StreamUnion {
     }
 }
 
-impl PlanTreeNode for StreamUnion {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Stream> for StreamUnion {
+    fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         smallvec::SmallVec::from_vec(self.core.inputs.clone())
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         let mut new = self.core.clone();
         new.inputs = inputs.to_vec();
         let dist = self.distribution().clone();
@@ -106,6 +136,6 @@ impl StreamNode for StreamUnion {
     }
 }
 
-impl ExprRewritable for StreamUnion {}
+impl ExprRewritable<Stream> for StreamUnion {}
 
 impl ExprVisitable for StreamUnion {}

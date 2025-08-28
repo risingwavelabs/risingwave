@@ -60,6 +60,12 @@ pub async fn handle_alter_system(
             handler_args.session.reset_config(param_name.as_str())?;
         }
     } else {
+        if !handler_args.session.is_super_user() {
+            return Err(ErrorCode::PermissionDenied(
+                "must be superuser to execute ALTER SYSTEM command".to_owned(),
+            )
+            .into());
+        }
         let params = meta_client.set_system_param(param_name, value).await?;
         if let Some(params) = params {
             if params.barrier_interval_ms() >= NOTICE_BARRIER_INTERVAL_MS {

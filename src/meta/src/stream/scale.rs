@@ -61,6 +61,7 @@ pub struct WorkerReschedule {
 }
 
 pub struct CustomFragmentInfo {
+    pub job_id: u32,
     pub fragment_id: u32,
     pub fragment_type_mask: FragmentTypeMask,
     pub distribution_type: PbFragmentDistributionType,
@@ -90,6 +91,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use super::SourceChange;
 use crate::controller::id::IdCategory;
 use crate::controller::utils::filter_workers_by_resource_group;
+use crate::stream::cdc::assign_cdc_table_snapshot_splits_impl;
 
 // The debug implementation is arbitrary. Just used in debug logs.
 #[derive(Educe)]
@@ -524,6 +526,7 @@ impl ScaleController {
                     related_jobs.get(&job_id).expect("job not found");
 
                 let fragment = CustomFragmentInfo {
+                    job_id: job_id as _,
                     fragment_id: fragment_id as _,
                     fragment_type_mask: fragment_type_mask.into(),
                     distribution_type: distribution_type.into(),
@@ -1351,6 +1354,25 @@ impl ScaleController {
                 .cloned()
                 .unwrap_or_default();
 
+            let cdc_table_snapshot_split_assignment = if fragment
+                .fragment_type_mask
+                .contains(FragmentTypeFlag::StreamCdcScan)
+            {
+                assign_cdc_table_snapshot_splits_impl(
+                    fragment.job_id,
+                    fragment_actors_after_reschedule
+                        .get(&fragment_id)
+                        .unwrap()
+                        .keys()
+                        .copied()
+                        .collect(),
+                    self.env.meta_store_ref(),
+                )
+                .await?
+            } else {
+                HashMap::default()
+            };
+
             reschedule_fragment.insert(
                 fragment_id,
                 Reschedule {
@@ -1362,6 +1384,7 @@ impl ScaleController {
                     downstream_fragment_ids,
                     actor_splits,
                     newly_created_actors: Default::default(),
+                    cdc_table_snapshot_split_assignment,
                 },
             );
         }
@@ -1653,6 +1676,7 @@ impl ScaleController {
     pub async fn generate_job_reschedule_plan(
         &self,
         policy: JobReschedulePolicy,
+        generate_plan_for_cdc_table_backfill: bool,
     ) -> MetaResult<JobReschedulePlan> {
         type VnodeCount = usize;
 
@@ -1771,13 +1795,14 @@ impl ScaleController {
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
             fragment_distribution_map: &mut HashMap<
                 FragmentId,
-                (FragmentDistributionType, VnodeCount),
+                (FragmentDistributionType, VnodeCount, bool),
             >,
             actor_location: &mut HashMap<ActorId, WorkerId>,
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
             mgr: &MetadataManager,
             table_ids: Vec<ObjectId>,
+            generate_plan_only_for_cdc_table_backfill: bool,
         ) -> Result<(), MetaError> {
             let RescheduleWorkingSet {
                 fragments,
@@ -1802,11 +1827,18 @@ impl ScaleController {
             }
 
             for (fragment_id, fragment) in fragments {
+                let is_cdc_backfill_v2_fragment =
+                    FragmentTypeMask::from(fragment.fragment_type_mask)
+                        .contains(FragmentTypeFlag::StreamCdcScan);
+                if generate_plan_only_for_cdc_table_backfill && !is_cdc_backfill_v2_fragment {
+                    continue;
+                }
                 fragment_distribution_map.insert(
                     fragment_id as FragmentId,
                     (
                         FragmentDistributionType::from(fragment.distribution_type),
                         fragment.vnode_count as _,
+                        is_cdc_backfill_v2_fragment,
                     ),
                 );
 
@@ -1838,6 +1870,7 @@ impl ScaleController {
             &mut fragment_actor_id_map,
             &self.metadata_manager,
             table_ids,
+            generate_plan_for_cdc_table_backfill,
         )
         .await?;
         tracing::debug!(
@@ -1909,9 +1942,32 @@ impl ScaleController {
                     );
                 }
 
-                let (dist, vnode_count) = fragment_distribution_map[&fragment_id];
+                let (dist, vnode_count, is_cdc_backfill_v2_fragment) =
+                    fragment_distribution_map[&fragment_id];
                 let max_parallelism = vnode_count;
-
+                let fragment_parallelism_strategy = if generate_plan_for_cdc_table_backfill {
+                    assert!(is_cdc_backfill_v2_fragment);
+                    let TableParallelism::Fixed(new_parallelism) = parallelism else {
+                        return Err(anyhow::anyhow!(
+                            "invalid new parallelism {:?}, expect fixed parallelism",
+                            parallelism
+                        )
+                        .into());
+                    };
+                    if new_parallelism > max_parallelism || new_parallelism == 0 {
+                        return Err(anyhow::anyhow!(
+                            "invalid new parallelism {}, max parallelism {}",
+                            new_parallelism,
+                            max_parallelism
+                        )
+                        .into());
+                    }
+                    TableParallelism::Fixed(new_parallelism)
+                } else if is_cdc_backfill_v2_fragment {
+                    TableParallelism::Fixed(fragment_actor_id_map[&fragment_id].len())
+                } else {
+                    parallelism
+                };
                 match dist {
                     FragmentDistributionType::Unspecified => unreachable!(),
                     FragmentDistributionType::Single => {
@@ -1951,7 +2007,7 @@ impl ScaleController {
                             },
                         );
                     }
-                    FragmentDistributionType::Hash => match parallelism {
+                    FragmentDistributionType::Hash => match fragment_parallelism_strategy {
                         TableParallelism::Adaptive => {
                             let target_slot_count = adaptive_parallelism_strategy
                                 .compute_target_parallelism(available_slot_count);
@@ -2037,7 +2093,10 @@ impl ScaleController {
             ?target_plan,
             "generate_table_resize_plan finished target_plan"
         );
-
+        if generate_plan_for_cdc_table_backfill {
+            job_reschedule_post_updates.resource_group_updates = HashMap::default();
+            job_reschedule_post_updates.parallelism_updates = HashMap::default();
+        }
         Ok(JobReschedulePlan {
             reschedules: target_plan,
             post_updates: job_reschedule_post_updates,
@@ -2510,7 +2569,7 @@ impl GlobalStreamManager {
 
             let plan = self
                 .scale_controller
-                .generate_job_reschedule_plan(JobReschedulePolicy { targets })
+                .generate_job_reschedule_plan(JobReschedulePolicy { targets }, false)
                 .await?;
 
             if !plan.reschedules.is_empty() {
@@ -2570,8 +2629,7 @@ impl GlobalStreamManager {
 
         self.env
             .notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+            .insert_local_sender(local_notification_tx);
 
         let worker_nodes = self
             .metadata_manager

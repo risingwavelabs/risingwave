@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -28,6 +29,7 @@ use thiserror_ext::AsReport;
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_versions, migrate_legacy_object,
 };
+use crate::cmd_impl::scale::set_cdc_table_backfill_parallelism;
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
@@ -464,6 +466,13 @@ enum MetaCommands {
         #[clap(long, required = true)]
         endpoint: String,
     },
+
+    SetCdcTableBackfillParallelism {
+        #[clap(long, required = true)]
+        table_id: u32,
+        #[clap(long, required = true)]
+        parallelism: u32,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -550,6 +559,11 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
     result
 }
 
+#[expect(
+    clippy::large_stack_frames,
+    reason = "Pre-opt MIR sums locals across match arms in async dispatch; \
+              post-layout generator stores only one arm at a time (~13–16 KiB)."
+)]
 async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
@@ -904,6 +918,12 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Throttle(ThrottleCommands::Mv(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
+        }
+        Commands::Meta(MetaCommands::SetCdcTableBackfillParallelism {
+            table_id,
+            parallelism,
+        }) => {
+            set_cdc_table_backfill_parallelism(context, table_id, parallelism).await?;
         }
     }
     Ok(())

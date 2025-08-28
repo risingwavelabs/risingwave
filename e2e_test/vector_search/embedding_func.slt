@@ -1,0 +1,93 @@
+query
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, 'first')::vector(3);
+----
+[1,2,3]
+
+query
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, 'second')::vector(3);
+----
+[4,5,6]
+
+query
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, 'any other')::vector(3);
+----
+[0,0,0]
+
+query
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, null)::vector(3);
+----
+NULL
+
+statement ok
+create function get_embedding(string) returns vector(3) language sql as $$
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, $1)::vector(3);
+$$;
+
+query
+select get_embedding('first')::vector(3);
+----
+[1,2,3]
+
+query
+select get_embedding('second')::vector(3);
+----
+[4,5,6]
+
+query
+select get_embedding('any other')::vector(3);
+----
+[0,0,0]
+
+query
+select get_embedding(null)::vector(3);
+----
+NULL
+
+statement ok
+create table t(id int, name string);
+
+# check StreamMaterializedExprs is created
+query T
+explain create materialized view embedding_mv as select id, name, get_embedding(name) from t;
+----
+StreamMaterialize { columns: [id, name, get_embedding, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+└─StreamProject { exprs: [t.id, t.name, $expr1, t._row_id] }
+  └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, t.name)::Vector(3) as $expr1] }
+    └─StreamTableScan { table: t, columns: [id, name, _row_id] }
+
+
+statement ok
+create materialized view embedding_mv as select id, name, get_embedding(name) from t;
+
+statement ok
+insert into t values (1, 'first'), (2, 'second');
+
+statement ok
+flush;
+
+query T
+select * from embedding_mv order by id;
+----
+1 first [1,2,3]
+2 second [4,5,6]
+
+statement ok
+update t set name = 'other' where id = 2;
+
+statement ok
+flush;
+
+query T
+select * from embedding_mv order by id;
+----
+1 first [1,2,3]
+2 other [0,0,0]
+
+statement ok
+drop materialized view embedding_mv;
+
+statement ok
+drop table t;
+
+statement ok
+drop function get_embedding;

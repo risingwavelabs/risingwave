@@ -403,7 +403,8 @@ impl IcebergSplitEnumerator {
         #[for_await]
         for task in file_scan_stream {
             let mut task: FileScanTask = task.map_err(|e| anyhow!(e))?;
-            for mut delete_file in task.deletes.drain(..) {
+            for delete_file in task.deletes.drain(..) {
+                let mut delete_file = delete_file.as_ref().clone();
                 match delete_file.data_file_content {
                     iceberg::spec::DataContentType::Data => {
                         bail!("Data file should not in task deletes");
@@ -516,7 +517,7 @@ impl IcebergSplitEnumerator {
                     iceberg::spec::DataContentType::Data => {}
                     iceberg::spec::DataContentType::EqualityDeletes => {
                         if equality_ids.is_empty() {
-                            equality_ids = delete_file.equality_ids;
+                            equality_ids = delete_file.equality_ids.clone();
                         } else if equality_ids != delete_file.equality_ids {
                             bail!("The schema of iceberg equality delete file must be consistent");
                         }

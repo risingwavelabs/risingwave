@@ -108,8 +108,7 @@ impl BackupManager {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         env.notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+            .insert_local_sender(local_notification_tx);
         let this = instance.clone();
         tokio::spawn(async move {
             loop {

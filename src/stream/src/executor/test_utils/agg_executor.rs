@@ -217,7 +217,7 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
     .await;
 
     let schema = generate_agg_schema(&input, &agg_calls, Some(&group_key_indices));
-    let info = ExecutorInfo::new(
+    let info = ExecutorInfo::for_test(
         schema,
         pk_indices,
         "HashAggExecutor".to_owned(),
@@ -286,7 +286,7 @@ pub async fn new_boxed_simple_agg_executor<S: StateStore>(
     .await;
 
     let schema = generate_agg_schema(&input, &agg_calls, None);
-    let info = ExecutorInfo::new(
+    let info = ExecutorInfo::for_test(
         schema,
         pk_indices,
         "SimpleAggExecutor".to_owned(),

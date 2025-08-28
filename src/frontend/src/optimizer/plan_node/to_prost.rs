@@ -13,16 +13,10 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use paste::paste;
 use risingwave_pb::batch_plan::plan_node as pb_batch_node;
 use risingwave_pb::stream_plan::stream_node as pb_stream_node;
 
 use super::*;
-use crate::{
-    for_all_plan_nodes, for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes,
-};
-
-pub trait ToPb: TryToBatchPb + TryToStreamPb {}
 
 pub trait TryToBatchPb {
     fn try_to_batch_prost_body(&self) -> SchedulerResult<pb_batch_node::NodeBody> {
@@ -74,33 +68,3 @@ pub trait StreamNode {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState)
     -> pb_stream_node::NodeBody;
 }
-
-/// impl `ToPb` nodes which have impl `ToBatchPb` and `ToStreamPb`.
-macro_rules! impl_to_prost {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl ToPb for [<$convention $name>] { })*
-        }
-    }
-}
-for_all_plan_nodes! { impl_to_prost }
-/// impl a panic `ToBatchPb` for logical and stream node.
-macro_rules! ban_to_batch_prost {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl TryToBatchPb for [<$convention $name>] {})*
-        }
-    }
-}
-for_logical_plan_nodes! { ban_to_batch_prost }
-for_stream_plan_nodes! { ban_to_batch_prost }
-/// impl a panic `ToStreamPb` for logical and batch node.
-macro_rules! ban_to_stream_prost {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl TryToStreamPb for [<$convention $name>] {})*
-        }
-    }
-}
-for_logical_plan_nodes! { ban_to_stream_prost }
-for_batch_plan_nodes! { ban_to_stream_prost }

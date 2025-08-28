@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::plan_node::*;
-use super::Rule;
-use crate::optimizer::rule::BoxedRule;
+use super::prelude::{PlanRef, *};
 
 /// Reorders a multi join into a left deep join via the heuristic ordering
 pub struct LeftDeepTreeJoinOrderingRule {}
 
-impl Rule for LeftDeepTreeJoinOrderingRule {
+impl Rule<Logical> for LeftDeepTreeJoinOrderingRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_multi_join()?;
         // check if join is inner and can be merged into multijoin
@@ -44,10 +42,10 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_pb::plan_common::JoinType;
 
-    use super::*;
     use crate::expr::{ExprImpl, FunctionCall, InputRef};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::generic::GenericPlanRef;
+    use crate::optimizer::plan_node::*;
     use crate::utils::Condition;
 
     #[tokio::test]

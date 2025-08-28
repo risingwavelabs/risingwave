@@ -40,7 +40,7 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use rand::rng as thread_rng;
 use rand::seq::SliceRandom;
-use risingwave_common::config::default::compaction_config;
+use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -563,9 +563,12 @@ impl HummockManager {
                         &mut compact_task,
                         group_config.compaction_config.as_ref(),
                     );
+
+                    let table_ids_to_be_compacted = compact_task.build_compact_table_ids();
+
                     let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = version
                         .latest_version()
-                        .safe_epoch_table_watermarks(&compact_task.existing_table_ids)
+                        .safe_epoch_table_watermarks(&table_ids_to_be_compacted)
                         .into_iter()
                         .partition(|(_table_id, table_watermarke)| {
                             matches!(

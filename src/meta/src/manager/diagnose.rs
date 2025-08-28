@@ -21,9 +21,10 @@ use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
-use risingwave_meta_model::table::TableType;
+use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
@@ -629,46 +630,63 @@ impl DiagnoseCommand {
             .list_sources()
             .await?
             .into_iter()
-            .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
+            .map(|s| {
+                (
+                    s.id,
+                    (s.name, s.schema_id, s.definition, s.created_at_epoch),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
-        let tables = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::Table)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
-        let mvs = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::MaterializedView)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
-        let indexes = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::Index)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
+        let mut user_tables = BTreeMap::new();
+        let mut mvs = BTreeMap::new();
+        let mut indexes = BTreeMap::new();
+        let mut internal_tables = BTreeMap::new();
+        {
+            let grouped = self
+                .metadata_manager
+                .catalog_controller
+                .list_all_state_tables()
+                .await?
+                .into_iter()
+                .chunk_by(|t| t.table_type());
+            for (table_type, tables) in &grouped {
+                let tables = tables.into_iter().map(|t| {
+                    (
+                        t.id,
+                        (t.name, t.schema_id, t.definition, t.created_at_epoch),
+                    )
+                });
+                match table_type {
+                    PbTableType::Table => user_tables.extend(tables),
+                    PbTableType::MaterializedView => mvs.extend(tables),
+                    PbTableType::Index | PbTableType::VectorIndex => indexes.extend(tables),
+                    PbTableType::Internal => internal_tables.extend(tables),
+                    PbTableType::Unspecified => {
+                        tracing::error!("unspecified table type: {:?}", tables.collect_vec());
+                    }
+                }
+            }
+        }
         let sinks = self
             .metadata_manager
             .catalog_controller
             .list_sinks()
             .await?
             .into_iter()
-            .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
+            .map(|s| {
+                (
+                    s.id,
+                    (s.name, s.schema_id, s.definition, s.created_at_epoch),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         let catalogs = [
             ("SOURCE", sources),
-            ("TABLE", tables),
+            ("TABLE", user_tables),
             ("MATERIALIZED VIEW", mvs),
             ("INDEX", indexes),
             ("SINK", sinks),
+            ("INTERNAL TABLE", internal_tables),
         ];
         let mut obj_id_to_name = HashMap::new();
         for (title, items) in catalogs {
@@ -679,17 +697,24 @@ impl DiagnoseCommand {
                 row.add_cell("id".into());
                 row.add_cell("name".into());
                 row.add_cell("schema_id".into());
+                row.add_cell("created_at".into());
                 row.add_cell("definition".into());
                 row
             });
-            for (id, (name, schema_id, definition)) in items {
+            for (id, (name, schema_id, definition, created_at_epoch)) in items {
                 obj_id_to_name.insert(id, name.clone());
                 let mut row = Row::new();
                 let may_redact = redact_sql(&definition, self.redact_sql_option_keywords.clone())
                     .unwrap_or_else(|| "[REDACTED]".into());
+                let created_at = if let Some(created_at_epoch) = created_at_epoch {
+                    format!("{}", Epoch::from(created_at_epoch).as_timestamptz())
+                } else {
+                    "".into()
+                };
                 row.add_cell(id.into());
                 row.add_cell(name.into());
                 row.add_cell(schema_id.into());
+                row.add_cell(created_at.into());
                 row.add_cell(may_redact.into());
                 table.add_row(row);
             }
