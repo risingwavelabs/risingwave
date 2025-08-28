@@ -24,3 +24,4 @@ pub use standalone::*;
 
 risingwave_batch_executors::enable!();
 risingwave_expr_impl::enable!();
+risingwave_jni_core::enable!();
