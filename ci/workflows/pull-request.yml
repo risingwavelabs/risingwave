@@ -78,3 +78,15 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 120
     retry: *auto-retry
+
+  - label: "build other components"
+    command: "ci/scripts/build-other.sh"
+    key: "build-other"
+    plugins:
+      - *cargo-cache  # Cache enabled
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          environment:
+          - GITHUB_TOKEN
+    timeout_in_minutes: 120
+    retry: *auto-retry
