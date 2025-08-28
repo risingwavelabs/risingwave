@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -38,9 +38,9 @@ use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId, SinkId, SourceId, ViewId};
-use crate::expr::{infer_type_name, infer_type_with_sigmap, Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, infer_type_name, infer_type_with_sigmap};
 use crate::user::user_catalog::UserCatalog;
-use crate::user::{has_access_to_object, UserId};
+use crate::user::{UserId, has_access_to_object};
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {

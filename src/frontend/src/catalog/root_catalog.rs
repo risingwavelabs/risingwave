@@ -38,7 +38,7 @@ use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::system_catalog::{
-    get_sys_tables_in_schema, get_sys_views_in_schema, SystemTableCatalog,
+    SystemTableCatalog, get_sys_tables_in_schema, get_sys_views_in_schema,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
