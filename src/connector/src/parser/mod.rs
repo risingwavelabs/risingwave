@@ -46,6 +46,7 @@ use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryConfig;
+use crate::source::cdc::CdcMessageType;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
@@ -323,8 +324,31 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
                     if let Err(error) = res {
-                        // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                        //       see #13105
+                        if let SourceMeta::DebeziumCdc(cdc_meta) = &msg.meta
+                            && matches!(cdc_meta.msg_type, CdcMessageType::SchemaChange)
+                        {
+                            // Check the schema change failure policy
+                            match parser.source_ctx().schema_change_failure_policy {
+                                crate::source::cdc::SchemaChangeFailurePolicy::Block => {
+                                    tracing::error!(
+                                        error = %error.as_report(),
+                                        split_id = &*msg.split_id,
+                                        offset = msg.offset,
+                                        "Schema change message parsing failed, blocking source."
+                                    );
+                                    return Err(error);
+                                }
+                                crate::source::cdc::SchemaChangeFailurePolicy::Skip => {
+                                    // Continue processing, don't return error
+                                    tracing::warn!(
+                                        error = %error.as_report(),
+                                        split_id = &*msg.split_id,
+                                        offset = msg.offset,
+                                        "Schema change message parsing failed, skipping due to policy."
+                                    );
+                                }
+                            }
+                        }
                         static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
                             LazyLock::new(LogSuppresser::default);
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
@@ -390,6 +414,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                             Ok(()) => {}
                             Err(e) => {
                                 tracing::error!(error = %e.as_report(), "failed to wait for schema change");
+                                return Err(anyhow::Error::from(e).into());
                             }
                         }
                     }

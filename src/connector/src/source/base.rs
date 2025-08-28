@@ -291,6 +291,7 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+    pub schema_change_failure_policy: crate::source::cdc::SchemaChangeFailurePolicy,
 }
 
 impl SourceContext {
@@ -305,6 +306,7 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+        schema_change_failure_policy: crate::source::cdc::SchemaChangeFailurePolicy,
     ) -> Self {
         Self {
             actor_id,
@@ -315,6 +317,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+            schema_change_failure_policy,
         }
     }
 
@@ -333,6 +336,7 @@ impl SourceContext {
             },
             ConnectorProperties::default(),
             None,
+            crate::source::cdc::SchemaChangeFailurePolicy::default(),
         )
     }
 }
