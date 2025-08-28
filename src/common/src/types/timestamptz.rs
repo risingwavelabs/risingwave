@@ -31,10 +31,30 @@ use crate::array::ArrayResult;
 
 /// Timestamp with timezone.
 #[derive(
-    Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+    Default,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Serialize,
+    rkyv::Archive,
 )]
+#[archive_attr(derive(Clone, Copy))]
 #[repr(transparent)]
 pub struct Timestamptz(i64);
+
+impl From<ArchivedTimestamptz> for Timestamptz {
+    #[inline(always)]
+    fn from(value: ArchivedTimestamptz) -> Self {
+        Self(value.0)
+    }
+}
 
 impl ZeroHeapSize for Timestamptz {}
 
