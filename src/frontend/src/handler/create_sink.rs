@@ -38,6 +38,7 @@ use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
+use risingwave_connector::sink::trivial::BlackHoleSink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     Sink, enforce_secret_sink,
@@ -215,6 +216,7 @@ pub async fn gen_sink_plan(
                 match connector.as_str() {
                     RedshiftSink::SINK_NAME
                     | SnowflakeV2Sink::SINK_NAME
+                    | BlackHoleSink::SINK_NAME
                     | ElasticSearchSink::SINK_NAME => {}
                     _ => {
                         return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(

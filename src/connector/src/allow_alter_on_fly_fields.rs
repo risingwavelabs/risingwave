@@ -202,7 +202,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.request.required.acks".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
-    // SnowflakeConfig
+    // SnowflakeV2Config
     map.try_insert(
         std::any::type_name::<SnowflakeV2Config>().to_owned(),
         [
