@@ -117,6 +117,11 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
                     Err(err) => tracing::error!("failed to execute restore cmd: {err}"),
                 }
 
+                // The connection to the frontend is lost when the frontend process panics,
+                // so the old `Client` instance becomes unusable (is_closed() = true).
+                // We must rebuild a brand new client connection here, otherwise all queries
+                // will keep failing. After reconnection, we still need to wait until RW
+                // finishes recovery before continuing.
                 match tokio_postgres::Config::new()
                     .host("localhost")
                     .port(4566)
@@ -135,6 +140,12 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
                         });
                         *client = new_client;
                         tracing::info!("Reconnected to Frontend after panic");
+
+                        if let Err(err) = wait_for_recovery(client).await {
+                            tracing::error!("RW failed to recover after frontend panic: {:?}", err);
+                        } else {
+                            tracing::info!("RW recovery complete (frontend case)");
+                        }
                     }
                     Err(err) => {
                         tracing::error!("Failed to reconnect frontend: {}", err);
@@ -145,9 +156,9 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
             {
                 tracing::error!("Compute panic detected, waiting for recovery...");
                 if let Err(err) = wait_for_recovery(client).await {
-                    tracing::error!("RW failed to recover: {:?}", err);
+                    tracing::error!("RW failed to recover after compute panic: {:?}", err);
                 } else {
-                    tracing::info!("Compute recovery complete");
+                    tracing::info!("RW recovery complete (compute case)");
                 }
             }
 
@@ -155,6 +166,7 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
         }
     }
 }
+
 /// Wait until RW recovery finishes (`rw_recovery_status() = 'RUNNING'`)
 pub async fn wait_for_recovery(client: &Client) -> anyhow::Result<()> {
     let timeout = Duration::from_secs(200);
