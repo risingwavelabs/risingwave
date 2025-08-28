@@ -37,7 +37,7 @@ use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
-use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeSink;
+use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     Sink, enforce_secret_sink,
@@ -214,7 +214,7 @@ pub async fn gen_sink_plan(
                 }
                 match connector.as_str() {
                     RedshiftSink::SINK_NAME
-                    | SnowflakeSink::SINK_NAME
+                    | SnowflakeV2Sink::SINK_NAME
                     | ElasticSearchSink::SINK_NAME => {}
                     _ => {
                         return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
@@ -227,7 +227,7 @@ pub async fn gen_sink_plan(
             if resolved_with_options
                 .value_eq_ignore_case(SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, "true")
                 && connector == RedshiftSink::SINK_NAME
-                || connector == SnowflakeSink::SINK_NAME
+                || connector == SnowflakeV2Sink::SINK_NAME
             {
                 if let Some(table_name) = resolved_with_options.get(SINK_TARGET_TABLE_NAME) {
                     // auto fill intermediate table name if target table name is specified
