@@ -129,6 +129,15 @@
         └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
           └─BatchProject { exprs: [items.id, items.embedding, Neg(InnerProduct(items.embedding, '[3,1,2]':Vector(3))) as $expr1] }
             └─BatchScan { table: items, columns: [items.id, items.embedding], distribution: UpstreamHashShard(items.id) }
+- id: explain_create_table_and_index
+  sql: |
+    create table items (id int primary key, name string, unindexed timestamptz, embedding vector(3)) append only;
+    explain create index vector_index on items using flat (embedding) include (name) with (distance_type = 'inner_product');
+  explain_output: |
+    StreamVectorIndexWrite { vector_column: embedding, columns: [embedding, name, items.id(hidden)], stream_key: [items.id] }
+    └─StreamExchange { dist: Single }
+      └─StreamProject { exprs: [items.embedding, items.name, items.id] }
+        └─StreamTableScan { table: items, columns: [name, embedding, id] }
 - id: create_table_and_index
   sql: |
     create table items (id int primary key, name string, unindexed timestamptz, embedding vector(3)) append only;
