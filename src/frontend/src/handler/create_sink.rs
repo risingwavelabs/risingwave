@@ -32,11 +32,14 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
+use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink;
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
+use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
+use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeSink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    enforce_secret_sink,
+    Sink, enforce_secret_sink,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
@@ -179,6 +182,21 @@ pub async fn gen_sink_plan(
             .map_err(|e| anyhow::anyhow!(e))?;
     }
 
+    let sink_into_table_name = stmt.into_table_name.as_ref().map(|name| name.real_value());
+    if sink_into_table_name.is_some() {
+        let prev = resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_owned(), "table".to_owned());
+
+        if prev.is_some() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_owned(),
+            )));
+        }
+    }
+    let connector = resolved_with_options
+        .get(CONNECTOR_TYPE_KEY)
+        .cloned()
+        .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
+
     // Used for debezium's table name
     let sink_from_table_name;
     // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
@@ -188,13 +206,28 @@ pub async fn gen_sink_plan(
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
             direct_sink_from_name = Some((from_name.clone(), is_auto_schema_change));
-            if is_auto_schema_change && stmt.into_table_name.is_some() {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "auto schema change not supported for sink-into-table".to_owned(),
-                )));
+            if is_auto_schema_change {
+                if sink_into_table_name.is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                        "auto schema change not supported for sink-into-table".to_owned(),
+                    )));
+                }
+                match connector.as_str() {
+                    RedshiftSink::SINK_NAME
+                    | SnowflakeSink::SINK_NAME
+                    | ElasticSearchSink::SINK_NAME => {}
+                    _ => {
+                        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                            "auto schema change not supported for {}",
+                            connector
+                        ))));
+                    }
+                }
             }
             if resolved_with_options
                 .value_eq_ignore_case(SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, "true")
+                && connector == RedshiftSink::SINK_NAME
+                || connector == SnowflakeSink::SINK_NAME
             {
                 if let Some(table_name) = resolved_with_options.get(SINK_TARGET_TABLE_NAME) {
                     // auto fill intermediate table name if target table name is specified
@@ -233,8 +266,6 @@ pub async fn gen_sink_plan(
             query
         }
     };
-
-    let sink_into_table_name = stmt.into_table_name.as_ref().map(|name| name.real_value());
 
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
@@ -291,25 +322,10 @@ pub async fn gen_sink_plan(
         get_column_names(&bound, stmt.columns)?
     };
 
-    if sink_into_table_name.is_some() {
-        let prev = resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_owned(), "table".to_owned());
-
-        if prev.is_some() {
-            return Err(RwError::from(ErrorCode::BindError(
-                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_owned(),
-            )));
-        }
-    }
-
     let emit_on_window_close = stmt.emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
-
-    let connector = resolved_with_options
-        .get(CONNECTOR_TYPE_KEY)
-        .cloned()
-        .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
 
     let format_desc = match stmt.sink_schema {
         // Case A: new syntax `format ... encode ...`
