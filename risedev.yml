@@ -967,6 +967,7 @@ profile:
 
   mysql-only:
     steps:
+      - use: minio
       - use: mysql
         port: 3306
         address: mysql

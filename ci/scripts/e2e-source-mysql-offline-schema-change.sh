@@ -85,6 +85,10 @@ risedev kill
 # Resume MySQL only, perform some writes, then schema change, then some more writes
 risedev dev mysql-only
 
+# Delete cluster_id file from minio to avoid conflict when restarting RW
+sleep 3
+risedev mc rm --recursive --force hummock-minio/hummock001/cluster_id/
+
 # docker exec -it risedev-mysql-8306 mysql -u root -p -D risedev  "USE risedev; DROP TABLE IF EXISTS t; CREATE TABLE t (k int primary key, v text);"
 
 echo "\n\n\n-------------Change Schema------------\n\n\n"
@@ -97,8 +101,6 @@ risedev kill
 
 echo "\n\n\n-------------Resume RW CDC------------\n\n\n"
 sleep 5
-# Delete cluster_id file from minio to avoid conflict
-risedev mc rm --recursive --force hummock-minio/hummock001/cluster_id/
 # Resume RW CDC without cleaning data
 risedev dev mysql-offline-schema-change-test
 
