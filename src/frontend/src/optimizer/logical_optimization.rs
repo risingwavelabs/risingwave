@@ -506,7 +506,7 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
 static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "TopN to Vector Search",
-        vec![ProjectMergeRule::create(), TopNToVectorSearchRule::create()],
+        vec![TopNToVectorSearchRule::create()],
         ApplyOrder::BottomUp,
     )
 });
@@ -788,6 +788,8 @@ impl LogicalOptimizer {
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
+        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
+
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
         // Filter simplification must be applied before predicate push-down
@@ -818,8 +820,6 @@ impl LogicalOptimizer {
 
         // Push down the calculation of inputs of join's condition.
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN)?;
-
-        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
 
         plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW)?;
         // Must push down predicates again after split over window so that OverWindow can be

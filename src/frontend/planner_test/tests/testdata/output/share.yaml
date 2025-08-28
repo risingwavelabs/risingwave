@@ -110,16 +110,16 @@
       │ └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
       │   └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
       │     └─BatchExchange { order: [], dist: HashShard(auction) }
-      │       └─BatchFilter { predicate: IsNotNull(date_time) }
-      │         └─BatchProject { exprs: [auction, date_time] }
+      │       └─BatchProject { exprs: [auction, date_time] }
+      │         └─BatchFilter { predicate: IsNotNull(date_time) }
       │           └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
       └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
         └─BatchExchange { order: [], dist: HashShard(window_start) }
           └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
             └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
               └─BatchExchange { order: [], dist: HashShard(auction) }
-                └─BatchFilter { predicate: IsNotNull(date_time) }
-                  └─BatchProject { exprs: [auction, date_time] }
+                └─BatchProject { exprs: [auction, date_time] }
+                  └─BatchFilter { predicate: IsNotNull(date_time) }
                     └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start], pk_columns: [auction, window_start], pk_conflict: NoCheck }

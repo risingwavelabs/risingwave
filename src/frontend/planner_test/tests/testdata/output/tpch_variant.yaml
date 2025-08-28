@@ -1045,7 +1045,7 @@
     └─LogicalAgg { group_key: [$expr1], aggs: [sum($expr3), sum($expr2)] }
       └─LogicalProject { exprs: [$expr1, Case((n_name <> 'IRAN':Varchar), $expr2, 0:Int32::Decimal) as $expr3, $expr2] }
         └─LogicalProject { exprs: [Extract('YEAR':Varchar, o_orderdate) as $expr1, (l_extendedprice * (1:Int32::Decimal - l_discount)) as $expr2, n_name] }
-          └─LogicalJoin { type: Inner, on: (n_regionkey = r_regionkey), output: [l_extendedprice, l_discount, n_name, o_orderdate] }
+          └─LogicalJoin { type: Inner, on: (n_regionkey = r_regionkey), output: [l_extendedprice, l_discount, o_orderdate, n_name] }
             ├─LogicalJoin { type: Inner, on: (c_nationkey = n_nationkey), output: [l_extendedprice, l_discount, n_name, o_orderdate, n_regionkey] }
             │ ├─LogicalJoin { type: Inner, on: (o_custkey = c_custkey), output: [l_extendedprice, l_discount, n_name, o_orderdate, c_nationkey] }
             │ │ ├─LogicalJoin { type: Inner, on: (l_orderkey = o_orderkey), output: [l_extendedprice, l_discount, n_name, o_custkey, o_orderdate] }
@@ -1068,7 +1068,7 @@
           └─BatchExchange { order: [], dist: HashShard($expr1) }
             └─BatchProject { exprs: [$expr1, Case((n_name <> 'IRAN':Varchar), $expr2, 0:Decimal) as $expr3, $expr2] }
               └─BatchProject { exprs: [Extract('YEAR':Varchar, o_orderdate) as $expr1, (l_extendedprice * (1:Decimal - l_discount)) as $expr2, n_name] }
-                └─BatchHashJoin { type: Inner, predicate: n_regionkey = r_regionkey, output: [l_extendedprice, l_discount, n_name, o_orderdate] }
+                └─BatchHashJoin { type: Inner, predicate: n_regionkey = r_regionkey, output: [l_extendedprice, l_discount, o_orderdate, n_name] }
                   ├─BatchExchange { order: [], dist: HashShard(n_regionkey) }
                   │ └─BatchHashJoin { type: Inner, predicate: c_nationkey = n_nationkey, output: [l_extendedprice, l_discount, n_name, o_orderdate, n_regionkey] }
                   │   ├─BatchExchange { order: [], dist: HashShard(c_nationkey) }
@@ -1380,7 +1380,7 @@
     LogicalProject { exprs: [n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
     └─LogicalAgg { group_key: [n_name, $expr1], aggs: [sum($expr2)] }
       └─LogicalProject { exprs: [n_name, Extract('YEAR':Varchar, o_orderdate) as $expr1, ((l_extendedprice * (1:Int32::Decimal - l_discount)) - (ps_supplycost * l_quantity)) as $expr2] }
-        └─LogicalJoin { type: Inner, on: (o_orderkey = l_orderkey), output: [l_quantity, l_extendedprice, l_discount, n_name, ps_supplycost, o_orderdate] }
+        └─LogicalJoin { type: Inner, on: (o_orderkey = l_orderkey), output: [l_quantity, l_extendedprice, l_discount, ps_supplycost, o_orderdate, n_name] }
           ├─LogicalJoin { type: Inner, on: (ps_suppkey = l_suppkey) AND (ps_partkey = l_partkey), output: [l_orderkey, l_quantity, l_extendedprice, l_discount, n_name, ps_supplycost] }
           │ ├─LogicalJoin { type: Inner, on: (s_nationkey = n_nationkey), output: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, n_name] }
           │ │ ├─LogicalJoin { type: Inner, on: (s_suppkey = l_suppkey), output: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, s_nationkey] }
@@ -1398,7 +1398,7 @@
         └─BatchHashAgg { group_key: [n_name, $expr1], aggs: [sum($expr2)] }
           └─BatchExchange { order: [], dist: HashShard(n_name, $expr1) }
             └─BatchProject { exprs: [n_name, Extract('YEAR':Varchar, o_orderdate) as $expr1, ((l_extendedprice * (1:Decimal - l_discount)) - (ps_supplycost * l_quantity)) as $expr2] }
-              └─BatchHashJoin { type: Inner, predicate: l_orderkey = o_orderkey, output: [l_quantity, l_extendedprice, l_discount, n_name, ps_supplycost, o_orderdate] }
+              └─BatchHashJoin { type: Inner, predicate: l_orderkey = o_orderkey, output: [l_quantity, l_extendedprice, l_discount, ps_supplycost, o_orderdate, n_name] }
                 ├─BatchExchange { order: [], dist: HashShard(l_orderkey) }
                 │ └─BatchHashJoin { type: Inner, predicate: l_suppkey = ps_suppkey AND l_partkey = ps_partkey, output: [l_orderkey, l_quantity, l_extendedprice, l_discount, n_name, ps_supplycost] }
                 │   ├─BatchExchange { order: [], dist: HashShard(l_partkey, l_suppkey) }

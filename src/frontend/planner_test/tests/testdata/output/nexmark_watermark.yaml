@@ -10,7 +10,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, $expr1] }
       └─BatchFilter { predicate: (event_type = 2:Int32) }
-        └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1] }
+        └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
           └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, date_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
@@ -34,7 +34,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, (0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4, $expr1] }
       └─BatchFilter { predicate: (event_type = 2:Int32) }
-        └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1] }
+        └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
           └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, date_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
@@ -75,9 +75,9 @@
   sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction = 2001 OR auction = 2019 OR auction = 2087;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 2:Int32) as $expr2] }
+    └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 2:Int32) as $expr3] }
       └─BatchFilter { predicate: ((((Field(bid, 0:Int32) = 1007:Int32) OR (Field(bid, 0:Int32) = 1020:Int32)) OR ((Field(bid, 0:Int32) = 2001:Int32) OR (Field(bid, 0:Int32) = 2019:Int32))) OR (Field(bid, 0:Int32) = 2087:Int32)) AND (event_type = 2:Int32) }
-        └─BatchProject { exprs: [event_type, bid] }
+        └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
           └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, price, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
@@ -223,12 +223,12 @@
               ├─BatchExchange { order: [], dist: HashShard($expr2) }
               │ └─BatchProject { exprs: [Field(auction, 0:Int32) as $expr2, $expr1, Field(auction, 6:Int32) as $expr3, Field(auction, 8:Int32) as $expr4] }
               │   └─BatchFilter { predicate: (event_type = 1:Int32) }
-              │     └─BatchProject { exprs: [event_type, auction, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1] }
+              │     └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
               │       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
               └─BatchExchange { order: [], dist: HashShard($expr6) }
                 └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr6, Field(bid, 2:Int32) as $expr7, $expr5] }
                   └─BatchFilter { predicate: (event_type = 2:Int32) }
-                    └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr5] }
+                    └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr5, _row_id] }
                       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
@@ -378,7 +378,7 @@
       │     └─BatchExchange { order: [], dist: HashShard($expr2) }
       │       └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, $expr1] }
       │         └─BatchFilter { predicate: IsNotNull($expr1) AND (event_type = 2:Int32) }
-      │           └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1] }
+      │           └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
       │             └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
         └─BatchExchange { order: [], dist: HashShard(window_start) }
@@ -387,7 +387,7 @@
               └─BatchExchange { order: [], dist: HashShard($expr4) }
                 └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr4, $expr3] }
                   └─BatchFilter { predicate: IsNotNull($expr3) AND (event_type = 2:Int32) }
-                    └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr3] }
+                    └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr3, _row_id] }
                       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start], pk_columns: [auction, window_start], pk_conflict: NoCheck, watermark_columns: [window_start(hidden), window_start#1(hidden)] }
@@ -674,7 +674,7 @@
       ├─BatchExchange { order: [], dist: HashShard($expr4) }
       │ └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, $expr1] }
       │   └─BatchFilter { predicate: (event_type = 2:Int32) }
-      │     └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1] }
+      │     └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
       │       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─BatchExchange { order: [], dist: HashShard(max($expr7)) }
         └─BatchProject { exprs: [max($expr7), $expr6, ($expr6 - '00:00:10':Interval) as $expr8] }
@@ -682,7 +682,7 @@
             └─BatchExchange { order: [], dist: HashShard($expr6) }
               └─BatchProject { exprs: [(TumbleStart($expr5, '00:00:10':Interval) + '00:00:10':Interval) as $expr6, Field(bid, 2:Int32) as $expr7] }
                 └─BatchFilter { predicate: (event_type = 2:Int32) }
-                  └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr5] }
+                  └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr5, _row_id] }
                     └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr5(hidden)], stream_key: [_row_id, $expr5, price], pk_columns: [_row_id, $expr5, price], pk_conflict: NoCheck, watermark_columns: [date_time, $expr5(hidden)] }
@@ -1099,7 +1099,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, $expr1, ToChar($expr1, 'YYYY-MM-DD':Varchar) as $expr5, ToChar($expr1, 'HH:MI':Varchar) as $expr6] }
       └─BatchFilter { predicate: (event_type = 2:Int32) }
-        └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1] }
+        └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
           └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, date_time, date, time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
@@ -1210,7 +1210,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, (0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4, Case(((Extract('HOUR':Varchar, $expr1) >= 8:Decimal) AND (Extract('HOUR':Varchar, $expr1) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $expr1) <= 6:Decimal) OR (Extract('HOUR':Varchar, $expr1) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr5, $expr1, Field(bid, 6:Int32) as $expr6] }
       └─BatchFilter { predicate: ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) > 1000000:Decimal) AND ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) < 50000000:Decimal) AND (event_type = 2:Int32) }
-        └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1] }
+        └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
           └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, bidtimetype, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
@@ -1423,7 +1423,7 @@
         └─BatchExchange { order: [], dist: HashShard($expr2, $expr3) }
           └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, ToChar($expr1, 'YYYY-MM-DD':Varchar) as $expr3, Field(bid, 2:Int32) as $expr4] }
             └─BatchFilter { predicate: (event_type = 2:Int32) }
-              └─BatchProject { exprs: [event_type, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1] }
+              └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
                 └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], stream_key: [auction, day], pk_columns: [auction, day], pk_conflict: NoCheck }
@@ -2167,19 +2167,19 @@
     );
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftSemi, predicate: $expr1 = $expr3, output: all }
-      ├─BatchExchange { order: [], dist: HashShard($expr1) }
-      │ └─BatchProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2] }
+    └─BatchHashJoin { type: LeftSemi, predicate: $expr2 = $expr5, output: all }
+      ├─BatchExchange { order: [], dist: HashShard($expr2) }
+      │ └─BatchProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3] }
       │   └─BatchFilter { predicate: (event_type = 1:Int32) }
-      │     └─BatchProject { exprs: [event_type, auction] }
+      │     └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
       │       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-      └─BatchProject { exprs: [$expr3] }
+      └─BatchProject { exprs: [$expr5] }
         └─BatchFilter { predicate: (count >= 20:Int32) }
-          └─BatchHashAgg { group_key: [$expr3], aggs: [count] }
-            └─BatchExchange { order: [], dist: HashShard($expr3) }
-              └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr3] }
+          └─BatchHashAgg { group_key: [$expr5], aggs: [count] }
+            └─BatchExchange { order: [], dist: HashShard($expr5) }
+              └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr5] }
                 └─BatchFilter { predicate: (event_type = 2:Int32) }
-                  └─BatchProject { exprs: [event_type, bid] }
+                  └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr4, _row_id] }
                     └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, _row_id(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
@@ -2277,19 +2277,19 @@
     );
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftAnti, predicate: $expr1 = $expr3, output: all }
-      ├─BatchExchange { order: [], dist: HashShard($expr1) }
-      │ └─BatchProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2] }
+    └─BatchHashJoin { type: LeftAnti, predicate: $expr2 = $expr5, output: all }
+      ├─BatchExchange { order: [], dist: HashShard($expr2) }
+      │ └─BatchProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3] }
       │   └─BatchFilter { predicate: (event_type = 1:Int32) }
-      │     └─BatchProject { exprs: [event_type, auction] }
+      │     └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
       │       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-      └─BatchProject { exprs: [$expr3] }
+      └─BatchProject { exprs: [$expr5] }
         └─BatchFilter { predicate: (count < 20:Int32) }
-          └─BatchHashAgg { group_key: [$expr3], aggs: [count] }
-            └─BatchExchange { order: [], dist: HashShard($expr3) }
-              └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr3] }
+          └─BatchHashAgg { group_key: [$expr5], aggs: [count] }
+            └─BatchExchange { order: [], dist: HashShard($expr5) }
+              └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr5] }
                 └─BatchFilter { predicate: (event_type = 2:Int32) }
-                  └─BatchProject { exprs: [event_type, bid] }
+                  └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr4, _row_id] }
                     └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, _row_id(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }

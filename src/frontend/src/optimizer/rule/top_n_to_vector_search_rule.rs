@@ -19,12 +19,13 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::common::PbDistanceType;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::optimizer::LogicalPlanRef;
 use crate::optimizer::plan_node::generic::TopNLimit;
 use crate::optimizer::plan_node::{
     LogicalPlanRef as PlanRef, LogicalProject, LogicalVectorSearch, PlanTreeNodeUnary,
 };
 use crate::optimizer::rule::prelude::*;
-use crate::optimizer::rule::{BoxedRule, Rule};
+use crate::optimizer::rule::{BoxedRule, ProjectMergeRule, Rule};
 
 pub struct TopNToVectorSearchRule;
 
@@ -32,6 +33,17 @@ impl TopNToVectorSearchRule {
     pub fn create() -> BoxedRule<Logical> {
         Box::new(TopNToVectorSearchRule)
     }
+}
+
+fn merge_consecutive_projections(input: LogicalPlanRef) -> Option<(Vec<ExprImpl>, LogicalPlanRef)> {
+    let projection = input.as_logical_project()?;
+    let mut exprs = projection.exprs().clone();
+    let mut input = projection.input();
+    while let Some(projection) = input.as_logical_project() {
+        exprs = ProjectMergeRule::merge_project_exprs(&exprs, projection.exprs(), false)?;
+        input = projection.input();
+    }
+    Some((exprs, input))
 }
 
 impl Rule<Logical> for TopNToVectorSearchRule {
@@ -57,9 +69,8 @@ impl Rule<Logical> for TopNToVectorSearchRule {
             return None;
         }
 
-        let top_n_input = top_n.input();
-        let projection = top_n_input.as_logical_project()?;
-        let exprs = projection.exprs();
+        // TODO: may merge the projections in a finer way so as not to break potential common sub expr.
+        let (exprs, projection_input) = merge_consecutive_projections(top_n.input())?;
 
         let order_expr = &exprs[order.column_index];
         let ExprImpl::FunctionCall(call) = order_expr else {
@@ -95,7 +106,6 @@ impl Rule<Logical> for TopNToVectorSearchRule {
         let [left, right]: &[_; 2] = call.inputs().try_into().unwrap();
         assert_matches!(left.return_type(), DataType::Vector(_));
         assert_matches!(right.return_type(), DataType::Vector(_));
-        let projection_input = projection.input();
 
         let vector_search = LogicalVectorSearch::new(
             limit,

@@ -43,6 +43,8 @@ struct VectorSearchCore {
     distance_type: PbDistanceType,
     left: ExprImpl,
     right: ExprImpl,
+    /// The indices of input that will be included in the output.
+    /// The index of distance column is `output_input_idx.len()`
     output_input_idx: Vec<usize>,
     input: PlanRef,
 }
@@ -186,45 +188,19 @@ impl Distill for LogicalVectorSearch {
 impl ColPrunable for LogicalVectorSearch {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_schema = self.core.input.schema();
-        let distance_required_input_idx =
+        let mut required_input_idx_bitset =
             collect_input_refs(input_schema.len(), [&self.core.left, &self.core.right]);
-        let mut required_input_idx_bitset = distance_required_input_idx.clone();
         let mut non_distance_required_input_idx = Vec::new();
-        let mut required_cols_new_output_mapping = vec![None; required_cols.len()];
-        for (original_output_idx, input_idx) in self.core.output_input_idx.iter().enumerate() {
-            if let Some(new_output_idx) =
-                required_cols
-                    .iter()
-                    .position(|required_original_output_idx| {
-                        required_original_output_idx == &original_output_idx
-                    })
-            {
-                assert_eq!(
-                    required_cols_new_output_mapping[new_output_idx]
-                        .replace(non_distance_required_input_idx.len()),
-                    None
-                );
-                non_distance_required_input_idx.push(*input_idx);
-                required_input_idx_bitset.set(*input_idx, true);
+        let mut distance_col_idx_in_required_cols = None;
+        for (new_output_idx, &required_col_idx) in required_cols.iter().enumerate() {
+            if required_col_idx == self.core.output_input_idx.len() {
+                distance_col_idx_in_required_cols = Some(new_output_idx);
+            } else {
+                let required_input_idx = self.core.output_input_idx[required_col_idx];
+                non_distance_required_input_idx.push(required_input_idx);
+                required_input_idx_bitset.set(required_col_idx, true);
             }
         }
-        if let Some(distance_new_output_idx) =
-            required_cols
-                .iter()
-                .position(|required_original_output_idx| {
-                    *required_original_output_idx == self.core.output_input_idx.len()
-                })
-        {
-            assert_eq!(
-                required_cols_new_output_mapping[distance_new_output_idx]
-                    .replace(non_distance_required_input_idx.len()),
-                None
-            );
-        }
-        let required_cols_new_output_idx = required_cols_new_output_mapping
-            .into_iter()
-            .map(Option::unwrap)
-            .collect_vec();
         let input_required_idx = required_input_idx_bitset.ones().collect_vec();
 
         let new_input = self.input().prune_col(&input_required_idx, ctx);
@@ -234,23 +210,31 @@ impl ColPrunable for LogicalVectorSearch {
             self.input().schema().len(),
         );
 
-        let mut new_core = self.core.clone_with_input(new_input);
-        new_core.left = mapping.rewrite_expr(new_core.left);
-        new_core.right = mapping.rewrite_expr(new_core.right);
-        new_core.output_input_idx = non_distance_required_input_idx
-            .iter()
-            .map(|input_idx| mapping.map(*input_idx))
-            .collect();
-        let vector_search = Self::with_core(new_core);
-        let plan: PlanRef = vector_search.into();
-        if required_cols_new_output_idx.len() == plan.schema().len()
-            && required_cols_new_output_idx.is_sorted()
-        {
-            // the current plan output has match the required column order.
-            plan
+        let vector_search = {
+            let mut new_core = self.core.clone_with_input(new_input);
+            new_core.left = mapping.rewrite_expr(new_core.left);
+            new_core.right = mapping.rewrite_expr(new_core.right);
+            new_core.output_input_idx = non_distance_required_input_idx
+                .iter()
+                .map(|input_idx| mapping.map(*input_idx))
+                .collect();
+            Self::with_core(new_core)
+        };
+        if let Some(distance_col_idx_in_required_cols) = distance_col_idx_in_required_cols {
+            assert_eq!(required_cols.len(), vector_search.schema().len());
+            // distance column is at the end of vector search
+            let distance_col_idx_in_vector_search = vector_search.schema().len() - 1;
+            // recompose output col idx by inserting distance column in the middle
+            let output_col_idx = (0..distance_col_idx_in_required_cols)
+                .chain([distance_col_idx_in_vector_search])
+                .chain(distance_col_idx_in_required_cols..distance_col_idx_in_vector_search);
+            LogicalProject::with_out_col_idx(vector_search.into(), output_col_idx).into()
         } else {
-            LogicalProject::with_out_col_idx(plan, required_cols_new_output_idx.iter().copied())
-                .into()
+            LogicalProject::with_out_col_idx(
+                vector_search.into(),
+                0..non_distance_required_input_idx.len(),
+            )
+            .into()
         }
     }
 }
