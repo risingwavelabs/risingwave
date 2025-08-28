@@ -38,7 +38,7 @@ use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::system_catalog::{
-    SystemTableCatalog, get_sys_tables_in_schema, get_sys_views_in_schema,
+    get_sys_tables_in_schema, get_sys_views_in_schema, SystemTableCatalog,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
@@ -1140,7 +1140,7 @@ impl Catalog {
             .unwrap()
             .get_schema_by_id(&schema_id)
             .unwrap()
-            .get_indexes_by_table_id(&mv_id)
+            .get_indexes_by_table_id(&mv_id, true)
     }
 
     pub fn get_id_by_class_name(
@@ -1155,7 +1155,7 @@ impl Catalog {
                 #[allow(clippy::manual_map)]
                 if let Some(item) = schema.get_system_table_by_name(class_name) {
                     Ok(Some(item.id().into()))
-                } else if let Some(item) = schema.get_created_table_by_name(class_name) {
+                } else if let Some(item) = schema.get_any_table_by_name(class_name) {
                     Ok(Some(item.id().into()))
                 } else if let Some(item) = schema.get_any_index_by_name(class_name) {
                     Ok(Some(item.id.into()))
@@ -1163,6 +1163,8 @@ impl Catalog {
                     Ok(Some(item.id))
                 } else if let Some(item) = schema.get_view_by_name(class_name) {
                     Ok(Some(item.id))
+                } else if let Some(item) = schema.get_any_sink_by_name(class_name) {
+                    Ok(Some(item.id.into()))
                 } else {
                     Ok(None)
                 }

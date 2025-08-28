@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -38,9 +38,9 @@ use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId, SinkId, SourceId, ViewId};
-use crate::expr::{Expr, ExprImpl, infer_type_name, infer_type_with_sigmap};
+use crate::expr::{infer_type_name, infer_type_with_sigmap, Expr, ExprImpl};
 use crate::user::user_catalog::UserCatalog;
-use crate::user::{UserId, has_access_to_object};
+use crate::user::{has_access_to_object, UserId};
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -841,11 +841,18 @@ impl SchemaCatalog {
     }
 
     /// Returns all indexes on the given table. Will not check if the table exists.
-    pub fn get_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+    pub fn get_indexes_by_table_id(
+        &self,
+        table_id: &TableId,
+        include_creating: bool,
+    ) -> Vec<Arc<IndexCatalog>> {
         self.indexes_by_table_id
             .get(table_id)
             .cloned()
             .unwrap_or_default()
+            .into_iter()
+            .filter(|i| include_creating || i.is_created())
+            .collect()
     }
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&Arc<SystemTableCatalog>> {
