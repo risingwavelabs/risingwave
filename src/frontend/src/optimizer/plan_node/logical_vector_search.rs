@@ -14,18 +14,18 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::array::VectorVal;
+use risingwave_common::array::VECTOR_DISTANCE_TYPE;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataType, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::common::PbDistanceType;
 
 use crate::OptimizerContextRef;
 use crate::expr::{
-    ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal, TableFunction,
-    TableFunctionType, collect_input_refs,
+    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    TableFunction, TableFunctionType, collect_input_refs,
 };
 use crate::optimizer::plan_node::batch_vector_search::BatchVectorSearchCore;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -33,13 +33,7 @@ use crate::optimizer::plan_node::generic::{
     GenericPlanNode, GenericPlanRef, TopNLimit, ensure_sorted_required_cols,
 };
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
-use crate::optimizer::plan_node::{
-    BatchPlanRef, BatchProject, BatchProjectSet, BatchTopN, BatchValues, BatchVectorSearch,
-    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
-    LogicalProject, LogicalScan, LogicalValues, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
-    PredicatePushdownContext, RewriteStreamContext, StreamPlanRef, ToBatch, ToStream,
-    ToStreamContext, gen_filter_and_pushdown, generic,
-};
+use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, *};
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
@@ -279,8 +273,7 @@ impl ToStream for LogicalVectorSearch {
 }
 
 impl LogicalVectorSearch {
-    fn to_batch_top_n(&self) -> crate::error::Result<BatchPlanRef> {
-        let input = self.input().to_batch()?;
+    fn to_top_n(&self) -> LogicalTopN {
         let (neg, expr_type) = match self.core.distance_type {
             PbDistanceType::Unspecified => {
                 unreachable!()
@@ -290,12 +283,17 @@ impl LogicalVectorSearch {
             PbDistanceType::Cosine => (false, ExprType::CosineDistance),
             PbDistanceType::InnerProduct => (true, ExprType::InnerProduct),
         };
-        let mut expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new(
+        let mut expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
             expr_type,
             vec![self.core.left.clone(), self.core.right.clone()],
-        )?));
+            VECTOR_DISTANCE_TYPE,
+        )));
         if neg {
-            expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new(ExprType::Neg, vec![expr])?));
+            expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+                ExprType::Neg,
+                vec![expr],
+                VECTOR_DISTANCE_TYPE,
+            )));
         }
         let exprs = generic::Project::out_col_idx_exprs(
             &self.core.input,
@@ -304,8 +302,7 @@ impl LogicalVectorSearch {
         .chain([expr])
         .collect();
 
-        let project = generic::Project::new(exprs, input);
-        let input = BatchProject::new(project).into();
+        let input = LogicalProject::new(self.input(), exprs).into();
         let top_n = generic::TopN::without_group(
             input,
             TopNLimit::Simple(self.core.top_n),
@@ -315,28 +312,27 @@ impl LogicalVectorSearch {
                 OrderType::ascending(),
             )]),
         );
-        Ok(BatchTopN::new(top_n).into())
+        top_n.into()
     }
 
-    fn as_vector_table_scan(&self) -> Option<(&LogicalScan, VectorVal, usize)> {
+    fn as_vector_table_scan(&self) -> Option<(&LogicalScan, ExprImpl, usize)> {
         let scan = self.core.input.as_logical_scan()?;
-        let (vector_input, vector_literal) = match (&self.core.left, &self.core.right) {
-            (ExprImpl::InputRef(input), ExprImpl::Literal(vector_literal))
-            | (ExprImpl::Literal(vector_literal), ExprImpl::InputRef(input)) => {
-                (input, vector_literal)
+        let (vector_input, vec) = match (&self.core.left, &self.core.right) {
+            (ExprImpl::InputRef(_), ExprImpl::InputRef(_)) => return None,
+            (ExprImpl::InputRef(input), other) | (other, ExprImpl::InputRef(input))
+                if other.only_literal_and_func() =>
+            {
+                (input, other.clone())
             }
             _ => return None,
         };
-        let ScalarImpl::Vector(vec) = vector_literal.get_data().as_ref()? else {
-            unreachable!("input of vector search must be of vector type")
-        };
-        Some((scan, vec.clone(), vector_input.index))
+        Some((scan, vec, vector_input.index))
     }
 }
 
 impl ToBatch for LogicalVectorSearch {
     fn to_batch(&self) -> crate::error::Result<BatchPlanRef> {
-        if let Some((scan, vector_literal, vector_input_idx)) = self.as_vector_table_scan()
+        if let Some((scan, vector_expr, vector_input_idx)) = self.as_vector_table_scan()
             && !scan.vector_indexes().is_empty()
         {
             for index in scan.vector_indexes() {
@@ -376,16 +372,10 @@ impl ToBatch for LogicalVectorSearch {
                 if !non_covered_table_cols_idx.is_empty() {
                     continue;
                 }
-                let dimension = vector_literal.as_scalar_ref().into_slice().len();
+                let vector_data_type = vector_expr.return_type();
                 let literal_vector_input = BatchValues::new(LogicalValues::new(
-                    vec![vec![ExprImpl::Literal(
-                        Literal::new(
-                            Some(ScalarImpl::Vector(vector_literal)),
-                            DataType::Vector(dimension),
-                        )
-                        .into(),
-                    )]],
-                    Schema::from_iter([Field::unnamed(DataType::Vector(dimension))]),
+                    vec![vec![vector_expr]],
+                    Schema::from_iter([Field::unnamed(vector_data_type)]),
                     self.core.ctx(),
                 ))
                 .into();
@@ -468,6 +458,6 @@ impl ToBatch for LogicalVectorSearch {
                 .into());
             }
         }
-        self.to_batch_top_n()
+        self.to_top_n().to_batch()
     }
 }
