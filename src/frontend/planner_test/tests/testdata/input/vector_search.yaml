@@ -3,6 +3,14 @@
     create table items (id int primary key, embedding vector(3));
   expected_outputs: []
 - before:
+    - create_table
+  sql: |
+    SELECT * FROM items order by embedding <-> '[3,1,2]' limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
   - create_table
   sql: |
     SELECT * FROM (select *, _rw_timestamp, embedding <-> '[3,1,2]' as distance from items) order by distance limit 5;

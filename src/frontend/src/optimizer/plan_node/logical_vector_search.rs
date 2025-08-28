@@ -44,8 +44,8 @@ struct VectorSearchCore {
     left: ExprImpl,
     right: ExprImpl,
     /// The indices of input that will be included in the output.
-    /// The index of distance column is `output_input_idx.len()`
-    output_input_idx: Vec<usize>,
+    /// The index of distance column is `output_indices.len()`
+    output_indices: Vec<usize>,
     input: PlanRef,
 }
 
@@ -56,7 +56,7 @@ impl VectorSearchCore {
             distance_type: self.distance_type,
             left: self.left.clone(),
             right: self.right.clone(),
-            output_input_idx: self.output_input_idx.clone(),
+            output_indices: self.output_indices.clone(),
             input,
         }
     }
@@ -73,10 +73,10 @@ impl VectorSearchCore {
 
     pub(crate) fn i2o_mapping(&self) -> ColIndexMapping {
         let mut mapping = vec![None; self.input.schema().len()];
-        for (output_idx, input_idx) in self.output_input_idx.iter().enumerate() {
+        for (output_idx, input_idx) in self.output_indices.iter().enumerate() {
             mapping[*input_idx] = Some(output_idx);
         }
-        ColIndexMapping::new(mapping, self.output_input_idx.len() + 1)
+        ColIndexMapping::new(mapping, self.output_indices.len() + 1)
     }
 }
 
@@ -88,7 +88,7 @@ impl GenericPlanNode for VectorSearchCore {
 
     fn schema(&self) -> Schema {
         let fields = self
-            .output_input_idx
+            .output_indices
             .iter()
             .map(|idx| self.input.schema()[*idx].clone())
             .chain([Field::new("vector_distance", DataType::Float64)])
@@ -120,7 +120,7 @@ impl LogicalVectorSearch {
         distance_type: PbDistanceType,
         left: ExprImpl,
         right: ExprImpl,
-        output_input_idx: Vec<usize>,
+        output_indices: Vec<usize>,
         input: PlanRef,
     ) -> Self {
         let core = VectorSearchCore {
@@ -128,7 +128,7 @@ impl LogicalVectorSearch {
             distance_type,
             left,
             right,
-            output_input_idx,
+            output_indices,
             input,
         };
         Self::with_core(core)
@@ -171,7 +171,7 @@ impl Distill for LogicalVectorSearch {
                 "output_columns",
                 Pretty::Array(
                     self.core
-                        .output_input_idx
+                        .output_indices
                         .iter()
                         .map(|input_idx| {
                             Pretty::debug(&self.core.input.schema().fields()[*input_idx])
@@ -193,10 +193,10 @@ impl ColPrunable for LogicalVectorSearch {
         let mut non_distance_required_input_idx = Vec::new();
         let mut distance_col_idx_in_required_cols = None;
         for (new_output_idx, &required_col_idx) in required_cols.iter().enumerate() {
-            if required_col_idx == self.core.output_input_idx.len() {
+            if required_col_idx == self.core.output_indices.len() {
                 distance_col_idx_in_required_cols = Some(new_output_idx);
             } else {
-                let required_input_idx = self.core.output_input_idx[required_col_idx];
+                let required_input_idx = self.core.output_indices[required_col_idx];
                 non_distance_required_input_idx.push(required_input_idx);
                 required_input_idx_bitset.set(required_col_idx, true);
             }
@@ -214,7 +214,7 @@ impl ColPrunable for LogicalVectorSearch {
             let mut new_core = self.core.clone_with_input(new_input);
             new_core.left = mapping.rewrite_expr(new_core.left);
             new_core.right = mapping.rewrite_expr(new_core.right);
-            new_core.output_input_idx = non_distance_required_input_idx
+            new_core.output_indices = non_distance_required_input_idx
                 .iter()
                 .map(|input_idx| mapping.map(*input_idx))
                 .collect();
@@ -301,7 +301,7 @@ impl ToBatch for LogicalVectorSearch {
         }
         let exprs = generic::Project::out_col_idx_exprs(
             &self.core.input,
-            self.core.output_input_idx.iter().copied(),
+            self.core.output_indices.iter().copied(),
         )
         .chain([expr])
         .collect();
@@ -313,7 +313,7 @@ impl ToBatch for LogicalVectorSearch {
             TopNLimit::Simple(self.core.top_n),
             0,
             Order::new(vec![ColumnOrder::new(
-                self.core.output_input_idx.len(),
+                self.core.output_indices.len(),
                 OrderType::ascending(),
             )]),
         );

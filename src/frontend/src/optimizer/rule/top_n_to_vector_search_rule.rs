@@ -46,6 +46,16 @@ fn merge_consecutive_projections(input: LogicalPlanRef) -> Option<(Vec<ExprImpl>
     Some((exprs, input))
 }
 
+/// This rule converts the following TopN pattern to `LogicalVectorSearch`
+/// ```ignore
+///     LogicalTopN { order: [$expr1 ASC], limit: TOP_N, offset: 0 }
+///       └─LogicalProject { exprs: [VectorDistanceFunc(vector_expr1, vector_expr2) as $expr1, other_exprs...] }
+/// ```
+/// to
+/// ```ignore
+///     LogicalProject { exprs: [other_exprs...] }
+///       └─LogicalVectorSearch { distance_type: `PbDistanceType`, top_n: TOP_N, left: vector_expr1, right: vector_expr2, output_columns: [...] }
+/// ```
 impl Rule<Logical> for TopNToVectorSearchRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_n = plan.as_logical_top_n()?;
