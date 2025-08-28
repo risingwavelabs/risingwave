@@ -127,15 +127,22 @@
     - logical_plan
     - optimized_logical_plan_for_batch
     - batch_plan
-- id: create_table_and_function_index
+- id: explain_create_function_index
   sql: |
     create table items (id int primary key, name string, unindexed timestamptz, embedding vector(3)) append only;
-    create index vector_index on items using flat (embedding + '[1, 2, 3]'::vector(3)) include (name) with (distance_type = 'inner_product');
-  expected_outputs: []
+    explain create index vector_index on items using flat (openai_embedding('{"model": "model"}'::jsonb, name)::vector(3)) include (name) with (distance_type = 'inner_product');
+  expected_outputs:
+    - explain_output
+- id: create_table_and_function_index
+  sql: |
+    create table items (id int primary key, name string, unindexed timestamptz, text string) append only;
+    create index vector_index on items using flat (openai_embedding('{"model": "model"}'::jsonb, text)::vector(3)) include (name) with (distance_type = 'inner_product');
+  expected_outputs:
+    - explain_output
 - before:
     - create_table_and_function_index
   sql: |
-    SELECT id, name FROM items order by (embedding + '[1, 2, 3]'::vector(3)) <#> '[3,1,2]' limit 5;
+    SELECT id, name FROM items order by openai_embedding('{"model": "model"}'::jsonb, text)::vector(3) <#> '[3,1,2]' limit 5;
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_batch
