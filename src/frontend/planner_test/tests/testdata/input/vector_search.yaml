@@ -59,7 +59,7 @@
 - before:
     - create_table_and_index
   sql: |
-    SELECT id, name FROM items order by embedding <#> '[3,1,2]' limit 5;
+    SELECT id, name FROM items order by embedding <#> openai_embedding('{"model": "model"}'::jsonb, 'hello')::vector(3) limit 5;
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_batch
