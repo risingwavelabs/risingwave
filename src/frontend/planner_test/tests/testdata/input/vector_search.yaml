@@ -4,6 +4,15 @@
   expected_outputs: []
 - before:
     - create_table
+  id: no_vector_search_with_offset
+  sql: |
+    SELECT * FROM items order by embedding <-> '[3,1,2]' limit 5 offset 1;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table
   sql: |
     SELECT * FROM items order by embedding <-> '[3,1,2]' limit 5;
   expected_outputs:

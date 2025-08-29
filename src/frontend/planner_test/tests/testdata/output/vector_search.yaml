@@ -2,6 +2,27 @@
 - id: create_table
   sql: |
     create table items (id int primary key, embedding vector(3));
+- id: no_vector_search_with_offset
+  before:
+  - create_table
+  sql: |
+    SELECT * FROM items order by embedding <-> '[3,1,2]' limit 5 offset 1;
+  logical_plan: |-
+    LogicalProject { exprs: [items.id, items.embedding] }
+    └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 1 }
+      └─LogicalProject { exprs: [items.id, items.embedding, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
+        └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 1 }
+    └─LogicalProject { exprs: [items.id, items.embedding, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
+      └─LogicalScan { table: items, columns: [items.id, items.embedding] }
+  batch_plan: |-
+    BatchProject { exprs: [items.id, items.embedding] }
+    └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 1 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchTopN { order: [$expr1 ASC], limit: 6, offset: 0 }
+          └─BatchProject { exprs: [items.id, items.embedding, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
+            └─BatchScan { table: items, columns: [items.id, items.embedding], distribution: UpstreamHashShard(items.id) }
 - before:
   - create_table
   sql: |

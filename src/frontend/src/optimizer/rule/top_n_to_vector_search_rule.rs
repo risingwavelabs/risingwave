@@ -22,7 +22,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::LogicalPlanRef;
 use crate::optimizer::plan_node::generic::TopNLimit;
 use crate::optimizer::plan_node::{
-    LogicalPlanRef as PlanRef, LogicalProject, LogicalVectorSearch, PlanTreeNodeUnary,
+    LogicalPlanRef as PlanRef, LogicalProject, LogicalTopN, LogicalVectorSearch, PlanTreeNodeUnary,
 };
 use crate::optimizer::rule::prelude::*;
 use crate::optimizer::rule::{BoxedRule, ProjectMergeRule, Rule};
@@ -46,21 +46,13 @@ fn merge_consecutive_projections(input: LogicalPlanRef) -> Option<(Vec<ExprImpl>
     Some((exprs, input))
 }
 
-/// This rule converts the following TopN pattern to `LogicalVectorSearch`
-/// ```ignore
-///     LogicalTopN { order: [$expr1 ASC], limit: TOP_N, offset: 0 }
-///       └─LogicalProject { exprs: [VectorDistanceFunc(vector_expr1, vector_expr2) as $expr1, other_exprs...] }
-/// ```
-/// to
-/// ```ignore
-///     LogicalProject { exprs: [other_exprs...] }
-///       └─LogicalVectorSearch { distance_type: `PbDistanceType`, top_n: TOP_N, left: vector_expr1, right: vector_expr2, output_columns: [...] }
-/// ```
-impl Rule<Logical> for TopNToVectorSearchRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let top_n = plan.as_logical_top_n()?;
+impl TopNToVectorSearchRule {
+    fn resolve_vector_search(top_n: &LogicalTopN) -> Option<(LogicalVectorSearch, Vec<ExprImpl>)> {
         if !top_n.group_key().is_empty() {
-            // vector index applies for only singleton top n
+            // vector search applies for only singleton top n
+            return None;
+        }
+        if top_n.offset() > 0 {
             return None;
         }
         let TopNLimit::Simple(limit) = top_n.limit_attr() else {
@@ -126,7 +118,6 @@ impl Rule<Logical> for TopNToVectorSearchRule {
             projection_input.clone(),
         );
         let mut i2o_mapping = vector_search.i2o_mapping();
-        let plan = vector_search.into();
         let mut output_exprs = Vec::with_capacity(exprs.len());
         for expr in &exprs[0..order.column_index] {
             output_exprs.push(i2o_mapping.rewrite_expr(expr.clone()));
@@ -141,6 +132,24 @@ impl Rule<Logical> for TopNToVectorSearchRule {
         for expr in &exprs[order.column_index + 1..exprs.len()] {
             output_exprs.push(i2o_mapping.rewrite_expr(expr.clone()));
         }
-        Some(LogicalProject::create(plan, output_exprs))
+        Some((vector_search, output_exprs))
+    }
+}
+
+/// This rule converts the following TopN pattern to `LogicalVectorSearch`
+/// ```ignore
+///     LogicalTopN { order: [$expr1 ASC], limit: TOP_N, offset: 0 }
+///       └─LogicalProject { exprs: [VectorDistanceFunc(vector_expr1, vector_expr2) as $expr1, other_exprs...] }
+/// ```
+/// to
+/// ```ignore
+///     LogicalProject { exprs: [other_exprs... + distance_column] }
+///       └─LogicalVectorSearch { distance_type: `PbDistanceType`, top_n: TOP_N, left: vector_expr1, right: vector_expr2, output_columns: [...] }
+/// ```
+impl Rule<Logical> for TopNToVectorSearchRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+        let top_n = plan.as_logical_top_n()?;
+        let (vector_search, project_exprs) = Self::resolve_vector_search(top_n)?;
+        Some(LogicalProject::create(vector_search.into(), project_exprs))
     }
 }
