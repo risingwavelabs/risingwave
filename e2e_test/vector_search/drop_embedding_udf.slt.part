@@ -1,0 +1,2 @@
+statement ok
+drop function get_embedding;
