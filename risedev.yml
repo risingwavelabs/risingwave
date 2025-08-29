@@ -954,6 +954,7 @@ profile:
     steps:
       - use: minio
       - use: meta-node
+        meta-backend: sqlite
       - use: compute-node
       - use: frontend
       - use: compactor

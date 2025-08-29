@@ -85,13 +85,7 @@ risedev kill
 # Resume MySQL only, perform some writes, then schema change, then some more writes
 risedev dev mysql-only
 
-# Delete cluster_id file from minio to avoid conflict when restarting RW
-sleep 3
-echo "\n\n\n-------------Delete cluster_id in minio------------\n\n\n"
 
-risedev mc rm hummock-minio/hummock001/hummock_001/cluster_id/0
-
-risedev mc ls hummock-minio/hummock001/hummock_001/cluster_id/
 
 echo "\n\n\n-------------Change Schema------------\n\n\n"
 
