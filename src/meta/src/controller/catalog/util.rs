@@ -331,22 +331,8 @@ impl CatalogController {
         txn: &DatabaseTransaction,
     ) -> MetaResult<Vec<TableId>> {
         // clean incoming sink from (table)
-        // clean upstream fragment ids from (fragment)
-        // clean stream node from (fragment)
-        // clean upstream actor ids from (actor)
-
-        // The cleanup of fragment and StreamNode is to maintain compatibility with old versions of data. For the
-        // current sink-into-table implementation, there is no need to restore the contents of StreamNode, because the
-        // `UpstreamSinkUnion` operator does not persist any data, but relies on refill during recovery.
-
-        let all_fragment_ids: Vec<FragmentId> = Fragment::find()
-            .select_only()
-            .column(fragment::Column::FragmentId)
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        let all_fragment_ids: HashSet<_> = all_fragment_ids.into_iter().collect();
+        // For the current sink-into-table implementation, there is no need to clean up the info of StreamNode, because
+        // the `UpstreamSinkUnion` operator does not persist any data, but relies on refill during recovery.
 
         let table_sink_ids: Vec<ObjectId> = Sink::find()
             .select_only()
@@ -401,87 +387,6 @@ impl CatalogController {
             .exec(txn)
             .await?;
             updated_table_ids.push(table_id);
-
-            let fragments: Vec<(FragmentId, StreamNode, i32)> = Fragment::find()
-                .select_only()
-                .columns(vec![
-                    fragment::Column::FragmentId,
-                    fragment::Column::StreamNode,
-                    fragment::Column::FragmentTypeMask,
-                ])
-                .filter(fragment::Column::JobId.eq(table_id))
-                .into_tuple()
-                .all(txn)
-                .await?;
-
-            for (fragment_id, stream_node, fragment_mask) in fragments {
-                {
-                    // dirty downstream should be materialize fragment of table
-                    if fragment_mask & FragmentTypeFlag::Mview as i32 == 0 {
-                        continue;
-                    }
-
-                    let mut dirty_upstream_fragment_ids = HashSet::new();
-
-                    let mut pb_stream_node = stream_node.to_protobuf();
-
-                    visit_stream_node_cont_mut(&mut pb_stream_node, |node| {
-                        if let Some(NodeBody::Union(_)) = node.node_body {
-                            node.input.retain_mut(|input| match &mut input.node_body {
-                                Some(NodeBody::Project(_)) => {
-                                    let body = input.input.iter().exactly_one().unwrap();
-                                    let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
-                                        unreachable!("expect merge node");
-                                    };
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
-                                    {
-                                        true
-                                    } else {
-                                        dirty_upstream_fragment_ids
-                                            .insert(merge_node.upstream_fragment_id);
-                                        false
-                                    }
-                                }
-                                Some(NodeBody::Merge(merge_node)) => {
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
-                                    {
-                                        true
-                                    } else {
-                                        dirty_upstream_fragment_ids
-                                            .insert(merge_node.upstream_fragment_id);
-                                        false
-                                    }
-                                }
-                                _ => false,
-                            });
-                        }
-                        true
-                    });
-
-                    tracing::info!(
-                        "cleaning dirty table sink fragment {:?} from downstream fragment {}",
-                        dirty_upstream_fragment_ids,
-                        fragment_id
-                    );
-
-                    if !dirty_upstream_fragment_ids.is_empty() {
-                        tracing::info!(
-                            "fixing dirty stream node in downstream fragment {}",
-                            fragment_id
-                        );
-                        Fragment::update_many()
-                            .col_expr(
-                                fragment::Column::StreamNode,
-                                StreamNode::from(&pb_stream_node).into(),
-                            )
-                            .filter(fragment::Column::FragmentId.eq(fragment_id))
-                            .exec(txn)
-                            .await?;
-                    }
-                }
-            }
         }
 
         Ok(updated_table_ids)

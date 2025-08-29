@@ -60,6 +60,7 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbUpstreamSinkUnionNode};
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
@@ -414,6 +415,126 @@ impl CatalogController {
             .await?;
         txn.commit().await?;
         // We don't need to notify the frontend, because the Init subscription is not send to frontend.
+        Ok(())
+    }
+
+    /// A `Union` node on the table, in older versions, should contain multiple `Merge` + `Project` nodes at the end as
+    /// input for upstream sinks.
+    fn transform_upstream_sink_union(union_node: &mut PbStreamNode) -> bool {
+        assert!(matches!(
+            union_node.get_node_body().unwrap(),
+            NodeBody::Union(_)
+        ));
+        assert!(union_node.get_input().len() >= 2);
+        if matches!(
+            union_node
+                .get_input()
+                .last()
+                .unwrap()
+                .get_node_body()
+                .unwrap(),
+            NodeBody::UpstreamSinkUnion(_)
+        ) {
+            return false;
+        }
+        let mut upstream_sink_count = 0;
+        for union_input in union_node.get_input().iter().rev() {
+            let mut is_sink_into = false;
+            if let NodeBody::Project(project) = union_input.get_node_body().unwrap() {
+                let project_input = union_input.get_input().first().unwrap();
+                if let NodeBody::Merge(merge) = project_input.get_node_body().unwrap() {
+                    // Operators created in older versions should meet these conditions.
+                    assert!(
+                        project.get_watermark_input_cols().is_empty()
+                            && project.get_watermark_output_cols().is_empty()
+                            && project.get_nondecreasing_exprs().is_empty()
+                            && !project.noop_update_hint
+                            && merge.upstream_dispatcher_type() == PbDispatcherType::Hash
+                    );
+                    is_sink_into = true;
+                    upstream_sink_count += 1;
+                }
+            }
+            if !is_sink_into {
+                break;
+            }
+        }
+
+        assert!(union_node.get_input().len() > upstream_sink_count);
+        union_node
+            .input
+            .truncate(union_node.get_input().len() - upstream_sink_count);
+
+        let upstream_sink_union = PbUpstreamSinkUnionNode {
+            // It will be rebuilt in the subsequent recovery process.
+            init_upstreams: Default::default(),
+        };
+        let stream_node = PbStreamNode {
+            operator_id: 1 << 16, // a large unique value that is not the same as other operator_id
+            input: Default::default(),
+            stream_key: union_node.get_stream_key().clone(),
+            stream_kind: union_node.stream_kind().into(), // not used, so it doesn't matter here
+            identity: "UpstreamSinkUnion".to_owned(),
+            fields: union_node.get_fields().clone(),
+            node_body: Some(NodeBody::UpstreamSinkUnion(Box::new(upstream_sink_union))),
+        };
+        union_node.input.push(stream_node);
+
+        true
+    }
+
+    // Currently it is only used to transform table fragments with upstream sinks.
+    pub async fn migrate_legacy_fragments(&self) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let all_table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let table_fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns(vec![
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+            ])
+            .filter(fragment::Column::JobId.is_in(all_table_ids.clone()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        for (fragment_id, fragment_type_mask, stream_node) in table_fragments {
+            if fragment_type_mask & FragmentTypeFlag::Mview as i32 == 0 {
+                continue;
+            }
+
+            let mut pb_stream_node = stream_node.to_protobuf();
+            let mut updated = false;
+            visit_stream_node_cont_mut(&mut pb_stream_node, |node| {
+                if matches!(node.node_body, Some(NodeBody::Union(_))) {
+                    updated = Self::transform_upstream_sink_union(node);
+                    false
+                } else {
+                    true
+                }
+            });
+
+            if updated {
+                Fragment::update(fragment::ActiveModel {
+                    fragment_id: Set(fragment_id),
+                    stream_node: Set(StreamNode::from(&pb_stream_node)),
+                    ..Default::default()
+                })
+                .exec(&txn)
+                .await?;
+            }
+        }
+
+        txn.commit().await?;
+
         Ok(())
     }
 
