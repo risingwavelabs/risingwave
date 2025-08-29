@@ -60,6 +60,7 @@ pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
 /// The reason why the cluster is recovering.
+#[derive(Clone)]
 enum RecoveryReason {
     /// After bootstrap.
     Bootstrap,
