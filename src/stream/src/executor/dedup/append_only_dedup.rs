@@ -156,14 +156,14 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
             }
 
             let table = &self.state_table;
-            futures.push(async move { (key, table.get_encoded_row(key).await) });
+            futures.push(async move { (key, table.exists(key).await) });
         }
 
         if !futures.is_empty() {
             let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
             while let Some(result) = buffered.next().await {
-                let (key, value) = result;
-                if value?.is_some() {
+                let (key, exists) = result;
+                if exists? {
                     // Only insert into the cache when we have this key in storage.
                     self.cache.put(key.to_owned(), ());
                 }
