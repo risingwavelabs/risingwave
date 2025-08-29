@@ -438,7 +438,7 @@ impl TestCase {
                     source_watermarks,
                     append_only,
                     on_conflict,
-                    with_version_column,
+                    with_version_columns,
                     cdc_table_info,
                     include_column_options,
                     wildcard_idx,
@@ -459,7 +459,10 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         on_conflict,
-                        with_version_column.map(|x| x.real_value()),
+                        with_version_columns
+                            .iter()
+                            .map(|x| x.real_value())
+                            .collect(),
                         cdc_table_info,
                         include_column_options,
                         webhook_info,
