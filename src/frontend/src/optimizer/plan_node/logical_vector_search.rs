@@ -26,7 +26,9 @@ use crate::expr::{
     ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, collect_input_refs,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef, TopNLimit};
+use crate::optimizer::plan_node::generic::{
+    GenericPlanNode, GenericPlanRef, TopNLimit, ensure_sorted_required_cols,
+};
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
     BatchPlanRef, BatchProject, BatchTopN, ColPrunable, ColumnPruningContext, ExprRewritable,
@@ -187,19 +189,26 @@ impl Distill for LogicalVectorSearch {
 
 impl ColPrunable for LogicalVectorSearch {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let (project_exprs, required_cols) =
+            ensure_sorted_required_cols(required_cols, self.base.schema());
+        assert!(required_cols.is_sorted());
         let input_schema = self.core.input.schema();
         let mut required_input_idx_bitset =
             collect_input_refs(input_schema.len(), [&self.core.left, &self.core.right]);
         let mut non_distance_required_input_idx = Vec::new();
-        let mut distance_col_idx_in_required_cols = None;
-        for (new_output_idx, &required_col_idx) in required_cols.iter().enumerate() {
-            if required_col_idx == self.core.output_indices.len() {
-                distance_col_idx_in_required_cols = Some(new_output_idx);
-            } else {
-                let required_input_idx = self.core.output_indices[required_col_idx];
-                non_distance_required_input_idx.push(required_input_idx);
-                required_input_idx_bitset.set(required_col_idx, true);
-            }
+        let require_distance_col = required_cols
+            .last()
+            .map(|last_col_idx| *last_col_idx == self.core.output_indices.len())
+            .unwrap_or(false);
+        let non_distance_iter_end_idx = if require_distance_col {
+            required_cols.len() - 1
+        } else {
+            required_cols.len()
+        };
+        for &required_col_idx in &required_cols[0..non_distance_iter_end_idx] {
+            let required_input_idx = self.core.output_indices[required_col_idx];
+            non_distance_required_input_idx.push(required_input_idx);
+            required_input_idx_bitset.set(required_col_idx, true);
         }
         let input_required_idx = required_input_idx_bitset.ones().collect_vec();
 
@@ -220,22 +229,7 @@ impl ColPrunable for LogicalVectorSearch {
                 .collect();
             Self::with_core(new_core)
         };
-        if let Some(distance_col_idx_in_required_cols) = distance_col_idx_in_required_cols {
-            assert_eq!(required_cols.len(), vector_search.schema().len());
-            // distance column is at the end of vector search
-            let distance_col_idx_in_vector_search = vector_search.schema().len() - 1;
-            // recompose output col idx by inserting distance column in the middle
-            let output_col_idx = (0..distance_col_idx_in_required_cols)
-                .chain([distance_col_idx_in_vector_search])
-                .chain(distance_col_idx_in_required_cols..distance_col_idx_in_vector_search);
-            LogicalProject::with_out_col_idx(vector_search.into(), output_col_idx).into()
-        } else {
-            LogicalProject::with_out_col_idx(
-                vector_search.into(),
-                0..non_distance_required_input_idx.len(),
-            )
-            .into()
-        }
+        LogicalProject::create(vector_search.into(), project_exprs)
     }
 }
 

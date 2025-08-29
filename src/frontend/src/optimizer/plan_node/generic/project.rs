@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -398,5 +399,79 @@ impl fmt::Debug for AliasedExpr<'_> {
             Some(alias) => write!(f, "{:?} as {}", self.expr, alias),
             None => write!(f, "{:?}", self.expr),
         }
+    }
+}
+
+/// Given the index of required cols, return a vec of permutation index, so that after we sort the `required_cols`,
+/// and re-apply with a projection with the permutation index, we can restore the original `required_cols`.
+///
+/// For example, when the `required_cols` is `[5, 3, 10]`, the `sorted_required_cols` is `[3, 5, 10]`, and the permutation index is
+/// `[1, 0, 2]`, so that `[sorted_required_cols[1], sorted_required_cols[0], sorted_required_cols[2]]` equals the original `[5, 3, 10]`
+pub fn ensure_sorted_required_cols(
+    required_cols: &[usize],
+    schema: &Schema,
+) -> (Vec<ExprImpl>, Vec<usize>) {
+    let mut required_cols_with_output_idx = required_cols.iter().copied().enumerate().collect_vec();
+    required_cols_with_output_idx.sort_by_key(|(_, col_idx)| *col_idx);
+    let mut output_indices = vec![0; required_cols.len()];
+    let mut sorted_col_idx = Vec::with_capacity(required_cols.len());
+
+    for (sorted_input_idx, (output_idx, col_idx)) in
+        required_cols_with_output_idx.into_iter().enumerate()
+    {
+        sorted_col_idx.push(col_idx);
+        output_indices[output_idx] = sorted_input_idx;
+    }
+
+    (
+        output_indices
+            .into_iter()
+            .map(|sorted_input_idx| {
+                InputRef::new(
+                    sorted_input_idx,
+                    schema[sorted_col_idx[sorted_input_idx]].data_type(),
+                )
+                .into()
+            })
+            .collect(),
+        sorted_col_idx,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+
+    use itertools::Itertools;
+    use rand::prelude::SliceRandom;
+    use rand::rng;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::ensure_sorted_required_cols;
+
+    #[test]
+    fn test_ensure_sorted_required_cols() {
+        let input_len = 10;
+        let schema = Schema::new(
+            (0..input_len)
+                .map(|_| Field::unnamed(DataType::Int32))
+                .collect(),
+        );
+        let mut required_cols = (0..input_len)
+            .filter(|_| rand::random_bool(0.5))
+            .collect_vec();
+        let sorted_required_cols = required_cols.clone();
+        required_cols.shuffle(&mut rng());
+        let required_cols = required_cols;
+
+        let (output_exprs, sorted) = ensure_sorted_required_cols(&required_cols, &schema);
+        assert_eq!(sorted, sorted_required_cols);
+        assert_eq!(
+            output_exprs
+                .iter()
+                .map(|expr| sorted_required_cols[expr.as_input_ref().unwrap().index])
+                .collect_vec(),
+            required_cols
+        );
     }
 }
