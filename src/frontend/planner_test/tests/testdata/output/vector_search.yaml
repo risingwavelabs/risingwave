@@ -145,6 +145,47 @@
 - before:
   - create_table_and_index
   sql: |
+    SELECT id, name FROM items order by embedding <#> '[1, 2, 3]'::vector(3) limit 5;
+  logical_plan: |-
+    LogicalProject { exprs: [items.id, items.name] }
+    └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+      └─LogicalProject { exprs: [items.id, items.name, Neg(InnerProduct(items.embedding, '[1,2,3]':Vector(3))) as $expr1] }
+        └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $2, right: '[1,2,3]':Vector(3), output_columns: [items.id:Int32, items.name:Varchar] }
+    └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
+  batch_plan: |-
+    BatchProject { exprs: [$expr1, $expr2] }
+    └─BatchExchange { order: [$expr3 ASC], dist: Single }
+      └─BatchSort { order: [$expr3 ASC] }
+        └─BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
+          └─BatchProjectSet { select_list: [Unnest($1)] }
+            └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector:  }
+              └─BatchValues { rows: [['[1,2,3]':Vector(3)]] }
+- id: no_vector_index_search_on_table_scan_with_predicate
+  before:
+  - create_table_and_index
+  sql: |
+    SELECT id, name FROM items where id > 0 order by embedding <#> '[1, 2, 3]'::vector(3) limit 5;
+  logical_plan: |-
+    LogicalProject { exprs: [items.id, items.name] }
+    └─LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+      └─LogicalProject { exprs: [items.id, items.name, Neg(InnerProduct(items.embedding, '[1,2,3]':Vector(3))) as $expr1] }
+        └─LogicalFilter { predicate: (items.id > 0:Int32) }
+          └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $2, right: '[1,2,3]':Vector(3), output_columns: [items.id:Int32, items.name:Varchar] }
+    └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding], predicate: (items.id > 0:Int32) }
+  batch_plan: |-
+    BatchProject { exprs: [items.id, items.name] }
+    └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+          └─BatchProject { exprs: [items.id, items.name, Neg(InnerProduct(items.embedding, '[1,2,3]':Vector(3))) as $expr1] }
+            └─BatchScan { table: items, columns: [items.id, items.name, items.embedding], scan_ranges: [items.id > Int32(0)], distribution: UpstreamHashShard(items.id) }
+- before:
+  - create_table_and_index
+  sql: |
     SELECT id, name FROM items order by embedding <#> openai_embedding('{"model": "model"}'::jsonb, 'hello')::vector(3) limit 5;
   logical_plan: |-
     LogicalProject { exprs: [items.id, items.name] }
