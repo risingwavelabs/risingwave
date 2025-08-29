@@ -25,7 +25,6 @@ use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
-use risingwave_meta_model::table::CdcTableType;
 use risingwave_pb::catalog::table::{
     CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
     PbTableVersion,
@@ -603,7 +602,7 @@ impl TableCatalog {
             cdc_table_type: self
                 .cdc_table_type
                 .clone()
-                .map(|t| PbCdcTableType::from(Self::from_external_cdc_table_type(t)) as i32),
+                .map(|t| PbCdcTableType::from(t) as i32),
         }
     }
 
@@ -832,7 +831,7 @@ impl From<PbTable> for TableCatalog {
             cdc_table_type: tb
                 .cdc_table_type
                 .and_then(|t| PbCdcTableType::try_from(t).ok())
-                .map(|t| Self::to_external_cdc_table_type(CdcTableType::from(t))),
+                .map(ExternalCdcTableType::from),
         }
     }
 }
@@ -846,29 +845,6 @@ impl From<&PbTable> for TableCatalog {
 impl OwnedByUserCatalog for TableCatalog {
     fn owner(&self) -> UserId {
         self.owner
-    }
-}
-
-impl TableCatalog {
-    fn from_external_cdc_table_type(connector_type: ExternalCdcTableType) -> CdcTableType {
-        match connector_type {
-            ExternalCdcTableType::Undefined | ExternalCdcTableType::Mock => CdcTableType::Postgres, /* Default to Postgres */
-            ExternalCdcTableType::Postgres => CdcTableType::Postgres,
-            ExternalCdcTableType::MySql => CdcTableType::Mysql,
-            ExternalCdcTableType::SqlServer => CdcTableType::Sqlserver,
-            ExternalCdcTableType::Mongo => CdcTableType::Mongo,
-            ExternalCdcTableType::Citus => CdcTableType::Citus,
-        }
-    }
-
-    fn to_external_cdc_table_type(meta_type: CdcTableType) -> ExternalCdcTableType {
-        match meta_type {
-            CdcTableType::Postgres => ExternalCdcTableType::Postgres,
-            CdcTableType::Mysql => ExternalCdcTableType::MySql,
-            CdcTableType::Sqlserver => ExternalCdcTableType::SqlServer,
-            CdcTableType::Mongo => ExternalCdcTableType::Mongo,
-            CdcTableType::Citus => ExternalCdcTableType::Citus,
-        }
     }
 }
 

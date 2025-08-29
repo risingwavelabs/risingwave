@@ -68,7 +68,6 @@ risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_frontend_macro = { path = "macro" }
 risingwave_hummock_sdk = { workspace = true }
-risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }

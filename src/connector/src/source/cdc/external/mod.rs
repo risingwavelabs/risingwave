@@ -28,6 +28,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
 
@@ -106,6 +107,33 @@ impl ExternalCdcTableType {
             // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
+        }
+    }
+}
+
+impl From<ExternalCdcTableType> for PbCdcTableType {
+    fn from(cdc_table_type: ExternalCdcTableType) -> Self {
+        match cdc_table_type {
+            ExternalCdcTableType::Postgres => Self::Postgres,
+            ExternalCdcTableType::MySql => Self::Mysql,
+            ExternalCdcTableType::SqlServer => Self::Sqlserver,
+
+            ExternalCdcTableType::Citus => Self::Citus,
+            ExternalCdcTableType::Mongo => Self::Mongo,
+            ExternalCdcTableType::Undefined | ExternalCdcTableType::Mock => Self::Unspecified,
+        }
+    }
+}
+
+impl From<PbCdcTableType> for ExternalCdcTableType {
+    fn from(cdc_table_type: PbCdcTableType) -> Self {
+        match cdc_table_type {
+            PbCdcTableType::Postgres => Self::Postgres,
+            PbCdcTableType::Mysql => Self::MySql,
+            PbCdcTableType::Sqlserver => Self::SqlServer,
+            PbCdcTableType::Mongo => Self::Mongo,
+            PbCdcTableType::Citus => Self::Citus,
+            PbCdcTableType::Unspecified => Self::Undefined,
         }
     }
 }

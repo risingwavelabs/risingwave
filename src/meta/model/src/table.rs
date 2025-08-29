@@ -139,6 +139,8 @@ impl From<PbEngine> for Engine {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum CdcTableType {
+    #[sea_orm(string_value = "UNSPECIFIED")]
+    Unspecified,
     #[sea_orm(string_value = "POSTGRES")]
     Postgres,
     #[sea_orm(string_value = "MYSQL")]
@@ -159,6 +161,7 @@ impl From<CdcTableType> for PbCdcTableType {
             CdcTableType::Sqlserver => Self::Sqlserver,
             CdcTableType::Mongo => Self::Mongo,
             CdcTableType::Citus => Self::Citus,
+            CdcTableType::Unspecified => Self::Unspecified,
         }
     }
 }
@@ -171,9 +174,7 @@ impl From<PbCdcTableType> for CdcTableType {
             PbCdcTableType::Sqlserver => Self::Sqlserver,
             PbCdcTableType::Mongo => Self::Mongo,
             PbCdcTableType::Citus => Self::Citus,
-            PbCdcTableType::Unspecified => {
-                unreachable!("Unspecified CDC table type")
-            }
+            PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
 }
