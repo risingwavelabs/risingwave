@@ -319,11 +319,11 @@ public class DbzConnectorConfig {
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }
-
         var otherProps = extractDebeziumProperties(userProps);
         for (var entry : otherProps.entrySet()) {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
+        LOG.info("Final Debezium properties: {}", dbzProps);
 
         this.sourceId = sourceId;
         this.sourceType = source;
