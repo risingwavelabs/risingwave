@@ -55,9 +55,14 @@ impl BoundShareInput {
                         bound_base_table.table_catalog.columns().to_vec(),
                         bound_base_table.table_catalog.name().to_owned(),
                     )
+                } else if let Relation::Source(bound_source) = r {
+                    (
+                        bound_source.catalog.columns.clone(),
+                        bound_source.catalog.name.clone(),
+                    )
                 } else {
                     return Err(ErrorCode::BindError(
-                        "Change log CTE must be a base table".to_owned(),
+                        "Change log CTE must be a table or source".to_owned(),
                     )
                     .into());
                 };
