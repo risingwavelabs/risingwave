@@ -124,7 +124,6 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
             .await?;
     }
     txn.commit().await?;
-    // TODO(zw): handle metadata backup&restore
     Ok(())
 }
 

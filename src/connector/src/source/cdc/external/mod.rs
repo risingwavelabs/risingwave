@@ -28,6 +28,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
 
@@ -92,7 +93,7 @@ impl CdcTableType {
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(config, schema)?,
+                MySqlExternalTableReader::new(config, schema, pk_indices, schema_table_name)?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(config, schema, pk_indices, schema_table_name)
@@ -477,3 +478,34 @@ impl ExternalTableImpl {
         }
     }
 }
+
+pub(crate) fn to_int_scalar(i: i64, data_type: &DataType) -> ScalarImpl {
+    match data_type {
+        DataType::Int16 => ScalarImpl::Int16(i.try_into().unwrap()),
+        DataType::Int32 => ScalarImpl::Int32(i.try_into().unwrap()),
+        DataType::Int64 => ScalarImpl::Int64(i),
+        _ => {
+            panic!("Can't convert int {} to ScalarImpl::{}", i, data_type)
+        }
+    }
+}
+
+pub(crate) fn try_increase_split_id(split_id: &mut i64) -> ConnectorResult<()> {
+    match split_id.checked_add(1) {
+        Some(s) => {
+            *split_id = s;
+            Ok(())
+        }
+        None => Err(anyhow::anyhow!("too many CDC snapshot splits").into()),
+    }
+}
+
+/// Use the first column of primary keys to split table.
+pub(crate) fn is_supported_even_split_data_type(data_type: &DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Int16 | DataType::Int32 | DataType::Int64
+    )
+}
+
+pub(crate) const CDC_TABLE_SPLIT_ID_START: i64 = 1;
