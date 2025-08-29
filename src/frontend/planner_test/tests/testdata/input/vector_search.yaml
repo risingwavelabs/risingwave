@@ -59,7 +59,7 @@
     - explain_output
 - id: create_table_and_index
   sql: |
-    create table items (id int primary key, name string, unindexed timestamptz, embedding vector(3)) append only;
+    create table items (id int primary key, unindexed timestamptz, name string, embedding vector(3)) append only;
     create index vector_index on items using flat (embedding) include (name) with (distance_type = 'inner_product');
   expected_outputs: []
 - before:
