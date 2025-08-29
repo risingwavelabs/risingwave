@@ -93,10 +93,11 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
     shutdown: CancellationToken,
 ) {
+    let opts = Arc::new(opts);
     // Load the configuration.
-    let config = load_config(&opts.config_path, &opts);
+    let config = Arc::new(load_config(&opts.config_path, &*opts));
     info!("Starting compute node",);
-    info!("> config: {:?}", config);
+    info!("> config: {:?}", &*config);
     info!(
         "> debug assertions: {}",
         if cfg!(debug_assertions) { "on" } else { "off" }
@@ -165,7 +166,7 @@ pub async fn compute_node_serve(
     );
 
     let storage_opts = Arc::new(StorageOpts::from((
-        &config,
+        &*config,
         &system_params,
         &storage_memory_config,
     )));
@@ -221,7 +222,7 @@ pub async fn compute_node_serve(
     .unwrap();
 
     LocalSecretManager::init(
-        opts.temp_secret_file_dir,
+        opts.temp_secret_file_dir.clone(),
         meta_client.cluster_id().to_owned(),
         worker_id,
     );
