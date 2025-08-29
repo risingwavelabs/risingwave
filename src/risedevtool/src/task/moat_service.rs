@@ -88,59 +88,6 @@ impl MoatService {
 
         Ok(())
     }
-
-    // fn minio_path(&self) -> Result<PathBuf> {
-    //     let prefix_bin = env::var("PREFIX_BIN")?;
-    //     Ok(Path::new(&prefix_bin).join("minio"))
-    // }
-
-    // fn minio(&self) -> Result<Command> {
-    //     Ok(Command::new(self.minio_path()?))
-    // }
-
-    // /// Apply command args according to config
-    // pub fn apply_command_args(cmd: &mut Command, config: &MinioConfig) -> Result<()> {
-    //     cmd.arg("server")
-    //         .arg("--address")
-    //         .arg(format!("{}:{}", config.listen_address, config.port))
-    //         .arg("--console-address")
-    //         .arg(format!("{}:{}", config.listen_address, config.console_port))
-    //         .env("MINIO_ROOT_USER", &config.root_user)
-    //         .env("MINIO_ROOT_PASSWORD", &config.root_password)
-    //         .env("MINIO_PROMETHEUS_AUTH_TYPE", "public")
-    //         // Allow MinIO to be used on root disk, bypass restriction.
-    //         // https://github.com/risingwavelabs/risingwave/pull/3012
-    //         // https://docs.min.io/minio/baremetal/installation/deploy-minio-single-node-single-drive.html#id3
-    //         .env("MINIO_CI_CD", "1");
-    //     if config.api_requests_max > 0 {
-    //         // Rate limit minio
-    //         cmd.env(
-    //             "MINIO_API_REQUESTS_MAX",
-    //             config.api_requests_max.to_string(),
-    //         );
-    //     }
-    //     if !config.api_requests_deadline.is_empty() {
-    //         // Rate limit minio
-    //         cmd.env("MINIO_API_REQUESTS_DEADLINE", &config.api_requests_deadline);
-    //     }
-
-    //     let provide_prometheus = config.provide_prometheus.as_ref().unwrap();
-    //     match provide_prometheus.len() {
-    //         0 => {}
-    //         1 => {
-    //             let prometheus = &provide_prometheus[0];
-    //             cmd.env(
-    //                 "MINIO_PROMETHEUS_URL",
-    //                 format!("http://{}:{}", prometheus.address, prometheus.port),
-    //             );
-    //         }
-    //         other_length => {
-    //             return Err(anyhow!("expected 0 or 1 prometheus, get {}", other_length));
-    //         }
-    //     }
-
-    //     Ok(())
-    // }
 }
 
 impl Task for MoatService {
