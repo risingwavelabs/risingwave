@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, span};
@@ -23,6 +22,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, TableId};
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -54,7 +54,7 @@ use crate::model::{
     FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::cdc::{
-    assign_cdc_table_snapshot_splits, assign_cdc_table_snapshot_splits_for_replace_table,
+    assign_cdc_table_snapshot_splits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -476,13 +476,12 @@ impl GlobalStreamManager {
                 .source_manager
                 .allocate_splits(&stream_job_fragments)
                 .await?;
-            let cdc_table_snapshot_split_assignment =
-                assign_cdc_table_snapshot_splits_for_replace_table(
-                    context.old_fragments.stream_job_id.table_id,
-                    &stream_job_fragments.inner,
-                    self.env.meta_store_ref(),
-                )
-                .await?;
+            let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+                context.old_fragments.stream_job_id.table_id,
+                &stream_job_fragments.inner,
+                self.env.meta_store_ref(),
+            )
+            .await?;
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -517,10 +516,39 @@ impl GlobalStreamManager {
         );
 
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
-            iter::once(stream_job_fragments.deref()),
+            stream_job_fragments.stream_job_id.table_id,
+            &stream_job_fragments,
             self.env.meta_store_ref(),
         )
         .await?;
+        let cdc_table_snapshot_split_assignment = if !cdc_table_snapshot_split_assignment.is_empty()
+        {
+            self.env.cdc_table_backfill_tracker.track_new_job(
+                stream_job_fragments.stream_job_id.table_id,
+                cdc_table_snapshot_split_assignment
+                    .values()
+                    .map(|s| u64::try_from(s.len()).unwrap())
+                    .sum(),
+            );
+            self.env
+                .cdc_table_backfill_tracker
+                .add_fragment_table_mapping(
+                    stream_job_fragments
+                        .fragments
+                        .values()
+                        .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
+                        .map(|f| f.fragment_id),
+                    stream_job_fragments.stream_job_id.table_id,
+                );
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                cdc_table_snapshot_split_assignment,
+                self.env
+                    .cdc_table_backfill_tracker
+                    .next_generation(iter::once(stream_job_fragments.stream_job_id.table_id)),
+            )
+        } else {
+            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+        };
 
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
@@ -600,13 +628,12 @@ impl GlobalStreamManager {
             init_split_assignment
         );
 
-        let cdc_table_snapshot_split_assignment =
-            assign_cdc_table_snapshot_splits_for_replace_table(
-                old_fragments.stream_job_id.table_id,
-                &new_fragments.inner,
-                self.env.meta_store_ref(),
-            )
-            .await?;
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+            old_fragments.stream_job_id.table_id,
+            &new_fragments.inner,
+            self.env.meta_store_ref(),
+        )
+        .await?;
 
         self.barrier_scheduler
             .run_command(
