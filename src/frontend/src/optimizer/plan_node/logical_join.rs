@@ -322,6 +322,21 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         logical_join: generic::Join<BatchPlanRef>,
     ) -> Result<Option<BatchLookupJoin>> {
+        let logical_scan: &LogicalScan =
+            if let Some(logical_scan) = self.core.right.as_logical_scan() {
+                logical_scan
+            } else {
+                return Ok(None);
+            };
+        Self::gen_batch_lookup_join(logical_scan, predicate, logical_join, self.is_asof_join())
+    }
+
+    pub fn gen_batch_lookup_join(
+        logical_scan: &LogicalScan,
+        predicate: EqJoinPredicate,
+        logical_join: generic::Join<BatchPlanRef>,
+        is_as_of: bool,
+    ) -> Result<Option<BatchLookupJoin>> {
         match logical_join.join_type {
             JoinType::Inner
             | JoinType::LeftOuter
@@ -332,13 +347,6 @@ impl LogicalJoin {
             _ => return Ok(None),
         };
 
-        let right = self.right();
-        // Lookup Join only supports basic tables on the join's right side.
-        let logical_scan: &LogicalScan = if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan
-        } else {
-            return Ok(None);
-        };
         let table = logical_scan.table();
         let output_column_ids = logical_scan.output_column_ids();
 
@@ -459,8 +467,7 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        let asof_desc = self
-            .is_asof_join()
+        let asof_desc = is_as_of
             .then(|| {
                 Self::get_inequality_desc_from_predicate(
                     predicate.other_cond().clone(),
