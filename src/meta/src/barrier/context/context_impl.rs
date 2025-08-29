@@ -208,6 +208,8 @@ impl CommandContext {
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(SourceChange::UpdateSourceProps {
+                        // here we push all mutations to the source manager,
+                        // it will discard the mutations that if the id not registered.
                         source_id_map_new_props: obj_id_map_props.clone(),
                     })
                     .await;
