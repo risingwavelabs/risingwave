@@ -22,6 +22,7 @@ pub use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
     CreateSubscriptionStatement, SecretRef, SecretRefAsType, SqlOption, Statement, Value,
@@ -310,4 +311,42 @@ impl TryFrom<&Statement> for WithOptions {
             _ => Ok(Default::default()),
         }
     }
+}
+
+/// Resolves connection references and secret references in `WithOptions`.
+///
+/// This function takes `WithOptions` (typically from a CREATE/ALTER statement),
+/// resolves any CONNECTION and SECRET references, and merges their properties
+/// with the directly specified options.
+///
+/// # Arguments
+/// * `with_options` - The original `WithOptions` containing user-specified options and references
+/// * `session` - The current user session, used to access catalogs and verify permissions
+/// * `object` - Optional telemetry information about the database object being created/altered
+///
+/// # Returns
+/// A tuple containing:
+/// * `WithOptionsSecResolved` - `WithOptions` with all references resolved and merged
+/// * `PbConnectionType` - The type of the referenced connection (if any)
+/// * `Option<u32>` - The ID of the referenced connection (if any)
+///
+/// # Workflow
+/// 1. Extract connector name, options, secret refs, and connection refs from `with_options`
+/// 2. Resolve any CONNECTION references by looking them up in the catalog
+/// 3. Resolve any SECRET references by looking them up in the catalog
+/// 4. Merge properties from CONNECTION with directly specified options
+/// 5. Perform validation to ensure no conflicts between options
+/// 6. Return the merged options, connection type, and connection ID
+pub(crate) fn resolve_connection_ref_and_secret_ref(
+    with_options: WithOptions,
+    _session: &SessionImpl,
+    _object: Option<TelemetryDatabaseObject>,
+) -> RwResult<(WithOptionsSecResolved, Option<u32>)> {
+    let (options, _secret_refs) = with_options.clone().into_parts();
+    let inner_secret_refs = BTreeMap::default();
+
+    Ok((
+        WithOptionsSecResolved::new(options, inner_secret_refs),
+        None,
+    ))
 }

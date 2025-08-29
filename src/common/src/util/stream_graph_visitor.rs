@@ -19,6 +19,14 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{agg_call_state, StreamNode};
 
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s recursively.
+pub fn visit_stream_node_mut(stream_node: &mut StreamNode, mut f: impl FnMut(&mut NodeBody)) {
+    visit_stream_node_cont_mut(stream_node, |stream_node| {
+        f(stream_node.node_body.as_mut().unwrap());
+        true
+    })
+}
+
+/// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s recursively.
 pub fn visit_stream_node<F>(stream_node: &mut StreamNode, mut f: F)
 where
     F: FnMut(&mut NodeBody),

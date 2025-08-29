@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
@@ -37,6 +37,7 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -128,6 +129,14 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 
     fn worker_id(&self) -> u32;
+
+    async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -310,5 +319,22 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     fn worker_id(&self) -> u32 {
         self.0.worker_id()
+    }
+
+    async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        self.0
+            .alter_source_connector_props(
+                source_id,
+                changed_props,
+                changed_secret_refs,
+                connector_conn_ref,
+            )
+            .await
     }
 }

@@ -22,6 +22,7 @@ use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta_model::{SourceId, StreamingParallelism};
+use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -430,5 +431,37 @@ impl StreamManagerService for StreamServiceImpl {
             .list_rate_limits()
             .await?;
         Ok(Response::new(ListRateLimitsResponse { rate_limits }))
+    }
+
+    async fn alter_connector_props(
+        &self,
+        request: Request<AlterConnectorPropsRequest>,
+    ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
+        let request = request.into_inner();
+        match request.object_type() {
+            AlterConnectorPropsObject::Source => {
+                // alter source and table's associated source
+                if request.connector_conn_ref.is_some() {
+                    return Err(Status::invalid_argument(
+                        "alter connector_conn_ref is not supported",
+                    ));
+                }
+                let _options_with_secret = self
+                    .metadata_manager
+                    .catalog_controller
+                    .update_source_props_by_source_id(
+                        request.object_id as SourceId,
+                        request.changed_props.clone().into_iter().collect(),
+                        request.changed_secret_refs.clone().into_iter().collect(),
+                    )
+                    .await?;
+            }
+            _ => {
+                return Err(Status::invalid_argument(
+                    "unsupported AlterConnectorPropsObject",
+                ))
+            }
+        };
+        Ok(Response::new(AlterConnectorPropsResponse {}))
     }
 }

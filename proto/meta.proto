@@ -9,6 +9,7 @@ import "hummock.proto";
 import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
+import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -337,6 +338,7 @@ service StreamManagerService {
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
+  rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
 }
 
 // Below for cluster service.
@@ -877,3 +879,20 @@ message ListRateLimitsResponse {
   }
   repeated RateLimitInfo rate_limits = 1;
 }
+
+message AlterConnectorPropsRequest {
+  enum AlterConnectorPropsObject {
+    UNSPECIFIED = 0;
+    SOURCE = 1;
+    SINK = 2;
+    CONNECTION = 3;
+  }
+
+  uint32 object_id = 1;
+  map<string, string> changed_props = 2;
+  map<string, secret.SecretRef> changed_secret_refs = 3;
+  optional uint32 connector_conn_ref = 4;
+  AlterConnectorPropsObject object_type = 5;
+}
+
+message AlterConnectorPropsResponse {}

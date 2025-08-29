@@ -612,6 +612,22 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("source_id", source_id.to_string()))
     }
 
+    pub fn get_source_by_id_2<'a>(
+        &self,
+        db_name: &'a str,
+        schema_path: &SchemaPath<'a>,
+        source_id: &SourceId,
+    ) -> CatalogResult<&Arc<SourceCatalog>> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_source_by_id(source_id))
+            })?
+            .map(|(s, _)| s)
+            .ok_or_else(|| CatalogError::NotFound("source", source_id.to_string()))
+    }
+
     /// Refer to [`SearchPath`].
     pub fn first_valid_schema(
         &self,

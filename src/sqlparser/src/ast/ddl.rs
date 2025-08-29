@@ -22,7 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use super::ConnectorSchema;
 use crate::ast::{
-    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
+    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName,
+    SetVariableValue, SqlOption,
 };
 use crate::tokenizer::Token;
 
@@ -119,6 +120,10 @@ pub enum AlterTableOperation {
     SwapRenameTable {
         target_table: ObjectName,
     },
+    /// `ALTER CONNECTOR WITH (<connector_props>)`
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -204,6 +209,7 @@ pub enum AlterSourceOperation {
     RefreshSchema,
     SetSourceRateLimit { rate_limit: i32 },
     SwapRenameSource { target_source: ObjectName },
+    AlterConnectorProps { alter_props: Vec<SqlOption> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -327,6 +333,13 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::SwapRenameTable { target_table } => {
                 write!(f, "SWAP WITH {}", target_table)
+            }
+            AlterTableOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
             }
         }
     }
@@ -463,6 +476,13 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::SwapRenameSource { target_source } => {
                 write!(f, "SWAP WITH {}", target_source)
+            }
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
             }
         }
     }

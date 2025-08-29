@@ -44,6 +44,7 @@ mod alter_parallelism;
 mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
+mod alter_source_props;
 mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
 mod alter_swap_rename;
@@ -758,6 +759,13 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::AlterConnectorProps { alter_props },
+        } => {
+            alter_source_props::handle_alter_table_connector_props(handler_args, name, alter_props)
+                .await
+        }
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
@@ -1058,6 +1066,13 @@ pub async fn handle(
                 StatementType::ALTER_SOURCE,
             )
             .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::AlterConnectorProps { alter_props },
+        } => {
+            alter_source_props::handle_alter_source_connector_props(handler_args, name, alter_props)
+                .await
         }
         Statement::AlterFunction {
             name,
