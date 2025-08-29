@@ -54,11 +54,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             .layer(RetryLayer::default())
             .finish();
 
-        // Check if we need to call stat() to get complete metadata
-        let full_capability = op.info().full_capability();
-        let need_stat_metadata =
-            !full_capability.list_has_content_length || !full_capability.list_has_last_modified;
-
         let (prefix, matcher) = if let Some(pattern) = azblob_properties.match_pattern.as_ref() {
             let prefix = get_prefix(pattern);
             let matcher = glob::Pattern::new(pattern)
@@ -75,7 +70,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             matcher,
             marker: PhantomData,
             compression_format,
-            need_stat_metadata,
         })
     }
 }

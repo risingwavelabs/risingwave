@@ -50,17 +50,11 @@ impl OpendalObjectStore {
             .finish();
         op.update_http_client(|_| http_client);
 
-        // Check if we need to call stat() to get complete metadata
-        let full_capability = op.info().full_capability();
-        let need_stat_metadata =
-            !full_capability.list_has_content_length || !full_capability.list_has_last_modified;
-
         Ok(Self {
             op,
             media_type: MediaType::S3,
             config,
             metrics,
-            need_stat_metadata,
         })
     }
 
@@ -98,17 +92,11 @@ impl OpendalObjectStore {
         let http_client = Self::new_http_client(&config)?;
         op.update_http_client(|_| http_client);
 
-        // Check if we need to call stat() to get complete metadata
-        let full_capability = op.info().full_capability();
-        let need_stat_metadata =
-            !full_capability.list_has_content_length || !full_capability.list_has_last_modified;
-
         Ok(Self {
             op,
             media_type: MediaType::Minio,
             config,
             metrics,
-            need_stat_metadata,
         })
     }
 

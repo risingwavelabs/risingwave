@@ -37,11 +37,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             .layer(RetryLayer::default())
             .finish();
 
-        // Check if we need to call stat() to get complete metadata
-        let full_capability = op.info().full_capability();
-        let need_stat_metadata =
-            !full_capability.list_has_content_length || !full_capability.list_has_last_modified;
-
         let (prefix, matcher) = if let Some(pattern) = posix_fs_properties.match_pattern.as_ref() {
             // TODO(Kexiang): Currently, FsListnenr in opendal does not support a prefix. (Seems a bug in opendal)
             // So we assign prefix to empty string.
@@ -58,7 +53,6 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             matcher,
             marker: PhantomData,
             compression_format,
-            need_stat_metadata,
         })
     }
 }

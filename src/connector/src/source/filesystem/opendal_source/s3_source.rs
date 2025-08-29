@@ -72,18 +72,12 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             .layer(RetryLayer::default())
             .finish();
 
-        // Check if we need to call stat() to get complete metadata
-        let full_capability = op.info().full_capability();
-        let need_stat_metadata =
-            !full_capability.list_has_content_length || !full_capability.list_has_last_modified;
-
         Ok(Self {
             op,
             prefix,
             matcher,
             marker: PhantomData,
             compression_format,
-            need_stat_metadata,
         })
     }
 }

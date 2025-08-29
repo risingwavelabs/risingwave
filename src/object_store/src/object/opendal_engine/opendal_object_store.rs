@@ -40,8 +40,6 @@ pub struct OpendalObjectStore {
     pub(crate) media_type: MediaType,
     pub(crate) config: Arc<ObjectStoreConfig>,
     pub(crate) metrics: Arc<ObjectStoreMetrics>,
-    /// Whether we need to call `stat()` to get complete metadata during list operations
-    pub(crate) need_stat_metadata: bool,
 }
 
 #[derive(Clone)]
@@ -82,17 +80,11 @@ impl OpendalObjectStore {
         let builder = Memory::default();
         let op: Operator = Operator::new(builder)?.finish();
 
-        // Check if we need to call stat() to get complete metadata
-        let full_capability = op.info().full_capability();
-        let need_stat_metadata =
-            !full_capability.list_has_content_length || !full_capability.list_has_last_modified;
-
         Ok(Self {
             op,
             media_type: MediaType::Memory,
             config: Arc::new(ObjectStoreConfig::default()),
             metrics: Arc::new(ObjectStoreMetrics::unused()),
-            need_stat_metadata,
         })
     }
 }
@@ -252,7 +244,6 @@ impl ObjectStore for OpendalObjectStore {
         let object_lister = object_lister.await?;
 
         let op = self.op.clone();
-        let need_stat_metadata = self.need_stat_metadata;
         let stream = stream::unfold(object_lister, move |mut object_lister| {
             let op = op.clone();
 
@@ -262,8 +253,11 @@ impl ObjectStore for OpendalObjectStore {
                         let key = object.path().to_owned();
                         let mut meta = object.metadata().clone();
 
-                        // If we need to call stat() to get complete metadata
-                        if need_stat_metadata {
+                        // Check if we need to call stat() to get complete metadata
+                        let full_capability = op.info().full_capability();
+                        if !full_capability.list_has_content_length
+                            || !full_capability.list_has_last_modified
+                        {
                             let stat_meta = op.stat(&key).await.ok()?;
                             meta = stat_meta;
                         }
