@@ -959,6 +959,18 @@ profile:
         # Add 100ms latency to any network call to the pg service
         latency-ms: 100
 
+  moat-1cn-1fe:
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: moat
+
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:
@@ -1040,6 +1052,9 @@ template:
     # AWS s3 bucket used by this compute node
     provide-aws-s3: "aws-s3*"
 
+    # Moat used by this compute node
+    provide-moat: "moat*"
+
     # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
 
@@ -1111,6 +1126,9 @@ template:
 
     # AWS s3 bucket used by the cluster
     provide-aws-s3: "aws-s3*"
+
+    # Moat used by this compute node
+    provide-moat: "moat*"
 
     # Tempo used by this meta node
     provide-tempo: "tempo*"
@@ -1470,6 +1488,18 @@ template:
 
     # PostgreSQL backend config for Lakekeeper catalog
     provide-postgres-backend: "postgres*"
+
+    # Storage backend - MinIO for S3-compatible storage
+    provide-minio: "minio*"
+  moat:
+    # Id to be picked-up by services
+    id: moat-${port}
+
+    # Address of Moat
+    address: "127.0.0.1"
+
+    # Listen port of Moat
+    port: 8182
 
     # Storage backend - MinIO for S3-compatible storage
     provide-minio: "minio*"

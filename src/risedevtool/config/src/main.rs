@@ -77,6 +77,7 @@ pub enum Components {
     NoBacktrace,
     Udf,
     NoDefaultFeatures,
+    Moat,
 }
 
 impl Components {
@@ -101,6 +102,7 @@ impl Components {
             Self::NoBacktrace => "[Runtime] Disable backtrace",
             Self::Udf => "[Build] Enable UDF",
             Self::NoDefaultFeatures => "[Build] Disable default features",
+            Self::Moat => "[Component] Enable Moat",
         }
         .into()
     }
@@ -215,6 +217,10 @@ Add --no-default-features to build command.
 Currently, default features are: rw-static-link, all-connectors
 "
             }
+            Self::Moat => {
+                "
+Enable Moat as distributed hybrid cache service."
+            }
         }
         .into()
     }
@@ -240,6 +246,7 @@ Currently, default features are: rw-static-link, all-connectors
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
             "ENABLE_UDF" => Some(Self::Udf),
             "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
+            "ENABLE_MOAT" => Some(Self::Moat),
             _ => None,
         }
     }
@@ -265,6 +272,7 @@ Currently, default features are: rw-static-link, all-connectors
             Self::NoBacktrace => "DISABLE_BACKTRACE",
             Self::Udf => "ENABLE_UDF",
             Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
+            Self::Moat => "ENABLE_MOAT",
         }
         .into()
     }

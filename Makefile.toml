@@ -8,6 +8,7 @@ extend = [
     { path = "src/risedevtool/redis.toml" },
     { path = "src/risedevtool/connector.toml" },
     { path = "src/risedevtool/risedev-components.toml" },
+    { path = "src/risedevtool/moat.toml" },
     { path = "src/sqlparser/sqlparser_test.toml" },
     { path = "src/frontend/planner_test/planner_test.toml" },
     { path = "src/tests/compaction_test/Makefile.toml" },
@@ -524,6 +525,7 @@ dependencies = [
     "download-prometheus",
     "download-pubsub",
     "download-redis",
+    "download-moat"
 ]
 
 [tasks.create-user-profiles-file]

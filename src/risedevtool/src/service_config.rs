@@ -35,6 +35,7 @@ pub struct ComputeNodeConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
+    pub provide_moat: Option<Vec<MoatConfig>>,
     pub provide_tempo: Option<Vec<TempoConfig>>,
     pub user_managed: bool,
     pub resource_group: String,
@@ -86,6 +87,7 @@ pub struct MetaNodeConfig {
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
+    pub provide_moat: Option<Vec<MoatConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -435,6 +437,20 @@ pub struct LakekeeperConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct MoatConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub provide_minio: Option<Vec<MinioConfig>>,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -458,6 +474,7 @@ pub enum ServiceConfig {
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
     Lakekeeper(LakekeeperConfig),
+    Moat(MoatConfig),
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -472,6 +489,7 @@ pub enum TaskGroup {
     SqlServer,
     Redis,
     Lakekeeper,
+    Moat,
 }
 
 impl ServiceConfig {
@@ -497,6 +515,7 @@ impl ServiceConfig {
             Self::SqlServer(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
             Self::Lakekeeper(c) => &c.id,
+            Self::Moat(c) => &c.id,
         }
     }
 
@@ -523,6 +542,7 @@ impl ServiceConfig {
             Self::SqlServer(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
             Self::Lakekeeper(c) => Some(c.port),
+            Self::Moat(c) => Some(c.port),
         }
     }
 
@@ -548,6 +568,7 @@ impl ServiceConfig {
             Self::SqlServer(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
             Self::Lakekeeper(c) => c.user_managed,
+            Self::Moat(_c) => false,
         }
     }
 
@@ -584,6 +605,7 @@ impl ServiceConfig {
             }
             ServiceConfig::SqlServer(_) => SqlServer,
             ServiceConfig::Lakekeeper(_) => Lakekeeper,
+            ServiceConfig::Moat(_) => Moat,
         }
     }
 }
