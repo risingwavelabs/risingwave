@@ -638,6 +638,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     );
 
                     // Prefer to select input stream to handle barriers promptly
+                    // Rebuild the merge stream each time processing a barrier
                     let mut merge_stream =
                         select_with_strategy(left_input, right_merge_sort, |_: &mut ()| {
                             stream::PollNext::Left
@@ -876,21 +877,27 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         for vnode in main_table.vnodes().clone().iter_vnodes() {
             let mut processed_rows = 0;
             // Check if this VNode has already been completed (for fault tolerance)
-            if let Some(current_entry) = progress_table.get_progress(vnode) {
-                // Skip already completed VNodes during recovery
-                if current_entry.is_completed {
-                    tracing::debug!(
-                        vnode = vnode.to_index(),
-                        "Skipping already completed VNode during recovery"
-                    );
-                    continue;
-                }
-                processed_rows += current_entry.processed_rows;
+            let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) =
+                if let Some(current_entry) = progress_table.get_progress(vnode) {
+                    // Skip already completed VNodes during recovery
+                    if current_entry.is_completed {
+                        tracing::debug!(
+                            vnode = vnode.to_index(),
+                            "Skipping already completed VNode during recovery"
+                        );
+                        continue;
+                    }
+                    processed_rows += current_entry.processed_rows;
+                    tracing::debug!(vnode = vnode.to_index(), "Started merging VNode");
 
-                tracing::debug!(vnode = vnode.to_index(), "Started merging VNode");
-            }
-
-            let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
+                    if let Some(current_state) = &current_entry.current_pos {
+                        (Bound::Excluded(current_state.clone()), Bound::Unbounded)
+                    } else {
+                        (Bound::Unbounded, Bound::Unbounded)
+                    }
+                } else {
+                    (Bound::Unbounded, Bound::Unbounded)
+                };
 
             let iter_main = main_table
                 .iter_keyed_row_with_vnode(
@@ -919,7 +926,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 let main_key = main_kv.key();
 
                 // Advance staging iterator until we find a key >= main_key
-                // TODO: update refresh progress here!
                 let mut should_delete = false;
                 while let Some(staging_kv) = &staging_item {
                     let staging_key = staging_kv.key();

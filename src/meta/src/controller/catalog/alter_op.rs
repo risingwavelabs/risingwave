@@ -905,7 +905,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        // Unconditional update
+        // It is okay to update refresh state unconditionally because the check is done in `validate_refreshable_table` inside `RefreshManager`.
         let active_model = table::ActiveModel {
             table_id: Set(table_id),
             refresh_state: Set(Some(new_state)),

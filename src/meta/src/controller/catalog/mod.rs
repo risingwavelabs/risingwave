@@ -623,7 +623,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         // IDLE: no change
-        // REFRESHING: reset to IDLE
+        // REFRESHING: reset to IDLE (give up refresh for allowing re-trigger)
         // FINISHING: no change (materialize executor will recover from state table and continue)
         let filter_condition = table::Column::RefreshState.eq(RefreshState::Refreshing);
 

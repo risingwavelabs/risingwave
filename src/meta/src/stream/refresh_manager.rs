@@ -136,23 +136,15 @@ impl RefreshManager {
             .get_table_refresh_state(table_id.table_id as _)
             .await?;
         match current_state {
-            Some(RefreshState::Idle) => {
+            Some(RefreshState::Idle) | None => {
                 // the table is not refreshing. issue a refresh
             }
-            Some(RefreshState::Refreshing) => {
+            state @ (Some(RefreshState::Finishing) | Some(RefreshState::Refreshing)) => {
                 return Err(MetaError::invalid_parameter(format!(
-                    "Table '{}' is currently being refreshed. Cannot start a new refresh operation.",
-                    table.name
+                    "Table '{}' is currently in state {:?}. Cannot start a new refresh operation.",
+                    table.name,
+                    state.unwrap()
                 )));
-            }
-            Some(RefreshState::Finishing) => {
-                return Err(MetaError::invalid_parameter(format!(
-                    "Table '{}' is currently finishing a refresh operation. Cannot start a new refresh operation.",
-                    table.name
-                )));
-            }
-            None => {
-                // If refresh_state is None, treat as IDLE for backward compatibility
             }
         }
 
