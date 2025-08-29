@@ -24,7 +24,8 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_connector::source::cdc::external::CdcTableType;
+use risingwave_connector::source::cdc::external::ExternalCdcTableType;
+use risingwave_meta_model::table::CdcTableType;
 use risingwave_pb::catalog::table::{
     CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
     PbTableVersion,
@@ -208,7 +209,7 @@ pub struct TableCatalog {
 
     pub vector_index_info: Option<PbVectorIndexInfo>,
 
-    pub cdc_table_type: Option<CdcTableType>,
+    pub cdc_table_type: Option<ExternalCdcTableType>,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -599,7 +600,10 @@ impl TableCatalog {
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
-            cdc_table_type: self.cdc_table_type.clone().map(Self::cdc_table_type_to_i32),
+            cdc_table_type: self
+                .cdc_table_type
+                .clone()
+                .map(|t| PbCdcTableType::from(Self::from_external_cdc_table_type(t)) as i32),
         }
     }
 
@@ -825,7 +829,10 @@ impl From<PbTable> for TableCatalog {
 
             refreshable: tb.refreshable,
             vector_index_info: tb.vector_index_info,
-            cdc_table_type: tb.cdc_table_type.map(Self::i32_to_cdc_table_type),
+            cdc_table_type: tb
+                .cdc_table_type
+                .and_then(|t| PbCdcTableType::try_from(t).ok())
+                .map(|t| Self::to_external_cdc_table_type(CdcTableType::from(t))),
         }
     }
 }
@@ -843,35 +850,24 @@ impl OwnedByUserCatalog for TableCatalog {
 }
 
 impl TableCatalog {
-    fn cdc_table_type_to_i32(cdc_table_type: CdcTableType) -> i32 {
-        let pb_type: PbCdcTableType = match cdc_table_type {
-            CdcTableType::Undefined | CdcTableType::Mock => PbCdcTableType::Unspecified,
-            CdcTableType::Postgres => PbCdcTableType::Postgres,
-            CdcTableType::MySql => PbCdcTableType::Mysql,
-            CdcTableType::SqlServer => PbCdcTableType::Sqlserver,
-            CdcTableType::Mongo => PbCdcTableType::Mongo,
-            CdcTableType::Citus => PbCdcTableType::Citus,
-        };
-        pb_type as i32
+    fn from_external_cdc_table_type(connector_type: ExternalCdcTableType) -> CdcTableType {
+        match connector_type {
+            ExternalCdcTableType::Undefined | ExternalCdcTableType::Mock => CdcTableType::Postgres, /* Default to Postgres */
+            ExternalCdcTableType::Postgres => CdcTableType::Postgres,
+            ExternalCdcTableType::MySql => CdcTableType::Mysql,
+            ExternalCdcTableType::SqlServer => CdcTableType::Sqlserver,
+            ExternalCdcTableType::Mongo => CdcTableType::Mongo,
+            ExternalCdcTableType::Citus => CdcTableType::Citus,
+        }
     }
 
-    fn i32_to_cdc_table_type(cdc_table_type: i32) -> CdcTableType {
-        let pb_type = match cdc_table_type {
-            0 => PbCdcTableType::Unspecified,
-            1 => PbCdcTableType::Postgres,
-            2 => PbCdcTableType::Mysql,
-            3 => PbCdcTableType::Sqlserver,
-            4 => PbCdcTableType::Mongo,
-            5 => PbCdcTableType::Citus,
-            _ => panic!("Invalid CDC table type: {}", cdc_table_type),
-        };
-        match pb_type {
-            PbCdcTableType::Unspecified => CdcTableType::Undefined,
-            PbCdcTableType::Postgres => CdcTableType::Postgres,
-            PbCdcTableType::Mysql => CdcTableType::MySql,
-            PbCdcTableType::Sqlserver => CdcTableType::SqlServer,
-            PbCdcTableType::Mongo => CdcTableType::Mongo,
-            PbCdcTableType::Citus => CdcTableType::Citus,
+    fn to_external_cdc_table_type(meta_type: CdcTableType) -> ExternalCdcTableType {
+        match meta_type {
+            CdcTableType::Postgres => ExternalCdcTableType::Postgres,
+            CdcTableType::Mysql => ExternalCdcTableType::MySql,
+            CdcTableType::Sqlserver => ExternalCdcTableType::SqlServer,
+            CdcTableType::Mongo => ExternalCdcTableType::Mongo,
+            CdcTableType::Citus => ExternalCdcTableType::Citus,
         }
     }
 }

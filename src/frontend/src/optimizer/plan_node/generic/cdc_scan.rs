@@ -21,7 +21,7 @@ use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_connector::source::cdc::external::CdcTableType;
+use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_BACKFILL_AS_EVEN_SPLITS, CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_MAX_PARALLELISM,
     CDC_BACKFILL_NUM_ROWS_PER_SPLIT, CDC_BACKFILL_PARALLELISM,
@@ -55,10 +55,13 @@ pub struct CdcScan {
 
 pub fn build_cdc_scan_options_with_options(
     with_options: &WithOptions,
-    cdc_table_type: &CdcTableType,
+    cdc_table_type: &ExternalCdcTableType,
 ) -> Result<CdcScanOptions> {
     // Update this after more CDC table type is supported for backfill v2.
-    let support_backfill_v2 = matches!(cdc_table_type, CdcTableType::Postgres | CdcTableType::Mock);
+    let support_backfill_v2 = matches!(
+        cdc_table_type,
+        ExternalCdcTableType::Postgres | ExternalCdcTableType::Mock
+    );
 
     // unspecified option will use default values
     let mut scan_options = CdcScanOptions::default();

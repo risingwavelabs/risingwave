@@ -30,7 +30,7 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
-    CdcOffset, CdcTableType, ExternalTableReaderImpl,
+    CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
 };
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 use rw_futures_util::pausable;
@@ -229,7 +229,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .then_some(TimeHandling::Milli);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
-            self.external_table.table_type() == &CdcTableType::Postgres;
+            self.external_table.table_type() == &ExternalCdcTableType::Postgres;
         // Make sure to use mapping_message after transform_upstream.
         let mut upstream = transform_upstream(
             upstream,

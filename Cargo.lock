@@ -12288,6 +12288,7 @@ dependencies = [
  "risingwave_expr_impl",
  "risingwave_frontend_macro",
  "risingwave_hummock_sdk",
+ "risingwave_meta_model",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_sqlparser",

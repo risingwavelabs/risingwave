@@ -47,7 +47,7 @@ use crate::source::cdc::external::sql_server::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum CdcTableType {
+pub enum ExternalCdcTableType {
     Undefined,
     Mock,
     MySql,
@@ -57,7 +57,7 @@ pub enum CdcTableType {
     Mongo,
 }
 
-impl CdcTableType {
+impl ExternalCdcTableType {
     pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
         let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
@@ -123,18 +123,20 @@ pub const DATABASE_NAME_KEY: &str = "database.name";
 
 impl SchemaTableName {
     pub fn from_properties(properties: &BTreeMap<String, String>) -> Self {
-        let table_type = CdcTableType::from_properties(properties);
+        let table_type = ExternalCdcTableType::from_properties(properties);
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
         let schema_name = match table_type {
-            CdcTableType::MySql => properties
+            ExternalCdcTableType::MySql => properties
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
-            CdcTableType::Postgres | CdcTableType::Citus => {
+            ExternalCdcTableType::Postgres | ExternalCdcTableType::Citus => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
-            CdcTableType::SqlServer => properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default(),
+            ExternalCdcTableType::SqlServer => {
+                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
+            }
             _ => {
                 unreachable!("invalid external table type: {:?}", table_type);
             }
