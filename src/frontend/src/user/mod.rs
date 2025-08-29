@@ -15,6 +15,7 @@
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use user_catalog::UserCatalog;
 
+pub(crate) mod ldap_auth;
 pub(crate) mod user_authentication;
 pub(crate) mod user_catalog;
 pub(crate) mod user_manager;

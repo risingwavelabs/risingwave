@@ -34,6 +34,7 @@ iana-time-zone = "0.1"
 iceberg = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
+ldap3 = "0.11.0-beta.1"
 linkme = { workspace = true }
 maplit = "1"
 md5 = "0.7.0"

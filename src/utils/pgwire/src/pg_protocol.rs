@@ -660,6 +660,11 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))?;
             }
+            UserAuthenticator::Ldap(_) => {
+                // LDAP authentication requires clear text password
+                self.stream
+                    .write_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
+            }
         }
 
         self.session = Some(session);

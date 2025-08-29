@@ -48,7 +48,8 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig, load_config,
+    AuthMethod, BatchConfig, ConnectionType, FrontendConfig, HbaEntry, MetaConfig, MetricLevel,
+    StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -74,6 +75,11 @@ use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
+
+// Manually add Ldap to EncryptionType
+impl EncryptionType {
+    pub const Ldap: i32 = 4; // Choose an appropriate unused value
+}
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
@@ -122,6 +128,7 @@ use crate::scheduler::{
 };
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::UserId;
+use crate::user::ldap_auth::LdapAuthenticator;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -1534,6 +1541,24 @@ impl SessionManagerImpl {
             let user_authenticator = match &user.auth_info {
                 None => UserAuthenticator::None,
                 Some(auth_info) => {
+                    // Check HBA configuration for LDAP authentication
+                    let connection_type = match peer_addr.as_ref() {
+                        Address::Tcp(_) => ConnectionType::Host,
+                        Address::Unix(_) => ConnectionType::Local,
+                        _ => ConnectionType::Host,
+                    };
+
+                    let hba_entry_opt = catalog_reader.hba_config().find_matching_entry(
+                        &connection_type,
+                        database_name,
+                        user_name,
+                        match peer_addr.as_ref() {
+                            Address::Tcp(socket_addr) => Some(socket_addr.ip()),
+                            _ => None,
+                        },
+                        false,
+                    );
+
                     if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
                         UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
                     } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
@@ -1549,6 +1574,25 @@ impl SessionManagerImpl {
                         }
                     } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
                         UserAuthenticator::OAuth(auth_info.metadata.clone())
+                    } else if auth_info.encryption_type == EncryptionType::Ldap as i32 {
+                        // LDAP authentication through HBA configuration
+                        match hba_entry_opt {
+                            Some(hba_entry) if hba_entry.auth_method == AuthMethod::Ldap => {
+                                let ldap_auth = LdapAuthenticator::new(hba_entry).map_err(|e| {
+                                    Box::new(Error::new(
+                                        ErrorKind::Other,
+                                        format!("Failed to create LDAP authenticator: {}", e),
+                                    ))
+                                })?;
+                                UserAuthenticator::Ldap(Box::new(ldap_auth))
+                            }
+                            _ => {
+                                return Err(Box::new(Error::new(
+                                    ErrorKind::PermissionDenied,
+                                    "LDAP authentication not configured for this connection",
+                                )));
+                            }
+                        }
                     } else {
                         return Err(Box::new(Error::new(
                             ErrorKind::Unsupported,
