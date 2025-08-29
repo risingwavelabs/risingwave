@@ -273,8 +273,12 @@ impl CatalogController {
             }
         }
 
-        let (removed_source_fragments, removed_actors, removed_fragments) =
-            get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
+        let (removed_source_fragments, removed_actors, removed_fragments) = get_fragments_for_jobs(
+            &txn,
+            self.env.shared_actor_infos(),
+            removed_streaming_job_ids.clone(),
+        )
+        .await?;
 
         // Find affect users with privileges on all this objects.
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -313,6 +317,10 @@ impl CatalogController {
         let user_infos = list_user_info_by_ids(updated_user_ids, &txn).await?;
 
         txn.commit().await?;
+
+        // inner
+        //     .actors
+        //     .drop_actors_by_fragments(&removed_fragments.iter().copied().collect_vec());
 
         // notify about them.
         self.notify_users_update(user_infos).await;
