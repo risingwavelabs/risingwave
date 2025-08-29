@@ -351,6 +351,15 @@ impl Binder {
             let Cte { alias, cte_inner } = cte_table;
             let table_name = alias.name.real_value();
 
+            // Check for duplicate CTE names
+            if self.context.cte_to_relation.contains_key(&table_name) {
+                return Err(ErrorCode::BindError(format!(
+                    "WITH query name \"{}\" specified more than once",
+                    table_name
+                ))
+                .into());
+            }
+
             if with.recursive {
                 if let CteInner::Query(query) = cte_inner {
                     let (all, corresponding, left, right, with) = Self::validate_rcte(query)?;
