@@ -40,6 +40,7 @@ mod task_pubsub_emu_ready_check;
 mod task_redis_ready_check;
 mod task_tcp_ready_check;
 mod tempo_service;
+mod moat_service;
 mod utils;
 
 use std::collections::HashMap;
@@ -84,6 +85,7 @@ pub use self::task_pubsub_emu_ready_check::*;
 pub use self::task_redis_ready_check::*;
 pub use self::task_tcp_ready_check::*;
 pub use self::tempo_service::*;
+pub use self::moat_service::*;
 use crate::util::{begin_spin, complete_spin, get_program_args, get_program_name};
 use crate::wait::{wait, wait_tcp_available};
 
