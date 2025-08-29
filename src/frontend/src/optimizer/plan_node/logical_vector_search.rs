@@ -317,6 +317,9 @@ impl LogicalVectorSearch {
 
     fn as_vector_table_scan(&self) -> Option<(&LogicalScan, ExprImpl, usize)> {
         let scan = self.core.input.as_logical_scan()?;
+        if !scan.predicate().always_true() {
+            return None;
+        }
         let (vector_input, vec) = match (&self.core.left, &self.core.right) {
             (ExprImpl::InputRef(_), ExprImpl::InputRef(_)) => return None,
             (ExprImpl::InputRef(input), other) | (other, ExprImpl::InputRef(input))

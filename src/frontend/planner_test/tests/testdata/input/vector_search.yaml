@@ -65,6 +65,23 @@
 - before:
     - create_table_and_index
   sql: |
+    SELECT id, name FROM items order by embedding <#> '[1, 2, 3]'::vector(3) limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  id: no_vector_index_search_on_table_scan_with_predicate
+  sql: |
+    SELECT id, name FROM items where id > 0 order by embedding <#> '[1, 2, 3]'::vector(3) limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  sql: |
     SELECT id, name FROM items order by embedding <#> openai_embedding('{"model": "model"}'::jsonb, 'hello')::vector(3) limit 5;
   expected_outputs:
     - logical_plan
