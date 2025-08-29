@@ -43,12 +43,9 @@ with cte1 as (select i as j from a), cte2 as (select ref.j as k from cte1 as ref
 43
 
 
-# FIXME: this should be an error
-# duplicate CTE alias
-query I
+# duplicate CTE alias should error
+statement error
 with cte1 as (select 42), cte1 as (select 43) select * FROM cte1;
-----
-43
 
 # reference to CTE before its actually defined
 # duckdb is ok
