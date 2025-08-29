@@ -36,7 +36,7 @@ use crate::source::cdc::external::{
     ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PostgresOffset {
     pub txid: i64,
     // In postgres, an LSN is a 64-bit integer, representing a byte position in the write-ahead log stream.
@@ -49,9 +49,32 @@ pub struct PostgresOffset {
     pub lsn_proc: Option<u64>,
 }
 
-// only compare the lsn field, prefer lsn_commit and lsn_proc if both available
 impl PartialOrd for PostgresOffset {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for PostgresOffset {}
+impl PartialEq for PostgresOffset {
+    fn eq(&self, other: &Self) -> bool {
+        match (
+            self.lsn_commit,
+            self.lsn_proc,
+            other.lsn_commit,
+            other.lsn_proc,
+        ) {
+            (_, Some(_), _, Some(_)) => {
+                self.lsn_commit == other.lsn_commit && self.lsn_proc == other.lsn_proc
+            }
+            _ => self.lsn == other.lsn,
+        }
+    }
+}
+
+// only compare the lsn field, prefer lsn_commit and lsn_proc if both available
+impl Ord for PostgresOffset {
+    fn cmp(&self, other: &Self) -> Ordering {
         match (
             self.lsn_commit,
             self.lsn_proc,
@@ -61,14 +84,14 @@ impl PartialOrd for PostgresOffset {
             (_, Some(self_proc), _, Some(other_proc)) => {
                 // if both have `lsn_commit` and `lsn_proc`, compare `lsn_commit` first, then `lsn_proc`
                 // if `lsn_commit` is None, fall back to `lsn_proc`
-                match self.lsn_commit.partial_cmp(&other.lsn_commit) {
-                    Some(Ordering::Equal) => self_proc.partial_cmp(&other_proc),
+                match self.lsn_commit.cmp(&other.lsn_commit) {
+                    Ordering::Equal => self_proc.cmp(&other_proc),
                     other_result => other_result,
                 }
             }
             _ => {
                 // Fall back to lsn comparison when either lsn_commit or lsn_proc is missing
-                self.lsn.partial_cmp(&other.lsn)
+                self.lsn.cmp(&other.lsn)
             }
         }
     }
