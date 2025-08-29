@@ -345,20 +345,24 @@ impl Binder {
     }
 
     fn bind_with(&mut self, with: &With) -> Result<()> {
+        // Check for duplicate CTE names within the current WITH clause
+        let mut current_cte_names = std::collections::HashSet::new();
         for cte_table in &with.cte_tables {
-            // note that the new `share_id` for the rcte is generated here
-            let share_id = self.next_share_id();
-            let Cte { alias, cte_inner } = cte_table;
-            let table_name = alias.name.real_value();
-
-            // Check for duplicate CTE names
-            if self.context.cte_to_relation.contains_key(&table_name) {
+            let table_name = cte_table.alias.name.real_value();
+            if !current_cte_names.insert(table_name.clone()) {
                 return Err(ErrorCode::BindError(format!(
                     "WITH query name \"{}\" specified more than once",
                     table_name
                 ))
                 .into());
             }
+        }
+
+        for cte_table in &with.cte_tables {
+            // note that the new `share_id` for the rcte is generated here
+            let share_id = self.next_share_id();
+            let Cte { alias, cte_inner } = cte_table;
+            let table_name = alias.name.real_value();
 
             if with.recursive {
                 if let CteInner::Query(query) = cte_inner {
