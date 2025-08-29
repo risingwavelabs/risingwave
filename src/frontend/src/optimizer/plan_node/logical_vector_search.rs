@@ -365,13 +365,17 @@ impl ToBatch for LogicalVectorSearch {
                     .collect_vec();
                 let mut covered_table_cols_idx = Vec::new();
                 let mut non_covered_table_cols_idx = Vec::new();
+                let mut primary_table_col_in_output =
+                    Vec::with_capacity(primary_table_cols_idx.len());
                 for table_col_idx in &primary_table_cols_idx {
-                    if index
+                    if let Some(covered_info_column_idx) = index
                         .primary_to_included_info_column_mapping
-                        .contains_key(table_col_idx)
+                        .get(table_col_idx)
                     {
                         covered_table_cols_idx.push(*table_col_idx);
+                        primary_table_col_in_output.push((true, *covered_info_column_idx));
                     } else {
+                        primary_table_col_in_output.push((false, non_covered_table_cols_idx.len()));
                         non_covered_table_cols_idx.push(*table_col_idx);
                     }
                 }
@@ -480,6 +484,7 @@ impl ToBatch for LogicalVectorSearch {
                     let logical_scan = LogicalScan::from(table_scan);
                     let batch_scan = logical_scan.to_batch()?;
                     let vector_search_schema = vector_search.schema();
+                    let vector_search_schema_len = vector_search_schema.len();
                     let on_condition = Condition {
                         conjunctions: index
                             .primary_key_idx_in_info_columns
@@ -505,17 +510,21 @@ impl ToBatch for LogicalVectorSearch {
                         on_condition.clone(),
                     );
                     let join = generic::Join::new(
-                        vector_search.clone(),
+                        vector_search,
                         batch_scan,
                         on_condition,
                         JoinType::Inner,
-                        covered_output_col_idx
-                            .chain((0..non_covered_table_cols_idx.len()).map(
-                                |primary_table_output_idx| {
-                                    primary_table_output_idx + vector_search_schema.len()
-                                },
-                            ))
-                            .chain([index.included_info_columns.len()])
+                        primary_table_col_in_output
+                            .iter()
+                            .map(|(covered, idx)| {
+                                if *covered {
+                                    *idx
+                                } else {
+                                    *idx + vector_search_schema_len
+                                }
+                            })
+                            // chain with distance column
+                            .chain([vector_search_schema_len - 1])
                             .collect(),
                     );
                     let lookup_join = LogicalJoin::gen_batch_lookup_join(
