@@ -8,7 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-async-std = { version = "1", features = ["attributes", "tokio1"] }
+smol = "1"
 easy-ext = "1"
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
