@@ -90,10 +90,9 @@ use crate::telemetry::ComputeTelemetryCreator;
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
-    opts: ComputeNodeOpts,
+    opts: Arc<ComputeNodeOpts>,
     shutdown: CancellationToken,
 ) {
-    let opts = Arc::new(opts);
     // Load the configuration.
     let config = Arc::new(load_config(&opts.config_path, &*opts));
     info!("Starting compute node",);
@@ -207,7 +206,7 @@ pub async fn compute_node_serve(
     };
 
     LicenseManager::get().refresh(system_params.license_key());
-    let state_store = StateStoreImpl::new(
+    let state_store = Box::pin(StateStoreImpl::new(
         state_store_url,
         storage_opts.clone(),
         hummock_meta_client.clone(),
@@ -217,7 +216,7 @@ pub async fn compute_node_serve(
         compactor_metrics.clone(),
         await_tree_config.clone(),
         system_params.use_new_object_prefix_strategy(),
-    )
+    ))
     .await
     .unwrap();
 
