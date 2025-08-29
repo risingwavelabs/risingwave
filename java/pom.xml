@@ -49,6 +49,7 @@
         <module>connector-node/risingwave-source-cdc</module>
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/risingwave-source-cdc-test</module>
+        <module>connector-node/risingwave-jdbc-runner</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
         <module>connector-node/tracing</module>
@@ -273,6 +274,11 @@
             <dependency>
                 <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-cassandra</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave</groupId>
+                <artifactId>risingwave-jdbc-runner</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>

@@ -17,6 +17,8 @@ package com.risingwave.connector;
 import com.risingwave.connector.jdbc.JdbcDialectFactory;
 import com.risingwave.connector.jdbc.MySqlDialectFactory;
 import com.risingwave.connector.jdbc.PostgresDialectFactory;
+import com.risingwave.connector.jdbc.RedShiftDialectFactory;
+import com.risingwave.connector.jdbc.SnowflakeDialectFactory;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -33,6 +35,10 @@ public abstract class JdbcUtils {
             return Optional.of(new MySqlDialectFactory());
         } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
             return Optional.of(new PostgresDialectFactory());
+        } else if (jdbcUrl.startsWith("jdbc:redshift")) {
+            return Optional.of(new RedShiftDialectFactory());
+        } else if (jdbcUrl.startsWith("jdbc:snowflake")) {
+            return Optional.of(new SnowflakeDialectFactory());
         } else {
             return Optional.empty();
         }
@@ -40,7 +46,8 @@ public abstract class JdbcUtils {
 
     /** The connection returned by this method is *not* autoCommit */
     public static Connection getConnection(
-            String jdbcUrl, String user, String password, boolean autoCommit) throws SQLException {
+            String jdbcUrl, String user, String password, boolean autoCommit, int batchInsertRows)
+            throws SQLException {
         var props = new Properties();
         // enable TCP keep alive to avoid connection closed by server
         // both MySQL and PG support this property
@@ -61,6 +68,10 @@ public abstract class JdbcUtils {
         }
         if (password != null) {
             props.put("password", password);
+        }
+        if (jdbcUrl.startsWith("jdbc:redshift") && batchInsertRows > 0) {
+            props.setProperty("reWriteBatchedInserts", "true");
+            props.setProperty("reWriteBatchedInsertsSize", String.valueOf(batchInsertRows));
         }
 
         var conn = DriverManager.getConnection(jdbcUrl, props);

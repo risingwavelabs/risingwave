@@ -64,6 +64,10 @@ impl Sink for ElasticSearchSink {
 
     const SINK_NAME: &'static str = ES_SINK;
 
+    fn support_schema_change() -> bool {
+        true
+    }
+
     async fn validate(&self) -> Result<()> {
         self.config.validate_config(&self.schema)?;
         let client = self.config.build_client(Self::SINK_NAME)?;
