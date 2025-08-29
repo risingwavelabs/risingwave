@@ -293,7 +293,7 @@ pub(crate) fn gen_create_index_plan(
             .as_str()
         {
             "l1" => PbDistanceType::L1,
-            "l2" => PbDistanceType::L2,
+            "l2_sqr" => PbDistanceType::L2Sqr,
             "inner_product" => PbDistanceType::InnerProduct,
             "cosine" => PbDistanceType::Cosine,
             other => {
