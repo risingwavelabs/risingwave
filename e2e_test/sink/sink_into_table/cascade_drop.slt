@@ -1,0 +1,82 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int, v2 varchar);
+
+statement ok
+create table t2 (v1 int, v2 varchar);
+
+statement ok
+create table t3 (v1 varchar, v2 int);
+
+statement ok
+create table t4 (v1 int primary key, v2 varchar, v3 int default 10);
+
+statement ok
+create sink s1 into t4 as select v1, v2 from t1;
+
+statement ok
+create sink s2 into t4 from t2;
+
+statement ok
+create sink s3 into t4 as select v2, v1 from t3;
+
+query I
+select count(*) from rw_sinks;
+----
+3
+
+statement ok
+insert into t1 values (1, 'a');
+
+statement ok
+insert into t2 values (2, 'b');
+
+statement ok
+insert into t3 values ('c', 3);
+
+query ITI rowsort
+select * from t4;
+----
+1 a 10
+2 b 10
+3 c 10
+
+statement ok
+drop table t1 cascade;
+
+query I
+select count(*) from rw_sinks;
+----
+2
+
+statement ok
+insert into t2 values (4, 'd');
+
+query ITI rowsort
+select * from t4;
+----
+1 a 10
+2 b 10
+3 c 10
+4 d 10
+
+statement ok
+drop table t4 cascade;
+
+query I
+select count(*) from rw_sinks;
+----
+0
+
+query I
+select count(*) from rw_tables;
+----
+2
+
+statement ok
+drop table t2;
+
+statement ok
+drop table t3;

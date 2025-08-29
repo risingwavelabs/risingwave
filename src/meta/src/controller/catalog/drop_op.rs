@@ -94,6 +94,7 @@ impl CatalogController {
 
         // TODO: record dependency info in object_dependency table for sink into table.
         // Special handling for 'sink into table'.
+        // Because no object will depend on sink, it is correct to only query it once (instead of cascading query).
         let removed_incoming_sinks: Vec<I32Array> = Table::find()
             .select_only()
             .column(table::Column::IncomingSinks)
@@ -130,28 +131,6 @@ impl CatalogController {
 
             removed_object_ids.extend(removed_sink_objs.iter().map(|obj| obj.oid));
             removed_objects.extend(removed_sink_objs);
-        }
-
-        // When there is a table sink in the dependency chain of drop cascade, an error message needs to be returned currently to manually drop the sink.
-        if object_type != ObjectType::Sink {
-            for obj in &removed_objects {
-                if obj.obj_type == ObjectType::Sink {
-                    let sink = Sink::find_by_id(obj.oid)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
-
-                    // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
-                    if let Some(target_table) = sink.target_table
-                        && !removed_object_ids.contains(&target_table)
-                    {
-                        return Err(MetaError::permission_denied(format!(
-                            "Found sink into table in dependency: {}, please drop it manually",
-                            sink.name,
-                        )));
-                    }
-                }
-            }
         }
 
         // 1. Detect when an Iceberg table is part of the dependencies.
