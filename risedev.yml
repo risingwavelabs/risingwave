@@ -953,6 +953,7 @@ profile:
   mysql-offline-schema-change-test:
     steps:
       - use: minio
+      - use: sqlite
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
