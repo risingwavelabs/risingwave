@@ -263,21 +263,23 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         );
 
         // This will fetch previous agg states from the intermediate state table.
+        let (agg_group, _stats) = AggGroup::create(
+            this.version,
+            None,
+            &this.agg_calls,
+            &this.agg_funcs,
+            &this.storages,
+            &this.intermediate_state_table,
+            &this.input_pk_indices,
+            this.row_count_index,
+            false, // emit on window close
+            this.extreme_cache_size,
+            &this.input_schema,
+        )
+        .await?;
+
         let mut vars = ExecutionVars {
-            agg_group: AggGroup::create(
-                this.version,
-                None,
-                &this.agg_calls,
-                &this.agg_funcs,
-                &this.storages,
-                &this.intermediate_state_table,
-                &this.input_pk_indices,
-                this.row_count_index,
-                false, // emit on window close
-                this.extreme_cache_size,
-                &this.input_schema,
-            )
-            .await?,
+            agg_group,
             distinct_dedup,
             state_changed: false,
         };
