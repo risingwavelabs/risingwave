@@ -233,6 +233,11 @@ impl Strong {
             | ExprType::Sha256
             | ExprType::Sha384
             | ExprType::Sha512
+            | ExprType::GetBit
+            | ExprType::GetByte
+            | ExprType::SetBit
+            | ExprType::SetByte
+            | ExprType::BitCount
             | ExprType::Hmac
             | ExprType::SecureCompare
             | ExprType::Left
