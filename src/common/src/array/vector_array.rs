@@ -24,6 +24,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::PbBuffer;
 use risingwave_pb::common::buffer::PbCompressionType;
 use risingwave_pb::data::{PbArray, PbArrayType, PbListArrayData};
+use rkyv::with::RefAsBox;
 use serde::{Deserialize, Serialize};
 
 use super::{Array, ArrayBuilder};
@@ -376,9 +377,20 @@ impl FromIterator<Finite32> for VectorVal {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, rkyv::Archive, rkyv::Serialize)]
 pub struct VectorRef<'a> {
+    #[with(RefAsBox)]
     inner: &'a [VectorItemType],
+}
+
+impl<'a> From<&'a ArchivedVectorRef<'static>> for VectorRef<'a> {
+    fn from(value: &'a ArchivedVectorRef<'static>) -> Self {
+        Self {
+            // TODO(safety): do we ensure `ArchivedOrderedFloat<fxx>` has the same layout as `fxx`
+            // (then `OrderedFloat<fxx>`)?
+            inner: unsafe { std::mem::transmute(value.inner.get()) },
+        }
+    }
 }
 
 impl Debug for VectorRef<'_> {

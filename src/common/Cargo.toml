@@ -83,7 +83,8 @@ risingwave_error = { workspace = true }
 risingwave_license = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_telemetry_event = { workspace = true }
-rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rkyv = { workspace = true }
+rust_decimal = { version = "1", features = ["db-postgres", "maths", "rkyv"] }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
 ryu = "1.0"

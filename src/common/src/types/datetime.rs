@@ -42,7 +42,20 @@ const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 macro_rules! impl_chrono_wrapper {
     ($variant_name:ident, $chrono:ty, $pg_type:ident) => {
-        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(
+            Clone,
+            Copy,
+            Debug,
+            Default,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            rkyv::Archive,
+            rkyv::Serialize,
+        )]
+        #[archive_attr(derive(Clone, Copy))]
         #[repr(transparent)]
         pub struct $variant_name(pub $chrono);
 
@@ -96,6 +109,13 @@ macro_rules! impl_chrono_wrapper {
 
             fn accepts(ty: &Type) -> bool {
                 matches!(*ty, Type::$pg_type)
+            }
+        }
+
+        impl From<rkyv::Archived<$variant_name>> for $variant_name {
+            #[inline(always)]
+            fn from(value: rkyv::Archived<$variant_name>) -> Self {
+                Self(rkyv::Deserialize::deserialize(&value.0, &mut rkyv::Infallible).unwrap())
             }
         }
     };
