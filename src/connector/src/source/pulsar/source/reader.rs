@@ -82,7 +82,9 @@ impl SplitReader for PulsarSplitReader {
 
 /// Filter offset for pulsar messages
 #[derive(Debug, Clone)]
-pub struct PulsarFilterOffset {
+struct PulsarFilterOffset {
+    /// Ledger ID of the message
+    pub ledger_id: u64,
     /// Entry ID of the message
     pub entry_id: u64,
     /// Batch index of the message, if any
@@ -209,6 +211,7 @@ impl SplitReader for PulsarBrokerReader {
                 } else {
                     let start_message_id = parse_message_id(m.as_str())?;
                     already_read_offset = Some(PulsarFilterOffset {
+                        ledger_id: start_message_id.ledger_id,
                         entry_id: start_message_id.entry_id,
                         batch_index: start_message_id.batch_index,
                     });
@@ -261,15 +264,21 @@ impl PulsarBrokerReader {
                 let msg = msg?;
 
                 if let Some(PulsarFilterOffset {
+                    ledger_id,
                     entry_id,
                     batch_index,
                 }) = already_read_offset
                 {
                     let message_id = msg.message_id();
 
-                    // for most case, we only compare `entry_id`
-                    // but for batch message, we need to compare `batch_index` if the `entry_id` is the same
-                    if message_id.entry_id <= entry_id && message_id.batch_index <= batch_index {
+                    // If we have a previously stored offset, check that the messages we're consuming
+                    // appear after. Note that entry IDs and batch indexes are only monotonically increasing
+                    // within a BookKeeper ledger, so we must check that the ledger IDs match. If they don't match,
+                    // messages are coming from a new ledger and we can safely ignore the stored offset.
+                    if message_id.ledger_id == ledger_id
+                        && message_id.entry_id <= entry_id
+                        && message_id.batch_index <= batch_index
+                    {
                         tracing::info!(
                             "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
                             message_id.entry_id,
