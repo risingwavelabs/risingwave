@@ -300,6 +300,10 @@ impl IndexCatalog {
             distributed_by_columns,
         }
     }
+
+    pub fn is_created(&self) -> bool {
+        self.index_table().is_created()
+    }
 }
 
 pub struct IndexDisplay {

@@ -76,13 +76,9 @@ impl CatalogController {
             .join(JoinType::LeftJoin, table::Relation::Object1.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
-                table::Column::TableType
-                    .eq(TableType::MaterializedView)
-                    .and(
-                        streaming_job::Column::CreateType
-                            .eq(CreateType::Background)
-                            .and(status_cond.clone()),
-                    ),
+                streaming_job::Column::CreateType
+                    .eq(CreateType::Background)
+                    .and(status_cond.clone()),
             )
             .into_tuple()
             .all(&inner.db)

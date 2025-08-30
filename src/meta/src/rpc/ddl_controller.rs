@@ -1831,6 +1831,7 @@ impl DdlController {
                             true,
                             Some(&sink.original_sink),
                             None,
+                            None, // index
                         )
                         .await?;
                 }
