@@ -34,7 +34,8 @@ use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::{
-    CdcTableType, DebeziumOffset, DebeziumSourceOffset, ExternalTableConfig, SchemaTableName,
+    DebeziumOffset, DebeziumSourceOffset, ExternalCdcTableType, ExternalTableConfig,
+    SchemaTableName,
 };
 use risingwave_connector::source::cdc::{CdcScanOptions, DebeziumCdcSplit};
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
@@ -178,7 +179,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         table_name,
         "mydb".to_owned(),
         config,
-        CdcTableType::Mock,
+        ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),
@@ -487,7 +488,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         table_name,
         "mydb".to_owned(),
         config,
-        CdcTableType::Mock,
+        ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),

@@ -1,0 +1,300 @@
+control substitution on
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t;
+    CREATE EXTENSION IF NOT EXISTS citext;
+    CREATE TYPE mood_enum AS ENUM ('happy', 'sad', 'angry');
+    CREATE TABLE t (
+        v1 uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+        v2 jsonb NOT NULL,
+        v3 character varying NOT NULL,
+        v4 integer,
+        v5 timestamp(6) without time zone NOT NULL,
+        v6 boolean,
+        v7 smallint,
+        v8 bigint,
+        v9 real,
+        v10 double precision,
+        v11 char(10),
+        v12 varchar(50),
+        v13 text,
+        v14 character(20),
+        v15 character varying(100),
+        v16 timestamptz,
+        v17 timetz,
+        v18 interval,
+        v19 bytea,
+        v20 json,
+        v21 xml,
+        v22 point,
+        v23 citext,
+        v24 inet,
+        v25 int4range,
+        v26 int8range,
+        v27 numrange,
+        v28 tsrange,
+        v29 tstzrange,
+        v30 daterange,
+        v31 date,
+        v32 time(3),
+        v33 timestamp(3),
+        v34 numeric(10,2),
+        v35 decimal(8,4),
+        v36 money,
+        v37 cidr,
+        v38 macaddr,
+        v39 macaddr8,
+        v40 int[],
+        v41 bit(1),
+        v42 smallserial,
+        v43 serial,
+        v44 bigserial,
+        v45 oid,
+        v46 mood_enum
+    );
+    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46) VALUES (
+        '{\"test\": \"abc\"}',
+        'source1',
+        42,
+        NOW(),
+        true,
+        123,
+        1234567890123456789,
+        3.14,
+        2.718281828459045,
+        'char10',
+        'varchar50',
+        'This is v13 text field',
+        'char20',
+        'varchar100',
+        NOW() AT TIME ZONE 'UTC',
+        '12:34:56.789'::time,
+        '1 day 2 hours 3 minutes',
+        E'\\x48656c6c6f',
+        '{\"json\": \"test\"}',
+        '<xml>test</xml>',
+        point(1.0, 2.0),
+        'citext_test',
+        '192.168.1.1',
+        '[1,10)',
+        '[100,200)',
+        '[1.5,2.5)',
+        '[2023-01-01,2023-12-31)',
+        '[2023-01-01 00:00:00+00,2023-12-31 23:59:59+00)',
+        '[2023-01-01,2023-12-31)',
+        '2023-12-25',
+        '12:34:56.789',
+        '2023-12-25 12:34:56.789',
+        123.45,
+        123.4567,
+        123.45,
+        '192.168.1.0/24',
+        '08:00:2b:01:02:03',
+        '08:00:2b:01:02:03:04:05',
+        '{1, 2, 3, 4, 5}',
+        B'1',
+        12345,
+        67890,
+        123456789,
+        12345,
+        'happy'
+    );
+    "
+
+statement ok
+create source s with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'rw_slot',
+  auto.schema.change = 'true'
+);
+
+statement ok
+create table t (
+  v1 character varying primary key,
+  v2 jsonb,
+  v3 character varying,
+  v4 int,
+  v5 timestamp,
+  v6 boolean,
+  v7 smallint,
+  v8 bigint,
+  v9 real,
+  v10 double precision,
+  v11 character varying,
+  v12 character varying,
+  v13 text,
+  v14 character varying,
+  v15 character varying,
+  v16 timestamp with time zone,
+  v17 time without time zone,
+  v18 interval,
+  v19 bytea,
+  v20 jsonb,
+  v21 character varying,
+  v22 struct<x double precision, y double precision>,
+  v23 character varying,
+  v24 character varying,
+  v25 character varying,
+  v26 character varying,
+  v27 character varying,
+  v28 character varying,
+  v29 character varying,
+  v30 character varying,
+  v31 date,
+  v32 time without time zone,
+  v33 timestamp without time zone,
+  v34 numeric,
+  v35 numeric,
+  v36 numeric,
+  v37 character varying,
+  v38 character varying,
+  v39 character varying,
+  v40 int[],
+  v41 boolean,
+  v42 smallint,
+  v43 int,
+  v44 bigint,
+  v45 bigint,
+  v46 character varying
+) from s table 'public.t';
+
+sleep 2s
+
+system ok
+psql -c "
+    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46) VALUES (
+        '{\"test\": \"abc\"}',
+        'source1',
+        84,
+        NOW(),
+        true,
+        123,
+        1234567890123456789,
+        3.14,
+        2.718281828459045,
+        'char10',
+        'varchar50',
+        'This is v13 text field for second record',
+        'char20',
+        'varchar100',
+        NOW() AT TIME ZONE 'UTC',
+        '12:34:56.789'::time,
+        '1 day 2 hours 3 minutes',
+        E'\\x48656c6c6f',
+        '{\"json\": \"test\"}',
+        '<xml>test</xml>',
+        point(1.0, 2.0),
+        'citext_test',
+        '192.168.1.1',
+        '[1,10)',
+        '[100,200)',
+        '[1.5,2.5)',
+        '[2023-01-01,2023-12-31)',
+        '[2023-01-01 00:00:00+00,2023-12-31 23:59:59+00)',
+        '[2023-01-01,2023-12-31)',
+        '2023-12-25',
+        '12:34:56.789',
+        '2023-12-25 12:34:56.789',
+        123.45,
+        123.4567,
+        123.45,
+        '192.168.1.0/24',
+        '08:00:2b:01:02:03',
+        '08:00:2b:01:02:03:04:05',
+        '{1, 2, 3, 4, 5}',
+        B'1',
+        12345,
+        67890,
+        123456789,
+        12345,
+        'happy'
+    );
+    "
+
+sleep 10s
+
+query TTTT
+select count(*) from t;
+----
+2
+
+# Test 1: Unsuopported LTREE type should cause schema mismatch error
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_ltree;
+    CREATE EXTENSION IF NOT EXISTS ltree;
+    CREATE TABLE t_ltree (
+        id serial PRIMARY KEY,
+        path ltree NOT NULL
+    );
+    INSERT INTO t_ltree (path) VALUES ('Top.Science.Astronomy.Cosmology');
+    INSERT INTO t_ltree (path) VALUES ('Top.Collections.Pictures.Astronomy.Stars');
+"
+
+statement error Incompatible data type of column path
+create table t_ltree_mismatch (
+  id int primary key,
+  path character varying
+) from s table 'public.t_ltree';
+
+# Test 2: bit(1) type should cause schema mismatch error when mapped to bytea
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_bit;
+    CREATE TABLE t_bit (
+        id serial PRIMARY KEY,
+        flag bit(1) NOT NULL
+    );
+    INSERT INTO t_bit (flag) VALUES (B'1');
+    INSERT INTO t_bit (flag) VALUES (B'0');
+"
+
+statement error Incompatible data type of column flag
+create table t_bit_mismatch (
+  id int primary key,
+  flag bytea
+) from s table 'public.t_bit';
+
+# Test 3: Unsuopported HSTORE type should cause schema mismatch error
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_hstore;
+    CREATE EXTENSION IF NOT EXISTS hstore;
+    CREATE TABLE t_hstore (
+        id serial PRIMARY KEY,
+        attributes hstore NOT NULL
+    );
+    INSERT INTO t_hstore (attributes) VALUES ('key1=>value1, key2=>value2');
+    INSERT INTO t_hstore (attributes) VALUES ('color=>red, size=>large');
+"
+
+statement error Incompatible data type of column attributes
+create table t_hstore_mismatch (
+  id int primary key,
+  attributes jsonb
+) from s table 'public.t_hstore';
+
+# Test 4: bit(8) type should cause schema mismatch error when mapped to bytea
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_bit8;
+    CREATE TABLE t_bit8 (
+        id serial PRIMARY KEY,
+        flags bit(8) NOT NULL
+    );
+    INSERT INTO t_bit8 (flags) VALUES (B'00000001');
+    INSERT INTO t_bit8 (flags) VALUES (B'11111111');
+"
+
+statement error
+create table t_bit8_mismatch (
+  id int primary key,
+  flags byteas
+) from s table 'public.t_bit8';

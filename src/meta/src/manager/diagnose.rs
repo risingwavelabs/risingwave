@@ -21,6 +21,7 @@ use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_pb::catalog::table::PbTableType;
@@ -629,7 +630,12 @@ impl DiagnoseCommand {
             .list_sources()
             .await?
             .into_iter()
-            .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
+            .map(|s| {
+                (
+                    s.id,
+                    (s.name, s.schema_id, s.definition, s.created_at_epoch),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         let mut user_tables = BTreeMap::new();
         let mut mvs = BTreeMap::new();
@@ -644,9 +650,12 @@ impl DiagnoseCommand {
                 .into_iter()
                 .chunk_by(|t| t.table_type());
             for (table_type, tables) in &grouped {
-                let tables = tables
-                    .into_iter()
-                    .map(|t| (t.id, (t.name, t.schema_id, t.definition)));
+                let tables = tables.into_iter().map(|t| {
+                    (
+                        t.id,
+                        (t.name, t.schema_id, t.definition, t.created_at_epoch),
+                    )
+                });
                 match table_type {
                     PbTableType::Table => user_tables.extend(tables),
                     PbTableType::MaterializedView => mvs.extend(tables),
@@ -664,7 +673,12 @@ impl DiagnoseCommand {
             .list_sinks()
             .await?
             .into_iter()
-            .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
+            .map(|s| {
+                (
+                    s.id,
+                    (s.name, s.schema_id, s.definition, s.created_at_epoch),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         let catalogs = [
             ("SOURCE", sources),
@@ -683,17 +697,24 @@ impl DiagnoseCommand {
                 row.add_cell("id".into());
                 row.add_cell("name".into());
                 row.add_cell("schema_id".into());
+                row.add_cell("created_at".into());
                 row.add_cell("definition".into());
                 row
             });
-            for (id, (name, schema_id, definition)) in items {
+            for (id, (name, schema_id, definition, created_at_epoch)) in items {
                 obj_id_to_name.insert(id, name.clone());
                 let mut row = Row::new();
                 let may_redact = redact_sql(&definition, self.redact_sql_option_keywords.clone())
                     .unwrap_or_else(|| "[REDACTED]".into());
+                let created_at = if let Some(created_at_epoch) = created_at_epoch {
+                    format!("{}", Epoch::from(created_at_epoch).as_timestamptz())
+                } else {
+                    "".into()
+                };
                 row.add_cell(id.into());
                 row.add_cell(name.into());
                 row.add_cell(schema_id.into());
+                row.add_cell(created_at.into());
                 row.add_cell(may_redact.into());
                 table.add_row(row);
             }
