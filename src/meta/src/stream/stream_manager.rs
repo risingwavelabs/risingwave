@@ -36,7 +36,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument;
 
-use super::{FragmentBackfillOrder, Locations, RescheduleTarget, ScaleControllerRef};
+use super::{FragmentBackfillOrder, Locations, ReschedulePolicy, ScaleControllerRef};
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
@@ -815,7 +815,7 @@ impl GlobalStreamManager {
     pub(crate) async fn reschedule_streaming_job(
         &self,
         job_id: u32,
-        target: RescheduleTarget,
+        target: ReschedulePolicy,
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
@@ -852,7 +852,7 @@ impl GlobalStreamManager {
         let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
         let commands = self
             .scale_controller
-            .reschedule_update(HashMap::from([(job_id.table_id as _, target)]), workers)
+            .reschedule_inplace(HashMap::from([(job_id.table_id as _, target)]), workers)
             .await?;
 
         if !deferred {

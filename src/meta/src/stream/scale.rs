@@ -406,439 +406,9 @@ impl ScaleController {
         Ok(())
     }
 
-    // pub async fn generate_job_reschedule_plan(
-    //     &self,
-    //     policy: JobReschedulePolicy,
-    //     generate_plan_for_cdc_table_backfill: bool,
-    // ) -> MetaResult<JobReschedulePlan> {
-    //     type VnodeCount = usize;
-    //
-    //     let JobReschedulePolicy { targets } = policy;
-    //
-    //     let workers = self
-    //         .metadata_manager
-    //         .list_active_streaming_compute_nodes()
-    //         .await?;
-    //
-    //     // The `schedulable` field should eventually be replaced by resource groups like `unschedulable`
-    //     let workers: HashMap<_, _> = workers
-    //         .into_iter()
-    //         .filter(|worker| worker.is_streaming_schedulable())
-    //         .map(|worker| (worker.id, worker))
-    //         .collect();
-    //
-    //     #[derive(Debug)]
-    //     struct JobUpdate {
-    //         filtered_worker_ids: BTreeSet<WorkerId>,
-    //         parallelism: TableParallelism,
-    //     }
-    //
-    //     let mut job_parallelism_updates = HashMap::new();
-    //
-    //     let mut job_reschedule_post_updates = JobReschedulePostUpdates {
-    //         parallelism_updates: Default::default(),
-    //         resource_group_updates: Default::default(),
-    //     };
-    //
-    //     for (
-    //         job_id,
-    //         JobRescheduleTarget {
-    //             parallelism: parallelism_update,
-    //             resource_group: resource_group_update,
-    //         },
-    //     ) in &targets
-    //     {
-    //         let parallelism = match parallelism_update {
-    //             JobParallelismTarget::Update(parallelism) => *parallelism,
-    //             JobParallelismTarget::Refresh => {
-    //                 let parallelism = self
-    //                     .metadata_manager
-    //                     .catalog_controller
-    //                     .get_job_streaming_parallelisms(*job_id as _)
-    //                     .await?;
-    //
-    //                 parallelism.into()
-    //             }
-    //         };
-    //
-    //         job_reschedule_post_updates
-    //             .parallelism_updates
-    //             .insert(TableId::from(*job_id), parallelism);
-    //
-    //         let current_resource_group = match resource_group_update {
-    //             JobResourceGroupTarget::Update(Some(specific_resource_group)) => {
-    //                 job_reschedule_post_updates.resource_group_updates.insert(
-    //                     *job_id as ObjectId,
-    //                     Some(specific_resource_group.to_owned()),
-    //                 );
-    //
-    //                 specific_resource_group.to_owned()
-    //             }
-    //             JobResourceGroupTarget::Update(None) => {
-    //                 let database_resource_group = self
-    //                     .metadata_manager
-    //                     .catalog_controller
-    //                     .get_existing_job_database_resource_group(*job_id as _)
-    //                     .await?;
-    //
-    //                 job_reschedule_post_updates
-    //                     .resource_group_updates
-    //                     .insert(*job_id as ObjectId, None);
-    //                 database_resource_group
-    //             }
-    //             JobResourceGroupTarget::Keep => {
-    //                 self.metadata_manager
-    //                     .catalog_controller
-    //                     .get_existing_job_resource_group(*job_id as _)
-    //                     .await?
-    //             }
-    //         };
-    //
-    //         let filtered_worker_ids =
-    //             filter_workers_by_resource_group(&workers, current_resource_group.as_str());
-    //
-    //         if filtered_worker_ids.is_empty() {
-    //             bail!("Cannot resize streaming_job {job_id} to empty worker set")
-    //         }
-    //
-    //         job_parallelism_updates.insert(
-    //             *job_id,
-    //             JobUpdate {
-    //                 filtered_worker_ids,
-    //                 parallelism,
-    //             },
-    //         );
-    //     }
-    //
-    //     // index for no shuffle relation
-    //     let mut no_shuffle_source_fragment_ids = HashSet::new();
-    //     let mut no_shuffle_target_fragment_ids = HashSet::new();
-    //
-    //     // index for fragment_id -> (distribution_type, vnode_count)
-    //     let mut fragment_distribution_map = HashMap::new();
-    //     // index for actor -> worker id
-    //     let mut actor_location = HashMap::new();
-    //     // index for table_id -> [fragment_id]
-    //     let mut table_fragment_id_map = HashMap::new();
-    //     // index for fragment_id -> [actor_id]
-    //     let mut fragment_actor_id_map = HashMap::new();
-    //
-    //     async fn build_index(
-    //         no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
-    //         no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
-    //         fragment_distribution_map: &mut HashMap<
-    //             FragmentId,
-    //             (FragmentDistributionType, VnodeCount, bool),
-    //         >,
-    //         actor_location: &mut HashMap<ActorId, WorkerId>,
-    //         table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
-    //         fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
-    //         mgr: &MetadataManager,
-    //         table_ids: Vec<ObjectId>,
-    //         generate_plan_only_for_cdc_table_backfill: bool,
-    //     ) -> Result<(), MetaError> {
-    //         let RescheduleWorkingSet {
-    //             fragments,
-    //             actors,
-    //             actor_dispatchers: _actor_dispatchers,
-    //             fragment_downstreams,
-    //             fragment_upstreams: _fragment_upstreams,
-    //             related_jobs: _related_jobs,
-    //             job_resource_groups: _job_resource_groups,
-    //         } = mgr
-    //             .catalog_controller
-    //             .resolve_working_set_for_reschedule_tables(table_ids)
-    //             .await?;
-    //
-    //         for (fragment_id, downstreams) in fragment_downstreams {
-    //             for (downstream_fragment_id, dispatcher_type) in downstreams {
-    //                 if let risingwave_meta_model::DispatcherType::NoShuffle = dispatcher_type {
-    //                     no_shuffle_source_fragment_ids.insert(fragment_id as FragmentId);
-    //                     no_shuffle_target_fragment_ids.insert(downstream_fragment_id as FragmentId);
-    //                 }
-    //             }
-    //         }
-    //
-    //         for (fragment_id, fragment) in fragments {
-    //             let is_cdc_backfill_v2_fragment =
-    //                 FragmentTypeMask::from(fragment.fragment_type_mask)
-    //                     .contains(FragmentTypeFlag::StreamCdcScan);
-    //             if generate_plan_only_for_cdc_table_backfill && !is_cdc_backfill_v2_fragment {
-    //                 continue;
-    //             }
-    //             fragment_distribution_map.insert(
-    //                 fragment_id as FragmentId,
-    //                 (
-    //                     FragmentDistributionType::from(fragment.distribution_type),
-    //                     fragment.vnode_count as _,
-    //                     is_cdc_backfill_v2_fragment,
-    //                 ),
-    //             );
-    //
-    //             table_fragment_id_map
-    //                 .entry(fragment.job_id as u32)
-    //                 .or_default()
-    //                 .insert(fragment_id as FragmentId);
-    //         }
-    //
-    //         for (actor_id, actor) in actors {
-    //             actor_location.insert(actor_id as ActorId, actor.worker_id as WorkerId);
-    //             fragment_actor_id_map
-    //                 .entry(actor.fragment_id as FragmentId)
-    //                 .or_default()
-    //                 .insert(actor_id as ActorId);
-    //         }
-    //
-    //         Ok(())
-    //     }
-    //
-    //     let table_ids = targets.keys().map(|id| *id as ObjectId).collect();
-    //
-    //     build_index(
-    //         &mut no_shuffle_source_fragment_ids,
-    //         &mut no_shuffle_target_fragment_ids,
-    //         &mut fragment_distribution_map,
-    //         &mut actor_location,
-    //         &mut table_fragment_id_map,
-    //         &mut fragment_actor_id_map,
-    //         &self.metadata_manager,
-    //         table_ids,
-    //         generate_plan_for_cdc_table_backfill,
-    //     )
-    //     .await?;
-    //     tracing::debug!(
-    //         ?job_reschedule_post_updates,
-    //         ?job_parallelism_updates,
-    //         ?no_shuffle_source_fragment_ids,
-    //         ?no_shuffle_target_fragment_ids,
-    //         ?fragment_distribution_map,
-    //         ?actor_location,
-    //         ?table_fragment_id_map,
-    //         ?fragment_actor_id_map,
-    //         "generate_table_resize_plan, after build_index"
-    //     );
-    //
-    //     let adaptive_parallelism_strategy = self
-    //         .env
-    //         .system_params_reader()
-    //         .await
-    //         .adaptive_parallelism_strategy();
-    //
-    //     let mut target_plan = HashMap::new();
-    //
-    //     for (
-    //         table_id,
-    //         JobUpdate {
-    //             filtered_worker_ids,
-    //             parallelism,
-    //         },
-    //     ) in job_parallelism_updates
-    //     {
-    //         let assigner = AssignerBuilder::new(table_id).build();
-    //
-    //         let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
-    //
-    //         let available_worker_slots = workers
-    //             .iter()
-    //             .filter(|(id, _)| filtered_worker_ids.contains(&(**id as WorkerId)))
-    //             .map(|(_, worker)| {
-    //                 (
-    //                     worker.id as WorkerId,
-    //                     NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
-    //                 )
-    //             })
-    //             .collect::<BTreeMap<_, _>>();
-    //
-    //         for fragment_id in fragment_map {
-    //             // Currently, all of our NO_SHUFFLE relation propagations are only transmitted from upstream to downstream.
-    //             if no_shuffle_target_fragment_ids.contains(&fragment_id) {
-    //                 continue;
-    //             }
-    //
-    //             let mut fragment_slots: BTreeMap<WorkerId, usize> = BTreeMap::new();
-    //
-    //             for actor_id in &fragment_actor_id_map[&fragment_id] {
-    //                 let worker_id = actor_location[actor_id];
-    //                 *fragment_slots.entry(worker_id).or_default() += 1;
-    //             }
-    //
-    //             let available_slot_count: usize = available_worker_slots
-    //                 .values()
-    //                 .cloned()
-    //                 .map(NonZeroUsize::get)
-    //                 .sum();
-    //
-    //             if available_slot_count == 0 {
-    //                 bail!(
-    //                     "No schedulable slots available for fragment {}",
-    //                     fragment_id
-    //                 );
-    //             }
-    //
-    //             let (dist, vnode_count, is_cdc_backfill_v2_fragment) =
-    //                 fragment_distribution_map[&fragment_id];
-    //             let max_parallelism = vnode_count;
-    //             let fragment_parallelism_strategy = if generate_plan_for_cdc_table_backfill {
-    //                 assert!(is_cdc_backfill_v2_fragment);
-    //                 let TableParallelism::Fixed(new_parallelism) = parallelism else {
-    //                     return Err(anyhow::anyhow!(
-    //                         "invalid new parallelism {:?}, expect fixed parallelism",
-    //                         parallelism
-    //                     )
-    //                     .into());
-    //                 };
-    //                 if new_parallelism > max_parallelism || new_parallelism == 0 {
-    //                     return Err(anyhow::anyhow!(
-    //                         "invalid new parallelism {}, max parallelism {}",
-    //                         new_parallelism,
-    //                         max_parallelism
-    //                     )
-    //                     .into());
-    //                 }
-    //                 TableParallelism::Fixed(new_parallelism)
-    //             } else if is_cdc_backfill_v2_fragment {
-    //                 TableParallelism::Fixed(fragment_actor_id_map[&fragment_id].len())
-    //             } else {
-    //                 parallelism
-    //             };
-    //             match dist {
-    //                 FragmentDistributionType::Unspecified => unreachable!(),
-    //                 FragmentDistributionType::Single => {
-    //                     let (single_worker_id, should_be_one) = fragment_slots
-    //                         .iter()
-    //                         .exactly_one()
-    //                         .expect("single fragment should have only one worker slot");
-    //
-    //                     assert_eq!(*should_be_one, 1);
-    //
-    //                     let assignment =
-    //                         assigner.count_actors_per_worker(&available_worker_slots, 1);
-    //
-    //                     let (chosen_target_worker_id, should_be_one) =
-    //                         assignment.iter().exactly_one().ok().with_context(|| {
-    //                             format!(
-    //                                 "Cannot find a single target worker for fragment {fragment_id}"
-    //                             )
-    //                         })?;
-    //
-    //                     assert_eq!(*should_be_one, 1);
-    //
-    //                     if *chosen_target_worker_id == *single_worker_id {
-    //                         tracing::debug!(
-    //                             "single fragment {fragment_id} already on target worker {chosen_target_worker_id}"
-    //                         );
-    //                         continue;
-    //                     }
-    //
-    //                     target_plan.insert(
-    //                         fragment_id,
-    //                         WorkerReschedule {
-    //                             worker_actor_diff: BTreeMap::from_iter(vec![
-    //                                 (*chosen_target_worker_id, 1),
-    //                                 (*single_worker_id, -1),
-    //                             ]),
-    //                         },
-    //                     );
-    //                 }
-    //                 FragmentDistributionType::Hash => match fragment_parallelism_strategy {
-    //                     TableParallelism::Adaptive => {
-    //                         let target_slot_count = adaptive_parallelism_strategy
-    //                             .compute_target_parallelism(available_slot_count);
-    //
-    //                         if target_slot_count > max_parallelism {
-    //                             tracing::warn!(
-    //                                 "available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
-    //                             );
-    //
-    //                             let target_worker_slots = assigner.count_actors_per_worker(
-    //                                 &available_worker_slots,
-    //                                 max_parallelism,
-    //                             );
-    //
-    //                             target_plan.insert(
-    //                                 fragment_id,
-    //                                 Self::diff_worker_slot_changes(
-    //                                     &fragment_slots,
-    //                                     &target_worker_slots,
-    //                                 ),
-    //                             );
-    //                         } else if available_slot_count != target_slot_count {
-    //                             tracing::info!(
-    //                                 "available parallelism for table {table_id} is limit by adaptive strategy {adaptive_parallelism_strategy}, resetting to {target_slot_count}"
-    //                             );
-    //
-    //                             let target_worker_slots = assigner.count_actors_per_worker(
-    //                                 &available_worker_slots,
-    //                                 target_slot_count,
-    //                             );
-    //
-    //                             target_plan.insert(
-    //                                 fragment_id,
-    //                                 Self::diff_worker_slot_changes(
-    //                                     &fragment_slots,
-    //                                     &target_worker_slots,
-    //                                 ),
-    //                             );
-    //                         } else {
-    //                             let available_worker_slots = available_worker_slots
-    //                                 .iter()
-    //                                 .map(|(worker_id, v)| (*worker_id, v.get()))
-    //                                 .collect();
-    //
-    //                             target_plan.insert(
-    //                                 fragment_id,
-    //                                 Self::diff_worker_slot_changes(
-    //                                     &fragment_slots,
-    //                                     &available_worker_slots,
-    //                                 ),
-    //                             );
-    //                         }
-    //                     }
-    //                     TableParallelism::Fixed(mut n) => {
-    //                         if n > max_parallelism {
-    //                             tracing::warn!(
-    //                                 "specified parallelism {n} for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
-    //                             );
-    //                             n = max_parallelism
-    //                         }
-    //
-    //                         let target_worker_slots =
-    //                             assigner.count_actors_per_worker(&available_worker_slots, n);
-    //
-    //                         target_plan.insert(
-    //                             fragment_id,
-    //                             Self::diff_worker_slot_changes(
-    //                                 &fragment_slots,
-    //                                 &target_worker_slots,
-    //                             ),
-    //                         );
-    //                     }
-    //                     TableParallelism::Custom => {
-    //                         // skipping for custom
-    //                     }
-    //                 },
-    //             }
-    //         }
-    //     }
-    //
-    //     target_plan.retain(|_, plan| !plan.worker_actor_diff.is_empty());
-    //     tracing::debug!(
-    //         ?target_plan,
-    //         "generate_table_resize_plan finished target_plan"
-    //     );
-    //     if generate_plan_for_cdc_table_backfill {
-    //         job_reschedule_post_updates.resource_group_updates = HashMap::default();
-    //         job_reschedule_post_updates.parallelism_updates = HashMap::default();
-    //     }
-    //     Ok(JobReschedulePlan {
-    //         reschedules: target_plan,
-    //         post_updates: job_reschedule_post_updates,
-    //     })
-    // }
-
-    pub async fn reschedule_update(
+    pub async fn reschedule_inplace(
         &self,
-        policy: HashMap<ObjectId, RescheduleTarget>,
+        policy: HashMap<ObjectId, ReschedulePolicy>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         println!("aaaaaaaa");
@@ -857,14 +427,14 @@ impl ScaleController {
                 .into_active_model();
 
             match &target {
-                RescheduleTarget::Parallelism(p) | RescheduleTarget::Both(p, _) => {
+                ReschedulePolicy::Parallelism(p) | ReschedulePolicy::Both(p, _) => {
                     streaming_job.parallelism = Set(p.parallelism.clone());
                 }
                 _ => {}
             }
 
             match &target {
-                RescheduleTarget::ResourceGroup(r) | RescheduleTarget::Both(_, r) => {
+                ReschedulePolicy::ResourceGroup(r) | ReschedulePolicy::Both(_, r) => {
                     streaming_job.specific_resource_group = Set(r.resource_group.clone());
                 }
                 _ => {}
@@ -1145,20 +715,20 @@ impl ScaleController {
 }
 
 #[derive(Clone, Debug)]
-pub struct ParallelismTarget {
+pub struct ParallelismPolicy {
     pub parallelism: StreamingParallelism,
 }
 
 #[derive(Clone, Debug)]
-pub struct ResourceGroupTarget {
+pub struct ResourceGroupPolicy {
     pub resource_group: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub enum RescheduleTarget {
-    Parallelism(ParallelismTarget),
-    ResourceGroup(ResourceGroupTarget),
-    Both(ParallelismTarget, ResourceGroupTarget),
+pub enum ReschedulePolicy {
+    Parallelism(ParallelismPolicy),
+    ResourceGroup(ResourceGroupPolicy),
+    Both(ParallelismPolicy, ResourceGroupPolicy),
 }
 
 impl GlobalStreamManager {
@@ -1300,7 +870,7 @@ impl GlobalStreamManager {
             let _results = future::try_join_all(futures).await?;
         }
 
-        Ok(true)
+        Ok(false)
     }
 
     /// Handles notification of worker node activation and deletion, and triggers parallelism control.

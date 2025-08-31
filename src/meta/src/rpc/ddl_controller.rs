@@ -91,7 +91,7 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    ReplaceStreamJobContext, RescheduleTarget, SourceChange, SourceManagerRef, StreamFragmentGraph,
+    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
     check_sink_fragments_support_refresh_schema, create_source_worker,
     rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
@@ -499,7 +499,7 @@ impl DdlController {
     pub async fn reschedule_streaming_job(
         &self,
         job_id: u32,
-        target: RescheduleTarget,
+        target: ReschedulePolicy,
         mut deferred: bool,
     ) -> MetaResult<()> {
         tracing::info!("alter parallelism");
