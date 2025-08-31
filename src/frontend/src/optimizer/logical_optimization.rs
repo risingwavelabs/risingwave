@@ -141,6 +141,8 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
             TableFunctionToInternalBackfillProgressRule::create(),
             // Apply internal source backfill progress rule next
             TableFunctionToInternalSourceBackfillProgressRule::create(),
+            // Apply channel stats rule next
+            TableFunctionToChannelStatsRule::create(),
             // Apply postgres query rule next
             TableFunctionToPostgresQueryRule::create(),
             // Apply mysql query rule next
