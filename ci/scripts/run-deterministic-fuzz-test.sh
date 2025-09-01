@@ -37,6 +37,11 @@ echo "--- Download artifacts"
 download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
 
+download_and_prepare_rw "$profile" common
+
+download-and-decompress-artifact sqlsmith-reducer-"$profile" target/debug/
+mv target/debug/sqlsmith-reducer-"$profile" target/debug/sqlsmith-reducer
+chmod +x ./target/debug/sqlsmith-reducer
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
 set +e
