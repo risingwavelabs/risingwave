@@ -39,7 +39,7 @@ use crate::MetaResult;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor};
-use crate::stream::AssignerBuilder;
+use crate::stream::{AssignerBuilder, build_actor_id};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
     txn: &C,
@@ -336,7 +336,7 @@ where
                         DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
                     };
 
-                    let actor_id = (fragment_id << 16) as u32 | actor_idx as u32;
+                    let actor_id = build_actor_id(fragment_id as u32, actor_idx);
                     (
                         actor_id,
                         InflightActorInfo {

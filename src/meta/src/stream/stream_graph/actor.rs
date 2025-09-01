@@ -37,6 +37,7 @@ use crate::model::{
     Fragment, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle,
     FragmentReplaceUpstream, StreamActor,
 };
+use crate::stream::build_actor_id;
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, DownstreamExternalEdgeId, EdgeId, EitherFragment,
     StreamFragmentEdge,
@@ -568,7 +569,11 @@ impl ActorGraphBuildState {
     fn next_actor_id(&mut self, fragment_id: GlobalFragmentId) -> GlobalActorId {
         let local_id = self.next_local_id;
         self.next_local_id += 1;
-        GlobalActorId::from((fragment_id.as_global_id() << 16) | local_id)
+
+        GlobalActorId::from(build_actor_id(
+            fragment_id.as_global_id(),
+            local_id as usize,
+        ))
     }
 
     /// Finish the build and return the inner state.

@@ -1258,7 +1258,9 @@ impl CatalogController {
                 .actors
                 .len();
 
-            let upstreams = all_upstreams.remove(&fragment_desc.fragment_id).unwrap();
+            let upstreams = all_upstreams
+                .remove(&fragment_desc.fragment_id)
+                .unwrap_or_default();
 
             let fragment = FragmentDistribution {
                 fragment_id: fragment_desc.fragment_id as _,

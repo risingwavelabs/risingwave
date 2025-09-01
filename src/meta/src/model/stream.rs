@@ -491,12 +491,17 @@ impl StreamJobFragments {
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
     }
 
-    /// Returns mview actor ids.
-    pub fn mview_actor_ids(&self) -> Vec<ActorId> {
-        Self::filter_actor_ids(self, |fragment_type_mask| {
-            fragment_type_mask.contains(FragmentTypeFlag::Mview)
-        })
-        .collect()
+    /// Returns mview fragment ids.
+    pub fn mview_fragment_ids(&self) -> Vec<FragmentId> {
+        self.fragments
+            .values()
+            .filter(move |fragment| {
+                fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::Mview)
+            })
+            .map(|fragment| fragment.fragment_id)
+            .collect()
     }
 
     /// Returns actor ids that need to be tracked when creating MV.

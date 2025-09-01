@@ -28,3 +28,7 @@ pub use sink::*;
 pub use source_manager::*;
 pub use stream_graph::*;
 pub use stream_manager::*;
+
+pub(crate) fn build_actor_id(fragment_id: u32, actor_idx: usize) -> u32 {
+    (fragment_id << 16) | actor_idx as u32
+}

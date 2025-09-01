@@ -23,8 +23,8 @@ use futures::future;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeMask};
-use risingwave_common::hash;
 use risingwave_common::hash::ActorMapping;
+use risingwave_common::{bail, hash};
 use risingwave_meta_model::{
     ObjectId, StreamingParallelism, WorkerId, fragment, fragment_relation,
 };
@@ -423,11 +423,22 @@ impl ScaleController {
             let mut streaming_job = StreamingJob::find_by_id(*table_id)
                 .one(&txn)
                 .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?
-                .into_active_model();
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+
+            let max_parallelism = streaming_job.max_parallelism;
+
+            let mut streaming_job = streaming_job.into_active_model();
 
             match &target {
                 ReschedulePolicy::Parallelism(p) | ReschedulePolicy::Both(p, _) => {
+                    if let StreamingParallelism::Fixed(n) = p.parallelism
+                        && n > max_parallelism as usize
+                    {
+                        bail!(format!(
+                            "specified parallelism {n} should not exceed max parallelism {max_parallelism}"
+                        ));
+                    }
+
                     streaming_job.parallelism = Set(p.parallelism.clone());
                 }
                 _ => {}
