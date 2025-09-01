@@ -44,7 +44,6 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::{ActorId, FragmentId};
-use crate::model::MetadataModelResult;
 use crate::stream::{SplitAssignment, build_actor_connector_splits};
 
 /// The parallelism for a `TableFragments`.
@@ -595,7 +594,7 @@ impl StreamJobFragments {
     /// but only one of them is the upstream source fragment, which is what we return.
     pub fn source_backfill_fragments(
         &self,
-    ) -> MetadataModelResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
+    ) -> HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>> {
         let mut source_backfill_fragments = HashMap::new();
 
         for fragment in self.fragments() {
@@ -610,7 +609,7 @@ impl StreamJobFragments {
                 }
             }
         }
-        Ok(source_backfill_fragments)
+        source_backfill_fragments
     }
 
     /// Find the table job's `Union` fragment.
@@ -743,25 +742,12 @@ impl StreamJobFragments {
         }
     }
 
-    /// Retrieve the **complete** internal tables map of the whole graph.
-    ///
-    /// Compared to [`crate::stream::StreamFragmentGraph::incomplete_internal_tables`],
-    /// the table catalogs returned here are complete, with all fields filled.
-    pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
-        self.collect_tables_inner(true)
-    }
-
-    /// `internal_tables()` with additional table in `Materialize` node.
-    pub fn all_tables(&self) -> BTreeMap<u32, Table> {
-        self.collect_tables_inner(false)
-    }
-
-    fn collect_tables_inner(&self, internal_tables_only: bool) -> BTreeMap<u32, Table> {
+    pub fn collect_tables(fragments: impl Iterator<Item = &Fragment>) -> BTreeMap<u32, Table> {
         let mut tables = BTreeMap::new();
-        for fragment in self.fragments.values() {
+        for fragment in fragments {
             stream_graph_visitor::visit_stream_node_tables_inner(
                 &mut fragment.nodes.clone(),
-                internal_tables_only,
+                false,
                 true,
                 |table, _| {
                     let table_id = table.id;

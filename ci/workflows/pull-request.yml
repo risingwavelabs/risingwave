@@ -198,7 +198,7 @@ steps:
           run: source-test-env
           upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 25
     parallelism: 2
     retry: *auto-retry
 
@@ -216,7 +216,7 @@ steps:
           <<: *docker-compose
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 25
     parallelism: 2
     retry: *auto-retry
 

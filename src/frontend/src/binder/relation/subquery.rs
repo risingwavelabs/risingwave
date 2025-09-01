@@ -37,8 +37,8 @@ impl Binder {
     /// After finishing binding, we update the current context with the output of the subquery.
     pub(super) fn bind_subquery_relation(
         &mut self,
-        query: Query,
-        alias: Option<TableAlias>,
+        query: &Query,
+        alias: Option<&TableAlias>,
         lateral: bool,
     ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;

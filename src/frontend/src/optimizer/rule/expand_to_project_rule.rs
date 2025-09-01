@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{ExprImpl, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::*;
 
 pub struct ExpandToProjectRule {}
 
@@ -24,7 +24,7 @@ impl ExpandToProjectRule {
         Box::new(Self {})
     }
 }
-impl Rule for ExpandToProjectRule {
+impl Rule<Logical> for ExpandToProjectRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let expand: &LogicalExpand = plan.as_logical_expand()?;
         let (input, column_subsets) = expand.clone().decompose();

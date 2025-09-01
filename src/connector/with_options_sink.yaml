@@ -540,6 +540,16 @@ IcebergConfig:
     comments: This is only used by iceberg engine to enable the hosted catalog.
     required: false
     default: Default::default
+  - name: catalog.header
+    field_type: String
+    comments: |-
+      The http header to be used in the catalog requests.
+      Example:
+      `catalog.header = "key1=value1;key2=value2;key3=value3"`
+      explain the format of the header:
+      - Each header is a key-value pair, separated by an '='.
+      - Multiple headers can be specified, separated by a ';'.
+    required: false
   - name: primary_key
     field_type: Vec<String>
     required: false
@@ -587,6 +597,35 @@ IcebergConfig:
     comments: Whether to enable iceberg expired snapshots.
     required: false
     default: Default::default
+    allow_alter_on_fly: true
+  - name: write_mode
+    field_type: String
+    comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
+    required: false
+    default: ICEBERG_WRITE_MODE_MERGE_ON_READ . to_owned ()
+  - name: snapshot_expiration_max_age_millis
+    field_type: i64
+    comments: |-
+      The maximum age (in milliseconds) for snapshots before they expire
+      For example, if set to 3600000, snapshots older than 1 hour will be expired
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: snapshot_expiration_retain_last
+    field_type: i32
+    comments: The number of snapshots to retain
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: snapshot_expiration_clear_expired_files
+    field_type: bool
+    required: false
+    default: 'true'
+    allow_alter_on_fly: true
+  - name: snapshot_expiration_clear_expired_meta_data
+    field_type: bool
+    required: false
+    default: 'true'
     allow_alter_on_fly: true
 KafkaConfig:
   fields:

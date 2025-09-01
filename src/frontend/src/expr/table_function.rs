@@ -308,7 +308,7 @@ impl TableFunction {
             INLINE_ARG_LEN => {
                 let mut cast_args = Vec::with_capacity(INLINE_ARG_LEN);
                 for arg in args {
-                    let arg = arg.cast_implicit(DataType::Varchar)?;
+                    let arg = arg.cast_implicit(&DataType::Varchar)?;
                     cast_args.push(arg);
                 }
                 cast_args
@@ -338,7 +338,7 @@ impl TableFunction {
                     args.get(1)
                         .unwrap()
                         .clone()
-                        .cast_implicit(DataType::Varchar)?,
+                        .cast_implicit(&DataType::Varchar)?,
                 ]
             }
             _ => {
@@ -678,8 +678,8 @@ impl Expr for TableFunction {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Table function should not be converted to ExprNode")
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
+        Err("Table function should not be converted to ExprNode".to_owned())
     }
 }
 

@@ -14,7 +14,7 @@
 
 use risingwave_common::bail;
 
-use super::unified::json::TimestamptzHandling;
+use super::unified::json::{TimeHandling, TimestampHandling, TimestamptzHandling};
 use super::unified::kv_event::KvEvent;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
@@ -69,7 +69,12 @@ impl PlainParser {
         };
 
         let transaction_meta_builder = Some(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new(TimestamptzHandling::GuessNumberUnit)?,
+            DebeziumJsonAccessBuilder::new(
+                TimestamptzHandling::GuessNumberUnit,
+                TimestampHandling::GuessNumberUnit,
+                TimeHandling::Micro,
+                false,
+            )?,
         ));
 
         let schema_change_builder = Some(AccessBuilderImpl::DebeziumJson(

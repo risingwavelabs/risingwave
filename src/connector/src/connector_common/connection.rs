@@ -245,6 +245,15 @@ pub struct IcebergConnection {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub hosted_catalog: Option<bool>,
+
+    /// The http header to be used in the catalog requests.
+    /// Example:
+    /// `catalog.header = "key1=value1;key2=value2;key3=value3"`
+    /// explain the format of the header:
+    /// - Each header is a key-value pair, separated by an '='.
+    /// - Multiple headers can be specified, separated by a ';'.
+    #[serde(rename = "catalog.header")]
+    pub header: Option<String>,
 }
 
 impl EnforceSecret for IcebergConnection {
@@ -401,6 +410,7 @@ impl Connection for IcebergConnection {
             table_name: "test_table".to_owned(),
             enable_config_load: self.enable_config_load,
             hosted_catalog: self.hosted_catalog,
+            header: self.header.clone(),
         };
 
         let mut java_map = HashMap::new();

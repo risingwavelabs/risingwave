@@ -16,7 +16,6 @@ use core::mem;
 use core::time::Duration;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -49,7 +48,7 @@ use crate::handler::util::{
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
 use crate::optimizer::PlanRoot;
 use crate::optimizer::plan_node::{BatchFilter, BatchLogSeqScan, BatchSeqScan, generic};
-use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot};
 use crate::utils::Condition;
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
@@ -922,7 +921,7 @@ impl SubscriptionCursor {
                             .into(),
                     ],
                 }
-                .split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)?;
+                .split_to_scan_ranges(&table_catalog, max_split_range_gap)?;
                 if scan.len() > 1 {
                     return Err(ErrorCode::InternalError(
                         "Seek pk row should only generate one scan range".to_owned(),
@@ -939,7 +938,7 @@ impl SubscriptionCursor {
             let core = generic::LogScan::new(
                 table_catalog.name.clone(),
                 output_col_idx,
-                Rc::new(table_catalog.table_desc()),
+                table_catalog.clone(),
                 context,
                 epoch_range,
                 version_id,
@@ -950,16 +949,15 @@ impl SubscriptionCursor {
             (batch_log_seq_scan.into(), out_fields, out_names)
         } else {
             let core = generic::TableScan::new(
-                table_catalog.name.clone(),
                 output_col_idx,
                 table_catalog.clone(),
+                vec![],
                 vec![],
                 context,
                 Condition {
                     conjunctions: vec![],
                 },
                 None,
-                Cardinality::default(),
             );
             let scans = match scan {
                 Some(scan) => vec![scan],
@@ -1004,7 +1002,7 @@ impl SubscriptionCursor {
             query_mode,
             schema,
             stmt_type: StatementType::SELECT,
-            dependent_relations: table_catalog.dependent_relations.clone(),
+            dependent_relations: vec![],
             read_storage_tables: HashSet::from_iter([table_catalog.id]),
         })
     }

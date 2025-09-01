@@ -100,18 +100,19 @@ impl Expr for FunctionCallWithLambda {
         self.base.return_type()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
-        ExprNode {
+
+        let children = self
+            .inputs_with_lambda_arg()
+            .map(|input| input.try_to_expr_proto())
+            .try_collect()?;
+
+        Ok(ExprNode {
             function_type: self.func_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: self
-                    .inputs_with_lambda_arg()
-                    .map(Expr::to_expr_proto)
-                    .collect(),
-            })),
-        }
+            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
+        })
     }
 }

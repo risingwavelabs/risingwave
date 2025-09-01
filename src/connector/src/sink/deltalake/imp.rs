@@ -31,7 +31,7 @@ use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -316,7 +316,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         }
         _ => {
             return Err(SinkError::DeltaLake(anyhow!(
-                "deltalake cannot support type {:?}",
+                "Type {:?} is not supported for DeltaLake sink.",
                 rw_data_type.to_owned()
             )));
         }
@@ -535,8 +535,20 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
         Ok(None)
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
         tracing::info!("Starting DeltaLake commit in epoch {epoch}.");
+        if let Some(add_columns) = add_columns {
+            return Err(anyhow!(
+                "Delta lake sink not support add columns, but got: {:?}",
+                add_columns
+            )
+            .into());
+        }
 
         let deltalake_write_result = metadata
             .iter()
@@ -682,7 +694,7 @@ mod test {
             table: deltalake_table,
         };
         let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
-        committer.commit(1, vec![metadata]).await.unwrap();
+        committer.commit(1, vec![metadata], None).await.unwrap();
 
         // The following code is to test reading the deltalake data table written with test data.
         // To enable the following code, add `deltalake = { workspace = true, features = ["datafusion"] }`

@@ -70,7 +70,7 @@ pub fn align_types<'a>(
     let ret_type = ret_type.unwrap_or(DataType::Varchar);
     for e in exprs {
         // unwrap: cast to least_restrictive type always succeeds
-        e.cast_implicit_mut(ret_type.clone()).unwrap();
+        e.cast_implicit_mut(&ret_type).unwrap();
     }
     Ok(ret_type)
 }
@@ -112,7 +112,7 @@ pub fn align_array_and_element(
     let array_type = DataType::List(Box::new(common_element_type));
 
     // elements are already casted by `align_types`, we cast the array argument here
-    inputs[array_idx].cast_implicit_mut(array_type.clone())?;
+    inputs[array_idx].cast_implicit_mut(&array_type)?;
     tracing::trace!(?inputs, "align_array_and_element done");
     Ok(array_type)
 }
@@ -237,6 +237,16 @@ fn cast_array(source: &DataType, target: &DataType, allows: CastContext) -> Cast
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
         (DataType::Varchar, DataType::List(_)) => canbo(CastContext::Explicit <= allows),
         (DataType::List(_), DataType::Varchar) => canbo(CastContext::Assign <= allows),
+        // https://github.com/pgvector/pgvector/blob/v0.8.0/sql/vector.sql#L157-L170
+        (DataType::Vector(_), DataType::List(elem)) => {
+            canbo(**elem == DataType::Float32 && CastContext::Implicit <= allows)
+        }
+        (DataType::List(elem), DataType::Vector(_)) => canbo(
+            matches!(
+                **elem,
+                DataType::Int32 | DataType::Decimal | DataType::Float32 | DataType::Float64
+            ) && CastContext::Assign <= allows,
+        ),
         _ => cannot(),
     }
 }

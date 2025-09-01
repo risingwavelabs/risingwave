@@ -6,7 +6,7 @@
         {
             "description": "A dummy feature for testing purposes.",
             "type": "string",
-            "const": "TestPaid"
+            "const": "TestDummy"
         },
         {
             "description": "Query historical data within the retention period.",
@@ -87,6 +87,11 @@
             "description": "Auto iceberg compaction.",
             "type": "string",
             "const": "IcebergCompaction"
+        },
+        {
+            "description": "Sink auto schema change.",
+            "type": "string",
+            "const": "SinkAutoSchemaChange"
         }
     ]
 }

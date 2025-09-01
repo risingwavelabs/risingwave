@@ -19,7 +19,10 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::batch::prelude::*;
 use super::generic::{self, PlanAggCall};
 use super::utils::impl_distill_by_unit;
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use super::{
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch,
+};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -64,7 +67,7 @@ impl BatchSimpleAgg {
     }
 }
 
-impl PlanTreeNodeUnary for BatchSimpleAgg {
+impl PlanTreeNodeUnary<Batch> for BatchSimpleAgg {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -76,7 +79,7 @@ impl PlanTreeNodeUnary for BatchSimpleAgg {
         })
     }
 }
-impl_plan_tree_node_for_unary! { BatchSimpleAgg }
+impl_plan_tree_node_for_unary! { Batch, BatchSimpleAgg }
 impl_distill_by_unit!(BatchSimpleAgg, core, "BatchSimpleAgg");
 
 impl ToDistributedBatch for BatchSimpleAgg {
@@ -136,13 +139,13 @@ impl ToLocalBatch for BatchSimpleAgg {
         let new_input = self.input().to_local()?;
 
         let new_input =
-            RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
+            RequiredDist::single().batch_enforce_if_not_satisfies(new_input, &Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
     }
 }
 
-impl ExprRewritable for BatchSimpleAgg {
+impl ExprRewritable<Batch> for BatchSimpleAgg {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

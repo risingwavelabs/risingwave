@@ -26,7 +26,9 @@ use risingwave_meta_model::{
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::table::{PbEngine, PbOptionalAssociatedSourceId, PbTableType};
+use risingwave_pb::catalog::table::{
+    CdcTableType as PbCdcTableType, PbEngine, PbOptionalAssociatedSourceId, PbTableType,
+};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
@@ -219,7 +221,6 @@ impl From<ObjectModel<table::Model>> for PbTable {
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             pk: value.0.pk.to_protobuf(),
-            dependent_relations: vec![], // todo: deprecate it.
             table_type: PbTableType::from(value.0.table_type) as _,
             distribution_key: value.0.distribution_key.0,
             stream_key: value.0.stream_key.0,
@@ -267,6 +268,12 @@ impl From<ObjectModel<table::Model>> for PbTable {
             job_id: value.0.belongs_to_job_id.map(|id| id as _),
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
+            refreshable: value.0.refreshable,
+            vector_index_info: value.0.vector_index_info.map(|index| index.to_protobuf()),
+            cdc_table_type: value
+                .0
+                .cdc_table_type
+                .map(|cdc_type| PbCdcTableType::from(cdc_type) as i32),
         }
     }
 }
@@ -317,7 +324,6 @@ impl From<ObjectModel<sink::Model>> for PbSink {
         if let Some(secret_ref) = value.0.secret_ref {
             secret_ref_map = secret_ref.to_protobuf();
         }
-        #[allow(deprecated)] // for `dependent_relations`
         Self {
             id: value.0.sink_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -325,7 +331,6 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             plan_pk: value.0.plan_pk.to_protobuf(),
-            dependent_relations: vec![],
             distribution_key: value.0.distribution_key.0,
             downstream_pk: value.0.downstream_pk.0,
             sink_type: PbSinkType::from(value.0.sink_type) as _,
@@ -353,6 +358,10 @@ impl From<ObjectModel<sink::Model>> for PbSink {
                 .original_target_columns
                 .map(|cols| cols.to_protobuf())
                 .unwrap_or_default(),
+            auto_refresh_schema_from_table: value
+                .0
+                .auto_refresh_schema_from_table
+                .map(|id| id as _),
         }
     }
 }
@@ -421,7 +430,6 @@ impl From<ObjectModel<view::Model>> for PbView {
             owner: value.1.owner_id as _,
             properties: value.0.properties.0,
             sql: value.0.definition,
-            dependent_relations: vec![], // todo: deprecate it.
             columns: value.0.columns.to_protobuf(),
         }
     }
@@ -474,6 +482,10 @@ impl From<ObjectModel<function::Model>> for PbFunction {
                 .options
                 .as_ref()
                 .and_then(|o| o.0.get("batch").map(|v| v == "true")),
+            created_at_epoch: Some(
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+            ),
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }

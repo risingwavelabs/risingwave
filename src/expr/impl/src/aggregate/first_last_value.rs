@@ -14,8 +14,8 @@
 
 use risingwave_common::types::{Datum, ScalarRefImpl};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::aggregate;
 use risingwave_expr::aggregate::AggStateDyn;
+use risingwave_expr::{ExprError, aggregate};
 
 /// Note that different from `min` and `max`, `first_value` doesn't ignore `NULL` values.
 ///
@@ -73,12 +73,27 @@ impl From<&FirstValueState> for Datum {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("last_value(*) -> auto", state = "ref")] // TODO(rc): `last_value(any) -> any`
+#[aggregate(
+    "last_value(*) -> auto",
+    state = "ref",
+    type_infer = "|args| Ok(args[0].clone())"
+)] // TODO(rc): `last_value(any) -> any`
 fn last_value<T>(_: Option<T>, input: Option<T>) -> Option<T> {
     input
 }
 
-#[aggregate("internal_last_seen_value(*) -> auto", state = "ref", internal)]
+#[aggregate(
+    "internal_last_seen_value(*) -> auto",
+    state = "ref",
+    internal,
+    type_infer = "|args| Ok(args[0].clone())"
+)]
 fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
     if retract { state } else { input }
 }
+
+#[aggregate("arg_min(any, any) -> any", rewritten)]
+fn _arg_min() {}
+
+#[aggregate("arg_max(any, any) -> any", rewritten)]
+fn _arg_max() {}

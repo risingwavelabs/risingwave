@@ -45,12 +45,12 @@ use super::monitor::SourceMetrics;
 use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::pulsar::source::PulsarMeta;
-use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
+use crate::source::batch::BatchSourceSplitImpl;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
 use crate::{
@@ -451,7 +451,10 @@ pub type BoxSourceMessageStream =
     BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 /// Stream of [`StreamChunk`]s parsed from the messages from the external source.
 pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+/// `StreamChunk` with the latest split state.
+/// The state is constructed in `StreamReaderBuilder::into_retry_stream`
 pub type StreamChunkWithState = (StreamChunk, HashMap<SplitId, SplitImpl>);
+/// See [`StreamChunkWithState`].
 pub type BoxSourceChunkWithStateStream =
     BoxStream<'static, crate::error::ConnectorResult<StreamChunkWithState>>;
 
@@ -526,20 +529,6 @@ for_all_sources!(impl_connector_properties);
 impl Default for ConnectorProperties {
     fn default() -> Self {
         ConnectorProperties::Test(Box::default())
-    }
-}
-
-impl ConnectorProperties {
-    pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
-        with_properties
-            .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| {
-                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
-                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
-                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
-                    || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
-            })
-            .unwrap_or(false)
     }
 }
 
@@ -714,6 +703,16 @@ impl SplitImpl {
             CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
             SqlServerCdc(split) => split.start_offset().clone().unwrap_or_default(),
             _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
+        }
+    }
+
+    pub fn into_batch_split(self) -> Option<BatchSourceSplitImpl> {
+        #[expect(clippy::match_single_binding)]
+        match self {
+            // SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
+            //     Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
+            // }
+            _ => None,
         }
     }
 }

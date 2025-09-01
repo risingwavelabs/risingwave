@@ -22,7 +22,7 @@ use itertools::Itertools;
 
 use super::ExecuteContext;
 use crate::util::is_env_set;
-use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig, TempoConfig};
+use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, MoatConfig, OpendalConfig, TempoConfig};
 
 impl<W> ExecuteContext<W>
 where
@@ -63,7 +63,7 @@ where
                 .arg("--network")
                 .arg("host")
                 .arg("--cpus")
-                .arg("4") // release build has a paid license working with <= 4 cpus
+                .arg("4") // release build has a premium license working with <= 4 cpus
                 .arg("-v")
                 .arg(format!("{wd}:{wd}"))
                 .arg(&image)
@@ -155,6 +155,7 @@ pub fn add_hummock_backend(
     provide_opendal: &[OpendalConfig],
     provide_minio: &[MinioConfig],
     provide_aws_s3: &[AwsS3Config],
+    provide_moat: &[MoatConfig],
     hummock_in_memory_strategy: HummockInMemoryStrategy,
     cmd: &mut Command,
 ) -> Result<(bool, bool)> {
@@ -162,8 +163,9 @@ pub fn add_hummock_backend(
         provide_minio,
         provide_aws_s3,
         provide_opendal,
+        provide_moat,
     ) {
-        ([], [], []) => match hummock_in_memory_strategy {
+        ([], [], [], []) => match hummock_in_memory_strategy {
             HummockInMemoryStrategy::Allowed => {
                 cmd.arg("--state-store").arg("hummock+memory");
                 (false, false)
@@ -175,7 +177,7 @@ pub fn add_hummock_backend(
                 ));
             }
         },
-        ([minio], [], []) => {
+        ([minio], [], [], []) => {
             cmd.arg("--state-store").arg(format!(
                 "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
                 hummock_user = minio.root_user,
@@ -186,12 +188,12 @@ pub fn add_hummock_backend(
             ));
             (true, true)
         }
-        ([], [aws_s3], []) => {
+        ([], [aws_s3], [], []) => {
             cmd.arg("--state-store")
                 .arg(format!("hummock+s3://{}", aws_s3.bucket));
             (true, true)
         }
-        ([], [], [opendal]) => {
+        ([], [], [opendal], []) => {
             if opendal.engine == "hdfs" {
                 cmd.arg("--state-store")
                     .arg(format!("hummock+hdfs://{}", opendal.namenode));
@@ -219,8 +221,18 @@ pub fn add_hummock_backend(
             }
             (true, true)
         }
-
-        (other_minio, other_s3, _) => {
+        ([minio], _, _, [moat]) => {
+            cmd.arg("--state-store").arg(format!(
+                "hummock+minio://{hummock_user}:{hummock_password}@{moat_addr}:{moat_port}/{hummock_bucket}",
+                hummock_user = minio.root_user,
+                hummock_password = minio.root_password,
+                hummock_bucket = minio.hummock_bucket,
+                moat_addr = moat.address,
+                moat_port = moat.port,
+            ));
+            (true, true)
+        }
+        (other_minio, other_s3, _, _) => {
             return Err(anyhow!(
                 "{} minio and {} s3 instance found in config, but only 1 is needed",
                 other_minio.len(),

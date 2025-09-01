@@ -13,13 +13,15 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use pulsar::proto::command_get_topics_of_namespace::Mode as LookupMode;
+use pulsar::{Pulsar, TokioExecutor};
 use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
 use urlencoding::encode;
 
 use crate::error::ConnectorResult as Result;
 
-const PERSISTENT_DOMAIN: &str = "persistent";
+pub(crate) const PERSISTENT_DOMAIN: &str = "persistent";
 const NON_PERSISTENT_DOMAIN: &str = "non-persistent";
 const PUBLIC_TENANT: &str = "public";
 const DEFAULT_NAMESPACE: &str = "default";
@@ -167,6 +169,29 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
     }
 
     Ok(parsed_topic)
+}
+
+pub(crate) async fn check_topic_exists(
+    client: &Pulsar<TokioExecutor>,
+    topic: &Topic,
+) -> Result<()> {
+    // issue about api `get_topics_of_namespace`:
+    // for partitioned topic, the api will return all sub-topic of the topic instead of the topic itself
+    let topics_on_broker = client
+        .get_topics_of_namespace(
+            format!("{}/{}", topic.tenant, topic.namespace),
+            LookupMode::All,
+        )
+        .await?;
+    if !topics_on_broker.contains(&topic.to_string()) {
+        bail!(
+            "topic {} not found on broker, available topics: {:?}",
+            topic,
+            topics_on_broker
+        );
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

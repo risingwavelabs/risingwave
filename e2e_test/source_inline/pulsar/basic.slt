@@ -17,6 +17,38 @@ python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://publ
 system ok
 python3 e2e_test/commands/pulsar_util.py create-topic --topic 'non-persistent://public/default/non-persistent' --partitions 0 --non-persistent
 
+statement error
+create table t_non_exist (
+  f1 int,
+  f2 varchar)
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/topic-non-exist',
+) format plain encode json;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateTable`) failed: Internal error
+  2: failed to create source worker
+  3: topic persistent://public/default/topic-non-exist not found on broker, available topics: ["persistent://public/default/topic-partition-0", "persistent://public/default/topic-partition-1", "persistent://public/default/topic-partition-2", "persistent://public/default/unpartitioned"]
+
+
+# expected: skip existance check for non-persistent topic
+statement ok
+create table t_non_exist (
+  f1 int,
+  f2 varchar)
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'non-persistent://public/default/topic-non-exist',
+) format plain encode json;
+
+statement ok
+drop table t_non_exist
+
 system ok
 python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default/topic" <<EOF
 {"f1":12,"f2":"foo"}

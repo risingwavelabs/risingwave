@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::system_param::{OverrideValidate, Validate};
+use risingwave_common::util::epoch::Epoch;
 
 use super::*;
 use crate::barrier::SnapshotBackfillInfo;
@@ -256,6 +257,10 @@ impl CatalogController {
         )
         .await?;
         pb_function.id = function_obj.oid as _;
+        pb_function.created_at_epoch = Some(
+            Epoch::from_unix_millis(function_obj.created_at.and_utc().timestamp_millis() as _).0,
+        );
+        pb_function.created_at_cluster_version = function_obj.created_at_cluster_version;
         let function: function::ActiveModel = pb_function.clone().into();
         Function::insert(function).exec(&txn).await?;
 
@@ -415,7 +420,11 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn create_view(&self, mut pb_view: PbView) -> MetaResult<NotificationVersion> {
+    pub async fn create_view(
+        &self,
+        mut pb_view: PbView,
+        dependencies: HashSet<ObjectId>,
+    ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let owner_id = pb_view.owner as _;
         let txn = inner.db.begin().await?;
@@ -442,11 +451,9 @@ impl CatalogController {
         let view: view::ActiveModel = pb_view.clone().into();
         View::insert(view).exec(&txn).await?;
 
-        // todo: change `dependent_relations` to `dependent_objects`, which should includes connection and function as well.
-        // todo: shall we need to check existence of them Or let database handle it by FOREIGN KEY constraint.
-        for obj_id in &pb_view.dependent_relations {
+        for obj_id in dependencies {
             ObjectDependency::insert(object_dependency::ActiveModel {
-                oid: Set(*obj_id as _),
+                oid: Set(obj_id),
                 used_by: Set(view_obj.oid),
                 ..Default::default()
             })

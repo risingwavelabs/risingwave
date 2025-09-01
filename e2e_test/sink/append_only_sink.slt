@@ -44,10 +44,9 @@ WITH
 ----
 db error: ERROR: Failed to run the query
 
-Caused by these errors (recent errors listed first):
-  1: Sink error
-  2: config error
-  3: File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.
+Caused by:
+  Not supported: File sink can only be created with sink_decouple enabled.
+HINT: Please run `set sink_decouple = true` first.
 
 
 statement ok

@@ -26,14 +26,14 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
-use risingwave_common::row::{CompactedRow, RowDeserializer};
+use risingwave_common::row::{CompactedRow, OwnedRow};
+use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::catalog::table::Engine;
-use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 
 use crate::cache::ManagedLruCache;
@@ -71,6 +71,9 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// No data will be written to hummock table. This Materialize is just a dummy node.
     /// Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
     is_dummy_table: bool,
+
+    /// Indices of TOAST-able columns for PostgreSQL CDC tables. None means either non-CDC table or CDC table without TOAST-able columns.
+    toastable_column_indices: Option<Vec<usize>>,
 }
 
 fn get_op_consistency_level(
@@ -112,6 +115,39 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             .iter()
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
+
+        // Extract TOAST-able column indices from table columns.
+        // Only for PostgreSQL CDC tables.
+        let toastable_column_indices = if table_catalog.cdc_table_type()
+            == risingwave_pb::catalog::table::CdcTableType::Postgres
+        {
+            let toastable_indices: Vec<usize> = table_columns
+                .iter()
+                .enumerate()
+                .filter_map(|(index, column)| match &column.data_type {
+                    // Currently supports TOAST updates for:
+                    // - jsonb (DataType::Jsonb)
+                    // - varchar (DataType::Varchar)
+                    // - bytea (DataType::Bytea)
+                    // - One-dimensional arrays of the above types (DataType::List)
+                    //   Note: Some array types may not be fully supported yet, see issue  https://github.com/risingwavelabs/risingwave/issues/22916 for details.
+
+                    // For details on how TOAST values are handled, see comments in `is_debezium_unavailable_value`.
+                    DataType::Varchar | DataType::List(_) | DataType::Bytea | DataType::Jsonb => {
+                        Some(index)
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            if toastable_indices.is_empty() {
+                None
+            } else {
+                Some(toastable_indices)
+            }
+        } else {
+            None
+        };
 
         let row_serde: BasicSerde = BasicSerde::new(
             Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
@@ -169,13 +205,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             may_have_downstream,
             depended_subscription_ids,
             metrics: mv_metrics,
+            toastable_column_indices,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mv_table_id = TableId::new(self.state_table.table_id());
-
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
@@ -209,6 +245,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     let do_not_handle_conflict = !self.state_table.is_consistent_op()
                         && self.version_column_index.is_none()
                         && self.conflict_behavior == ConflictBehavior::Overwrite;
+
                     match self.conflict_behavior {
                         checked_conflict_behaviors!() if !do_not_handle_conflict => {
                             if chunk.cardinality() == 0 {
@@ -256,6 +293,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     &self.state_table,
                                     self.conflict_behavior,
                                     &self.metrics,
+                                    self.toastable_column_indices.as_deref(),
                                 )
                                 .await?;
 
@@ -418,11 +456,83 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             conflict_behavior,
             version_column_index: None,
             is_dummy_table: false,
+            toastable_column_indices: None,
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
             metrics,
         }
     }
+}
+
+/// Fast string comparison to check if a string equals `DEBEZIUM_UNAVAILABLE_VALUE`.
+/// Optimized by checking length first to avoid expensive string comparison.
+fn is_unavailable_value_str(s: &str) -> bool {
+    s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE
+}
+
+/// Check if a datum represents Debezium's unavailable value placeholder.
+/// This function handles both scalar types and one-dimensional arrays.
+fn is_debezium_unavailable_value(
+    datum: &Option<risingwave_common::types::ScalarRefImpl<'_>>,
+) -> bool {
+    match datum {
+        Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => is_unavailable_value_str(val),
+        Some(risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref)) => {
+            // For jsonb type, check if it's a string containing the unavailable value
+            jsonb_ref
+                .as_str()
+                .map(is_unavailable_value_str)
+                .unwrap_or(false)
+        }
+        Some(risingwave_common::types::ScalarRefImpl::Bytea(bytea)) => {
+            // For bytea type, we need to check if it contains the string bytes of DEBEZIUM_UNAVAILABLE_VALUE
+            // This is because when processing bytea from Debezium, we convert the base64-encoded string
+            // to `DEBEZIUM_UNAVAILABLE_VALUE` in the json.rs parser to maintain consistency
+            if let Ok(bytea_str) = std::str::from_utf8(bytea) {
+                is_unavailable_value_str(bytea_str)
+            } else {
+                false
+            }
+        }
+        Some(risingwave_common::types::ScalarRefImpl::List(list_ref)) => {
+            // For list type, check if it contains exactly one element with the unavailable value
+            // This is because when any element in an array triggers TOAST, Debezium treats the entire
+            // array as unchanged and sends a placeholder array with only one element
+            if list_ref.len() == 1 {
+                if let Some(Some(element)) = list_ref.get(0) {
+                    // Recursively check the array element
+                    is_debezium_unavailable_value(&Some(element))
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Fix TOAST columns by replacing unavailable values with old row values.
+fn handle_toast_columns_for_postgres_cdc(
+    old_row: &OwnedRow,
+    new_row: &OwnedRow,
+    toastable_indices: &[usize],
+) -> OwnedRow {
+    let mut fixed_row_data = new_row.as_inner().to_vec();
+
+    for &toast_idx in toastable_indices {
+        // Check if the new value is Debezium's unavailable value placeholder
+        let is_unavailable = is_debezium_unavailable_value(&new_row.datum_at(toast_idx));
+        if is_unavailable {
+            // Replace with old row value if available
+            if let Some(old_datum_ref) = old_row.datum_at(toast_idx) {
+                fixed_row_data[toast_idx] = Some(old_datum_ref.into_scalar_impl());
+            }
+        }
+    }
+
+    OwnedRow::new(fixed_row_data)
 }
 
 /// Construct output `StreamChunk` from given buffer.
@@ -433,19 +543,18 @@ fn generate_output(
     // construct output chunk
     // TODO(st1page): when materialize partial columns(), we should construct some columns in the pk
     let mut new_ops: Vec<Op> = vec![];
-    let mut new_rows: Vec<Bytes> = vec![];
-    let row_deserializer = RowDeserializer::new(data_types.clone());
+    let mut new_rows: Vec<OwnedRow> = vec![];
     for (_, row_op) in change_buffer.into_parts() {
         match row_op {
-            KeyOp::Insert(value) => {
+            ChangeBufferKeyOp::Insert(value) => {
                 new_ops.push(Op::Insert);
                 new_rows.push(value);
             }
-            KeyOp::Delete(old_value) => {
+            ChangeBufferKeyOp::Delete(old_value) => {
                 new_ops.push(Op::Delete);
                 new_rows.push(old_value);
             }
-            KeyOp::Update((old_value, new_value)) => {
+            ChangeBufferKeyOp::Update((old_value, new_value)) => {
                 // if old_value == new_value, we don't need to emit updates to downstream.
                 if old_value != new_value {
                     new_ops.push(Op::UpdateDelete);
@@ -458,9 +567,8 @@ fn generate_output(
     }
     let mut data_chunk_builder = DataChunkBuilder::new(data_types, new_rows.len() + 1);
 
-    for row_bytes in new_rows {
-        let res =
-            data_chunk_builder.append_one_row(row_deserializer.deserialize(row_bytes.as_ref())?);
+    for row in new_rows {
+        let res = data_chunk_builder.append_one_row(row);
         debug_assert!(res.is_none());
     }
 
@@ -475,7 +583,15 @@ fn generate_output(
 /// `ChangeBuffer` is a buffer to handle chunk into `KeyOp`.
 /// TODO(rc): merge with `TopNStaging`.
 struct ChangeBuffer {
-    buffer: HashMap<Vec<u8>, KeyOp>,
+    buffer: HashMap<Vec<u8>, ChangeBufferKeyOp>,
+}
+
+/// `KeyOp` variant for `ChangeBuffer` that stores `OwnedRow` instead of Bytes
+enum ChangeBufferKeyOp {
+    Insert(OwnedRow),
+    Delete(OwnedRow),
+    /// (`old_value`, `new_value`)
+    Update((OwnedRow, OwnedRow)),
 }
 
 impl ChangeBuffer {
@@ -485,16 +601,16 @@ impl ChangeBuffer {
         }
     }
 
-    fn insert(&mut self, pk: Vec<u8>, value: Bytes) {
+    fn insert(&mut self, pk: Vec<u8>, value: OwnedRow) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(KeyOp::Insert(value));
+                e.insert(ChangeBufferKeyOp::Insert(value));
             }
             Entry::Occupied(mut e) => {
-                if let KeyOp::Delete(old_value) = e.get_mut() {
+                if let ChangeBufferKeyOp::Delete(old_value) = e.get_mut() {
                     let old_val = std::mem::take(old_value);
-                    e.insert(KeyOp::Update((old_val, value)));
+                    e.insert(ChangeBufferKeyOp::Update((old_val, value)));
                 } else {
                     unreachable!();
                 }
@@ -502,48 +618,48 @@ impl ChangeBuffer {
         }
     }
 
-    fn delete(&mut self, pk: Vec<u8>, old_value: Bytes) {
-        let entry: Entry<'_, Vec<u8>, KeyOp> = self.buffer.entry(pk);
+    fn delete(&mut self, pk: Vec<u8>, old_value: OwnedRow) {
+        let entry: Entry<'_, Vec<u8>, ChangeBufferKeyOp> = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(KeyOp::Delete(old_value));
+                e.insert(ChangeBufferKeyOp::Delete(old_value));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                KeyOp::Insert(_) => {
+                ChangeBufferKeyOp::Insert(_) => {
                     e.remove();
                 }
-                KeyOp::Update((prev, _curr)) => {
+                ChangeBufferKeyOp::Update((prev, _curr)) => {
                     let prev = std::mem::take(prev);
-                    e.insert(KeyOp::Delete(prev));
+                    e.insert(ChangeBufferKeyOp::Delete(prev));
                 }
-                KeyOp::Delete(_) => {
+                ChangeBufferKeyOp::Delete(_) => {
                     unreachable!();
                 }
             },
         }
     }
 
-    fn update(&mut self, pk: Vec<u8>, old_value: Bytes, new_value: Bytes) {
+    fn update(&mut self, pk: Vec<u8>, old_value: OwnedRow, new_value: OwnedRow) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(KeyOp::Update((old_value, new_value)));
+                e.insert(ChangeBufferKeyOp::Update((old_value, new_value)));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                KeyOp::Insert(_) => {
-                    e.insert(KeyOp::Insert(new_value));
+                ChangeBufferKeyOp::Insert(_) => {
+                    e.insert(ChangeBufferKeyOp::Insert(new_value));
                 }
-                KeyOp::Update((_prev, curr)) => {
+                ChangeBufferKeyOp::Update((_prev, curr)) => {
                     *curr = new_value;
                 }
-                KeyOp::Delete(_) => {
+                ChangeBufferKeyOp::Delete(_) => {
                     unreachable!()
                 }
             },
         }
     }
 
-    fn into_parts(self) -> HashMap<Vec<u8>, KeyOp> {
+    fn into_parts(self) -> HashMap<Vec<u8>, ChangeBufferKeyOp> {
         self.buffer
     }
 }
@@ -594,6 +710,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         table: &StateTableInner<S, SD>,
         conflict_behavior: ConflictBehavior,
         metrics: &MaterializeMetrics,
+        toastable_column_indices: Option<&[usize]>,
     ) -> StreamExecutorResult<ChangeBuffer> {
         assert_matches!(conflict_behavior, checked_conflict_behaviors!());
 
@@ -620,7 +737,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 Op::Insert | Op::UpdateInsert => {
                     let Some(old_row) = self.get_expected(&key) else {
                         // not exists before, meaning no conflict, simply insert
-                        change_buffer.insert(key.clone(), row.clone());
+                        let new_row_deserialized =
+                            row_serde.deserializer.deserialize(row.clone())?;
+                        change_buffer.insert(key.clone(), new_row_deserialized);
                         self.lru_cache.put(key, Some(CompactedRow { row }));
                         continue;
                     };
@@ -628,12 +747,12 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     // now conflict happens, handle it according to the specified behavior
                     match conflict_behavior {
                         ConflictBehavior::Overwrite => {
-                            let need_overwrite = if let Some(idx) = version_column_index {
-                                let old_row_deserialized =
-                                    row_serde.deserializer.deserialize(old_row.row.clone())?;
-                                let new_row_deserialized =
-                                    row_serde.deserializer.deserialize(row.clone())?;
+                            let old_row_deserialized =
+                                row_serde.deserializer.deserialize(old_row.row.clone())?;
+                            let new_row_deserialized =
+                                row_serde.deserializer.deserialize(row.clone())?;
 
+                            let need_overwrite = if let Some(idx) = version_column_index {
                                 version_is_newer_or_equal(
                                     old_row_deserialized.index(idx as usize),
                                     new_row_deserialized.index(idx as usize),
@@ -642,9 +761,39 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 // no version column specified, just overwrite
                                 true
                             };
+
                             if need_overwrite {
-                                change_buffer.update(key.clone(), old_row.row.clone(), row.clone());
-                                self.lru_cache.put(key.clone(), Some(CompactedRow { row }));
+                                if let Some(toastable_indices) = toastable_column_indices {
+                                    // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
+                                    let final_row = handle_toast_columns_for_postgres_cdc(
+                                        &old_row_deserialized,
+                                        &new_row_deserialized,
+                                        toastable_indices,
+                                    );
+
+                                    change_buffer.update(
+                                        key.clone(),
+                                        old_row_deserialized,
+                                        final_row.clone(),
+                                    );
+                                    let final_row_bytes =
+                                        Bytes::from(row_serde.serializer.serialize(final_row));
+                                    self.lru_cache.put(
+                                        key.clone(),
+                                        Some(CompactedRow {
+                                            row: final_row_bytes,
+                                        }),
+                                    );
+                                } else {
+                                    // No TOAST columns, use the original row bytes directly to avoid unnecessary serialization
+                                    change_buffer.update(
+                                        key.clone(),
+                                        old_row_deserialized,
+                                        new_row_deserialized,
+                                    );
+                                    self.lru_cache
+                                        .put(key.clone(), Some(CompactedRow { row: row.clone() }));
+                                }
                             };
                         }
                         ConflictBehavior::IgnoreConflict => {
@@ -652,7 +801,6 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         }
                         ConflictBehavior::DoUpdateIfNotNull => {
                             // In this section, we compare the new row and old row column by column and perform `DoUpdateIfNotNull` replacement.
-                            // TODO(wcy-fdu): find a way to output the resulting new row directly to the downstream chunk, thus avoiding an additional deserialization step.
 
                             let old_row_deserialized =
                                 row_serde.deserializer.deserialize(old_row.row.clone())?;
@@ -669,20 +817,33 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                             if need_overwrite {
                                 let mut row_deserialized_vec =
-                                    old_row_deserialized.into_inner().into_vec();
+                                    old_row_deserialized.clone().into_inner().into_vec();
                                 replace_if_not_null(
                                     &mut row_deserialized_vec,
-                                    new_row_deserialized,
+                                    new_row_deserialized.clone(),
                                 );
-                                let updated_row = OwnedRow::new(row_deserialized_vec);
-                                let updated_row_bytes =
-                                    Bytes::from(row_serde.serializer.serialize(updated_row));
+                                let mut updated_row = OwnedRow::new(row_deserialized_vec);
+
+                                // Apply TOAST column fix for CDC tables with TOAST columns
+                                if let Some(toastable_indices) = toastable_column_indices {
+                                    // Note: we need to use old_row_deserialized again, but it was moved above
+                                    // So we re-deserialize the old row
+                                    let old_row_deserialized_again =
+                                        row_serde.deserializer.deserialize(old_row.row.clone())?;
+                                    updated_row = handle_toast_columns_for_postgres_cdc(
+                                        &old_row_deserialized_again,
+                                        &updated_row,
+                                        toastable_indices,
+                                    );
+                                }
 
                                 change_buffer.update(
                                     key.clone(),
-                                    old_row.row.clone(),
-                                    updated_row_bytes.clone(),
+                                    old_row_deserialized,
+                                    updated_row.clone(),
                                 );
+                                let updated_row_bytes =
+                                    Bytes::from(row_serde.serializer.serialize(updated_row));
                                 self.lru_cache.put(
                                     key.clone(),
                                     Some(CompactedRow {
@@ -699,7 +860,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     match conflict_behavior {
                         checked_conflict_behaviors!() => {
                             if let Some(old_row) = self.get_expected(&key) {
-                                change_buffer.delete(key.clone(), old_row.row.clone());
+                                let old_row_deserialized =
+                                    row_serde.deserializer.deserialize(old_row.row.clone())?;
+                                change_buffer.delete(key.clone(), old_row_deserialized);
                                 // put a None into the cache to represent deletion
                                 self.lru_cache.put(key, None);
                             } else {
@@ -727,6 +890,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             metrics.materialize_cache_total_count.inc();
 
             if self.lru_cache.contains(key) {
+                if self.lru_cache.get(key).unwrap().is_some() {
+                    metrics.materialize_data_exist_count.inc();
+                }
                 metrics.materialize_cache_hit_count.inc();
                 continue;
             }
@@ -740,6 +906,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
             let (key, row) = result?;
+            if row.is_some() {
+                metrics.materialize_data_exist_count.inc();
+            }
             // for keys that are not in the table, `value` is None
             match conflict_behavior {
                 checked_conflict_behaviors!() => self.lru_cache.put(key, row),

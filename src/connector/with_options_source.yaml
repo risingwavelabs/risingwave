@@ -32,6 +32,24 @@ AzblobProperties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+BatchPosixFsProperties:
+  fields:
+  - name: batch_posix_fs.root
+    field_type: String
+    comments: The root directory of the files to search. The files will be searched recursively.
+    required: true
+  - name: match_pattern
+    field_type: String
+    comments: The glob pattern to match files under root directory.
+    required: false
+    default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 DatagenProperties:
   fields:
   - name: datagen.split.num
@@ -192,6 +210,16 @@ IcebergProperties:
     comments: This is only used by iceberg engine to enable the hosted catalog.
     required: false
     default: Default::default
+  - name: catalog.header
+    field_type: String
+    comments: |-
+      The http header to be used in the catalog requests.
+      Example:
+      `catalog.header = "key1=value1;key2=value2;key3=value3"`
+      explain the format of the header:
+      - Each header is a key-value pair, separated by an '='.
+      - Multiple headers can be specified, separated by a ';'.
+    required: false
   - name: catalog.jdbc.user
     field_type: String
     required: false
