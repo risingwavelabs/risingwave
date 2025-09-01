@@ -19,8 +19,10 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::plan_common::ExprContext;
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
@@ -68,25 +70,37 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn list_background_job_progress(&self) -> MetaResult<Vec<(String, StreamJobFragments)>> {
+    // async fn list_background_job_progress(&self) -> MetaResult<Vec<(String, StreamJobFragments)>> {
+    //     let mgr = &self.metadata_manager;
+    //     let job_info = mgr
+    //         .catalog_controller
+    //         .list_background_creating_jobs(false)
+    //         .await?;
+    //
+    //     try_join_all(
+    //         job_info
+    //             .into_iter()
+    //             .map(|(id, definition, _init_at)| async move {
+    //                 let table_id = TableId::new(id as _);
+    //                 let stream_job_fragments = mgr.get_job_fragments_by_id(&table_id).await?;
+    //                 assert_eq!(stream_job_fragments.stream_job_id(), table_id);
+    //                 Ok((definition, stream_job_fragments))
+    //             }),
+    //     )
+    //     .await
+    //     // If failed, enter recovery mode.
+    // }
+
+    async fn list_background_jobs(&self) -> MetaResult<HashSet<ObjectId>> {
         let mgr = &self.metadata_manager;
         let job_info = mgr
             .catalog_controller
             .list_background_creating_jobs(false)
             .await?;
 
-        try_join_all(
-            job_info
-                .into_iter()
-                .map(|(id, definition, _init_at)| async move {
-                    let table_id = TableId::new(id as _);
-                    let stream_job_fragments = mgr.get_job_fragments_by_id(&table_id).await?;
-                    assert_eq!(stream_job_fragments.stream_job_id(), table_id);
-                    Ok((definition, stream_job_fragments))
-                }),
-        )
-        .await
-        // If failed, enter recovery mode.
+        let job_ids = job_info.into_iter().map(|(id, _, _)| id).collect();
+
+        Ok(job_ids)
     }
 
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
@@ -253,40 +267,6 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
-                    // Background job progress needs to be recovered.
-                    tracing::info!("recovering background job progress");
-                    let background_jobs = {
-                        let jobs = self
-                            .list_background_job_progress()
-                            .await
-                            .context("recover background job progress should not fail")?;
-                        let mut background_jobs = HashMap::new();
-                        for (definition, stream_job_fragments) in jobs {
-                            if stream_job_fragments
-                                .tracking_progress_actor_ids()
-                                .is_empty()
-                            {
-                                // If there's no tracking actor in the job, we can finish the job directly.
-                                self.metadata_manager
-                                    .catalog_controller
-                                    .finish_streaming_job(
-                                        stream_job_fragments.stream_job_id().table_id as _,
-                                    )
-                                    .await?;
-                            } else {
-                                background_jobs
-                                    .try_insert(
-                                        stream_job_fragments.stream_job_id(),
-                                        (definition, stream_job_fragments),
-                                    )
-                                    .expect("non-duplicate");
-                            }
-                        }
-                        background_jobs
-                    };
-
-                    tracing::info!("recovered background job progress");
-
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
 
@@ -294,8 +274,9 @@ impl GlobalBarrierWorkerContextImpl {
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
                             .await?;
 
-                    let background_streaming_jobs = background_jobs.keys().cloned().collect_vec();
-                    info!(
+                    let background_streaming_jobs = self.list_background_jobs().await?;
+
+                    println!(
                         "background streaming jobs: {:?} total {}",
                         background_streaming_jobs,
                         background_streaming_jobs.len()
@@ -304,17 +285,17 @@ impl GlobalBarrierWorkerContextImpl {
                     let unreschedulable_jobs = {
                         let mut unreschedulable_jobs = HashSet::new();
 
-                        for job_id in background_streaming_jobs {
+                        for job_id in &background_streaming_jobs {
                             let scan_types = self
                                 .metadata_manager
-                                .get_job_backfill_scan_types(&job_id)
+                                .get_job_backfill_scan_types(*job_id)
                                 .await?;
 
                             if scan_types
                                 .values()
                                 .any(|scan_type| !scan_type.is_reschedulable())
                             {
-                                unreschedulable_jobs.insert(job_id);
+                                unreschedulable_jobs.insert(*job_id);
                             }
                         }
 
@@ -332,31 +313,15 @@ impl GlobalBarrierWorkerContextImpl {
                     // following steps will be no-op, while the compute nodes will still be reset.
                     // FIXME: Transactions should be used.
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
-                    let mut info = if !self.env.opts.disable_automatic_parallelism_control
-                        && unreschedulable_jobs.is_empty()
-                    {
+                    let mut info = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
-                        // self.scale_actors(&active_streaming_nodes)
-                        //     .await
-                        //     .inspect_err(|err| {
-                        //         warn!(error = %err.as_report(), "scale actors failed");
-                        //     })?;
-
                         self.resolve_graph_info(None, &active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
                             })?
                     } else {
-                        info!("trigger actor migration");
-
-                        unimplemented!()
-                        // Migrate actors in expired CN to newly joined one.
-                        // self.migrate_actors(&mut active_streaming_nodes)
-                        //     .await
-                        //     .inspect_err(|err| {
-                        //         warn!(error = %err.as_report(), "migrate actors failed");
-                        //     })?
+                        bail!("unimpl");
                     };
 
                     if self.scheduled_barriers.pre_apply_drop_cancel(None) {
@@ -379,6 +344,44 @@ impl GlobalBarrierWorkerContextImpl {
                     )
                     .await
                     .context("purge state table from hummock")?;
+
+                    println!("generated info {:?}", info);
+
+                    let background_jobs = {
+                        let mut background_jobs = HashMap::new();
+
+                        let job_infos: HashMap<_, _> = info
+                            .values()
+                            .flatten()
+                            .filter(|(job_id, _)| {
+                                background_streaming_jobs.contains(&(job_id.table_id as _))
+                            })
+                            .map(|(table_id, job_info)| {
+                                (
+                                    table_id.table_id() as ObjectId,
+                                    job_info
+                                        .fragment_infos
+                                        .iter()
+                                        .map(|(fragment_id, fragment_info)| {
+                                            (*fragment_id as _, fragment_info.clone())
+                                        })
+                                        .collect(),
+                                )
+                            })
+                            .collect();
+                        let jobs = self
+                            .metadata_manager
+                            .catalog_controller
+                            .restore_background_streaming_job(job_infos)
+                            .await?;
+
+                        for (job_id, info) in jobs {
+                            background_jobs
+                                .try_insert(job_id, info)
+                                .expect("non-duplicate");
+                        }
+                        background_jobs
+                    };
 
                     let (state_table_committed_epochs, state_table_log_epochs) = self
                         .hummock_manager
@@ -420,23 +423,6 @@ impl GlobalBarrierWorkerContextImpl {
                                 .collect(),
                         )
                         .await?;
-
-                    let background_jobs = {
-                        let jobs = self
-                            .list_background_job_progress()
-                            .await
-                            .context("recover background job progress should not fail")?;
-                        let mut background_jobs = HashMap::new();
-                        for (definition, stream_job_fragments) in jobs {
-                            background_jobs
-                                .try_insert(
-                                    stream_job_fragments.stream_job_id(),
-                                    (definition, stream_job_fragments),
-                                )
-                                .expect("non-duplicate");
-                        }
-                        background_jobs
-                    };
 
                     let database_infos = self
                         .metadata_manager
@@ -488,10 +474,6 @@ impl GlobalBarrierWorkerContextImpl {
             ?database_id,
             "recovering background job progress of database"
         );
-        let background_jobs = self
-            .list_background_job_progress()
-            .await
-            .context("recover background job progress of database should not fail")?;
         tracing::info!(?database_id, "recovered background job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
@@ -502,13 +484,6 @@ impl GlobalBarrierWorkerContextImpl {
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        // let info = self
-        //     .resolve_graph_info(Some(database_id), &active_streaming_nodes)
-        //     .await
-        //     .inspect_err(|err| {
-        //         warn!(error = %err.as_report(), "resolve actor info failed");
-        //     })?;
-        // assert!(info.len() <= 1);
         let all_info = self
             .resolve_graph_info(None, &active_streaming_nodes)
             .await
@@ -523,6 +498,34 @@ impl GlobalBarrierWorkerContextImpl {
             info
         }) else {
             return Ok(None);
+        };
+
+        let background_streaming_jobs = self.list_background_jobs().await?;
+
+        let background_jobs = {
+            let job_infos: HashMap<_, _> = info
+                .iter()
+                .filter(|(job_id, _)| background_streaming_jobs.contains(&(job_id.table_id as _)))
+                .map(|(table_id, job_info)| {
+                    (
+                        table_id.table_id() as ObjectId,
+                        job_info
+                            .fragment_infos
+                            .iter()
+                            .map(|(fragment_id, fragment_info)| {
+                                (*fragment_id as _, fragment_info.clone())
+                            })
+                            .collect(),
+                    )
+                })
+                .collect();
+            let jobs = self
+                .metadata_manager
+                .catalog_controller
+                .restore_background_streaming_job(job_infos)
+                .await?;
+
+            jobs.into_values().collect_vec()
         };
 
         let background_jobs = {

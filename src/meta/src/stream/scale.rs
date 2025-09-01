@@ -420,7 +420,7 @@ impl ScaleController {
         let txn = inner.db.begin().await?;
 
         for (table_id, target) in &policy {
-            let mut streaming_job = StreamingJob::find_by_id(*table_id)
+            let streaming_job = StreamingJob::find_by_id(*table_id)
                 .one(&txn)
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;

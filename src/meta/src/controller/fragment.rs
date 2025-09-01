@@ -624,6 +624,10 @@ impl CatalogController {
         // Build (FragmentModel, Vec<ActorModel>) from the in-memory cache
         let fragment_actors_from_cache: Vec<(_, Vec<ActorModel>)> = {
             let info = self.env.shared_actor_infos().read_guard();
+
+            let x = info.iter_over_fragments().collect_vec();
+
+            println!("all fragments {:?}", x);
             fragments
                 .into_iter()
                 .map(|fm| {
