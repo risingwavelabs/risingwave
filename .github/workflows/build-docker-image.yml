@@ -13,10 +13,6 @@ on:
         required: false
         type: boolean
         default: false
-      branch:
-        description: 'Branch to build the image from (defaults to current branch if not provided)'
-        required: false
-        type: string
       push_dockerhub:
         description: 'Whether to push to DockerHub'
         required: false
@@ -28,8 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.branch }}
       - name: 'Generate image tag'
         id: get_release_branch
         run: |
