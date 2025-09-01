@@ -241,7 +241,7 @@ impl ObjectStore for OpendalObjectStore {
             .op
             .lister_with(prefix)
             .recursive(true)
-            .metakey(Metakey::ContentLength);
+            .metakey(Metakey::ContentLength | Metakey::LastModified);
         if let Some(start_after) = start_after {
             object_lister = object_lister.start_after(&start_after);
         }

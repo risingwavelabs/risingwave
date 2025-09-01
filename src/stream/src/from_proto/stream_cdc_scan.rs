@@ -19,7 +19,7 @@ use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
-    CdcTableType, ExternalTableConfig, SchemaTableName,
+    ExternalCdcTableType, ExternalTableConfig, SchemaTableName,
 };
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
@@ -73,7 +73,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 disable_backfill: node.disable_backfill,
                 ..Default::default()
             });
-        let table_type = CdcTableType::from_properties(&properties);
+        let table_type = ExternalCdcTableType::from_properties(&properties);
         // Filter out additional columns to construct the external table schema
         let table_schema: Schema = table_desc
             .columns

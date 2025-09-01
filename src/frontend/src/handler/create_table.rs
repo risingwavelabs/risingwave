@@ -29,7 +29,7 @@ use risingwave_common::catalog::{
     ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
-use risingwave_common::global_jvm::JVM;
+use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -37,8 +37,8 @@ use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
-    CdcTableType, DATABASE_NAME_KEY, ExternalTableConfig, ExternalTableImpl, SCHEMA_NAME_KEY,
-    TABLE_NAME_KEY,
+    DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
+    SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
@@ -867,7 +867,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .map(|c| c.column_desc.clone())
         .collect_vec();
     let non_generated_column_num = non_generated_column_descs.len();
-    let cdc_table_type = CdcTableType::from_properties(&options);
+    let cdc_table_type = ExternalCdcTableType::from_properties(&options);
     let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id.into(), // id of cdc source streaming job
@@ -880,7 +880,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
-    let options = build_cdc_scan_options_with_options(context.with_options(), cdc_table_type)?;
+    let options = build_cdc_scan_options_with_options(context.with_options(), &cdc_table_type)?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name.clone(),
@@ -926,7 +926,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
-
+    table.cdc_table_type = Some(cdc_table_type);
     Ok((materialize.into(), table))
 }
 
@@ -1179,7 +1179,6 @@ pub(super) async fn handle_create_table_plan(
                     let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    // NOTE: if the external table has a default column, we will only treat it as a normal column.
                     (columns, pk_names)
                 }
             };
@@ -1345,6 +1344,7 @@ async fn bind_cdc_table_schema_externally(
     let table = ExternalTableImpl::connect(config)
         .await
         .context("failed to auto derive table schema")?;
+
     Ok((
         table
             .column_descs()
@@ -2021,7 +2021,7 @@ pub async fn create_iceberg_engine_table(
 
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
-    let _ = JVM.get_or_init()?;
+    let _ = Jvm::get_or_init()?;
 
     let catalog_writer = session.catalog_writer()?;
     // TODO(iceberg): make iceberg engine table creation ddl atomic

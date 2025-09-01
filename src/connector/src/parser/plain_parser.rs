@@ -73,6 +73,7 @@ impl PlainParser {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                false,
             )?,
         ));
 

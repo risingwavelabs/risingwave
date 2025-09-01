@@ -22,7 +22,7 @@ pub async fn handle_drop_function(
     handler_args: HandlerArgs,
     if_exists: bool,
     mut func_desc: Vec<FunctionDesc>,
-    _option: Option<ReferentialAction>,
+    option: Option<ReferentialAction>,
     aggregate: bool,
 ) -> Result<RwPgResponse> {
     if func_desc.len() != 1 {
@@ -103,7 +103,8 @@ pub async fn handle_drop_function(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_function(function_id).await?;
+    let cascade = matches!(option, Some(ReferentialAction::Cascade));
+    catalog_writer.drop_function(function_id, cascade).await?;
 
     Ok(PgResponse::empty_result(stmt_type))
 }

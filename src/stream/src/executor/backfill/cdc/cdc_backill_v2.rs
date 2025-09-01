@@ -25,7 +25,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_connector::parser::{TimeHandling, TimestampHandling, TimestamptzHandling};
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
+use risingwave_connector::source::cdc::external::{
+    CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
+};
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
@@ -152,12 +154,16 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             .map(|v| v == "connect")
             .unwrap_or(false)
             .then_some(TimeHandling::Milli);
+        // Only postgres-cdc connector may trigger TOAST.
+        let handle_toast_columns: bool =
+            self.external_table.table_type() == &ExternalCdcTableType::Postgres;
         let mut upstream = transform_upstream(
             upstream,
             self.output_columns.clone(),
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            handle_toast_columns,
         )
         .boxed();
         let mut next_reset_barrier = Some(first_barrier);
