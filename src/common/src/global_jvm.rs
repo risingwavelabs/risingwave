@@ -12,35 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
 use std::sync::OnceLock;
 
 use anyhow::Context as _;
 use jni::JavaVM;
 
-pub static JVM: JavaVmWrapper = JavaVmWrapper;
-static INSTANCE: OnceLock<JavaVM> = OnceLock::new();
+/// Type alias for a function that builds a JVM.
 pub type JvmBuilder = fn() -> anyhow::Result<JavaVM>;
-
-pub struct JavaVmWrapper;
 
 /// Registered JVM builder from other crates. Should only be one.
 #[linkme::distributed_slice]
 pub static JVM_BUILDER: [JvmBuilder];
 
-impl JavaVmWrapper {
+/// Wrapper for the global JVM instance.
+///
+/// To obtain the instance, use [`Jvm::get_or_init()`] or [`Jvm::get()`].
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct Jvm(pub &'static JavaVM);
+
+static INSTANCE: OnceLock<JavaVM> = OnceLock::new();
+
+impl Jvm {
     /// Get the global singleton JVM instance, initializing it with the registered builder if not already initialized.
-    pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
-        INSTANCE.get_or_try_init(|| {
-            let builder = JVM_BUILDER
-                .iter()
-                .next()
-                .context("no JVM builder is registered")?;
-            builder()
-        })
+    pub fn get_or_init() -> anyhow::Result<Self> {
+        INSTANCE
+            .get_or_try_init(|| {
+                let builder = JVM_BUILDER
+                    .iter()
+                    .next()
+                    .context("no JVM builder is registered")?;
+                builder()
+            })
+            .map(Self)
     }
 
-    /// Get the global singleton JVM instance, returning None if not initialized.
-    pub fn get(&self) -> Option<&'static JavaVM> {
-        INSTANCE.get()
+    /// Get the global singleton JVM instance, returning `None` if not initialized.
+    ///
+    /// Use [`Jvm::get_or_init()`] if you want to initialize the JVM.
+    pub fn get() -> Option<Self> {
+        INSTANCE.get().map(Self)
+    }
+}
+
+impl Deref for Jvm {
+    type Target = JavaVM;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
     }
 }

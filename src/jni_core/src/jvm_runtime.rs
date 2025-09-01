@@ -20,7 +20,7 @@ use fs_err as fs;
 use fs_err::PathExt;
 use jni::objects::{JObject, JString};
 use jni::{AttachGuard, InitArgsBuilder, JNIEnv, JNIVersion, JavaVM};
-use risingwave_common::global_jvm::{JVM, JVM_BUILDER, JvmBuilder};
+use risingwave_common::global_jvm::{JVM_BUILDER, Jvm, JvmBuilder};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use thiserror_ext::AsReport;
 use tracing::error;
@@ -163,7 +163,7 @@ pub fn register_java_binding_native_methods(
 /// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize,
 /// return zero.
 pub fn load_jvm_memory_stats() -> (usize, usize) {
-    match JVM.get() {
+    match Jvm::get() {
         Some(jvm) => {
             let result: Result<(usize, usize), anyhow::Error> = try {
                 execute_with_jni_env(jvm, |env| {
@@ -194,7 +194,7 @@ pub fn load_jvm_memory_stats() -> (usize, usize) {
 }
 
 pub fn execute_with_jni_env<T>(
-    jvm: &JavaVM,
+    jvm: Jvm,
     f: impl FnOnce(&mut JNIEnv<'_>) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     let mut env = jvm
@@ -270,7 +270,7 @@ pub fn jobj_to_str(env: &mut JNIEnv<'_>, obj: JObject<'_>) -> anyhow::Result<Str
 /// - `Ok(Some(String))` if JVM is initialized and stack traces are dumped.
 /// - `Err` if failed to dump stack traces.
 pub fn dump_jvm_stack_traces() -> anyhow::Result<Option<String>> {
-    match JVM.get() {
+    match Jvm::get() {
         None => Ok(None),
         Some(jvm) => execute_with_jni_env(jvm, |env| {
             let result = call_static_method!(
