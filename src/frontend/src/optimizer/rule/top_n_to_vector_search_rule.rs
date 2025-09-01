@@ -137,12 +137,12 @@ impl TopNToVectorSearchRule {
 }
 
 /// This rule converts the following TopN pattern to `LogicalVectorSearch`
-/// ```ignore
+/// ```text
 ///     LogicalTopN { order: [$expr1 ASC], limit: TOP_N, offset: 0 }
 ///       └─LogicalProject { exprs: [VectorDistanceFunc(vector_expr1, vector_expr2) as $expr1, other_exprs...] }
 /// ```
 /// to
-/// ```ignore
+/// ```text
 ///     LogicalProject { exprs: [other_exprs... + distance_column] }
 ///       └─LogicalVectorSearch { distance_type: `PbDistanceType`, top_n: TOP_N, left: vector_expr1, right: vector_expr2, output_columns: [...] }
 /// ```
