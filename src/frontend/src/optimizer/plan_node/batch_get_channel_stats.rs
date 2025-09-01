@@ -99,10 +99,12 @@ impl ToDistributedBatch for BatchGetChannelStats {
 
 impl ToBatchPb for BatchGetChannelStats {
     fn to_batch_prost_body(&self) -> NodeBody {
-        // TODO: In a real implementation, this would create a proper protobuf message
-        // For now, we'll use a placeholder that indicates this is a channel stats node
-        // This would need to be properly implemented based on the actual protobuf schema
-        unimplemented!("Protobuf serialization not yet implemented for BatchGetChannelStats")
+        use risingwave_pb::batch_plan::GetChannelStatsNode;
+
+        NodeBody::GetChannelStats(GetChannelStatsNode {
+            at_time: self.at_time,
+            time_offset: self.time_offset,
+        })
     }
 }
 
