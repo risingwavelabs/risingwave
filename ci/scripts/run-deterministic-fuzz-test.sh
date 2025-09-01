@@ -40,7 +40,7 @@ chmod +x ./risingwave_simulation
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
 set +e
-seq 32 | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> '"$LOGDIR"'/fuzzing-{}.log || true'
+seq 32 | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 set -e
 
 failed_logs=$(ls $LOGDIR/fuzzing-*.log 2>/dev/null || true)
