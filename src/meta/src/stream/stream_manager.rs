@@ -22,7 +22,7 @@ use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, Field, TableId};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -172,6 +172,11 @@ impl CreatingStreamingJobInfo {
         }
         (receivers, recovered_job_ids)
     }
+
+    async fn check_job_exists(&self, job_id: TableId) -> bool {
+        let jobs = self.streaming_jobs.lock().await;
+        jobs.contains_key(&job_id)
+    }
 }
 
 type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
@@ -181,7 +186,8 @@ pub struct AutoRefreshSchemaSinkContext {
     pub tmp_sink_id: ObjectId,
     pub original_sink: PbSink,
     pub original_fragment: Fragment,
-    pub new_columns: Vec<PbColumnCatalog>,
+    pub new_schema: Vec<PbColumnCatalog>,
+    pub newly_add_fields: Vec<Field>,
     pub new_fragment: Fragment,
     pub new_log_store_table: Option<PbTable>,
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
@@ -642,6 +648,23 @@ impl GlobalStreamManager {
         state_table_ids: Vec<risingwave_meta_model::TableId>,
         fragment_ids: HashSet<FragmentId>,
     ) {
+        // TODO(august): This is a workaround for canceling SITT via drop, remove it after refactoring SITT.
+        for &job_id in &streaming_job_ids {
+            if self
+                .creating_job_info
+                .check_job_exists(TableId::new(job_id as _))
+                .await
+            {
+                tracing::info!(
+                    ?job_id,
+                    "streaming job is creating, cancel it with drop directly"
+                );
+                self.metadata_manager
+                    .notify_cancelled(database_id, job_id)
+                    .await;
+            }
+        }
+
         if !removed_actors.is_empty()
             || !streaming_job_ids.is_empty()
             || !state_table_ids.is_empty()

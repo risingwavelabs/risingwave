@@ -113,7 +113,7 @@ pub(crate) fn derive_pk(
 
     for order in &user_order_by.column_orders {
         let idx = order.column_index;
-        pk.push(order.clone());
+        pk.push(*order);
         in_order.insert(idx);
     }
 

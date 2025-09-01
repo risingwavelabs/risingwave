@@ -86,46 +86,46 @@
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   ├─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │ └─BatchValues { rows: [] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relkind], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relkind], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_columns.relation_id, $expr1) }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr1] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │       └─BatchFilter { predicate: (rw_columns.is_hidden = false:Boolean) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         └─BatchScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         └─BatchSysScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │     └─BatchValues { rows: [] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │     └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │     └─BatchValues { rows: [] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
-              │   │ │ │   │   │   │   │   │   │   │   │   │     └─BatchScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │   │     └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-              │   │ │ │   │   │   │   │   │   │   │   │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │     └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_type.oid) }
-              │   │ │ │   │   │   │   │   │   │   │     └─BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typnamespace], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │     └─BatchSysScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typnamespace], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-              │   │ │ │   │   │   │   │   │   │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │     └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_constraint.oid) }
-              │   │ │ │   │   │   │   │   │     └─BatchScan { table: pg_constraint, columns: [pg_constraint.oid, pg_constraint.conname, pg_constraint.connamespace, pg_constraint.contype, pg_constraint.conrelid], distribution: Single }
+              │   │ │ │   │   │   │   │   │     └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.oid, pg_constraint.conname, pg_constraint.connamespace, pg_constraint.contype, pg_constraint.conrelid], distribution: Single }
               │   │ │ │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
-              │   │ │ │   │   │   │   │     └─BatchScan { table: pg_class, columns: [pg_class.oid, pg_class.relname], distribution: Single }
+              │   │ │ │   │   │   │   │     └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname], distribution: Single }
               │   │ │ │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-              │   │ │ │   │   │   │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+              │   │ │ │   │   │   │     └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ │   │   │   └─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │ │   │   │     └─BatchValues { rows: [] }
               │   │ │ │   │   └─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
-              │   │ │ │   │     └─BatchScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+              │   │ │ │   │     └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
               │   │ │ │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-              │   │ │ │     └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+              │   │ │ │     └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   │ │ └─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │   │ │   └─BatchValues { rows: [] }
               │   │ └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-              │   │   └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+              │   │   └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
               │   └─BatchExchange { order: [], dist: HashShard(null:Int32) }
               │     └─BatchValues { rows: [] }
               └─BatchExchange { order: [], dist: HashShard(rw_columns.relation_id, $expr2) }
                 └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr2] }
                   └─BatchFilter { predicate: (rw_columns.is_hidden = false:Boolean) }
-                    └─BatchScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }
+                    └─BatchSysScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }

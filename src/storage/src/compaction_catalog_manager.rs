@@ -678,6 +678,8 @@ mod tests {
             engine: Some(PbEngine::Hummock as i32),
             clean_watermark_index_in_pk: None,
             refreshable: false,
+            vector_index_info: None,
+            cdc_table_type: None,
         }
     }
 

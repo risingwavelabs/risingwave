@@ -29,7 +29,7 @@ use super::{
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
-    OrderBy, WindowFunction,
+    OrderBy, OrderByExpr, WindowFunction,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -103,7 +103,7 @@ impl LogicalAgg {
                 agg_call.partial_to_total_agg_call(partial_output_idx)
             })
             .collect_vec();
-        let local_agg = StreamStatelessSimpleAgg::new(core);
+        let local_agg = StreamStatelessSimpleAgg::new(core)?;
         let exchange =
             RequiredDist::single().streaming_enforce_if_not_satisfies(local_agg.into())?;
 
@@ -111,7 +111,7 @@ impl LogicalAgg {
         let global_agg = new_stream_simple_agg(
             Agg::new(total_agg_calls, IndexSet::empty(), exchange),
             must_output_per_barrier,
-        );
+        )?;
 
         // ====== Merge approx percentile and normal aggs
         Self::add_row_merge_if_needed(
@@ -158,7 +158,7 @@ impl LogicalAgg {
         let local_agg = new_stream_hash_agg(
             Agg::new(core.agg_calls.to_vec(), local_group_key, project.into()),
             Some(vnode_col_idx),
-        );
+        )?;
         // Global group key excludes vnode.
         let local_agg_group_key_cardinality = local_agg.group_key().len();
         let local_group_key_without_vnode =
@@ -187,7 +187,7 @@ impl LogicalAgg {
                     exchange,
                 ),
                 must_output_per_barrier,
-            );
+            )?;
             global_agg.into()
         } else {
             // the `RowMergeExec` has not supported keyed merge
@@ -210,7 +210,7 @@ impl LogicalAgg {
                     exchange,
                 ),
                 None,
-            );
+            )?;
             global_agg.into()
         };
         Self::add_row_merge_if_needed(
@@ -224,7 +224,7 @@ impl LogicalAgg {
     fn gen_single_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
         let input = RequiredDist::single().streaming_enforce_if_not_satisfies(stream_input)?;
         let core = self.core.clone_with_input(input);
-        Ok(new_stream_simple_agg(core, false).into())
+        Ok(new_stream_simple_agg(core, false)?.into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
@@ -232,7 +232,7 @@ impl LogicalAgg {
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
                 .streaming_enforce_if_not_satisfies(stream_input)?;
         let core = self.core.clone_with_input(input);
-        Ok(new_stream_hash_agg(core, None).into())
+        Ok(new_stream_hash_agg(core, None)?.into())
     }
 
     /// Generates distributed stream plan.
@@ -432,7 +432,7 @@ impl LogicalAgg {
         approx_percentile_agg_call: &PlanAggCall,
     ) -> Result<StreamPlanRef> {
         let local_approx_percentile =
-            StreamLocalApproxPercentile::new(input, approx_percentile_agg_call);
+            StreamLocalApproxPercentile::new(input, approx_percentile_agg_call)?;
         let exchange = RequiredDist::single()
             .streaming_enforce_if_not_satisfies(local_approx_percentile.into())?;
         let global_approx_percentile =
@@ -474,8 +474,7 @@ impl LogicalAgg {
                 plan,
                 ColIndexMapping::identity_or_none(current_size, new_size),
                 ColIndexMapping::new(vec![Some(current_size)], new_size),
-            )
-            .expect("failed to build row merge");
+            )?;
             acc = row_merge.into();
         }
         Ok(Some(acc))
@@ -782,6 +781,61 @@ impl LogicalAggBuilder {
                     };
                     Ok(push_agg_call(new_agg_call)?.into())
                 }
+            }
+            AggType::Builtin(PbAggKind::ArgMin | PbAggKind::ArgMax) => {
+                let mut agg_call = agg_call;
+
+                let comparison_arg_type = agg_call.args[1].return_type();
+                match comparison_arg_type {
+                    DataType::Struct(_)
+                    | DataType::List(_)
+                    | DataType::Map(_)
+                    | DataType::Vector(_)
+                    | DataType::Jsonb => {
+                        bail!(format!(
+                            "{} does not support struct, array, map, vector, jsonb for comparison argument, got {}",
+                            agg_call.agg_type.to_string(),
+                            comparison_arg_type
+                        ));
+                    }
+                    _ => {}
+                }
+
+                let not_null_exprs: Vec<ExprImpl> = agg_call
+                    .args
+                    .iter()
+                    .map(|arg| -> Result<ExprImpl> {
+                        Ok(FunctionCall::new(ExprType::IsNotNull, vec![arg.clone()])?.into())
+                    })
+                    .try_collect()?;
+
+                let comparison_expr = agg_call.args[1].clone();
+                let mut order_exprs = vec![OrderByExpr {
+                    expr: comparison_expr,
+                    order_type: if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) {
+                        OrderType::ascending()
+                    } else {
+                        OrderType::descending()
+                    },
+                }];
+
+                order_exprs.extend(agg_call.order_by.sort_exprs);
+
+                let order_by = OrderBy::new(order_exprs);
+
+                let filter = agg_call.filter.clone().and(Condition {
+                    conjunctions: not_null_exprs,
+                });
+
+                agg_call.args.truncate(1);
+
+                let new_agg_call = AggCall {
+                    agg_type: AggType::Builtin(PbAggKind::FirstValue),
+                    order_by,
+                    filter,
+                    ..agg_call
+                };
+                Ok(push_agg_call(new_agg_call)?.into())
             }
             _ => Ok(push_agg_call(agg_call)?.into()),
         }
@@ -1344,12 +1398,15 @@ fn find_or_append_row_count(mut logical: Agg<StreamPlanRef>) -> (Agg<StreamPlanR
 fn new_stream_simple_agg(
     core: Agg<StreamPlanRef>,
     must_output_per_barrier: bool,
-) -> StreamSimpleAgg {
+) -> Result<StreamSimpleAgg> {
     let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamSimpleAgg::new(logical, row_count_idx, must_output_per_barrier)
 }
 
-fn new_stream_hash_agg(core: Agg<StreamPlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
+fn new_stream_hash_agg(
+    core: Agg<StreamPlanRef>,
+    vnode_col_idx: Option<usize>,
+) -> Result<StreamHashAgg> {
     let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }

@@ -44,7 +44,7 @@ impl StreamValues {
             logical.stream_key().map(|v| v.to_vec()),
             logical.functional_dependency().clone(),
             Distribution::Single,
-            true,
+            StreamKind::AppendOnly,
             false,
             WatermarkColumns::new(),
             MonotonicityMap::new(),

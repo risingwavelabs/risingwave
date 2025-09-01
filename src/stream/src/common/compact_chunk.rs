@@ -31,6 +31,45 @@ use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::consistency::consistency_panic;
 
+// XXX(bugen): This utility seems confusing. It's doing different things with different methods,
+// while all of them are named "compact" (also note `StreamChunk::compact`). We should consider
+// refactoring it.
+//
+// Basically,
+// - `StreamChunk::compact`: construct a new chunk by removing invisible rows.
+// - `StreamChunkCompactor::into_compacted_chunks`: hide intermediate operations of the same key
+//   by modifying the visibility, while preserving the original chunk structure.
+// - `StreamChunkCompactor::reconstructed_compacted_chunks`: filter out intermediate operations
+//   of the same key, construct new chunks. A combination of `into_compacted_chunks`, `compact`,
+//   and `StreamChunkBuilder`.
+
+/// Behavior when inconsistency is detected during compaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InconsistencyBehavior {
+    Panic,
+    Warn,
+    Tolerate,
+}
+
+impl InconsistencyBehavior {
+    /// Report an inconsistency.
+    #[track_caller]
+    fn report(self, msg: &str) {
+        match self {
+            InconsistencyBehavior::Panic => consistency_panic!("{}", msg),
+            InconsistencyBehavior::Warn => {
+                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                    LazyLock::new(LogSuppresser::default);
+
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::warn!(suppressed_count, "{}", msg);
+                }
+            }
+            InconsistencyBehavior::Tolerate => {}
+        }
+    }
+}
+
 /// A helper to compact the stream chunks by modifying the `Ops` and visibility of the chunk.
 pub struct StreamChunkCompactor {
     chunks: Vec<StreamChunk>,
@@ -44,11 +83,11 @@ struct OpRowMutRefTuple<'a> {
 
 impl<'a> OpRowMutRefTuple<'a> {
     /// return true if no row left
-    fn push(&mut self, mut curr: OpRowMutRef<'a>) -> bool {
+    fn push(&mut self, mut curr: OpRowMutRef<'a>, ib: InconsistencyBehavior) -> bool {
         debug_assert!(self.prev.vis());
         match (self.prev.op(), curr.op()) {
             (Op::Insert, Op::Insert) => {
-                consistency_panic!("receive duplicated insert on the stream");
+                ib.report("receive duplicated insert on the stream");
                 // If need to tolerate inconsistency, override the previous insert.
                 // Note that because the primary key constraint has been violated, we
                 // don't mind losing some data here.
@@ -56,7 +95,7 @@ impl<'a> OpRowMutRefTuple<'a> {
                 self.prev = curr;
             }
             (Op::Delete, Op::Delete) => {
-                consistency_panic!("receive duplicated delete on the stream");
+                ib.report("receive duplicated delete on the stream");
                 // If need to tolerate inconsistency, override the previous delete.
                 // Note that because the primary key constraint has been violated, we
                 // don't mind losing some data here.
@@ -108,18 +147,17 @@ pub enum RowOp<'a> {
     /// (`old_value`, `new_value`)
     Update((RowRef<'a>, RowRef<'a>)),
 }
-static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
 pub struct RowOpMap<'a, 'b> {
     map: HashMap<Prehashed<Project<'b, RowRef<'a>>>, RowOp<'a>, BuildHasherDefault<Passthru>>,
-    warn_for_inconsistent_stream: bool,
+    ib: InconsistencyBehavior,
 }
 
 impl<'a, 'b> RowOpMap<'a, 'b> {
-    fn with_capacity(estimate_size: usize, warn_for_inconsistent_stream: bool) -> Self {
+    fn with_capacity(estimate_size: usize, ib: InconsistencyBehavior) -> Self {
         Self {
             map: new_prehashed_map_with_capacity(estimate_size),
-            warn_for_inconsistent_stream,
+            ib,
         }
     }
 
@@ -134,25 +172,13 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                     e.insert(RowOp::Update((*old_v, v)));
                 }
                 RowOp::Insert(_) => {
-                    if self.warn_for_inconsistent_stream
-                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check()
-                    {
-                        tracing::warn!(
-                            suppressed_count,
-                            "double insert for the same pk, breaking the sink's pk constraint"
-                        );
-                    }
+                    self.ib
+                        .report("double insert for the same pk, breaking the sink's pk constraint");
                     e.insert(RowOp::Insert(v));
                 }
                 RowOp::Update((old_v, _)) => {
-                    if self.warn_for_inconsistent_stream
-                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check()
-                    {
-                        tracing::warn!(
-                            suppressed_count,
-                            "double insert for the same pk, breaking the sink's pk constraint"
-                        );
-                    }
+                    self.ib
+                        .report("double insert for the same pk, breaking the sink's pk constraint");
                     e.insert(RowOp::Update((*old_v, v)));
                 }
             },
@@ -173,11 +199,7 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                     e.insert(RowOp::Delete(*prev));
                 }
                 RowOp::Delete(_) => {
-                    if self.warn_for_inconsistent_stream
-                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check()
-                    {
-                        tracing::warn!(suppressed_count, "double delete for the same pk");
-                    }
+                    self.ib.report("double delete for the same pk");
                     e.insert(RowOp::Delete(v));
                 }
             },
@@ -234,7 +256,10 @@ impl StreamChunkCompactor {
     ///   have three kind of patterns Insert, Delete or Update.
     /// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
     ///   removed.
-    pub fn into_compacted_chunks(self) -> impl Iterator<Item = StreamChunk> {
+    pub fn into_compacted_chunks(
+        self,
+        ib: InconsistencyBehavior,
+    ) -> impl Iterator<Item = StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
 
         let estimate_size = chunks.iter().map(|c| c.cardinality()).sum();
@@ -265,7 +290,7 @@ impl StreamChunkCompactor {
                         });
                     }
                     Entry::Occupied(mut o) => {
-                        if o.get_mut().push(op_row) {
+                        if o.get_mut().push(op_row, ib) {
                             o.remove_entry();
                         }
                     }
@@ -292,7 +317,7 @@ impl StreamChunkCompactor {
         self,
         chunk_size: usize,
         data_types: Vec<DataType>,
-        warn_for_inconsistent_stream: bool,
+        ib: InconsistencyBehavior,
     ) -> Vec<StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
 
@@ -309,7 +334,7 @@ impl StreamChunkCompactor {
                 (hash_values, ops, c)
             })
             .collect_vec();
-        let mut map = RowOpMap::with_capacity(estimate_size, warn_for_inconsistent_stream);
+        let mut map = RowOpMap::with_capacity(estimate_size, ib);
         for (hash_values, ops, c) in &chunks {
             for row in c.rows() {
                 let hash = hash_values[row.index()];
@@ -326,9 +351,13 @@ impl StreamChunkCompactor {
     }
 }
 
-pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> StreamChunk {
+pub fn merge_chunk_row(
+    stream_chunk: StreamChunk,
+    pk_indices: &[usize],
+    ib: InconsistencyBehavior,
+) -> StreamChunk {
     let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), vec![stream_chunk]);
-    compactor.into_compacted_chunks().next().unwrap()
+    compactor.into_compacted_chunks(ib).next().unwrap()
 }
 
 #[cfg(test)]
@@ -363,7 +392,7 @@ mod tests {
             ),
         ];
         let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
-        let mut iter = compactor.into_compacted_chunks();
+        let mut iter = compactor.into_compacted_chunks(InconsistencyBehavior::Panic);
         assert_eq!(
             iter.next().unwrap().compact(),
             StreamChunk::from_pretty(
@@ -416,7 +445,7 @@ mod tests {
         let chunks = compactor.reconstructed_compacted_chunks(
             100,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
-            true,
+            InconsistencyBehavior::Panic,
         );
         assert_eq!(
             chunks.into_iter().next().unwrap(),

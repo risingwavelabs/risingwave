@@ -801,6 +801,12 @@ impl MetaClient {
         Ok(resp.task_id)
     }
 
+    pub async fn expire_iceberg_table_snapshots(&self, sink_id: u32) -> Result<()> {
+        let request = ExpireIcebergTableSnapshotsRequest { sink_id };
+        let _resp = self.inner.expire_iceberg_table_snapshots(request).await?;
+        Ok(())
+    }
+
     pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
@@ -860,9 +866,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_function(&self, function_id: FunctionId) -> Result<WaitVersion> {
+    pub async fn drop_function(
+        &self,
+        function_id: FunctionId,
+        cascade: bool,
+    ) -> Result<WaitVersion> {
         let request = DropFunctionRequest {
             function_id: function_id.0,
+            cascade,
         };
         let resp = self.inner.drop_function(request).await?;
         Ok(resp
@@ -2386,6 +2397,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
+            ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

@@ -398,7 +398,7 @@ impl Agg<StreamPlanRef> {
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
-        let in_pks = self.input.stream_key().unwrap().to_vec();
+        let in_pks = self.input.expect_stream_key().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 
@@ -833,7 +833,12 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
-            order_by: self.order_by.iter().map(ColumnOrder::to_protobuf).collect(),
+            order_by: self
+                .order_by
+                .iter()
+                .copied()
+                .map(ColumnOrder::to_protobuf)
+                .collect(),
             filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
             direct_args: self
                 .direct_args

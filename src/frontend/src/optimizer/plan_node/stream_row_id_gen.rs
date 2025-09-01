@@ -47,7 +47,7 @@ impl StreamRowIdGen {
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             distribution,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),

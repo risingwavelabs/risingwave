@@ -68,8 +68,7 @@ impl Planner {
 
     pub(crate) fn plan_sys_table(&mut self, sys_table: BoundSystemTable) -> Result<PlanRef> {
         Ok(LogicalSysScan::create(
-            sys_table.sys_table_catalog.name().to_owned(),
-            Rc::new(sys_table.sys_table_catalog.table_desc()),
+            sys_table.sys_table_catalog,
             self.ctx(),
             Cardinality::unknown(), // TODO(card): cardinality of system table
         )
@@ -154,7 +153,7 @@ impl Planner {
                             .map(|(i, column)| (column.name().to_owned(), (i, column)))
                             .collect();
                         let exprs = scan
-                            .table_catalog()
+                            .table()
                             .column_schema()
                             .fields()
                             .iter()

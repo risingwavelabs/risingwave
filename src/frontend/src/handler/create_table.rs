@@ -37,8 +37,8 @@ use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
-    CdcTableType, DATABASE_NAME_KEY, ExternalTableConfig, ExternalTableImpl, SCHEMA_NAME_KEY,
-    TABLE_NAME_KEY,
+    DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
+    SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
@@ -92,7 +92,9 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, WRITE_MODE,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
+    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     parse_partition_by_exprs,
 };
 
@@ -865,7 +867,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .map(|c| c.column_desc.clone())
         .collect_vec();
     let non_generated_column_num = non_generated_column_descs.len();
-    let cdc_table_type = CdcTableType::from_properties(&options);
+    let cdc_table_type = ExternalCdcTableType::from_properties(&options);
     let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id.into(), // id of cdc source streaming job
@@ -878,7 +880,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     };
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
-    let options = build_cdc_scan_options_with_options(context.with_options(), cdc_table_type)?;
+    let options = build_cdc_scan_options_with_options(context.with_options(), &cdc_table_type)?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name.clone(),
@@ -924,7 +926,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
-
+    table.cdc_table_type = Some(cdc_table_type);
     Ok((materialize.into(), table))
 }
 
@@ -1177,7 +1179,6 @@ pub(super) async fn handle_create_table_plan(
                     let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
 
-                    // NOTE: if the external table has a default column, we will only treat it as a normal column.
                     (columns, pk_names)
                 }
             };
@@ -1343,6 +1344,7 @@ async fn bind_cdc_table_schema_externally(
     let table = ExternalTableImpl::connect(config)
         .await
         .context("failed to auto derive table schema")?;
+
     Ok((
         table
             .column_descs()
@@ -1761,9 +1763,7 @@ pub async fn create_iceberg_engine_table(
     if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
         match enable_compaction.to_lowercase().as_str() {
             "true" => {
-                risingwave_common::license::Feature::IcebergCompaction
-                    .check_available()
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                risingwave_common::license::Feature::IcebergCompaction.check_available()?;
 
                 sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
             }
@@ -1813,18 +1813,22 @@ pub async fn create_iceberg_engine_table(
             .map(|x| x.with_properties.remove("compaction_interval_sec"));
     }
 
-    if let Some(enable_snapshot_expiration) =
+    let has_enabled_snapshot_expiration = if let Some(enable_snapshot_expiration) =
         handler_args.with_options.get(ENABLE_SNAPSHOT_EXPIRATION)
     {
+        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
         match enable_snapshot_expiration.to_lowercase().as_str() {
             "true" => {
-                risingwave_common::license::Feature::IcebergCompaction
-                    .check_available()
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                risingwave_common::license::Feature::IcebergCompaction.check_available()?;
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
+                true
             }
             "false" => {
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "false".to_owned());
+                false
             }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -1834,11 +1838,6 @@ pub async fn create_iceberg_engine_table(
                 .into());
             }
         }
-
-        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
     } else {
         sink_with.insert(
             ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
@@ -1847,6 +1846,68 @@ pub async fn create_iceberg_engine_table(
                 .is_ok()
                 .to_string(),
         );
+        true
+    };
+
+    if has_enabled_snapshot_expiration {
+        // configuration for snapshot expiration
+        if let Some(snapshot_expiration_retain_last) = handler_args
+            .with_options
+            .get(SNAPSHOT_EXPIRATION_RETAIN_LAST)
+        {
+            sink_with.insert(
+                SNAPSHOT_EXPIRATION_RETAIN_LAST.to_owned(),
+                snapshot_expiration_retain_last.to_owned(),
+            );
+            // remove snapshot_expiration_retain_last from source options, otherwise it will be considered as an unknown field.
+            source
+                .as_mut()
+                .map(|x| x.with_properties.remove(SNAPSHOT_EXPIRATION_RETAIN_LAST));
+        }
+
+        if let Some(snapshot_expiration_max_age) = handler_args
+            .with_options
+            .get(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
+        {
+            sink_with.insert(
+                SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS.to_owned(),
+                snapshot_expiration_max_age.to_owned(),
+            );
+            // remove snapshot_expiration_max_age from source options, otherwise it will be considered as an unknown field.
+            source
+                .as_mut()
+                .map(|x| x.with_properties.remove(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS));
+        }
+
+        if let Some(snapshot_expiration_clear_expired_files) = handler_args
+            .with_options
+            .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
+        {
+            sink_with.insert(
+                SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES.to_owned(),
+                snapshot_expiration_clear_expired_files.to_owned(),
+            );
+            // remove snapshot_expiration_clear_expired_files from source options, otherwise it will be considered as an unknown field.
+            source.as_mut().map(|x| {
+                x.with_properties
+                    .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
+            });
+        }
+
+        if let Some(snapshot_expiration_clear_expired_meta_data) = handler_args
+            .with_options
+            .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
+        {
+            sink_with.insert(
+                SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA.to_owned(),
+                snapshot_expiration_clear_expired_meta_data.to_owned(),
+            );
+            // remove snapshot_expiration_clear_expired_meta_data from source options, otherwise it will be considered as an unknown field.
+            source.as_mut().map(|x| {
+                x.with_properties
+                    .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
+            });
+        }
     }
 
     if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
@@ -1859,9 +1920,7 @@ pub async fn create_iceberg_engine_table(
             }
 
             ICEBERG_WRITE_MODE_COPY_ON_WRITE => {
-                risingwave_common::license::Feature::IcebergCompaction
-                    .check_available()
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                risingwave_common::license::Feature::IcebergCompaction.check_available()?;
 
                 if table.append_only {
                     return Err(ErrorCode::NotSupported(

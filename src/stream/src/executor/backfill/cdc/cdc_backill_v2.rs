@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use either::Either;
 use futures::stream;
 use futures::stream::select_with_strategy;
@@ -21,8 +23,9 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
+use risingwave_connector::parser::{TimeHandling, TimestampHandling, TimestamptzHandling};
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::ExternalTableReaderImpl;
+use risingwave_connector::source::cdc::external::{ExternalCdcTableType, ExternalTableReaderImpl};
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
@@ -65,6 +68,8 @@ pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     options: CdcScanOptions,
 
     state_table: StateTable<S>,
+
+    properties: BTreeMap<String, String>,
 }
 
 impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
@@ -79,6 +84,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
         options: CdcScanOptions,
+        properties: BTreeMap<String, String>,
     ) -> Self {
         Self {
             actor_ctx,
@@ -89,6 +95,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             rate_limit_rps,
             options,
             state_table,
+            properties,
         }
     }
 
@@ -121,7 +128,40 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         // Make sure to use mapping_message after transform_upstream.
-        let mut upstream = transform_upstream(upstream, self.output_columns.clone()).boxed();
+
+        // If user sets debezium.time.precision.mode to "connect", it means the user can guarantee
+        // that the upstream data precision is MilliSecond. In this case, we don't use GuessNumberUnit
+        // mode to guess precision, but use Milli mode directly, which can handle extreme timestamps.
+        let timestamp_handling: Option<TimestampHandling> = self
+            .properties
+            .get("debezium.time.precision.mode")
+            .map(|v| v == "connect")
+            .unwrap_or(false)
+            .then_some(TimestampHandling::Milli);
+        let timestamptz_handling: Option<TimestamptzHandling> = self
+            .properties
+            .get("debezium.time.precision.mode")
+            .map(|v| v == "connect")
+            .unwrap_or(false)
+            .then_some(TimestamptzHandling::Milli);
+        let time_handling: Option<TimeHandling> = self
+            .properties
+            .get("debezium.time.precision.mode")
+            .map(|v| v == "connect")
+            .unwrap_or(false)
+            .then_some(TimeHandling::Milli);
+        // Only postgres-cdc connector may trigger TOAST.
+        let handle_toast_columns: bool =
+            self.external_table.table_type() == &ExternalCdcTableType::Postgres;
+        let mut upstream = transform_upstream(
+            upstream,
+            self.output_columns.clone(),
+            timestamp_handling,
+            timestamptz_handling,
+            time_handling,
+            handle_toast_columns,
+        )
+        .boxed();
         let mut next_reset_barrier = Some(first_barrier);
         let mut is_reset = false;
         let mut state_impl =

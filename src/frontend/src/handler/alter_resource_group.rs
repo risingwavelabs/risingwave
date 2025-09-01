@@ -38,9 +38,7 @@ pub async fn handle_alter_resource_group(
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    risingwave_common::license::Feature::ResourceGroup
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
+    risingwave_common::license::Feature::ResourceGroup.check_available()?;
 
     let table_id = {
         let reader = session.env().catalog_reader().read_guard();

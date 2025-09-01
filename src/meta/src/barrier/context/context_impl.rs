@@ -217,35 +217,10 @@ impl CommandContext {
                 job_type,
                 cross_db_snapshot_backfill_info,
             } => {
+                let mut replace_plan = None;
                 match job_type {
-                    CreateStreamingJobType::SinkIntoTable(
-                        replace_plan @ ReplaceStreamJobPlan {
-                            old_fragments,
-                            new_fragments,
-                            upstream_fragment_downstreams,
-                            init_split_assignment,
-                            ..
-                        },
-                    ) => {
-                        barrier_manager_context
-                            .metadata_manager
-                            .catalog_controller
-                            .post_collect_job_fragments(
-                                new_fragments.stream_job_id.table_id as _,
-                                new_fragments.actor_ids(),
-                                upstream_fragment_downstreams,
-                                init_split_assignment,
-                            )
-                            .await?;
-                        barrier_manager_context
-                            .source_manager
-                            .handle_replace_job(
-                                old_fragments,
-                                new_fragments.stream_source_fragments(),
-                                init_split_assignment.clone(),
-                                replace_plan,
-                            )
-                            .await;
+                    CreateStreamingJobType::SinkIntoTable(plan) => {
+                        replace_plan = Some(plan);
                     }
                     CreateStreamingJobType::Normal => {
                         barrier_manager_context
@@ -303,13 +278,26 @@ impl CommandContext {
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
-                    .post_collect_job_fragments_inner(
+                    .post_collect_job_fragments(
                         stream_job_fragments.stream_job_id().table_id as _,
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
+                        replace_plan,
                     )
                     .await?;
+
+                if let Some(plan) = replace_plan {
+                    barrier_manager_context
+                        .source_manager
+                        .handle_replace_job(
+                            &plan.old_fragments,
+                            plan.new_fragments.stream_source_fragments(),
+                            init_split_assignment.clone(),
+                            plan,
+                        )
+                        .await;
+                }
 
                 let source_change = SourceChange::CreateJob {
                     added_source_fragments: stream_job_fragments.stream_source_fragments(),
@@ -353,6 +341,7 @@ impl CommandContext {
                         new_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
+                        None,
                     )
                     .await?;
 
@@ -366,6 +355,7 @@ impl CommandContext {
                                 sink.actor_status.keys().cloned().collect(),
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
                                 &Default::default(), // no split assignment
+                                None, // no replace plan
                             )
                             .await?;
                     }

@@ -31,6 +31,7 @@ pub struct StreamDml {
 }
 
 impl StreamDml {
+    // `append_only` indicates whether only `INSERT` is allowed.
     pub fn new(input: PlanRef, append_only: bool, column_descs: Vec<ColumnDesc>) -> Self {
         let base = PlanBase::new_stream(
             input.ctx(),
@@ -38,7 +39,16 @@ impl StreamDml {
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            append_only,
+            input.stream_kind().merge(if append_only {
+                // For append-only table. Either there will be a `RowIdGen` following the `Dml` and `Union`,
+                // or there will be a `Materialize` with conflict handling enabled. In both cases there
+                // will be no key conflict, so we can treat the merged stream as append-only here.
+                StreamKind::AppendOnly
+            } else {
+                // We cannot guarantee that there's no conflict on stream key between upstream
+                // source and DML input, so we must treat it as upsert here.
+                StreamKind::Upsert
+            }),
             false,                   // TODO(rc): decide EOWC property
             WatermarkColumns::new(), // no watermark if dml is allowed
             MonotonicityMap::new(),  // TODO: derive monotonicity
