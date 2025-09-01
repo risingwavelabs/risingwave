@@ -282,7 +282,7 @@ impl ToBatch for LogicalVectorSearch {
                 unreachable!()
             }
             PbDistanceType::L1 => (false, ExprType::L1Distance),
-            PbDistanceType::L2 => (false, ExprType::L2Distance),
+            PbDistanceType::L2Sqr => (false, ExprType::L2Distance),
             PbDistanceType::Cosine => (false, ExprType::CosineDistance),
             PbDistanceType::InnerProduct => (true, ExprType::InnerProduct),
         };

@@ -11531,6 +11531,7 @@ dependencies = [
  "enumflags2",
  "ethnum",
  "expect-test",
+ "faiss",
  "fixedbitset 0.5.7",
  "foyer",
  "futures",
