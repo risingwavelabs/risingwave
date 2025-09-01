@@ -60,7 +60,7 @@ use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
+    MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph, PbStreamNode,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
@@ -81,7 +81,7 @@ use crate::manager::{
     NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
-    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, StreamContext,
+    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::cdc::{
@@ -90,9 +90,10 @@ use crate::stream::cdc::{
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
-    SourceManagerRef, StreamFragmentGraph, check_sink_fragments_support_refresh_schema,
-    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
+    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
+    check_sink_fragments_support_refresh_schema, create_source_worker,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -498,7 +499,7 @@ impl DdlController {
     pub async fn reschedule_streaming_job(
         &self,
         job_id: u32,
-        target: JobRescheduleTarget,
+        target: ReschedulePolicy,
         mut deferred: bool,
     ) -> MetaResult<()> {
         tracing::info!("alter parallelism");
@@ -514,19 +515,19 @@ impl DdlController {
             .await
     }
 
-    pub async fn reschedule_cdc_table_backfill(
-        &self,
-        job_id: u32,
-        target: JobRescheduleTarget,
-    ) -> MetaResult<()> {
-        tracing::info!("alter CDC table backfill parallelism");
-        if self.barrier_manager.check_status_running().is_err() {
-            return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
-        }
-        self.stream_manager
-            .reschedule_cdc_table_backfill(job_id, target)
-            .await
-    }
+    // pub async fn reschedule_cdc_table_backfill(
+    //     &self,
+    //     job_id: u32,
+    //     target: JobRescheduleTarget,
+    // ) -> MetaResult<()> {
+    //     tracing::info!("alter CDC table backfill parallelism");
+    //     if self.barrier_manager.check_status_running().is_err() {
+    //         return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
+    //     }
+    //     self.stream_manager
+    //         .reschedule_cdc_table_backfill(job_id, target)
+    //         .await
+    // }
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         self.drop_object(
@@ -917,7 +918,8 @@ impl DdlController {
             let sink = sink.expect("sink not found");
             Self::inject_replace_table_plan_for_sink(
                 sink.id,
-                &sink_fragment,
+                sink_fragment.fragment_id,
+                &sink_fragment.nodes,
                 target_table,
                 &mut replace_table_ctx,
                 stream_job_fragments.inner.union_fragment_for_table(),
@@ -945,15 +947,20 @@ impl DdlController {
                     continue;
                 };
 
-                let sink_table_fragments = mgr
-                    .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink_id))
+                let sink_fragments = mgr
+                    .get_job_sink_fragments_by_id(&risingwave_common::catalog::TableId::new(
+                        sink_id,
+                    ))
                     .await?;
-
-                let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
+                let sink_fragment = sink_fragments
+                    .into_iter()
+                    .exactly_one()
+                    .expect("There should be exactly one fragment for each sink.");
 
                 Self::inject_replace_table_plan_for_sink(
                     sink_id,
-                    &sink_fragment,
+                    sink_fragment.fragment_id as _,
+                    &sink_fragment.stream_node.to_protobuf(),
                     target_table,
                     &mut replace_table_ctx,
                     stream_job_fragments.inner.union_fragment_for_table(),
@@ -1009,13 +1016,14 @@ impl DdlController {
 
     pub(crate) fn inject_replace_table_plan_for_sink(
         sink_id: u32,
-        sink_fragment: &Fragment,
+        sink_fragment_id: FragmentId,
+        sink_fragment_node: &PbStreamNode,
         table: &Table,
         replace_table_ctx: &mut ReplaceStreamJobContext,
         union_fragment: &mut Fragment,
         unique_identity: Option<&str>,
     ) {
-        let sink_fields = sink_fragment.nodes.fields.clone();
+        let sink_fields = sink_fragment_node.fields.clone();
 
         let output_indices = sink_fields
             .iter()
@@ -1027,7 +1035,7 @@ impl DdlController {
 
         let sink_fragment_downstreams = replace_table_ctx
             .upstream_fragment_downstreams
-            .entry(sink_fragment.fragment_id)
+            .entry(sink_fragment_id)
             .or_default();
 
         {
@@ -1039,7 +1047,7 @@ impl DdlController {
             });
         }
 
-        let upstream_fragment_id = sink_fragment.fragment_id;
+        let upstream_fragment_id = sink_fragment_id;
 
         let mut max_operator_id = 0;
 
@@ -1788,18 +1796,19 @@ impl DdlController {
                 for sink in catalogs {
                     let sink_id = &sink.id;
 
-                    let sink_table_fragments = self
+                    let maybe_sink_fragments = self
                         .metadata_manager
-                        .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(
+                        .get_job_sink_fragments_by_id(&risingwave_common::catalog::TableId::new(
                             *sink_id,
                         ))
                         .await?;
 
-                    let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
+                    let sink_fragment = maybe_sink_fragments.into_iter().exactly_one().unwrap();
 
                     Self::inject_replace_table_plan_for_sink(
                         *sink_id,
-                        &sink_fragment,
+                        sink_fragment.fragment_id as FragmentId,
+                        &sink_fragment.stream_node.to_protobuf(),
                         table,
                         &mut ctx,
                         stream_job_fragments.inner.union_fragment_for_table(),
@@ -2055,18 +2064,20 @@ impl DdlController {
 
         let upstream_actors = upstream_root_fragments
             .values()
-            .map(|fragment| {
+            .map(|(fragment, _)| {
                 (
                     fragment.fragment_id,
-                    fragment.actors.iter().map(|actor| actor.actor_id).collect(),
+                    fragment.actors.keys().copied().collect(),
                 )
             })
             .collect();
 
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
-            upstream_root_fragments,
-            existing_actor_location,
+            FragmentGraphUpstreamContext {
+                upstream_root_fragments,
+                upstream_actor_location: existing_actor_location,
+            },
             (&stream_job).into(),
         )?;
 
@@ -2255,6 +2266,11 @@ impl DdlController {
             .await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
 
+        //   let old_internal_table_ids = self
+        //             .metadata_manager
+        //             .list_job_internal_table_ids_by_id(&id.into())
+        //             .await?;
+
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;
         if let Some(to_remove_source_id) = drop_table_associated_source_id {
@@ -2312,13 +2328,13 @@ impl DdlController {
                 .iter()
                 .map(|sink| sink.original_fragment.fragment_id)
                 .collect();
-            for (_, downstream_fragment) in &mut downstream_fragments {
+            for (_, downstream_fragment, _) in &mut downstream_fragments {
                 if let Some(sink) = auto_refresh_schema_sinks.iter().find(|sink| {
                     sink.original_fragment.fragment_id == downstream_fragment.fragment_id
                 }) {
                     assert!(remaining_fragment.remove(&downstream_fragment.fragment_id));
-                    for actor in &downstream_fragment.actors {
-                        downstream_actor_location.remove(&actor.actor_id);
+                    for actor_id in downstream_fragment.actors.keys() {
+                        downstream_actor_location.remove(actor_id);
                     }
                     for (actor_id, status) in &sink.actor_status {
                         downstream_actor_location.insert(
@@ -2326,7 +2342,11 @@ impl DdlController {
                             status.location.as_ref().unwrap().worker_node_id as WorkerId,
                         );
                     }
-                    *downstream_fragment = sink.new_fragment.clone();
+
+                    todo!()
+                    // *downstream_fragment = SharedFragmentInfo {
+                    //
+                    // };
                 }
             }
             assert!(remaining_fragment.is_empty());
@@ -2337,9 +2357,11 @@ impl DdlController {
             StreamingJobType::Table(TableJobType::General) | StreamingJobType::Source => {
                 CompleteStreamFragmentGraph::with_downstreams(
                     fragment_graph,
-                    original_root_fragment.fragment_id,
-                    downstream_fragments,
-                    downstream_actor_location,
+                    FragmentGraphDownstreamContext {
+                        original_root_fragment_id: original_root_fragment.fragment_id,
+                        downstream_fragments,
+                        downstream_actor_location,
+                    },
                     job_type,
                 )?
             }
@@ -2353,11 +2375,15 @@ impl DdlController {
 
                 CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
                     fragment_graph,
-                    upstream_root_fragments,
-                    upstream_actor_location,
-                    original_root_fragment.fragment_id,
-                    downstream_fragments,
-                    downstream_actor_location,
+                    FragmentGraphUpstreamContext {
+                        upstream_root_fragments,
+                        upstream_actor_location,
+                    },
+                    FragmentGraphDownstreamContext {
+                        original_root_fragment_id: original_root_fragment.fragment_id,
+                        downstream_fragments,
+                        downstream_actor_location,
+                    },
                     job_type,
                 )?
             }

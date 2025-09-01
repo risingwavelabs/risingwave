@@ -446,6 +446,22 @@ impl CatalogController {
         Ok(job_id)
     }
 
+    pub async fn list_streaming_job_with_database(
+        &self,
+    ) -> MetaResult<HashMap<DatabaseId, Vec<ObjectId>>> {
+        let inner = self.inner.read().await;
+        let database_objects: Vec<(DatabaseId, ObjectId)> = StreamingJob::find()
+            .select_only()
+            .column(object::Column::DatabaseId)
+            .column(streaming_job::Column::JobId)
+            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(database_objects.into_iter().into_group_map())
+    }
+
     // Output: Vec<(table id, db name, schema name, table name, resource group)>
     pub async fn list_table_objects(
         &self,
@@ -504,5 +520,18 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?)
+    }
+
+    pub async fn list_streaming_jobs(
+        &self,
+        job_ids: Vec<ObjectId>,
+    ) -> MetaResult<HashMap<ObjectId, streaming_job::Model>> {
+        let inner = self.inner.read().await;
+        let jobs: Vec<_> = StreamingJob::find()
+            .filter(streaming_job::Column::JobId.is_in(job_ids))
+            .all(&inner.db)
+            .await?;
+
+        Ok(jobs.into_iter().map(|job| (job.job_id, job)).collect())
     }
 }

@@ -37,6 +37,7 @@ use crate::model::{
     Fragment, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle,
     FragmentReplaceUpstream, StreamActor,
 };
+use crate::stream::build_actor_id;
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, DownstreamExternalEdgeId, EdgeId, EitherFragment,
     StreamFragmentEdge,
@@ -565,11 +566,14 @@ impl ActorGraphBuildState {
     }
 
     /// Get the next global actor id.
-    fn next_actor_id(&mut self) -> GlobalActorId {
+    fn next_actor_id(&mut self, fragment_id: GlobalFragmentId) -> GlobalActorId {
         let local_id = self.next_local_id;
         self.next_local_id += 1;
 
-        self.actor_id_gen.to_global_id(local_id)
+        GlobalActorId::from(build_actor_id(
+            fragment_id.as_global_id(),
+            local_id as usize,
+        ))
     }
 
     /// Finish the build and return the inner state.
@@ -955,7 +959,7 @@ impl ActorGraphBuilder {
                 distribution
                     .actors()
                     .map(|alignment_id| {
-                        let actor_id = state.next_actor_id();
+                        let actor_id = state.next_actor_id(fragment_id);
                         let vnode_bitmap = bitmaps
                             .as_ref()
                             .map(|m: &HashMap<ActorAlignmentId, Bitmap>| &m[&alignment_id])
@@ -974,14 +978,14 @@ impl ActorGraphBuilder {
             EitherFragment::Existing(existing_fragment) => existing_fragment
                 .actors
                 .iter()
-                .map(|a| {
-                    let actor_id = GlobalActorId::new(a.actor_id);
+                .map(|(actor_id, actor_info)| {
+                    let actor_id = GlobalActorId::new(*actor_id);
                     let alignment_id = match &distribution {
                         Distribution::Singleton(worker_id) => {
                             ActorAlignmentId::new_single(*worker_id as u32)
                         }
                         Distribution::Hash(mapping) => mapping
-                            .get_matched(a.vnode_bitmap.as_ref().unwrap())
+                            .get_matched(actor_info.vnode_bitmap.as_ref().unwrap())
                             .unwrap(),
                     };
 

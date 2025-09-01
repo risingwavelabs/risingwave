@@ -12,23 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) mod cdc;
-mod refresh_manager;
-mod scale;
-mod sink;
-mod source_manager;
-mod stream_graph;
-mod stream_manager;
-#[cfg(test)]
-mod test_fragmenter;
+use std::collections::HashMap;
+use risingwave_meta_model::FragmentId;
 
-pub use refresh_manager::*;
-pub use scale::*;
-pub use sink::*;
-pub use source_manager::*;
-pub use stream_graph::*;
-pub use stream_manager::*;
+// pub(crate) struct BackgroundJobFragmentInfo {
+//     actor_ids
+// }
+//
+// pub(crate) struct BackgroundJobInfo {
+//     fragments: HashMap<FragmentId, BackgroundJobFragmentInfo>
+// }
 
-pub(crate) fn build_actor_id(fragment_id: u32, actor_idx: usize) -> u32 {
-    (fragment_id << 16) | actor_idx as u32
-}
