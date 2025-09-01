@@ -25,7 +25,7 @@ use risingwave_common::row::Row;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::external::{
-    CdcTableSnapshotSplitOption, CdcTableType, ExternalTableConfig, ExternalTableReader,
+    CdcTableSnapshotSplitOption, ExternalCdcTableType, ExternalTableConfig, ExternalTableReader,
     SchemaTableName,
 };
 use risingwave_connector::source::cdc::{CdcScanOptions, CdcTableSnapshotSplitAssignment};
@@ -63,7 +63,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
     } else {
         return Ok(());
     };
-    let table_type = CdcTableType::from_properties(&table_desc.connect_properties);
+    let table_type = ExternalCdcTableType::from_properties(&table_desc.connect_properties);
     // Filter out additional columns to construct the external table schema
     let table_schema: Schema = table_desc
         .columns
