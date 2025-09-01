@@ -24,6 +24,30 @@ use crate::optimizer::OptimizerContext;
 use crate::optimizer::plan_node::{Logical, LogicalTableFunction, LogicalValues};
 use crate::optimizer::rule::{ApplyResult, FallibleRule};
 
+/// Helper function to extract a constant u64 value from an `ExprImpl`.
+/// Returns `Ok(Some(value))` if the expression can be folded to a constant u64,
+/// `Ok(None)` if the expression is null, or an error if folding fails.
+fn expr_impl_to_u64_fn(arg: &crate::expr::ExprImpl) -> anyhow::Result<Option<u64>> {
+    match arg.try_fold_const() {
+        Some(Ok(value)) => {
+            let Some(scalar) = value else {
+                return Ok(None);
+            };
+            match scalar {
+                ScalarImpl::Int16(value) => Ok(Some(value as u64)),
+                ScalarImpl::Int32(value) => Ok(Some(value as u64)),
+                ScalarImpl::Int64(value) => Ok(Some(value as u64)),
+                _ => Err(anyhow::anyhow!(
+                    "Expected int16, int32, or int64, got {:?}",
+                    scalar
+                )),
+            }
+        }
+        Some(Err(err)) => Err(anyhow::anyhow!("Failed to fold constant: {}", err)),
+        None => Err(anyhow::anyhow!("Expression must be a constant value")),
+    }
+}
+
 /// Transform the `internal_get_channel_stats()` table function
 /// into a plan graph which will return channel statistics from the dashboard API.
 /// It will return channel stats with `upstream_fragment_id` and `downstream_fragment_id` as primary key.
@@ -65,41 +89,10 @@ impl TableFunctionToInternalGetChannelStatsRule {
                 let at_expr = &table_function.args[0];
                 let offset_expr = &table_function.args[1];
 
-                let at_time = match at_expr.try_fold_const() {
-                    Some(Ok(Some(at_value))) => {
-                        if let ScalarImpl::Int64(at) = at_value {
-                            Some(at)
-                        } else {
-                            bail!("First argument 'at' must be a constant uint64 value");
-                        }
-                    }
-                    Some(Ok(None)) => None,
-                    Some(Err(_)) => {
-                        bail!("First argument 'at' must be a constant value");
-                    }
-                    None => {
-                        bail!("First argument 'at' must be a constant value");
-                    }
-                };
-
-                let time_offset = match offset_expr.try_fold_const() {
-                    Some(Ok(Some(offset_value))) => {
-                        if let ScalarImpl::Int64(offset) = offset_value {
-                            offset
-                        } else {
-                            bail!("Second argument 'offset' must be a constant uint64 value");
-                        }
-                    }
-                    Some(Ok(None)) => {
-                        bail!("Second argument 'offset' must be a constant value");
-                    }
-                    Some(Err(_)) => {
-                        bail!("Second argument 'offset' must be a constant value");
-                    }
-                    None => {
-                        bail!("Second argument 'offset' must be a constant value");
-                    }
-                };
+                let at_time = expr_impl_to_u64_fn(at_expr)?;
+                let time_offset = expr_impl_to_u64_fn(offset_expr)?.ok_or_else(|| {
+                    anyhow::anyhow!("Second argument 'offset' must be a constant value")
+                })?;
 
                 (at_time, time_offset)
             }
