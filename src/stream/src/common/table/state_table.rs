@@ -1006,9 +1006,16 @@ where
             chunk
         };
 
-        for (op, row) in chunk.rows() {
+        let vnodes = self
+            .distribution
+            .compute_chunk_vnode(&chunk, &self.pk_indices);
+
+        for (idx, optional_row) in chunk.rows_with_holes().enumerate() {
+            let Some((op, row)) = optional_row else {
+                continue;
+            };
             let pk = row.project(&self.pk_indices);
-            let vnode = self.distribution.compute_vnode_by_pk(pk);
+            let vnode = vnodes[idx];
             let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, vnode);
             match op {
                 Op::Insert | Op::UpdateInsert => {
