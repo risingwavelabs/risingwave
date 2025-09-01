@@ -98,7 +98,7 @@ pub struct RedShiftConfig {
     pub create_table_if_not_exists: bool,
 
     #[serde(default = "default_schedule")]
-    #[serde(rename = "schedule_seconds")]
+    #[serde(rename = "write.target.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
     pub schedule_seconds: u64,
 

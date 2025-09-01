@@ -136,6 +136,18 @@ public class SinkWriterStreamObserver
 
                 currentBatchId = batch.getBatchId();
 
+                if (batchWritten) {
+                    responseObserver.onNext(
+                            ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
+                                    .setBatch(
+                                            ConnectorServiceProto.SinkWriterStreamResponse
+                                                    .BatchWrittenResponse.newBuilder()
+                                                    .setEpoch(currentEpoch)
+                                                    .setBatchId(currentBatchId)
+                                                    .build())
+                                    .build());
+                }
+
                 LOG.debug("Batch {} written to epoch {}", currentBatchId, batch.getEpoch());
             } else if (sinkTask.hasBarrier()) {
                 ConnectorServiceProto.SinkWriterStreamRequest.Barrier barrier =

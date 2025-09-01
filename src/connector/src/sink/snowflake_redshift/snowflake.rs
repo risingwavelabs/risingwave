@@ -66,7 +66,7 @@ pub struct SnowflakeV2Config {
     pub snowflake_schema: Option<String>,
 
     #[serde(default = "default_schedule")]
-    #[serde(rename = "schedule_seconds")]
+    #[serde(rename = "write.target.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
     pub snowflake_schedule_seconds: u64,
 
