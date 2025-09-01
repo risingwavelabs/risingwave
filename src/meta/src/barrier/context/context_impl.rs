@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
@@ -83,6 +83,11 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
         job.finish(&self.metadata_manager).await
+    }
+
+    #[await_tree::instrument("finish_cdc_table_backfill({job})")]
+    async fn finish_cdc_table_backfill(&self, job: TableId) -> MetaResult<()> {
+        self.env.cdc_table_backfill_tracker.complete_job(job).await
     }
 
     #[await_tree::instrument("new_control_stream({})", node.id)]
