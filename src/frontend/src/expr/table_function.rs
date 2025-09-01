@@ -625,25 +625,9 @@ impl TableFunction {
         }
     }
 
-    pub fn new_internal_get_channel_stats() -> Self {
-        TableFunction {
-            args: vec![],
-            return_type: DataType::Struct(StructType::new(vec![
-                ("upstream_fragment_id".to_owned(), DataType::Int32),
-                ("downstream_fragment_id".to_owned(), DataType::Int32),
-                ("upstream_actor_count".to_owned(), DataType::Int32),
-                ("backpressure_rate".to_owned(), DataType::Float64),
-                ("recv_throughput".to_owned(), DataType::Float64),
-                ("send_throughput".to_owned(), DataType::Float64),
-            ])),
-            function_type: TableFunctionType::InternalGetChannelStats,
-            user_defined: None,
-        }
-    }
-
-    pub fn new_internal_get_channel_stats_with_params(at: ExprImpl, offset: ExprImpl) -> Self {
-        TableFunction {
-            args: vec![at, offset],
+    pub fn new_internal_get_channel_stats(args: Vec<ExprImpl>) -> Self {
+        Self {
+            args,
             return_type: DataType::Struct(StructType::new(vec![
                 ("upstream_fragment_id".to_owned(), DataType::Int32),
                 ("downstream_fragment_id".to_owned(), DataType::Int32),
