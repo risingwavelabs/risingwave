@@ -151,7 +151,9 @@ struct CdcTableBackfillTrackerInner {
 
 impl CdcTableBackfillTrackerInner {
     async fn new(meta_store: SqlMetaStore) -> MetaResult<Self> {
-        // TODO(zw): improve init generation.
+        // The generation only resets after meta node is restarted.
+        // The barrier carrying expired generation will be rejected by the restarted meta node.
+        // Thus the invalid progress won't be applied to the tracker.
         let init_generation = INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID;
         let restored = restore_progress(&meta_store).await?;
         let fragment_id_to_job_id = load_cdc_fragment_table_mapping(&meta_store).await?;
