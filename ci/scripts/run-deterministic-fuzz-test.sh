@@ -39,7 +39,7 @@ chmod +x ./risingwave_simulation
 
 download_and_prepare_rw "$profile" common
 
-download-and-decompress-artifact sqlsmith-reducer-"$profile" target/debug/
+download-and-decompress-artifact sqlsmith-"$profile" target/debug/
 mv target/debug/sqlsmith-reducer-"$profile" target/debug/sqlsmith-reducer
 chmod +x ./target/debug/sqlsmith-reducer
 
