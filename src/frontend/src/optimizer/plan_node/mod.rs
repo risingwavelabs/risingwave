@@ -971,6 +971,7 @@ mod batch_delete;
 mod batch_exchange;
 mod batch_expand;
 mod batch_filter;
+mod batch_get_channel_stats;
 mod batch_group_topn;
 mod batch_hash_agg;
 mod batch_hash_join;
@@ -1005,6 +1006,7 @@ mod logical_delete;
 mod logical_except;
 mod logical_expand;
 mod logical_filter;
+mod logical_get_channel_stats;
 mod logical_hop_window;
 mod logical_insert;
 mod logical_intersect;
@@ -1090,6 +1092,7 @@ pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
 pub use batch_file_scan::BatchFileScan;
 pub use batch_filter::BatchFilter;
+pub use batch_get_channel_stats::BatchGetChannelStats;
 pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
@@ -1130,6 +1133,7 @@ pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
 pub use logical_file_scan::LogicalFileScan;
 pub use logical_filter::LogicalFilter;
+pub use logical_get_channel_stats::LogicalGetChannelStats;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
@@ -1259,6 +1263,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
+            , { Logical, GetChannelStats }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1292,6 +1297,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
+            , { Batch, GetChannelStats }
             , { Batch, VectorSearch }
             , { Stream, Project }
             , { Stream, Filter }

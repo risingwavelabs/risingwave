@@ -1,0 +1,142 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::Schema;
+
+use super::generic::GenericPlanRef;
+use super::utils::{Distill, childless_record};
+use super::{
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalPlanRef as PlanRef, PlanBase,
+    PredicatePushdown, ToBatch, ToStream,
+};
+use crate::error::Result;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
+};
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{ColIndexMapping, Condition};
+
+/// `LogicalGetChannelStats` represents a plan node that retrieves channel statistics
+/// from the dashboard API. It has no inputs and returns channel stats data.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LogicalGetChannelStats {
+    pub base: PlanBase<Logical>,
+    pub at_time: Option<u64>,
+    pub time_offset: u64,
+}
+
+impl LogicalGetChannelStats {
+    /// Create a new `LogicalGetChannelStats` node
+    pub fn new(
+        ctx: crate::OptimizerContextRef,
+        schema: Schema,
+        at_time: Option<u64>,
+        time_offset: u64,
+    ) -> Self {
+        let functional_dependency = FunctionalDependencySet::new(schema.len());
+        let base = PlanBase::new_logical(ctx, schema, None, functional_dependency);
+        Self {
+            base,
+            at_time,
+            time_offset,
+        }
+    }
+
+    /// Get the `at_time` parameter
+    pub fn at_time(&self) -> Option<u64> {
+        self.at_time
+    }
+
+    /// Get the `time_offset` parameter
+    pub fn time_offset(&self) -> u64 {
+        self.time_offset
+    }
+}
+
+impl_plan_tree_node_for_leaf! { Logical, LogicalGetChannelStats }
+
+impl Distill for LogicalGetChannelStats {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let fields = vec![
+            ("at_time", Pretty::debug(&self.at_time)),
+            ("time_offset", Pretty::debug(&self.time_offset)),
+        ];
+        childless_record("LogicalGetChannelStats", fields)
+    }
+}
+
+impl ExprRewritable<Logical> for LogicalGetChannelStats {
+    fn has_rewritable_expr(&self) -> bool {
+        false
+    }
+
+    fn rewrite_exprs(&self, _r: &mut dyn crate::expr::ExprRewriter) -> PlanRef {
+        self.clone().into()
+    }
+}
+
+impl crate::optimizer::plan_node::expr_visitable::ExprVisitable for LogicalGetChannelStats {
+    fn visit_exprs(&self, _v: &mut dyn crate::expr::ExprVisitor) {
+        // No expressions to visit
+    }
+}
+
+impl ColPrunable for LogicalGetChannelStats {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+        LogicalProject::with_out_col_idx(self.clone().into(), required_cols.iter().cloned()).into()
+    }
+}
+
+impl PredicatePushdown for LogicalGetChannelStats {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        LogicalFilter::create(self.clone().into(), predicate)
+    }
+}
+
+impl ToBatch for LogicalGetChannelStats {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
+        use crate::optimizer::plan_node::BatchGetChannelStats;
+        Ok(BatchGetChannelStats::new(
+            self.base.ctx().clone(),
+            self.base.schema().clone(),
+            self.at_time,
+            self.time_offset,
+        )
+        .into())
+    }
+}
+
+impl ToStream for LogicalGetChannelStats {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
+        // Not implementing streaming for this node as requested
+        unimplemented!("Streaming not implemented for LogicalGetChannelStats")
+    }
+
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        // Not implementing streaming for this node as requested
+        unimplemented!("Streaming not implemented for LogicalGetChannelStats")
+    }
+}
