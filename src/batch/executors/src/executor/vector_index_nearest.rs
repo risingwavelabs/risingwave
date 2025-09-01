@@ -25,14 +25,14 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::row::RowDeserializer;
-use risingwave_common::types::{DataType, ScalarImpl, StructType};
+use risingwave_common::types::{DataType, ScalarImpl, ScalarRef, StructType};
 use risingwave_common::util::value_encoding::BasicDeserializer;
+use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{BatchQueryEpoch, PbDistanceType};
 use risingwave_storage::store::{
     NewReadSnapshotOptions, StateStoreReadVector, VectorNearestOptions,
 };
-use risingwave_storage::vector::{DistanceMeasurement, Vector};
 use risingwave_storage::{StateStore, dispatch_state_store};
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -169,13 +169,13 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
                     let deserializer = deserializer.clone();
                     let row_results: Vec<Result<StructValue>> = read_snapshot
                         .nearest(
-                            Vector::new(vector.into_slice()),
+                            vector.to_owned_scalar(),
                             VectorNearestOptions { top_n, measure },
                             move |_vec, distance, value| {
                                 let mut values =
                                     Vec::with_capacity(deserializer.data_types().len() + 1);
                                 deserializer.deserialize_to(value, &mut values)?;
-                                values.push(Some(ScalarImpl::Float64((distance as f64).into())));
+                                values.push(Some(ScalarImpl::Float64(distance.into())));
                                 Ok(StructValue::new(values))
                             },
                         )

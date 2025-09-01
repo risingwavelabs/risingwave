@@ -24,6 +24,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::{EpochPair, MAX_EPOCH};
 use risingwave_hummock_sdk::key::{
@@ -35,7 +36,6 @@ use thiserror_ext::AsReport;
 use tokio::task::yield_now;
 use tracing::error;
 
-use crate::dispatch_measurement;
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::hummock::utils::{
@@ -756,7 +756,7 @@ impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
             );
             builder.finish()
         }
-        dispatch_measurement!(options.measure, MeasurementType, {
+        dispatch_distance_measurement!(options.measure, MeasurementType, {
             Ok(nearest_impl::<MeasurementType, O>(
                 &self.inner.vectors,
                 self.epoch,

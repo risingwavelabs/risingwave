@@ -33,7 +33,7 @@
       └─LogicalProject { exprs: [items.id, items.embedding, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
         └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalVectorSearch { distance_type: L2, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.embedding:Vector(3)] }
+    LogicalVectorSearch { distance_type: L2Sqr, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.embedding:Vector(3)] }
     └─LogicalScan { table: items, columns: [items.id, items.embedding] }
   batch_plan: |-
     BatchProject { exprs: [items.id, items.embedding] }
@@ -52,7 +52,7 @@
       └─LogicalProject { exprs: [items.id, items.embedding, items._rw_timestamp, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
         └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalVectorSearch { distance_type: L2, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.embedding:Vector(3), items._rw_timestamp:Timestamptz] }
+    LogicalVectorSearch { distance_type: L2Sqr, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.embedding:Vector(3), items._rw_timestamp:Timestamptz] }
     └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
   batch_plan: |-
     BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
@@ -72,7 +72,7 @@
           └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [vector_distance, (L2Distance(items.embedding, '[3,1,2]':Vector(3)) + 1:Int32::Float64) as $expr1] }
-    └─LogicalVectorSearch { distance_type: L2, top_n: 5, left: $0, right: '[3,1,2]':Vector(3), output_columns: [items.embedding:Vector(3)] }
+    └─LogicalVectorSearch { distance_type: L2Sqr, top_n: 5, left: $0, right: '[3,1,2]':Vector(3), output_columns: [items.embedding:Vector(3)] }
       └─LogicalScan { table: items, columns: [items.embedding] }
   batch_plan: |-
     BatchProject { exprs: [$expr1, (L2Distance(items.embedding, '[3,1,2]':Vector(3)) + 1:Float64) as $expr2] }

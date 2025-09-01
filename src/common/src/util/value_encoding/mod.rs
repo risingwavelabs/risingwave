@@ -284,11 +284,11 @@ fn estimate_serialize_list_size(list: ListRef<'_>) -> usize {
 }
 
 fn serialize_vector(value: VectorRef<'_>, buf: &mut impl BufMut) {
-    let elems = value.into_slice();
+    let elems = value.as_slice();
     encode_vector_payload(elems, buf);
 }
 fn estimate_serialize_vector_size(v: VectorRef<'_>) -> usize {
-    size_of_val(v.into_slice())
+    size_of_val(v.as_slice())
 }
 
 fn serialize_str(bytes: &[u8], buf: &mut impl BufMut) {
@@ -369,7 +369,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
-        DataType::Vector(dimension) => deserialize_vector(*dimension, data)?,
+        DataType::Vector(dimension) => deserialize_vector(*dimension, data),
         DataType::List(item_type) => deserialize_list(item_type, data)?,
         DataType::Map(map_type) => {
             // FIXME: clone type everytime here is inefficient
@@ -397,12 +397,11 @@ fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarI
     Ok(ScalarImpl::List(ListValue::new(builder.finish())))
 }
 
-fn deserialize_vector(dimension: usize, data: &mut impl Buf) -> Result<ScalarImpl> {
-    let payload = decode_vector_payload(dimension, data);
-    Ok(VectorVal {
-        inner: F32::from_inner_vec(payload).into_boxed_slice(),
+fn deserialize_vector(dimension: usize, data: &mut impl Buf) -> ScalarImpl {
+    VectorVal {
+        inner: decode_vector_payload(dimension, data).into_boxed_slice(),
     }
-    .to_scalar_value())
+    .to_scalar_value()
 }
 
 fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {
