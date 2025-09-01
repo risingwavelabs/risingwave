@@ -21,7 +21,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use super::prelude::{PlanRef, *};
 use crate::expr::TableFunctionType;
 use crate::optimizer::OptimizerContext;
-use crate::optimizer::plan_node::{Logical, LogicalTableFunction, LogicalValues};
+use crate::optimizer::plan_node::{Logical, LogicalGetChannelStats, LogicalTableFunction};
 use crate::optimizer::rule::{ApplyResult, FallibleRule};
 
 /// Helper function to extract a constant u64 value from an `ExprImpl`.
@@ -104,10 +104,11 @@ impl TableFunctionToInternalGetChannelStatsRule {
         // TODO: In a real implementation, this would:
         // 1. Call the dashboard API with the parameters
         // 2. Parse the response to get channel stats
-        // 3. Convert the stats to rows in the LogicalValues
+        // 3. Convert the stats to rows in the LogicalGetChannelStats
 
-        // For now, return empty values
-        let plan = LogicalValues::new(vec![], Schema::new(fields), ctx.clone());
+        // For now, create a LogicalGetChannelStats node
+        let plan =
+            LogicalGetChannelStats::new(ctx.clone(), Schema::new(fields), _at_time, _time_offset);
         Ok(plan.into())
     }
 }
