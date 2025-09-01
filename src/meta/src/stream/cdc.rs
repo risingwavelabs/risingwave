@@ -20,6 +20,7 @@ use anyhow::Context;
 use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -267,13 +268,24 @@ pub async fn try_get_cdc_table_snapshot_splits(
         .into_tuple()
         .all(&meta_store.conn)
         .await?;
-    if !splits.is_empty()
-        && splits
-            .iter()
-            .all(|(_, _, _, is_backfill_finished)| *is_backfill_finished == 1)
-    {
-        let merged_split = vec![single_merged_split()];
-        return Ok(merged_split);
+    let split_completed_count = splits
+        .iter()
+        .filter(|(_, _, _, is_backfill_finished)| *is_backfill_finished == 1)
+        .count();
+    assert!(
+        split_completed_count <= 1,
+        "split_completed_count = {}",
+        split_completed_count
+    );
+    let is_backfill_finished = split_completed_count == 1;
+    if is_backfill_finished && splits.len() != 1 {
+        // CdcTableBackfillTracker::complete_job rewrites splits in a transaction.
+        // This error should only happen when the meta store reads uncommitted data.
+        tracing::error!(table_id, ?splits, "unexpected split count");
+        bail!(
+            "unexpected split count: table_id={table_id}, split_total_count={}, split_completed_count={split_completed_count}",
+            splits.len()
+        );
     }
     let splits: Vec<_> = splits
         .into_iter()

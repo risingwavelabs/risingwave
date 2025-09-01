@@ -509,3 +509,5 @@ impl ExternalTableImpl {
         }
     }
 }
+
+pub const CDC_TABLE_SPLIT_ID_START: i64 = 1;

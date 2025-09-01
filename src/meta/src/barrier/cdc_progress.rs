@@ -15,8 +15,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
+use risingwave_common::row::{OwnedRow, Row};
+use risingwave_connector::source::cdc::external::CDC_TABLE_SPLIT_ID_START;
 use risingwave_connector::source::cdc::{
     INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID, INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID,
 };
@@ -24,7 +27,7 @@ use risingwave_meta_model::{FragmentId, ObjectId, cdc_table_snapshot_split, frag
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
 use risingwave_pb::stream_service::barrier_complete_response::PbCdcTableBackfillProgress;
 use sea_orm::prelude::Expr;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTrait};
 
 use crate::MetaResult;
 use crate::controller::SqlMetaStore;
@@ -97,17 +100,36 @@ impl CdcTableBackfillTracker {
     }
 
     pub async fn complete_job(&self, job_id: TableId) -> MetaResult<()> {
+        let txn = self.meta_store.conn.begin().await?;
+        // Rewrite the first split as [inf, inf].
+        let bound = OwnedRow::new(vec![None]).value_serialize();
         cdc_table_snapshot_split::Entity::update_many()
             .col_expr(
                 cdc_table_snapshot_split::Column::IsBackfillFinished,
                 Expr::value(1),
             )
+            .col_expr(
+                cdc_table_snapshot_split::Column::Left,
+                Expr::value(bound.clone()),
+            )
+            .col_expr(cdc_table_snapshot_split::Column::Right, Expr::value(bound))
             .filter(
                 cdc_table_snapshot_split::Column::TableId
                     .eq(job_id.table_id as risingwave_meta_model::TableId),
             )
-            .exec(&self.meta_store.conn)
+            .filter(cdc_table_snapshot_split::Column::SplitId.eq(CDC_TABLE_SPLIT_ID_START))
+            .exec(&txn)
             .await?;
+        // Keep only the first split.
+        cdc_table_snapshot_split::Entity::delete_many()
+            .filter(
+                cdc_table_snapshot_split::Column::TableId
+                    .eq(job_id.table_id as risingwave_meta_model::TableId),
+            )
+            .filter(cdc_table_snapshot_split::Column::SplitId.gt(CDC_TABLE_SPLIT_ID_START))
+            .exec(&txn)
+            .await?;
+        txn.commit().await?;
         self.inner.lock().complete_job(job_id);
         Ok(())
     }
@@ -156,7 +178,6 @@ impl CdcTableBackfillTrackerInner {
         // Thus the invalid progress won't be applied to the tracker.
         let init_generation = INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID;
         let restored = restore_progress(&meta_store).await?;
-        let fragment_id_to_job_id = load_cdc_fragment_table_mapping(&meta_store).await?;
         let cdc_progress = restored
             .into_iter()
             .map(|(job_id, (split_total_count, is_completed))| {
@@ -166,6 +187,7 @@ impl CdcTableBackfillTrackerInner {
                 )
             })
             .collect();
+        let fragment_id_to_job_id = load_cdc_fragment_table_mapping(&meta_store).await?;
         let inst = Self {
             cdc_progress,
             next_generation: init_generation + 1,
@@ -291,18 +313,36 @@ async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, 
         .into_tuple()
         .all(&meta_store.conn)
         .await?;
-    Ok(split_progress
+    split_progress
         .into_iter()
         .map(|(job_id, split_total_count, split_completed_count)| {
-            (
-                u32::try_from(job_id).unwrap(),
-                (
-                    u64::try_from(split_total_count).unwrap(),
-                    split_total_count == split_completed_count,
-                ),
-            )
+            assert!(
+                split_completed_count <= 1,
+                "split_completed_count = {}",
+                split_completed_count
+            );
+            let is_backfill_finished = split_completed_count == 1;
+            if is_backfill_finished && split_total_count != 1 {
+                // CdcTableBackfillTracker::complete_job rewrites splits in a transaction.
+                // This error should only happen when the meta store reads uncommitted data.
+                tracing::error!(
+                    job_id,
+                    split_total_count,
+                    split_completed_count,
+                    "unexpected split count"
+                );
+                Err(anyhow!(format!("unexpected split count:job_id={job_id}, split_total_count={split_total_count}, split_completed_count={split_completed_count}")).into())
+            } else {
+                Ok((
+                    u32::try_from(job_id).unwrap(),
+                    (
+                        u64::try_from(split_total_count).unwrap(),
+                        is_backfill_finished,
+                    ),
+                ))
+            }
         })
-        .collect())
+        .try_collect()
 }
 
 async fn load_cdc_fragment_table_mapping(
