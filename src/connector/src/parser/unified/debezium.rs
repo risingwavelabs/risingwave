@@ -56,13 +56,8 @@ fn is_bigserial_default(default_value_expression: &str) -> bool {
 
     let expr = default_value_expression.trim();
 
-    // Special handling for nextval() function - skip parsing for existing columns
-    if expr.starts_with("nextval(") {
-        return false;
-    }
-
-    // Otherwise, assume it's a constant value and continue to handle the default value as before.
-    true
+    // Return true if it's NOT a nextval() function.
+    !expr.starts_with("nextval(")
 }
 
 // Example of Debezium JSON value:
@@ -280,7 +275,7 @@ pub fn parse_schema_change(
                             // Only process constant default values
                             if !is_bigserial_default(default_val_expr_str) {
                                 tracing::warn!(target: "auto_schema_change",
-                                    "Skip unsupported expression: {}", default_val_expr_str);
+                                    "Ignoring unsupported BIGSERIAL default value expression: {}", default_val_expr_str);
                                 ColumnDesc::named(name, ColumnId::placeholder(), data_type)
                             } else {
                                 let value_text: Option<String>;
