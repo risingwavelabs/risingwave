@@ -29,9 +29,9 @@ use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
-use risingwave_connector::sink::{SinkError, CONNECTOR_TYPE_KEY};
+use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl};
-use risingwave_connector::{match_sink_name_str, WithOptionsSecResolved, WithPropertiesExt};
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
@@ -57,8 +57,8 @@ use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
-use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
     IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
@@ -68,14 +68,14 @@ use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
+use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
-    build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
-    ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_internal_tables_by_id,
-    get_table_columns, grant_default_privileges_automatically, insert_fragment_relations,
-    list_user_info_by_ids, PartialObject,
+    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
+    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
+    get_internal_tables_by_id, get_table_columns, grant_default_privileges_automatically,
+    insert_fragment_relations, list_user_info_by_ids,
 };
-use crate::controller::ObjectModel;
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
