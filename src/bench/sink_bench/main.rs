@@ -111,6 +111,7 @@ impl LogReader for MockRangeLogReader {
                                 is_checkpoint: true,
                                 new_vnode_bitmap: None,
                                 is_stop: false,
+                                add_columns: None,
                             },
                         ))
                     }

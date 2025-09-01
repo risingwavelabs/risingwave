@@ -9,7 +9,7 @@
 
 <div align="center">
 
-### 🌊 Ride the Wave of Streaming Data.
+### 🌊 Ride the wave of streaming data
 
 </div>
 <p align="center">
@@ -58,9 +58,9 @@ Install RisingWave standalone mode:
 curl -L https://risingwave.com/sh | sh
 ```
 
-To learn about other installation options, such as using a Docker image, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
+To learn about other installation options, such as using a Docker image, see the [quick start guide](https://docs.risingwave.com/get-started/quickstart).
 
-## Stream, Store, and Query — All in One
+## Stream, store, and query — all in one
 
 RisingWave delivers a full **end-to-end streaming data platform** — combining real-time processing with built-in storage and open-format persistence.
 

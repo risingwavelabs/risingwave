@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -558,6 +559,11 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
     result
 }
 
+#[expect(
+    clippy::large_stack_frames,
+    reason = "Pre-opt MIR sums locals across match arms in async dispatch; \
+              post-layout generator stores only one arm at a time (~13–16 KiB)."
+)]
 async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {

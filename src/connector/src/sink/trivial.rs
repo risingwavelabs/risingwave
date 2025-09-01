@@ -18,6 +18,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use phf::{Set, phf_set};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use tracing::info;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
@@ -129,7 +130,7 @@ impl<T: TrivialSinkType> LogSinker for TrivialSink<T> {
 
                     log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
                 }
-                LogStoreReadItem::Barrier { .. } => {
+                LogStoreReadItem::Barrier { add_columns, .. } => {
                     if T::TRACE_LOG {
                         tracing::trace!(
                             target: "events::sink::message::barrier",
@@ -137,6 +138,10 @@ impl<T: TrivialSinkType> LogSinker for TrivialSink<T> {
                             sink_name = self.param.sink_name,
                             epoch,
                         );
+                    }
+
+                    if let Some(add_columns) = add_columns {
+                        info!(?add_columns, "trivial sink receive add columns");
                     }
 
                     log_reader.truncate(TruncateOffset::Barrier { epoch })?;

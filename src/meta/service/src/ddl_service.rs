@@ -561,7 +561,10 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropFunction(request.function_id as _))
+            .run_command(DdlCommand::DropFunction(
+                request.function_id as _,
+                DropMode::from_request_setting(request.cascade),
+            ))
             .await?;
 
         Ok(Response::new(DropFunctionResponse {
@@ -1259,6 +1262,26 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(CompactIcebergTableResponse {
             status: None,
             task_id,
+        }))
+    }
+
+    async fn expire_iceberg_table_snapshots(
+        &self,
+        request: Request<ExpireIcebergTableSnapshotsRequest>,
+    ) -> Result<Response<ExpireIcebergTableSnapshotsResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
+
+        // Trigger manual snapshot expiration directly using the sink ID
+        self.iceberg_compaction_manager
+            .check_and_expire_snapshots(&sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!("Failed to expire snapshots: {}", e.as_report()))
+            })?;
+
+        Ok(Response::new(ExpireIcebergTableSnapshotsResponse {
+            status: None,
         }))
     }
 }

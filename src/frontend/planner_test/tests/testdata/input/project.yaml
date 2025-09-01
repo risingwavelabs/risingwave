@@ -5,20 +5,30 @@
 - sql: select 'abc', 1, 1.4 as k from (select 1 as k, 2 from (select 1, 2 union all select 3, 4) union all select * from (select 3, 4) union all select 100, 200 from (select now(), now() - interval '1 hour'));
   expected_outputs:
     - batch_plan
+- id: create_table
+  sql: create table t (id int, value string);
+  expected_outputs: []
+- id: create_append_only_table
+  sql: create table t (id int, value string) append only;
+  expected_outputs: []
 # Test openai_embedding function with MaterializedExprs for impure function
-- sql: |
-    select id, value, openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding
-    from (values (1, 'hello'), (2, 'world')) as t(id, value);
+- before:
+    - create_table
+  sql: |
+    select id, value, openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
+    from t;
   expected_outputs:
     - logical_plan
     - batch_plan
     - stream_plan
 # Test mixed pure and impure expressions with openai_embedding
-- sql: |
+- before:
+    - create_table
+  sql: |
     select id, value, id + 1 as id_plus_one,
-           openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding,
+           openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding,
            upper(value) as upper_value
-    from (values (1, 'hello'), (2, 'world')) as t(id, value);
+    from t;
   expected_outputs:
     - logical_plan
     - batch_plan
@@ -38,3 +48,25 @@
   expected_outputs:
     - stream_plan
     - stream_dist_plan
+# Test openai_embedding function with append only input for impure function
+- before:
+    - create_append_only_table
+  sql: |
+    select id, value, openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
+    from t;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_plan
+# Test mixed pure and impure expressions with openai_embedding with append only input
+- before:
+    - create_append_only_table
+  sql: |
+    select id, value, id + 1 as id_plus_one,
+           openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding,
+           upper(value) as upper_value
+    from t;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_plan

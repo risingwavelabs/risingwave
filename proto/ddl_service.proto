@@ -337,6 +337,7 @@ message CreateFunctionResponse {
 
 message DropFunctionRequest {
   uint32 function_id = 1;
+  bool cascade = 2;
 }
 
 message DropFunctionResponse {
@@ -587,6 +588,14 @@ message CompactIcebergTableResponse {
   uint64 task_id = 2;
 }
 
+message ExpireIcebergTableSnapshotsRequest {
+  uint32 sink_id = 1;
+}
+
+message ExpireIcebergTableSnapshotsResponse {
+  common.Status status = 1;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -631,5 +640,6 @@ service DdlService {
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
   rpc CompactIcebergTable(CompactIcebergTableRequest) returns (CompactIcebergTableResponse);
+  rpc ExpireIcebergTableSnapshots(ExpireIcebergTableSnapshotsRequest) returns (ExpireIcebergTableSnapshotsResponse);
   rpc AlterCdcTableBackfillParallelism(AlterCdcTableBackfillParallelismRequest) returns (AlterCdcTableBackfillParallelismResponse);
 }
