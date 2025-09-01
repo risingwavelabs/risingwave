@@ -840,7 +840,6 @@ impl SchemaCatalog {
         self.index_by_id.get(index_id)
     }
 
-    /// Returns all indexes on the given table. Will not check if the table exists.
     pub fn get_indexes_by_table_id(
         &self,
         table_id: &TableId,
@@ -853,6 +852,14 @@ impl SchemaCatalog {
             .into_iter()
             .filter(|i| include_creating || i.is_created())
             .collect()
+    }
+
+    pub fn get_any_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+        self.get_indexes_by_table_id(table_id, true)
+    }
+
+    pub fn get_created_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+        self.get_indexes_by_table_id(table_id, false)
     }
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&Arc<SystemTableCatalog>> {

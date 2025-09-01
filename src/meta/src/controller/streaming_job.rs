@@ -29,9 +29,9 @@ use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
-use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
+use risingwave_connector::sink::{SinkError, CONNECTOR_TYPE_KEY};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl};
-use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
+use risingwave_connector::{match_sink_name_str, WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
@@ -40,7 +40,7 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
-use risingwave_pb::catalog::{PbCreateType, PbSink, PbTable};
+use risingwave_pb::catalog::{PbCreateType, PbTable};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -57,8 +57,8 @@ use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
-use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
     IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
@@ -68,14 +68,14 @@ use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
-use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
-    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_internal_tables_by_id, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_user_info_by_ids,
+    build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
+    ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_internal_tables_by_id,
+    get_table_columns, grant_default_privileges_automatically, insert_fragment_relations,
+    list_user_info_by_ids, PartialObject,
 };
+use crate::controller::ObjectModel;
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
@@ -400,25 +400,14 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
-        let need_notify = streaming_job.should_notify_creating();
-        let (sink, table, index) = match streaming_job {
-            StreamingJob::Sink(sink, _) => (Some(sink), None, None),
-            StreamingJob::Table(_, table, _) => (None, Some(table), None),
-            StreamingJob::Index(index, _) => (None, None, Some(index)),
-            StreamingJob::Source(_) | StreamingJob::MaterializedView(_) => (None, None, None),
-        };
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id().table_id as _,
             || stream_job_fragments.fragments.values(),
             &stream_job_fragments.actor_status,
             &stream_job_fragments.actor_splits,
             &stream_job_fragments.downstreams,
-            need_notify,
-            streaming_job.definition(),
             for_replace,
-            sink,
-            table,
-            index,
+            Some(streaming_job),
         )
         .await
     }
@@ -437,12 +426,8 @@ impl CatalogController {
         actor_status: &BTreeMap<crate::model::ActorId, PbActorStatus>,
         actor_splits: &HashMap<crate::model::ActorId, Vec<SplitImpl>>,
         downstreams: &FragmentDownstreamRelation,
-        need_notify: bool,
-        definition: String,
         for_replace: bool,
-        sink: Option<&PbSink>,
-        table: Option<&PbTable>,
-        index: Option<&risingwave_pb::catalog::Index>,
+        creating_streaming_job: Option<&'a StreamingJob>,
     ) -> MetaResult<()> {
         let fragment_actors = Self::extract_fragment_and_actors_from_fragments(
             job_id,
@@ -452,7 +437,12 @@ impl CatalogController {
         )?;
         let inner = self.inner.write().await;
 
-        let mut objects_to_notify = if need_notify { Some(vec![]) } else { None };
+        let need_notify = creating_streaming_job
+            .map(|job| job.should_notify_creating())
+            .unwrap_or(false);
+        let definition = creating_streaming_job.map(|job| job.definition());
+
+        let mut objects_to_notify = vec![];
         let txn = inner.db.begin().await?;
 
         // Add fragments.
@@ -488,13 +478,13 @@ impl CatalogController {
                     .update(&txn)
                     .await?;
 
-                    if let Some(objects) = &mut objects_to_notify {
+                    if need_notify {
                         let mut table = table.clone();
                         // In production, definition was replaced but still needed for notification.
                         if cfg!(not(debug_assertions)) && table.id == job_id as u32 {
-                            table.definition = definition.clone();
+                            table.definition = definition.clone().unwrap();
                         }
-                        objects.push(PbObject {
+                        objects_to_notify.push(PbObject {
                             object_info: Some(PbObjectInfo::Table(table)),
                         });
                     }
@@ -503,16 +493,19 @@ impl CatalogController {
         }
 
         // Add streaming job objects to notification
-        if let Some(objects) = &mut objects_to_notify {
-            let job_objects = [
-                sink.map(|s| PbObjectInfo::Sink(s.clone())),
-                index.map(|i| PbObjectInfo::Index(i.clone())),
-            ];
-
-            for object_info in job_objects.into_iter().flatten() {
-                objects.push(PbObject {
-                    object_info: Some(object_info),
-                });
+        if need_notify {
+            match creating_streaming_job.unwrap() {
+                StreamingJob::Sink(sink, _) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Sink(sink.clone())),
+                    });
+                }
+                StreamingJob::Index(index, _) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Index(index.clone())),
+                    });
+                }
+                _ => {}
             }
         }
 
@@ -528,7 +521,7 @@ impl CatalogController {
 
         if !for_replace {
             // Update dml fragment id.
-            if let Some(table) = table {
+            if let Some(StreamingJob::Table(_, table, _)) = creating_streaming_job {
                 Table::update(table::ActiveModel {
                     table_id: Set(table.id as _),
                     dml_fragment_id: Set(table.dml_fragment_id.map(|id| id as _)),
@@ -541,11 +534,17 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        if let Some(objects) = objects_to_notify
-            && !objects.is_empty()
-        {
-            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
-                .await;
+        // FIXME: there's a gap between the catalog creation and notification, which may lead to
+        // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
+        // need to either forward the notification or filter catalogs without any fragments in the metastore.
+        if !objects_to_notify.is_empty() {
+            self.notify_frontend(
+                Operation::Add,
+                Info::ObjectGroup(PbObjectGroup {
+                    objects: objects_to_notify,
+                }),
+            )
+            .await;
         }
 
         Ok(())

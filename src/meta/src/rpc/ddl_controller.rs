@@ -1826,12 +1826,8 @@ impl DdlController {
                             &sink.actor_status,
                             &empty_actor_splits,
                             &empty_downstreams,
-                            false,
-                            sink.original_sink.definition.clone(),
                             true,
-                            Some(&sink.original_sink),
                             None,
-                            None, // index
                         )
                         .await?;
                 }

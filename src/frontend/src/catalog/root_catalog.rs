@@ -1140,7 +1140,7 @@ impl Catalog {
             .unwrap()
             .get_schema_by_id(&schema_id)
             .unwrap()
-            .get_indexes_by_table_id(&mv_id, true)
+            .get_any_indexes_by_table_id(&mv_id)
     }
 
     pub fn get_id_by_class_name(
