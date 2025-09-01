@@ -89,6 +89,24 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                                            panels.timeseries_count(
+                                "PostgreSQL CDC LSN Progression",
+                                "LSN progression through the CDC pipeline by source_id",
+                                [
+                                    panels.target(
+                                        f"{metric('stream_pg_cdc_state_table_lsn')}",
+                                        "source_id {{source_id}} - State Table LSN",
+                                    ),
+                                    panels.target(
+                                        f"{metric('stream_pg_cdc_jni_commit_offset_lsn')}",
+                                        "source_id {{source_id}} - JNI Commit Offset LSN",
+                                    ),
+                                    panels.target(
+                                        f"{metric('stream_pg_cdc_confirm_flush_lsn')}",
+                                                                                 "slot {{slot_name}} source_id {{source_id}} - Confirmed Flush LSN",
+                                    ),
+                                ],
+                            ),
             ],
         ),
     ]
