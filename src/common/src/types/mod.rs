@@ -63,7 +63,7 @@ mod num256;
 mod ops;
 mod ordered;
 mod ordered_float;
-mod postgres_type;
+pub mod postgres_type;
 mod scalar_impl;
 mod sentinel;
 mod serial;
@@ -103,6 +103,16 @@ pub type F32 = ordered_float::OrderedFloat<f32>;
 
 /// A 64-bit floating point type with total order.
 pub type F64 = ordered_float::OrderedFloat<f64>;
+
+pub const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
+
+// Pre-built JSON value for Debezium unavailable value to avoid rebuilding it every time
+pub static DEBEZIUM_UNAVAILABLE_JSON: std::sync::LazyLock<JsonbVal> =
+    std::sync::LazyLock::new(|| {
+        let mut builder = jsonbb::Builder::default();
+        builder.add_string(DEBEZIUM_UNAVAILABLE_VALUE);
+        JsonbVal(builder.finish())
+    });
 
 /// The set of datatypes that are supported in RisingWave.
 ///
