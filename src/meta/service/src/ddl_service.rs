@@ -561,7 +561,10 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropFunction(request.function_id as _))
+            .run_command(DdlCommand::DropFunction(
+                request.function_id as _,
+                DropMode::from_request_setting(request.cascade),
+            ))
             .await?;
 
         Ok(Response::new(DropFunctionResponse {

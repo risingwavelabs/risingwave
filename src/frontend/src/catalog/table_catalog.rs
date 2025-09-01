@@ -24,8 +24,10 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_pb::catalog::table::{
-    OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
+    CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
+    PbTableVersion,
 };
 use risingwave_pb::catalog::{
     PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
@@ -205,6 +207,8 @@ pub struct TableCatalog {
     pub refreshable: bool,
 
     pub vector_index_info: Option<PbVectorIndexInfo>,
+
+    pub cdc_table_type: Option<ExternalCdcTableType>,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -595,6 +599,10 @@ impl TableCatalog {
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
+            cdc_table_type: self
+                .cdc_table_type
+                .clone()
+                .map(|t| PbCdcTableType::from(t) as i32),
         }
     }
 
@@ -817,8 +825,13 @@ impl From<PbTable> for TableCatalog {
             job_id: tb.job_id.map(TableId::from),
             engine,
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
+
             refreshable: tb.refreshable,
             vector_index_info: tb.vector_index_info,
+            cdc_table_type: tb
+                .cdc_table_type
+                .and_then(|t| PbCdcTableType::try_from(t).ok())
+                .map(ExternalCdcTableType::from),
         }
     }
 }
@@ -910,8 +923,10 @@ mod tests {
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
             clean_watermark_index_in_pk: None,
+
             refreshable: false,
             vector_index_info: None,
+            cdc_table_type: None,
         }
         .into();
 
@@ -980,8 +995,10 @@ mod tests {
                 job_id: None,
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
+
                 refreshable: false,
                 vector_index_info: None,
+                cdc_table_type: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost()));

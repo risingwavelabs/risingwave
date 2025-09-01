@@ -586,7 +586,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
+    async fn drop_function(&self, _function_id: FunctionId, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
