@@ -810,6 +810,12 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
 
             /* patch code */
             // Check if this column is an enum type and set enum values
+            // 
+            // Caveat: The actual list of enum values is currently only used to determine whether 
+            // the field is set to a non-null value. If some logic uses these enum values in the future, 
+            // it can be inaccurate - when upstream PostgreSQL uses ALTER TYPE that adds a new variant 
+            // to this enum, the list here won't be updated to keep in sync.
+
             if (columnMetadata.getPostgresType().getEnumValues() != null) {
                 List<String> enumValues = columnMetadata.getPostgresType().getEnumValues();
                 if (!enumValues.isEmpty()) {
