@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use anyhow::Context;
-use jni::JavaVM;
 use jni::objects::JObject;
-use risingwave_common::global_jvm::JVM;
+use risingwave_common::global_jvm::Jvm;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 
@@ -23,7 +22,7 @@ use crate::sink::Result;
 
 #[derive(Debug)]
 pub struct JdbcJniClient {
-    jvm: &'static JavaVM,
+    jvm: Jvm,
     jdbc_url: String,
 }
 
@@ -38,7 +37,7 @@ impl Clone for JdbcJniClient {
 
 impl JdbcJniClient {
     pub fn new(jdbc_url: String) -> Result<Self> {
-        let jvm = JVM.get_or_init()?;
+        let jvm = Jvm::get_or_init()?;
         Ok(Self { jvm, jdbc_url })
     }
 
