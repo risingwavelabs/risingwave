@@ -251,6 +251,7 @@ mod add_logstore_rule;
 mod pull_up_correlated_predicate_agg_rule;
 mod source_to_iceberg_scan_rule;
 mod source_to_kafka_scan_rule;
+mod table_function_to_channel_stats;
 mod table_function_to_file_scan_rule;
 mod table_function_to_internal_backfill_progress;
 mod table_function_to_internal_source_backfill_progress;
@@ -265,6 +266,7 @@ pub use batch::batch_push_limit_to_scan_rule::*;
 pub use pull_up_correlated_predicate_agg_rule::*;
 pub use source_to_iceberg_scan_rule::*;
 pub use source_to_kafka_scan_rule::*;
+pub use table_function_to_channel_stats::*;
 pub use table_function_to_file_scan_rule::*;
 pub use table_function_to_internal_backfill_progress::*;
 pub use table_function_to_internal_source_backfill_progress::*;
@@ -341,6 +343,7 @@ macro_rules! for_all_rules {
             , { TableFunctionToMySqlQueryRule }
             , { TableFunctionToInternalBackfillProgressRule }
             , { TableFunctionToInternalSourceBackfillProgressRule }
+            , { TableFunctionToChannelStatsRule }
             , { ApplyLimitTransposeRule }
             , { CommonSubExprExtractRule }
             , { BatchProjectMergeRule }

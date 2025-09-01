@@ -371,6 +371,50 @@ message AlterConnectorPropsRequest {
 
 message AlterConnectorPropsResponse {}
 
+message GetChannelStatsRequest {
+  // Unix timestamp in seconds for the evaluation time. If not set, defaults to current Prometheus server time.
+  optional int64 at = 1;
+  // Time offset for throughput and backpressure rate calculation in seconds. If not set, defaults to 60s.
+  optional int64 time_offset = 2;
+}
+
+message GetChannelStatsResponse {
+  repeated ChannelStatsRow rows = 1;
+}
+
+message ChannelStatsRow {
+  uint32 upstream_fragment_id = 1;
+  uint32 downstream_fragment_id = 2;
+  uint32 actor_count = 3;
+  double backpressure_rate = 4;
+  double recv_throughput = 5;
+  double send_throughput = 6;
+}
+
+message GetFragmentStatsRequest {}
+
+message GetFragmentStatsResponse {
+  repeated FragmentStatsRow rows = 1;
+}
+
+message FragmentStatsRow {
+  uint32 fragment_id = 1;
+  uint32 actor_count = 2;
+  uint64 current_epoch = 3;
+}
+
+message GetRelationStatsRequest {}
+
+message GetRelationStatsResponse {
+  repeated RelationStatsRow rows = 1;
+}
+
+message RelationStatsRow {
+  uint32 relation_id = 1;
+  uint32 actor_count = 2;
+  uint64 current_epoch = 3;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -390,6 +434,9 @@ service StreamManagerService {
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
   rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
+  rpc GetChannelStats(GetChannelStatsRequest) returns (GetChannelStatsResponse);
+  rpc GetFragmentStats(GetFragmentStatsRequest) returns (GetFragmentStatsResponse);
+  rpc GetRelationStats(GetRelationStatsRequest) returns (GetRelationStatsResponse);
 }
 
 // Below for cluster service.

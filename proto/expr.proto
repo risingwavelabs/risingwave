@@ -403,6 +403,10 @@ message TableFunction {
     INTERNAL_BACKFILL_PROGRESS = 30;
     // Internal source backfill table function
     INTERNAL_SOURCE_BACKFILL_PROGRESS = 31;
+    // Internal streaming stats table functions
+    INTERNAL_GET_CHANNEL_STATS = 32;
+    INTERNAL_GET_FRAGMENT_STATS = 33;
+    INTERNAL_GET_RELATION_STATS = 34;
     // User defined table function
     USER_DEFINED = 100;
   }

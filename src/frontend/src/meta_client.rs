@@ -168,6 +168,11 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()>;
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
+
+    async fn get_channel_stats(
+        &self,
+        request: risingwave_pb::meta::GetChannelStatsRequest,
+    ) -> Result<risingwave_pb::meta::GetChannelStatsResponse>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -416,5 +421,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.0.refresh(request).await
+    }
+
+    async fn get_channel_stats(
+        &self,
+        request: risingwave_pb::meta::GetChannelStatsRequest,
+    ) -> Result<risingwave_pb::meta::GetChannelStatsResponse> {
+        self.0.get_channel_stats(request).await
     }
 }

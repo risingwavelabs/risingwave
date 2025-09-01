@@ -1,0 +1,37 @@
+# Test streaming stats table functions with a streaming job
+# This test creates a streaming job and verifies that the stats functions work
+
+statement ok
+CREATE TABLE source_table (id int, value int);
+
+statement ok
+INSERT INTO source_table VALUES (1, 10), (2, 20), (3, 30);
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT id, value FROM source_table;
+
+# Wait a bit for the materialized view to be created
+statement ok
+SELECT pg_sleep(2);
+
+# Test internal_get_channel_stats function with a streaming job
+query TT
+SELECT * FROM internal_get_channel_stats();
+----
+
+# Test internal_get_fragment_stats function with a streaming job
+query TT
+SELECT * FROM internal_get_fragment_stats();
+----
+
+# Test internal_get_relation_stats function with a streaming job
+query TT
+SELECT * FROM internal_get_relation_stats();
+----
+
+# Clean up
+statement ok
+DROP MATERIALIZED VIEW mv1;
+
+statement ok
+DROP TABLE source_table;

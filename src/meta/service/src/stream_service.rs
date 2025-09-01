@@ -629,6 +629,87 @@ impl StreamManagerService for StreamServiceImpl {
 
         Ok(Response::new(SetSyncLogStoreAlignedResponse {}))
     }
+
+    async fn get_channel_stats(
+        &self,
+        request: Request<GetChannelStatsRequest>,
+    ) -> Result<Response<GetChannelStatsResponse>, Status> {
+        let req = request.into_inner();
+        let _at = req.at;
+        let _time_offset = req.time_offset.unwrap_or(60);
+
+        // For now, return some mock data to demonstrate the functionality
+        // In a real implementation, this would query the compute nodes and Prometheus
+        let rows = vec![
+            ChannelStatsRow {
+                upstream_fragment_id: 1,
+                downstream_fragment_id: 2,
+                actor_count: 3,
+                backpressure_rate: 0.1,
+                recv_throughput: 1000.0,
+                send_throughput: 950.0,
+            },
+            ChannelStatsRow {
+                upstream_fragment_id: 2,
+                downstream_fragment_id: 3,
+                actor_count: 2,
+                backpressure_rate: 0.05,
+                recv_throughput: 950.0,
+                send_throughput: 900.0,
+            },
+        ];
+
+        Ok(Response::new(GetChannelStatsResponse { rows }))
+    }
+
+    async fn get_fragment_stats(
+        &self,
+        _request: Request<GetFragmentStatsRequest>,
+    ) -> Result<Response<GetFragmentStatsResponse>, Status> {
+        // For now, return some mock data to demonstrate the functionality
+        // In a real implementation, this would query the compute nodes
+        let rows = vec![
+            FragmentStatsRow {
+                fragment_id: 1,
+                actor_count: 3,
+                current_epoch: 100,
+            },
+            FragmentStatsRow {
+                fragment_id: 2,
+                actor_count: 2,
+                current_epoch: 100,
+            },
+            FragmentStatsRow {
+                fragment_id: 3,
+                actor_count: 1,
+                current_epoch: 100,
+            },
+        ];
+
+        Ok(Response::new(GetFragmentStatsResponse { rows }))
+    }
+
+    async fn get_relation_stats(
+        &self,
+        _request: Request<GetRelationStatsRequest>,
+    ) -> Result<Response<GetRelationStatsResponse>, Status> {
+        // For now, return some mock data to demonstrate the functionality
+        // In a real implementation, this would query the compute nodes
+        let rows = vec![
+            RelationStatsRow {
+                relation_id: 1001,
+                actor_count: 3,
+                current_epoch: 100,
+            },
+            RelationStatsRow {
+                relation_id: 1002,
+                actor_count: 2,
+                current_epoch: 100,
+            },
+        ];
+
+        Ok(Response::new(GetRelationStatsResponse { rows }))
+    }
 }
 
 fn fragment_desc_to_distribution(

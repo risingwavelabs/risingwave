@@ -415,6 +415,10 @@ message VectorIndexNearestNode {
   common.DistanceType distance_type = 6;
 }
 
+message ChannelStatsNode {
+  repeated plan_common.Field fields = 1;
+}
+
 message PlanNode {
   repeated PlanNode children = 1;
   reserved 22;
@@ -456,6 +460,7 @@ message PlanNode {
     GcsFileScanNode gcs_file_scan = 42;
     AzblobFileScanNode azblob_file_scan = 43;
     VectorIndexNearestNode vector_index_nearest = 44;
+    ChannelStatsNode channel_stats = 45;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;
