@@ -94,7 +94,7 @@ impl VectorStoreImpl {
         assert!(idx < self.info_offsets.len());
         let start = idx * self.dimension;
         let end = start + self.dimension;
-        VectorRef::from_slice(&self.vector_payload[start..end])
+        VectorRef::from_slice_unchecked(&self.vector_payload[start..end])
     }
 
     fn info(&self, idx: usize) -> &[u8] {

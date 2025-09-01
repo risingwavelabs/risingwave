@@ -270,7 +270,7 @@ pub type VectorVal = VectorInner<Box<[VectorItemType]>>;
 
 impl Debug for VectorVal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.as_scalar_ref().fmt(f)
+        self.to_ref().fmt(f)
     }
 }
 
@@ -278,7 +278,7 @@ impl Scalar for VectorVal {
     type ScalarRefType<'a> = VectorRef<'a>;
 
     fn as_scalar_ref(&self) -> VectorRef<'_> {
-        VectorInner { inner: &self.inner }
+        self.to_ref()
     }
 }
 
@@ -400,7 +400,7 @@ impl<'a> ScalarRef<'a> for VectorRef<'a> {
 }
 
 impl<'a> VectorRef<'a> {
-    pub fn from_slice(inner: &'a [VectorItemType]) -> Self {
+    pub fn from_slice_unchecked(inner: &'a [VectorItemType]) -> Self {
         Self { inner }
     }
 

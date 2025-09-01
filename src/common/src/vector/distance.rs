@@ -347,29 +347,29 @@ mod tests {
         assert_eq_float!(
             3.6808228,
             L1Distance::distance(
-                VectorRef::from_slice(&VEC1.map(Into::into)[..]),
-                VectorRef::from_slice(&VEC2.map(Into::into)[..]),
+                VectorRef::from_slice_unchecked(&VEC1.map(Into::into)[..]),
+                VectorRef::from_slice_unchecked(&VEC2.map(Into::into)[..]),
             )
         );
         assert_eq_float!(
             2.054677,
             L2SqrDistance::distance(
-                VectorRef::from_slice(&VEC1.map(Into::into)[..]),
-                VectorRef::from_slice(&VEC2.map(Into::into)[..]),
+                VectorRef::from_slice_unchecked(&VEC1.map(Into::into)[..]),
+                VectorRef::from_slice_unchecked(&VEC2.map(Into::into)[..]),
             )
         );
         assert_eq_float!(
             0.22848952,
             CosineDistance::distance(
-                VectorRef::from_slice(&VEC1.map(Into::into)[..]),
-                VectorRef::from_slice(&VEC2.map(Into::into)[..]),
+                VectorRef::from_slice_unchecked(&VEC1.map(Into::into)[..]),
+                VectorRef::from_slice_unchecked(&VEC2.map(Into::into)[..]),
             )
         );
         assert_eq_float!(
             -3.2870955,
             InnerProductDistance::distance(
-                VectorRef::from_slice(&VEC1.map(Into::into)[..]),
-                VectorRef::from_slice(&VEC2.map(Into::into)[..]),
+                VectorRef::from_slice_unchecked(&VEC1.map(Into::into)[..]),
+                VectorRef::from_slice_unchecked(&VEC2.map(Into::into)[..]),
             )
         );
     }

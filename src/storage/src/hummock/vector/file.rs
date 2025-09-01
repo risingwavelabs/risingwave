@@ -44,7 +44,7 @@ impl VectorBlockInner {
     pub fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
         let start = idx * self.dimension;
         let end = start + self.dimension;
-        VectorRef::from_slice(&self.vector_payload[start..end])
+        VectorRef::from_slice_unchecked(&self.vector_payload[start..end])
     }
 
     pub fn info(&self, idx: usize) -> &[u8] {

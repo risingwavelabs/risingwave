@@ -91,6 +91,15 @@ impl<T: AsRef<[VectorItemType]>> VectorInner<T> {
         let len = slice.len();
         let mut inner = Vec::with_capacity(len);
         let l2_norm = self.l2_norm();
+        if l2_norm.is_infinite() || l2_norm.is_nan() {
+            warn!(
+                "encounter vector {:?} with invalid l2_norm {}. return zeros vector",
+                slice, l2_norm
+            );
+            return VectorVal {
+                inner: vec![0.0.into(); slice.len()].into_boxed_slice(),
+            };
+        }
         if l2_norm < f32::MIN_POSITIVE {
             warn!("normalize 0-norm vector. return original value");
             return VectorVal {
