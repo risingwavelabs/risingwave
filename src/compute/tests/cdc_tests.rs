@@ -15,7 +15,7 @@
 #![feature(let_chains)]
 #![feature(coroutines)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -241,6 +241,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
                 snapshot_interval: 1,
                 snapshot_batch_size: 4,
             },
+            BTreeMap::default(),
         )
         .boxed(),
     );
