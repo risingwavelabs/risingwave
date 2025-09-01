@@ -340,9 +340,9 @@ impl Default for CdcScanOptions {
             disable_backfill: false,
             snapshot_barrier_interval: 1,
             snapshot_batch_size: 1000,
-            backfill_parallelism: 1,
             // 0 means disable backfill v2.
-            backfill_num_rows_per_split: 0,
+            backfill_parallelism: 0,
+            backfill_num_rows_per_split: 100_000,
             backfill_as_even_splits: true,
             backfill_split_pk_column_index: 0,
         }
