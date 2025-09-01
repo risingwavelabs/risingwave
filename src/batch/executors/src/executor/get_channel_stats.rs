@@ -15,7 +15,7 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -31,29 +31,21 @@ pub struct GetChannelStatsExecutor {
     identity: String,
     at_time: Option<u64>,
     time_offset: u64,
-    chunk_size: usize,
 }
 
 impl GetChannelStatsExecutor {
-    pub fn new(
-        schema: Schema,
-        identity: String,
-        at_time: Option<u64>,
-        time_offset: u64,
-        chunk_size: usize,
-    ) -> Self {
+    pub fn new(schema: Schema, identity: String, at_time: Option<u64>, time_offset: u64) -> Self {
         Self {
             schema,
             identity,
             at_time,
             time_offset,
-            chunk_size,
         }
     }
 
     /// Generate mock channel stats data for demonstration purposes
     /// In a real implementation, this would fetch data from the dashboard API
-    fn generate_channel_stats(&self) -> Vec<Vec<Option<String>>> {
+    fn generate_channel_stats(&self) -> Vec<Vec<Option<ScalarImpl>>> {
         let mut rows = Vec::new();
 
         // Generate some sample channel stats data
@@ -67,11 +59,13 @@ impl GetChannelStatsExecutor {
 
         for (channel_name, status, message_count) in channels {
             rows.push(vec![
-                Some(channel_name.to_string()),
-                Some(status.to_string()),
-                Some(message_count.to_string()),
-                Some(self.at_time.unwrap_or(0).to_string()),
-                Some(self.time_offset.to_string()),
+                Some(ScalarImpl::Utf8(channel_name.to_owned().into())),
+                Some(ScalarImpl::Utf8(status.to_owned().into())),
+                Some(ScalarImpl::Utf8(message_count.to_owned().into())),
+                Some(ScalarImpl::Utf8(
+                    self.at_time.unwrap_or(0).to_string().into(),
+                )),
+                Some(ScalarImpl::Utf8(self.time_offset.to_string().into())),
             ]);
         }
 
@@ -105,10 +99,7 @@ impl GetChannelStatsExecutor {
             for (col_idx, builder) in array_builders.iter_mut().enumerate() {
                 for row in &rows {
                     let value = &row[col_idx];
-                    match value {
-                        Some(s) => builder.append(&Some(s.as_str().into())),
-                        None => builder.append(&None),
-                    }
+                    builder.append(value);
                 }
             }
 
@@ -155,7 +146,6 @@ impl BoxedExecutorBuilder for GetChannelStatsExecutor {
             source.plan_node().get_identity().clone(),
             get_channel_stats_node.at_time,
             get_channel_stats_node.time_offset,
-            source.context().get_config().developer.chunk_size,
         )))
     }
 }
@@ -182,7 +172,6 @@ mod tests {
             "GetChannelStatsExecutor".to_string(),
             Some(1234567890),
             3600,
-            1024,
         ));
 
         let mut stream = executor.execute();
@@ -195,30 +184,15 @@ mod tests {
 
         // Verify the data structure
         assert_eq!(
-            *result
-                .column_at(0)
-                .as_varchar()
-                .unwrap()
-                .value_at(0)
-                .unwrap(),
+            *result.column_at(0).as_utf8().unwrap().value_at(0).unwrap(),
             "channel_1"
         );
         assert_eq!(
-            *result
-                .column_at(1)
-                .as_varchar()
-                .unwrap()
-                .value_at(0)
-                .unwrap(),
+            *result.column_at(1).as_utf8().unwrap().value_at(0).unwrap(),
             "active"
         );
         assert_eq!(
-            *result
-                .column_at(2)
-                .as_varchar()
-                .unwrap()
-                .value_at(0)
-                .unwrap(),
+            *result.column_at(2).as_utf8().unwrap().value_at(0).unwrap(),
             "1000"
         );
     }
@@ -239,7 +213,6 @@ mod tests {
             "GetChannelStatsExecutor".to_string(),
             None,
             7200,
-            1024,
         ));
 
         let mut stream = executor.execute();
@@ -252,21 +225,11 @@ mod tests {
 
         // Verify timestamp is 0 when no at_time is provided
         assert_eq!(
-            *result
-                .column_at(3)
-                .as_varchar()
-                .unwrap()
-                .value_at(0)
-                .unwrap(),
+            *result.column_at(3).as_utf8().unwrap().value_at(0).unwrap(),
             "0"
         );
         assert_eq!(
-            *result
-                .column_at(4)
-                .as_varchar()
-                .unwrap()
-                .value_at(0)
-                .unwrap(),
+            *result.column_at(4).as_utf8().unwrap().value_at(0).unwrap(),
             "7200"
         );
     }
