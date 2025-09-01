@@ -43,7 +43,7 @@ message AddMutation {
   // nodes which should be paused initially.
   repeated uint32 backfill_nodes_to_pause = 6;
   // CDC table snapshot splits
-  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
+  source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
   // Use downstream_fragment_id as keys.
   map<uint32, NewUpstreamSink> new_upstream_sinks = 8;
 }
@@ -100,7 +100,7 @@ message UpdateMutation {
   // Consistent with the semantics in AddMutation.
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
   // CDC table snapshot splits
-  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
+  source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
   map<uint32, SinkAddColumns> sink_add_columns = 8;
 }
 
