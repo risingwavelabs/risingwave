@@ -1237,6 +1237,13 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
         Ok(RefreshResponse { status: None })
     }
+
+    async fn get_channel_stats(
+        &self,
+        _request: risingwave_pb::meta::GetChannelStatsRequest,
+    ) -> RpcResult<risingwave_pb::meta::GetChannelStatsResponse> {
+        Ok(risingwave_pb::meta::GetChannelStatsResponse { rows: vec![] })
+    }
 }
 
 #[cfg(test)]

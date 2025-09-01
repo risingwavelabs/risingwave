@@ -14,13 +14,10 @@
 
 use std::rc::Rc;
 
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
-
 use super::prelude::{PlanRef, *};
 use crate::expr::TableFunctionType;
 use crate::optimizer::OptimizerContext;
-use crate::optimizer::plan_node::{Logical, LogicalTableFunction, LogicalValues};
+use crate::optimizer::plan_node::{Logical, LogicalChannelStats, LogicalTableFunction};
 use crate::optimizer::rule::{ApplyResult, FallibleRule};
 
 /// Transform the channel stats table function into a plan that calls the meta service.
@@ -43,19 +40,9 @@ impl FallibleRule<Logical> for TableFunctionToChannelStatsRule {
 
 impl TableFunctionToChannelStatsRule {
     fn build_plan(ctx: Rc<OptimizerContext>) -> anyhow::Result<PlanRef> {
-        let fields = vec![
-            Field::new("upstream_fragment_id", DataType::Int32),
-            Field::new("downstream_fragment_id", DataType::Int32),
-            Field::new("actor_count", DataType::Int32),
-            Field::new("backpressure_rate", DataType::Float64),
-            Field::new("recv_throughput", DataType::Float64),
-            Field::new("send_throughput", DataType::Float64),
-        ];
-
-        // For now, return empty results. The actual implementation would need to be done
-        // in the stream executor to call the meta service.
-        let plan = LogicalValues::new(vec![], Schema::new(fields), ctx.clone());
-        Ok(plan.into())
+        // Create a LogicalChannelStats plan that will fetch channel statistics from the meta service
+        let plan = LogicalChannelStats::create(ctx);
+        Ok(plan)
     }
 
     pub fn create() -> BoxedRule {

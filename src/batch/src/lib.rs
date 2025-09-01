@@ -35,6 +35,7 @@ pub mod error;
 pub mod exchange_source;
 pub mod execution;
 pub mod executor;
+pub mod meta_client;
 pub mod monitor;
 pub mod rpc;
 pub mod spill;

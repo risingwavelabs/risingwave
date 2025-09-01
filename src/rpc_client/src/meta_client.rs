@@ -1758,6 +1758,13 @@ impl MetaClient {
     pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.inner.refresh(request).await
     }
+
+    pub async fn get_channel_stats(
+        &self,
+        request: GetChannelStatsRequest,
+    ) -> Result<GetChannelStatsResponse> {
+        self.inner.get_channel_stats(request).await
+    }
 }
 
 #[async_trait]
@@ -2354,6 +2361,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
             ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
+            ,{ stream_client, get_channel_stats, GetChannelStatsRequest, GetChannelStatsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

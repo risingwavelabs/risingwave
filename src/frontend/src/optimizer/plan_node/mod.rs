@@ -967,6 +967,7 @@ pub mod stream;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 
+mod batch_channel_stats;
 mod batch_delete;
 mod batch_exchange;
 mod batch_expand;
@@ -999,6 +1000,7 @@ mod logical_agg;
 mod logical_apply;
 mod logical_cdc_scan;
 mod logical_changelog;
+mod logical_channel_stats;
 mod logical_cte_ref;
 mod logical_dedup;
 mod logical_delete;
@@ -1085,6 +1087,7 @@ mod stream_union;
 mod stream_vector_index_write;
 pub mod utils;
 
+pub use batch_channel_stats::BatchChannelStats;
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
@@ -1123,6 +1126,7 @@ pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
 pub use logical_changelog::LogicalChangeLog;
+pub use logical_channel_stats::LogicalChannelStats;
 pub use logical_cte_ref::LogicalCteRef;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
@@ -1259,6 +1263,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
+            , { Logical, ChannelStats }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1293,6 +1298,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
             , { Batch, VectorSearch }
+            , { Batch, ChannelStats }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }

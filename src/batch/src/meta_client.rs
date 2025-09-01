@@ -12,21 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use context::*;
-pub use env::*;
-pub use task_execution::*;
-pub use task_manager::*;
+use async_trait::async_trait;
+use risingwave_pb::meta::{GetChannelStatsRequest, GetChannelStatsResponse};
+use risingwave_rpc_client::error::Result;
 
-// Re-export FrontendMetaClient trait for batch executors
-pub use crate::meta_client::FrontendMetaClient;
-
-mod broadcast_channel;
-mod channel;
-mod consistent_hash_shuffle_channel;
-mod context;
-mod data_chunk_in_channel;
-mod env;
-mod fifo_channel;
-mod hash_shuffle_channel;
-mod task_execution;
-mod task_manager;
+/// Trait alias for `FrontendMetaClient` to avoid cyclic dependencies
+#[async_trait]
+pub trait FrontendMetaClient: Send + Sync {
+    async fn get_channel_stats(
+        &self,
+        request: GetChannelStatsRequest,
+    ) -> Result<GetChannelStatsResponse>;
+}
