@@ -35,75 +35,34 @@ use crate::source::cdc::external::mysql::{
 use crate::source::cdc::external::postgres::{pg_type_to_rw_type, type_name_to_pg_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
-/// Checks if a given default value expression is a constant value.
-/// Uses a fast heuristic approach based on syntax structure.
-fn is_constant_default_value(default_value_expression: &str) -> bool {
+/// Checks if a given default value expression is a BIGSERIAL default.
+///
+/// Normally, all unsupported expressions should fail in `from_text` parsing.
+/// However, we make a special exception for `nextval()` function because:
+/// 1. When users set a column as BIGSERIAL (usually as primary key), PostgreSQL automatically generates
+///    a default value expression like `nextval('sequence_name'::regclass)`
+/// 2. This is a very common scenario in real-world usage
+/// 3. For existing columns with `nextval()` default, we skip parsing the default value
+///    to avoid schema change failures
+///
+/// TODO: In the future, if we can distinguish between newly added columns and existing columns,
+/// we should modify this logic to:
+/// - Skip default value parsing for existing columns with `nextval()`
+/// - Report error for newly added columns with `nextval()` (since they should be handled differently)
+fn is_bigserial_default(default_value_expression: &str) -> bool {
     if default_value_expression.trim().is_empty() {
         return false;
     }
 
     let expr = default_value_expression.trim();
 
-    // 1. Quick check: contains parentheses = function call
-    if expr.contains('(') {
+    // Special handling for nextval() function - skip parsing for existing columns
+    if expr.starts_with("nextval(") {
         return false;
     }
 
-    // 2. Check if it's a literal constant
-    if is_literal_constant(expr) {
-        return true;
-    }
-
-    // 3. Check if it contains operators
-    if regex::Regex::new(r"[+\-*/<>=!&|]").unwrap().is_match(expr) {
-        return false;
-    }
-
-    // 4. Other cases might be constants
+    // Otherwise, assume it's a constant value and continue to handle the default value as before.
     true
-}
-
-/// Checks if the expression is a literal constant.
-fn is_literal_constant(expr: &str) -> bool {
-    // String literal: 'value' or 'value'::type
-    if regex::Regex::new(r"'[^']*'(::.*)?").unwrap().is_match(expr) {
-        return true;
-    }
-
-    // Numeric literal: 123, 3.14, -42, 1.23e-4
-    if regex::Regex::new(r"-?\d+(\.\d+)?([eE][+-]?\d+)?")
-        .unwrap()
-        .is_match(expr)
-    {
-        return true;
-    }
-
-    // Boolean literal
-    if regex::Regex::new(r"(true|false)(::.*)?")
-        .unwrap()
-        .is_match(&expr.to_lowercase())
-    {
-        return true;
-    }
-
-    // NULL literal
-    if regex::Regex::new(r"null(::.*)?")
-        .unwrap()
-        .is_match(&expr.to_lowercase())
-    {
-        return true;
-    }
-
-    // Array literal: '{1,2,3}' or ARRAY['a','b','c']
-    if regex::Regex::new(r"\{.*\}(::.*)?").unwrap().is_match(expr)
-        || regex::Regex::new(r"array\s*\[.*\](::.*)?")
-            .unwrap()
-            .is_match(&expr.to_lowercase())
-    {
-        return true;
-    }
-
-    false
 }
 
 // Example of Debezium JSON value:
@@ -320,9 +279,9 @@ pub fn parse_schema_change(
                         Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
                             let default_val_expr_str = default_val_expr_str.as_str().unwrap();
                             // Only process constant default values
-                            if !is_constant_default_value(default_val_expr_str) {
-                                tracing::debug!(target: "auto_schema_change",
-                                    "Skipping non-constant default value expression: {}", default_val_expr_str);
+                            if !is_bigserial_default(default_val_expr_str) {
+                                tracing::warn!(target: "auto_schema_change",
+                                    "Skip unsupported expression: {}", default_val_expr_str);
                                 ColumnDesc::named(name, ColumnId::placeholder(), data_type)
                             } else {
                                 let value_text: Option<String>;
