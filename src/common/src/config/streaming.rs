@@ -224,6 +224,22 @@ pub struct StreamingDeveloperConfig {
     /// `IcebergSink`: The maximum number of rows in a row group when writing Parquet files.
     #[serde(default = "default::developer::iceberg_sink_write_parquet_max_row_group_rows")]
     pub iceberg_sink_write_parquet_max_row_group_rows: usize,
+
+
+    /// Whether by default enable preloading all rows in memory for state table.
+    /// If true, all capable state tables will preload its state to memory
+    #[serde(default = "default::streaming::default_enable_mem_preload_state_table")]
+    pub default_enable_mem_preload_state_table: bool,
+
+    /// The list of state table ids to *enable* preloading all rows in memory for state table.
+    /// Only takes effect when `default_enable_mem_preload_state_table` is false.
+    #[serde(default)]
+    pub mem_preload_state_table_ids_whilelist: Vec<u32>,
+
+    /// The list of state table ids to *disable* preloading all rows in memory for state table.
+    /// Only takes effect when `default_enable_mem_preload_state_table` is true.
+    #[serde(default)]
+    pub mem_preload_state_table_ids_blacklist: Vec<u32>,
 }
 
 pub mod default {
@@ -248,6 +264,10 @@ pub mod default {
 
         pub fn unsafe_enable_strict_consistency() -> bool {
             true
+        }
+
+        pub fn default_enable_mem_preload_state_table() -> bool {
+            false
         }
     }
 }

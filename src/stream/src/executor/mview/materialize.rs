@@ -24,7 +24,7 @@ use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
+    ColumnDesc, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
 use risingwave_common::row::{CompactedRow, OwnedRow};
 use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DataType, ScalarImpl};
@@ -41,7 +41,6 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{
     StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
 };
-use crate::common::table::test_utils::gen_pbtable;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::prelude::*;
 
@@ -171,6 +170,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
         let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(op_consistency_level)
+            .enable_preload_all_rows_by_config(&actor_context.streaming_config)
             .build()
             .await;
 
@@ -402,13 +402,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
 impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
-    #[allow(clippy::too_many_arguments)]
+    #[cfg(any(test, feature = "test"))]
     pub async fn for_test(
         input: Executor,
         store: S,
         table_id: TableId,
         keys: Vec<ColumnOrder>,
-        column_ids: Vec<ColumnId>,
+        column_ids: Vec<risingwave_common::catalog::ColumnId>,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
@@ -426,7 +426,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             Arc::from(columns.clone().into_boxed_slice()),
         );
         let state_table = StateTableInner::from_table_catalog(
-            &gen_pbtable(
+            &crate::common::table::test_utils::gen_pbtable(
                 table_id,
                 columns,
                 arrange_order_types,
@@ -2148,7 +2148,7 @@ mod tests {
         let pk_indices = vec![0];
 
         let mut table = StateTable::from_table_catalog(
-            &gen_pbtable(
+            &crate::common::table::test_utils::gen_pbtable(
                 TableId::from(1002),
                 column_descs.clone(),
                 order_types,

@@ -35,8 +35,11 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
     /// See also [`super::SourceStateTableHandler::from_table_catalog`] for how the state table looks like.
     pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
         Self {
+            // Note: should not enable `preload_all_rows` for `StateTable` of source backfill
+            // because it uses storage to synchronize different parallelisms, which is a special
+            // access pattern that in-mem state table has not supported yet.
             state_store: StateTableBuilder::new(table_catalog, store, None)
-                .preload_all_rows(false)
+                .forbid_preload_all_rows()
                 .build()
                 .await,
         }

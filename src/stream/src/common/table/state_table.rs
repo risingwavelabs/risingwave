@@ -30,6 +30,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, TableId, TableOption, get_dist_key_in_pk_indices,
 };
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt, VnodeCountCompat};
 use risingwave_common::row::{self, Once, OwnedRow, Row, RowExt, once};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
@@ -249,6 +250,10 @@ macro_rules! dispatch_value_indices {
     };
 }
 
+/// Extract the logic of `StateTableRowStore` from `StateTable`, which serves
+/// a similar functionality as a `BTreeMap<TableKey<Bytes>, OwnedRow>`, and
+/// provides method to read (`get` and `iter`) over serialized key (or key range)
+/// and returns `OwnedRow`, and write (`insert`, `delete`, `update`) on `(TableKey<Bytes>, OwnedRow)`.
 struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
     state_store: LS,
     all_rows: Option<BTreeMap<TableKey<Bytes>, OwnedRow>>,
@@ -317,7 +322,8 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         switch_consistent_op: Option<StateTableOpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
         // TODO: remove the temp logic and clear range when seeing watermark
-        if table_watermarks.is_some() {
+        if table_watermarks.is_some() && self.all_rows.is_some() {
+            warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written watermark");
             self.all_rows = None;
         }
         self.state_store
@@ -358,14 +364,20 @@ pub enum StateTableOpConsistencyLevel {
     LogStoreEnabled,
 }
 
-pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-{
+pub struct StateTableBuilder<
+    'a,
+    S,
+    SD,
+    const IS_REPLICATED: bool,
+    const USE_WATERMARK_CACHE: bool,
+    PreloadAllRow,
+> {
     table_catalog: &'a Table,
     store: S,
     vnodes: Option<Arc<Bitmap>>,
     op_consistency_level: Option<StateTableOpConsistencyLevel>,
     output_column_ids: Option<Vec<ColumnId>>,
-    preload_all_rows: Option<bool>,
+    preload_all_rows: PreloadAllRow,
 
     _serde: PhantomData<SD>,
 }
@@ -376,7 +388,7 @@ impl<
     SD: ValueRowSerde,
     const IS_REPLICATED: bool,
     const USE_WATERMARK_CACHE: bool,
-> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, ()>
 {
     pub fn new(table_catalog: &'a Table, store: S, vnodes: Option<Arc<Bitmap>>) -> Self {
         Self {
@@ -385,11 +397,59 @@ impl<
             vnodes,
             op_consistency_level: None,
             output_column_ids: None,
-            preload_all_rows: None,
+            preload_all_rows: (),
             _serde: Default::default(),
         }
     }
 
+    fn with_preload_all_rows(
+        self,
+        preload_all_rows: bool,
+    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool> {
+        StateTableBuilder {
+            table_catalog: self.table_catalog,
+            store: self.store,
+            vnodes: self.vnodes,
+            op_consistency_level: self.op_consistency_level,
+            output_column_ids: self.output_column_ids,
+            preload_all_rows,
+            _serde: Default::default(),
+        }
+    }
+
+    pub fn enable_preload_all_rows_by_config(
+        self,
+        config: &StreamingConfig,
+    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool> {
+        let developer = &config.developer;
+        let preload_all_rows = if developer.default_enable_mem_preload_state_table {
+            !developer
+                .mem_preload_state_table_ids_blacklist
+                .contains(&self.table_catalog.id)
+        } else {
+            developer
+                .mem_preload_state_table_ids_whilelist
+                .contains(&self.table_catalog.id)
+        };
+        self.with_preload_all_rows(preload_all_rows)
+    }
+
+    pub fn forbid_preload_all_rows(
+        self,
+    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool> {
+        self.with_preload_all_rows(false)
+    }
+}
+
+impl<
+    'a,
+    S: StateStore,
+    SD: ValueRowSerde,
+    const IS_REPLICATED: bool,
+    const USE_WATERMARK_CACHE: bool,
+    PreloadAllRow,
+> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, PreloadAllRow>
+{
     pub fn with_op_consistency_level(
         mut self,
         op_consistency_level: StateTableOpConsistencyLevel,
@@ -402,14 +462,25 @@ impl<
         self.output_column_ids = Some(output_column_ids);
         self
     }
+}
 
-    pub fn preload_all_rows(mut self, preload_all_rows: bool) -> Self {
-        self.preload_all_rows = Some(preload_all_rows);
-        self
-    }
-
+impl<
+    'a,
+    S: StateStore,
+    SD: ValueRowSerde,
+    const IS_REPLICATED: bool,
+    const USE_WATERMARK_CACHE: bool,
+> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool>
+{
     pub async fn build(self) -> StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE> {
-        // TODO: disable preload by default
+        let mut preload_all_rows = self.preload_all_rows;
+        if preload_all_rows
+            && let Err(e) =
+                risingwave_common::license::Feature::StateTableMemoryPreload.check_available()
+        {
+            warn!(table_id=self.table_catalog.id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
+            preload_all_rows = false;
+        }
         StateTableInner::from_table_catalog_inner(
             self.table_catalog,
             self.store,
@@ -417,7 +488,7 @@ impl<
             self.op_consistency_level
                 .unwrap_or(StateTableOpConsistencyLevel::ConsistentOldValue),
             self.output_column_ids.unwrap_or_default(),
-            self.preload_all_rows.unwrap_or(true),
+            preload_all_rows,
         )
         .await
     }
@@ -436,17 +507,20 @@ where
     /// Create state table from table catalog and store.
     ///
     /// If `vnodes` is `None`, [`TableDistribution::singleton()`] will be used.
+    #[cfg(any(test, feature = "test"))]
     pub async fn from_table_catalog(
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
         StateTableBuilder::new(table_catalog, store, vnodes)
+            .forbid_preload_all_rows()
             .build()
             .await
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
+    #[cfg(any(test, feature = "test"))]
     pub async fn from_table_catalog_inconsistent_op(
         table_catalog: &Table,
         store: S,
@@ -454,6 +528,7 @@ where
     ) -> Self {
         StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .forbid_preload_all_rows()
             .build()
             .await
     }
@@ -764,9 +839,11 @@ where
         output_column_ids: Vec<ColumnId>,
     ) -> Self {
         // TODO: can it be ConsistentOldValue?
+        // TODO: may enable preload_all_rows
         StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
             .with_output_column_ids(output_column_ids)
+            .forbid_preload_all_rows()
             .build()
             .await
     }
