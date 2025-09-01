@@ -16,7 +16,6 @@ use std::process::Command;
 use std::time::Duration;
 
 use risingwave_sqlparser::ast::Statement;
-use tokio_postgres::error::Severity;
 use tokio_postgres::{Client, NoTls};
 
 /// Checker evaluates whether a transformed SQL still preserves the original failure.
@@ -151,9 +150,7 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
                         tracing::error!("Failed to reconnect frontend: {}", err);
                     }
                 }
-            } else if let Some(db_err) = e.as_db_error()
-                && db_err.parsed_severity() == Some(Severity::Panic)
-            {
+            } else if e.as_db_error().is_some() {
                 tracing::error!("Compute panic detected, waiting for recovery...");
                 if let Err(err) = wait_for_recovery(client).await {
                     tracing::error!("RW failed to recover after compute panic: {:?}", err);

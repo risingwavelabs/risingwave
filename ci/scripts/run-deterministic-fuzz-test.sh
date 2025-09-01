@@ -30,7 +30,7 @@ extract_error_sql() {
    | grep -E "(\[EXECUTING|\[TEST)" \
    | sed 's/.*\[EXECUTING .*\]: //' \
    | sed 's/.*\[TEST.*\]: //' \
-   | sed 's/$/;/' > $LOGDIR/error.sql.log
+   | sed 's/$/;/'
 }
 
 echo "--- Download artifacts"
