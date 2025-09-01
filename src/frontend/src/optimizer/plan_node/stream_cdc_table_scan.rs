@@ -62,9 +62,14 @@ impl StreamCdcTableScan {
         &self.core
     }
 
-    /// Build catalog for cdc backfill state
+    /// Build catalog for cdc backfill state.
+    /// 
+    /// For non-parallelized cdc backfill:
     /// Right now we only persist whether the backfill is finished and the corresponding cdc offset
     /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
+    ///
+    /// For parallelized cdc backfill:
+    /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
