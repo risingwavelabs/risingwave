@@ -39,30 +39,30 @@ chmod +x ./risingwave_simulation
 
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
-failed=0
-for seed in $(seq 32); do
-    log_file="$LOGDIR/fuzzing-$seed.log"
-    if ! MADSIM_TEST_SEED=$seed ./risingwave_simulation \
-        --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata \
-        2> "$log_file"; then
-        echo "Seed $seed failed, logs at $log_file"
-        extract_error_sql "$log_file"
-        failed=1
-    else
-        rm -f "$log_file"
-    fi
-done
+set +e
+seq 32 | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> '"$LOGDIR"'/fuzzing-{}.log || true'
+set -e
 
-if [[ $failed -eq 1 ]]; then
-    echo "Simulation fuzzing failed, please check $LOGDIR/error.sql.log"
-    echo "--- Running reducer on failing queries"
-    echo "Reducing queries from $LOGDIR/error.sql.log -> $LOGDIR/error.sql.shrunk.log"
-    ./target/debug/sqlsmith-reducer \
-      --input-file $LOGDIR/error.sql.log \
-      --output-file $LOGDIR/error.sql.shrunk.log \
-      --run-rw-cmd './risedev k && ./risedev d ci-3cn-2fe'
-    echo "--- Reducer finished"
-    echo "Reduced queries saved at $LOGDIR/error.sql.shrunk.log"
+failed_logs=$(ls $LOGDIR/fuzzing-*.log 2>/dev/null || true)
+
+if [[ -n "$failed_logs" ]]; then
+    echo "Simulation fuzzing failed, see logs in $LOGDIR"
+    for log_file in $failed_logs; do
+        seed=$(basename "$log_file" .log | cut -d'-' -f2)
+        error_sql="$LOGDIR/error-$seed.sql.log"
+        shrunk_sql="$LOGDIR/error-$seed.sql.shrunk.log"
+
+        echo "Processing seed $seed (log: $log_file)"
+        extract_error_sql "$log_file" > "$error_sql"
+
+        echo "--- Running reducer on failing queries for seed $seed"
+        ./target/debug/sqlsmith-reducer \
+          --input-file "$error_sql" \
+          --output-file "$shrunk_sql" \
+          --run-rw-cmd './risedev k && ./risedev d ci-3cn-2fe'
+        echo "--- Reducer finished for seed $seed"
+        echo "Reduced queries saved at $shrunk_sql"
+    done
     exit 1
 fi
 
