@@ -216,7 +216,6 @@ pub fn parse_schema_change(
                 Some(ScalarRefImpl::Jsonb(jsonb)) => jsonb,
                 _ => unreachable!(""),
             };
-
             let id = jsonb_access_field!(jsonb, "id", string);
             let ty = jsonb_access_field!(jsonb, "type", string);
             let ddl_type: TableChangeType = ty.as_str().into();

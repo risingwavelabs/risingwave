@@ -195,14 +195,16 @@ impl Distribution {
         }
     }
 
-    /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
-    /// valid.
+    /// Get distribution column indices.
+    ///
+    /// Panics if the distribution is not `HashShard`, `UpstreamHashShard` or `Single`.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
-            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
-                Default::default()
-            }
+            Distribution::Single => &[],
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => dists,
+            Distribution::SomeShard | Distribution::Broadcast => {
+                panic!("cannot obtain distribution columns for {self:?}")
+            }
         }
     }
 
@@ -300,26 +302,29 @@ impl RequiredDist {
         Self::PhysicalDist(Distribution::HashShard(key.to_vec()))
     }
 
-    pub fn enforce_if_not_satisfies(
+    pub fn batch_enforce_if_not_satisfies(
         &self,
-        mut plan: PlanRef,
+        mut plan: BatchPlanRef,
         required_order: &Order,
-    ) -> Result<PlanRef> {
-        if let Convention::Batch = plan.convention() {
-            plan = required_order.enforce_if_not_satisfies(plan)?;
-        }
+    ) -> Result<BatchPlanRef> {
+        plan = required_order.enforce_if_not_satisfies(plan)?;
         if !plan.distribution().satisfies(self) {
-            Ok(self.enforce(plan, required_order))
+            Ok(self.batch_enforce(plan, required_order))
         } else {
             Ok(plan)
         }
     }
 
-    pub fn no_shuffle(plan: PlanRef) -> PlanRef {
-        match plan.convention() {
-            Convention::Stream => StreamExchange::new_no_shuffle(plan).into(),
-            Convention::Logical | Convention::Batch => unreachable!(),
+    pub fn streaming_enforce_if_not_satisfies(&self, plan: StreamPlanRef) -> Result<StreamPlanRef> {
+        if !plan.distribution().satisfies(self) {
+            Ok(self.stream_enforce(plan))
+        } else {
+            Ok(plan)
         }
+    }
+
+    pub fn no_shuffle(plan: StreamPlanRef) -> StreamPlanRef {
+        StreamExchange::new_no_shuffle(plan).into()
     }
 
     /// check if the distribution satisfies other required distribution
@@ -338,13 +343,14 @@ impl RequiredDist {
         }
     }
 
-    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn batch_enforce(&self, plan: BatchPlanRef, required_order: &Order) -> BatchPlanRef {
         let dist = self.to_dist();
-        match plan.convention() {
-            Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),
-            Convention::Stream => StreamExchange::new(plan, dist).into(),
-            _ => unreachable!(),
-        }
+        BatchExchange::new(plan, required_order.clone(), dist).into()
+    }
+
+    pub fn stream_enforce(&self, plan: StreamPlanRef) -> StreamPlanRef {
+        let dist = self.to_dist();
+        StreamExchange::new(plan, dist).into()
     }
 
     fn to_dist(&self) -> Distribution {
@@ -358,6 +364,20 @@ impl RequiredDist {
                 Distribution::HashShard(required_keys.ones().collect())
             }
             RequiredDist::PhysicalDist(dist) => dist.clone(),
+        }
+    }
+}
+
+impl StreamPlanRef {
+    /// Eliminate `SomeShard` distribution by using the stream key as the distribution key to
+    /// enforce the current plan to have a known distribution key.
+    pub fn enforce_concrete_distribution(self) -> Self {
+        match self.distribution() {
+            Distribution::SomeShard => {
+                RequiredDist::shard_by_key(self.schema().len(), self.expect_stream_key())
+                    .stream_enforce(self)
+            }
+            _ => self,
         }
     }
 }

@@ -72,7 +72,7 @@ impl BoundSource {
 impl Binder {
     pub fn bind_catalog_relation_by_object_name(
         &mut self,
-        object_name: ObjectName,
+        object_name: &ObjectName,
         bind_creating_relations: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) =
@@ -93,8 +93,8 @@ impl Binder {
         db_name: Option<&str>,
         schema_name: Option<&str>,
         table_name: &str,
-        alias: Option<TableAlias>,
-        as_of: Option<AsOf>,
+        alias: Option<&TableAlias>,
+        as_of: Option<&AsOf>,
         bind_creating_relations: bool,
     ) -> Result<Relation> {
         // define some helper functions converting catalog to bound relation
@@ -122,17 +122,17 @@ impl Binder {
         let (ret, columns) = {
             match schema_name {
                 Some(schema_name) => {
-                    let db_name = db_name.unwrap_or(&self.db_name);
+                    let db_name = db_name.unwrap_or(&self.db_name).to_owned();
                     let schema_path = SchemaPath::Name(schema_name);
                     if is_system_schema(schema_name) {
                         if let Ok(sys_table_catalog) =
                             self.catalog
-                                .get_sys_table_by_name(db_name, schema_name, table_name)
+                                .get_sys_table_by_name(&db_name, schema_name, table_name)
                         {
                             resolve_sys_table_relation(sys_table_catalog)
                         } else if let Ok((view_catalog, _)) =
                             self.catalog
-                                .get_view_by_name(db_name, schema_path, table_name)
+                                .get_view_by_name(&db_name, schema_path, table_name)
                         {
                             self.resolve_view_relation(&view_catalog.clone())?
                         } else {
@@ -155,18 +155,23 @@ impl Binder {
                         self.resolve_source_relation(&source_catalog.clone(), as_of, true)?
                     } else if let Ok((table_catalog, schema_name)) = self
                         .catalog
-                        .get_any_table_by_name(db_name, schema_path, table_name)
+                        .get_any_table_by_name(&db_name, schema_path, table_name)
                         && (bind_creating_relations || table_catalog.is_created())
                     {
-                        self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
+                        self.resolve_table_relation(
+                            table_catalog.clone(),
+                            &db_name,
+                            schema_name,
+                            as_of,
+                        )?
                     } else if let Ok((source_catalog, _)) =
                         self.catalog
-                            .get_source_by_name(db_name, schema_path, table_name)
+                            .get_source_by_name(&db_name, schema_path, table_name)
                     {
                         self.resolve_source_relation(&source_catalog.clone(), as_of, false)?
                     } else if let Ok((view_catalog, _)) =
                         self.catalog
-                            .get_view_by_name(db_name, schema_path, table_name)
+                            .get_view_by_name(&db_name, schema_path, table_name)
                     {
                         self.resolve_view_relation(&view_catalog.clone())?
                     } else {
@@ -178,24 +183,28 @@ impl Binder {
                     }
                 }
                 None => (|| {
-                    let user_name = &self.auth_context.user_name;
+                    // If schema is not specified, db must be unspecified.
+                    // So we should always use current database here.
+                    assert!(db_name.is_none());
+                    let db_name = self.db_name.clone();
+                    let user_name = self.auth_context.user_name.clone();
 
                     for path in self.search_path.path() {
                         if is_system_schema(path)
-                            && let Ok(sys_table_catalog) =
-                                self.catalog
-                                    .get_sys_table_by_name(&self.db_name, path, table_name)
+                            && let Ok(sys_table_catalog) = self
+                                .catalog
+                                .get_sys_table_by_name(&db_name, path, table_name)
                         {
                             return Ok(resolve_sys_table_relation(sys_table_catalog));
                         } else {
                             let schema_name = if path == USER_NAME_WILD_CARD {
-                                user_name
+                                &user_name
                             } else {
-                                path
+                                &path.clone()
                             };
 
                             if let Ok(schema) =
-                                self.catalog.get_schema_by_name(&self.db_name, schema_name)
+                                self.catalog.get_schema_by_name(&db_name, schema_name)
                             {
                                 if let Some(source_catalog) =
                                     self.temporary_source_manager.get_source(table_name)
@@ -214,7 +223,8 @@ impl Binder {
                                 {
                                     return self.resolve_table_relation(
                                         table_catalog.clone(),
-                                        &schema_name.clone(),
+                                        &db_name,
+                                        schema_name,
                                         as_of,
                                     );
                                 } else if let Some(source_catalog) =
@@ -303,8 +313,9 @@ impl Binder {
     fn resolve_table_relation(
         &mut self,
         table_catalog: Arc<TableCatalog>,
+        db_name: &str,
         schema_name: &str,
-        as_of: Option<AsOf>,
+        as_of: Option<&AsOf>,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let table_id = table_catalog.id();
         let columns = table_catalog
@@ -323,13 +334,13 @@ impl Binder {
         )?;
         self.included_relations.insert(table_id);
 
-        let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
+        let table_indexes = self.resolve_table_indexes(db_name, schema_name, table_id)?;
 
         let table = BoundBaseTable {
             table_id,
             table_catalog,
             table_indexes,
-            as_of,
+            as_of: as_of.cloned(),
         };
 
         Ok::<_, RwError>((Relation::BaseTable(Box::new(table)), columns))
@@ -338,7 +349,7 @@ impl Binder {
     fn resolve_source_relation(
         &mut self,
         source_catalog: &SourceCatalog,
-        as_of: Option<AsOf>,
+        as_of: Option<&AsOf>,
         is_temporary: bool,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         debug_assert_column_ids_distinct(&source_catalog.columns);
@@ -357,7 +368,7 @@ impl Binder {
         Ok((
             Relation::Source(Box::new(BoundSource {
                 catalog: source_catalog.clone(),
-                as_of,
+                as_of: as_of.cloned(),
             })),
             source_catalog
                 .columns
@@ -392,7 +403,7 @@ impl Binder {
         else {
             unreachable!("a view should contain a query statement");
         };
-        let query = self.bind_query_for_view(*query).map_err(|e| {
+        let query = self.bind_query_for_view(&query).map_err(|e| {
             ErrorCode::BindError(format!(
                 "failed to bind view {}, sql: {}\nerror: {}",
                 view_catalog.name,
@@ -434,13 +445,17 @@ impl Binder {
 
     fn resolve_table_indexes(
         &self,
+        db_name: &str,
         schema_name: &str,
         table_id: TableId,
     ) -> Result<Vec<Arc<IndexCatalog>>> {
-        Ok(self
-            .catalog
-            .get_schema_by_name(&self.db_name, schema_name)?
-            .get_indexes_by_table_id(&table_id))
+        let schema = self.catalog.get_schema_by_name(db_name, schema_name)?;
+        assert!(
+            schema.get_table_by_id(&table_id).is_some(),
+            "table {table_id} not found in {db_name}.{schema_name}"
+        );
+
+        Ok(schema.get_indexes_by_table_id(&table_id))
     }
 
     pub(crate) fn bind_table(
@@ -456,7 +471,7 @@ impl Binder {
         let table_catalog = table_catalog.clone();
 
         let table_id = table_catalog.id();
-        let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
+        let table_indexes = self.resolve_table_indexes(db_name, schema_name, table_id)?;
 
         let columns = table_catalog.columns.clone();
 
@@ -480,7 +495,7 @@ impl Binder {
         let table_name = &table.name;
         match table.table_type() {
             TableType::Table => {}
-            TableType::Index => {
+            TableType::Index | TableType::VectorIndex => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change index \"{table_name}\""
                 ))

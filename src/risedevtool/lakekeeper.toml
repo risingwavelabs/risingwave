@@ -1,0 +1,37 @@
+extend = "common.toml"
+
+[env]
+LAKEKEEPER_TARGET_TRIPLE = { source = "${SYSTEM}", mapping = { "darwin-arm64" = "aarch64-apple-darwin", "darwin-amd64" = "x86_64-apple-darwin", "linux-arm64" = "aarch64-unknown-linux-musl", "linux-amd64" = "x86_64-unknown-linux-gnu" } }
+LAKEKEEPER_VERSION = { value = "v0.9.5", condition = { env_not_set = [
+    "LAKEKEEPER_VERSION",
+] } }
+LAKEKEEPER_DOWNLOAD_URL = { value = "https://github.com/lakekeeper/lakekeeper/releases/download/${LAKEKEEPER_VERSION}/lakekeeper-${LAKEKEEPER_TARGET_TRIPLE}.tar.gz", condition = { env_not_set = [
+    "LAKEKEEPER_DOWNLOAD_URL",
+] } }
+
+[tasks.download-lakekeeper]
+private = true
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [
+    "ENABLE_LAKEKEEPER",
+], files_not_exist = [
+    "${PREFIX_BIN}/lakekeeper",
+] }
+description = "Download and extract Lakekeeper"
+script = '''
+#!/usr/bin/env bash
+set -e
+if [ -f "${PREFIX_BIN}/lakekeeper" ]; then
+    exit 0
+fi
+echo "Lakekeeper not found, downloading"
+curl -fL -o "${PREFIX_TMP}/lakekeeper-${LAKEKEEPER_TARGET_TRIPLE}.tar.gz" "${LAKEKEEPER_DOWNLOAD_URL}"
+cd "${PREFIX_TMP}"
+tar -xzf "lakekeeper-${LAKEKEEPER_TARGET_TRIPLE}.tar.gz"
+chmod +x lakekeeper
+mv lakekeeper "${PREFIX_BIN}/lakekeeper"
+rm -f "lakekeeper-${LAKEKEEPER_TARGET_TRIPLE}.tar.gz"
+
+"${PREFIX_BIN}/lakekeeper" --version
+'''

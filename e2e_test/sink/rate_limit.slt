@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = true;
+
+statement ok
 CREATE TABLE t1(v1 int, v2 int);
 
 statement ok
@@ -34,10 +37,27 @@ statement error
 ALTER SINK s2 SET SINK_RATE_LIMIT = 0;
 
 statement ok
+set sink_decouple = false;
+
+statement ok
+CREATE SINK s3 AS select * from t1 WITH (
+    connector = 'blackhole'
+);
+
+statement error
+alter sink s3 set sink_rate_limit = 100;
+
+statement error
+alter sink s3 set sink_rate_limit = 0;
+
+statement ok
 DROP SINK s2;
 
 statement ok
 DROP SINK s1;
+
+statement ok
+DROP SINK s3;
 
 statement ok
 DROP TABLE t2;

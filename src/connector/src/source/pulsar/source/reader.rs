@@ -80,6 +80,17 @@ impl SplitReader for PulsarSplitReader {
     }
 }
 
+/// Filter offset for pulsar messages
+#[derive(Debug, Clone)]
+struct PulsarFilterOffset {
+    /// Ledger ID of the message
+    pub ledger_id: u64,
+    /// Entry ID of the message
+    pub entry_id: u64,
+    /// Batch index of the message, if any
+    pub batch_index: Option<i32>,
+}
+
 /// This reader reads from pulsar broker
 pub struct PulsarBrokerReader {
     #[expect(dead_code)]
@@ -91,6 +102,9 @@ pub struct PulsarBrokerReader {
     split_id: SplitId,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
+
+    // for filter out already read messages
+    already_read_offset: Option<PulsarFilterOffset>,
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
@@ -162,6 +176,8 @@ impl SplitReader for PulsarBrokerReader {
                 source_ctx.actor_id
             ));
 
+        let mut already_read_offset = None;
+
         let builder = match split.start_offset.clone() {
             PulsarEnumeratorOffset::Earliest => {
                 if topic.starts_with("non-persistent://") {
@@ -193,9 +209,15 @@ impl SplitReader for PulsarBrokerReader {
                         ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
                     )
                 } else {
+                    let start_message_id = parse_message_id(m.as_str())?;
+                    already_read_offset = Some(PulsarFilterOffset {
+                        ledger_id: start_message_id.ledger_id,
+                        entry_id: start_message_id.entry_id,
+                        batch_index: start_message_id.batch_index,
+                    });
                     builder.with_options(pulsar::ConsumerOptions {
                         durable: Some(false),
-                        start_message_id: parse_message_id(m.as_str()).ok(),
+                        start_message_id: Some(start_message_id),
                         ..Default::default()
                     })
                 }
@@ -219,6 +241,7 @@ impl SplitReader for PulsarBrokerReader {
             split,
             parser_config,
             source_ctx,
+            already_read_offset,
         })
     }
 
@@ -233,11 +256,43 @@ impl PulsarBrokerReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
+        let mut already_read_offset = self.already_read_offset;
         #[for_await]
         for msgs in self.consumer.ready_chunks(max_chunk_size) {
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
-                let msg = SourceMessage::from(msg?);
+                let msg = msg?;
+
+                if let Some(PulsarFilterOffset {
+                    ledger_id,
+                    entry_id,
+                    batch_index,
+                }) = already_read_offset
+                {
+                    let message_id = msg.message_id();
+
+                    // If we have a previously stored offset, check that the messages we're consuming
+                    // appear after. Note that entry IDs and batch indexes are only monotonically increasing
+                    // within a BookKeeper ledger, so we must check that the ledger IDs match. If they don't match,
+                    // messages are coming from a new ledger and we can safely ignore the stored offset.
+                    if message_id.ledger_id == ledger_id
+                        && message_id.entry_id <= entry_id
+                        && message_id.batch_index <= batch_index
+                    {
+                        tracing::info!(
+                            "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
+                            message_id.entry_id,
+                            message_id.batch_index,
+                            entry_id,
+                            batch_index
+                        );
+                        continue;
+                    } else {
+                        already_read_offset = None;
+                    }
+                }
+
+                let msg = SourceMessage::from(msg);
                 res.push(msg);
             }
             yield res;

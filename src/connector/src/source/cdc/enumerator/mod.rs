@@ -20,7 +20,7 @@ use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use itertools::Itertools;
 use prost::Message;
-use risingwave_common::global_jvm::JVM;
+use risingwave_common::global_jvm::Jvm;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
@@ -71,7 +71,7 @@ where
             SourceType::from(T::source_type())
         );
 
-        let jvm = JVM.get_or_init()?;
+        let jvm = Jvm::get_or_init()?;
         let source_id = context.info.source_id;
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             execute_with_jni_env(jvm, |env| {
@@ -128,6 +128,7 @@ where
 
 pub trait ListCdcSplits {
     type CdcSourceType: CdcSourceTypeTrait;
+    /// Generates a single split for shared source.
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>>;
 }
 

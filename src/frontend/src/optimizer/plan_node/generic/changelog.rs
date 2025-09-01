@@ -48,6 +48,14 @@ impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
         }
     }
 
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> ChangeLog<OtherPlanRef> {
+        ChangeLog {
+            input,
+            need_op: self.need_op,
+            need_changelog_row_id: self.need_changelog_row_id,
+        }
+    }
+
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         let mut map = vec![None; self.input.schema().len()];
         (0..self.input.schema().len()).for_each(|i| map[i] = Some(i));

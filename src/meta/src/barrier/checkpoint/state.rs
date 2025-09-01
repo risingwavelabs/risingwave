@@ -15,10 +15,13 @@
 use std::collections::HashSet;
 use std::mem::take;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::Epoch;
 
-use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightSubscriptionInfo};
+use crate::barrier::info::{
+    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, InflightSubscriptionInfo,
+    SharedActorInfos,
+};
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
@@ -42,26 +45,32 @@ pub(crate) struct BarrierWorkerState {
 }
 
 impl BarrierWorkerState {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(database_id: DatabaseId, shared_actor_infos: SharedActorInfos) -> Self {
         Self {
             in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
             pending_non_checkpoint_barriers: vec![],
-            inflight_graph_info: InflightDatabaseInfo::empty(),
+            inflight_graph_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
             inflight_subscription_info: InflightSubscriptionInfo::default(),
             is_paused: false,
         }
     }
 
     pub fn recovery(
+        database_id: DatabaseId,
+        shared_actor_infos: SharedActorInfos,
         in_flight_prev_epoch: TracedEpoch,
-        inflight_graph_info: InflightDatabaseInfo,
+        jobs: impl Iterator<Item = InflightStreamingJobInfo>,
         inflight_subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
     ) -> Self {
         Self {
             in_flight_prev_epoch,
             pending_non_checkpoint_barriers: vec![],
-            inflight_graph_info,
+            inflight_graph_info: InflightDatabaseInfo::recover(
+                database_id,
+                jobs,
+                shared_actor_infos,
+            ),
             inflight_subscription_info,
             is_paused,
         }
@@ -165,7 +174,7 @@ impl BarrierWorkerState {
             for (table_id, (_, graph_info)) in jobs_to_merge {
                 jobs_to_wait.insert(*table_id);
                 table_ids_to_commit.extend(graph_info.existing_table_ids());
-                self.inflight_graph_info.extend(graph_info.clone());
+                self.inflight_graph_info.add_existing(graph_info.clone());
             }
         }
 

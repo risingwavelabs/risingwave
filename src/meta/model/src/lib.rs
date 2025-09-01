@@ -26,6 +26,7 @@ pub mod prelude;
 
 pub mod actor;
 pub mod catalog_version;
+pub mod cdc_table_snapshot_split;
 pub mod cluster;
 pub mod compaction_config;
 pub mod compaction_status;
@@ -153,6 +154,15 @@ impl From<PbCreateType> for CreateType {
             PbCreateType::Background => Self::Background,
             PbCreateType::Foreground => Self::Foreground,
             PbCreateType::Unspecified => unreachable!("Unspecified create type"),
+        }
+    }
+}
+
+impl CreateType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CreateType::Background => "BACKGROUND",
+            CreateType::Foreground => "FOREGROUND",
         }
     }
 }

@@ -18,11 +18,11 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_expr_visitor::Strong;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
 use crate::utils::{Condition, IndexSet};
 
@@ -60,7 +60,7 @@ use crate::utils::{Condition, IndexSet};
 ///               Filter
 /// ```
 pub struct PullUpCorrelatedPredicateAggRule {}
-impl Rule for PullUpCorrelatedPredicateAggRule {
+impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_filter = if let Some(top_filter) = plan.as_logical_filter() {
             top_filter.clone()

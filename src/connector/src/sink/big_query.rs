@@ -65,7 +65,7 @@ use super::{
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::connector_common::AwsAuthProps;
 use crate::enforce_secret::EnforceSecret;
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
+use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
 
 pub const BIGQUERY_SINK: &str = "bigquery";
 pub const CHANGE_TYPE: &str = "_CHANGE_TYPE";
@@ -354,7 +354,7 @@ impl BigQuerySink {
             DataType::Int32 => Ok("INT64".to_owned()),
             DataType::Int64 => Ok("INT64".to_owned()),
             DataType::Float32 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support real"
+                "REAL is not supported for BigQuery sink. Please convert to FLOAT64 or other supported types."
             ))),
             DataType::Float64 => Ok("FLOAT64".to_owned()),
             DataType::Decimal => Ok("NUMERIC".to_owned()),
@@ -381,12 +381,14 @@ impl BigQuerySink {
             DataType::Jsonb => Ok("JSON".to_owned()),
             DataType::Serial => Ok("INT64".to_owned()),
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support Int256"
+                "INT256 is not supported for BigQuery sink."
             ))),
             DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support Map"
+                "MAP is not supported for BigQuery sink."
             ))),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "VECTOR is not supported for BigQuery sink."
+            ))),
         }
     }
 
@@ -398,7 +400,7 @@ impl BigQuerySink {
             }
             DataType::Float32 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support real"
+                    "REAL is not supported for BigQuery sink. Please convert to FLOAT64 or other supported types."
                 )));
             }
             DataType::Float64 => TableFieldSchema::float(&rw_field.name),
@@ -410,7 +412,7 @@ impl BigQuerySink {
             DataType::Timestamptz => TableFieldSchema::timestamp(&rw_field.name),
             DataType::Interval => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Interval"
+                    "INTERVAL is not supported for BigQuery sink. Please convert to VARCHAR or other supported types."
                 )));
             }
             DataType::Struct(st) => {
@@ -434,15 +436,19 @@ impl BigQuerySink {
             DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
             DataType::Int256 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Int256"
+                    "INT256 is not supported for BigQuery sink."
                 )));
             }
             DataType::Map(_) => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Map"
+                    "MAP is not supported for BigQuery sink."
                 )));
             }
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "VECTOR is not supported for BigQuery sink."
+                )));
+            }
         };
         Ok(tfs)
     }
@@ -472,7 +478,6 @@ impl BigQuerySink {
 }
 
 impl Sink for BigQuerySink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = BigQueryLogSinker;
 
     const SINK_NAME: &'static str = BIGQUERY_SINK;
@@ -952,8 +957,10 @@ fn build_protobuf_field(
                 "Don't support Float32 and Int256"
             )));
         }
-        DataType::Map(_) => todo!(),
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Map(_) => return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Map"))),
+        DataType::Vector(_) => {
+            return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Vector")));
+        }
     }
     Ok((field, None))
 }

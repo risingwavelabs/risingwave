@@ -381,6 +381,7 @@ pub struct SinkMetrics {
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec,
     pub iceberg_write_bytes: LabelGuardedIntCounterVec,
+    pub iceberg_snapshot_num: LabelGuardedIntGaugeVec,
 }
 
 impl SinkMetrics {
@@ -506,6 +507,14 @@ impl SinkMetrics {
         )
         .unwrap();
 
+        let iceberg_snapshot_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_snapshot_num",
+            "The snapshot number of iceberg table",
+            &["sink_name", "catalog_name", "table_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             sink_commit_duration,
             connector_sink_rows_received,
@@ -522,6 +531,7 @@ impl SinkMetrics {
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
             iceberg_write_bytes,
+            iceberg_snapshot_num,
         }
     }
 }
@@ -653,7 +663,8 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
 
     type LogSinker: LogSinker;
-    type Coordinator: SinkCommitCoordinator;
+    #[expect(deprecated)]
+    type Coordinator: SinkCommitCoordinator = NoSinkCommitCoordinator;
 
     fn set_default_commit_checkpoint_interval(
         desc: &mut SinkDesc,
@@ -698,6 +709,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
             SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
             SinkDecouple::Disable => Ok(false),
         }
+    }
+
+    fn support_schema_change() -> bool {
+        false
     }
 
     fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
@@ -776,19 +791,44 @@ pub trait SinkCommitCoordinator {
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()>;
 }
 
-pub struct DummySinkCommitCoordinator;
+#[deprecated]
+/// A place holder struct of `SinkCommitCoordinator` for sink without coordinator.
+///
+/// It can never be constructed because it holds a never type, and therefore it's safe to
+/// mark all its methods as unreachable.
+///
+/// Explicitly mark this struct as `deprecated` so that when developers accidentally declare it explicitly as
+/// the associated type `Coordinator` when implementing `Sink` trait, they can be warned, and remove the explicit
+/// declaration.
+///
+/// Note:
+///     When we implement a sink without coordinator, don't explicitly write `type Coordinator = NoSinkCommitCoordinator`.
+///     Just remove the explicit declaration and use the default associated type, and besides, don't explicitly implement
+///     `fn new_coordinator(...)` and use the default implementation.
+pub struct NoSinkCommitCoordinator(!);
 
+#[expect(deprecated)]
 #[async_trait]
-impl SinkCommitCoordinator for DummySinkCommitCoordinator {
+impl SinkCommitCoordinator for NoSinkCommitCoordinator {
     async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        Ok(None)
+        unreachable!()
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
-        Ok(())
+    async fn commit(
+        &mut self,
+        _epoch: u64,
+        _metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        unreachable!()
     }
 }
 

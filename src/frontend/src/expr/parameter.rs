@@ -58,8 +58,8 @@ impl Expr for Parameter {
             .unwrap_or(DataType::Varchar)
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Parameter should not be serialized to ExprNode")
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
+        Err("Parameter should not be serialized to ExprNode".to_owned())
     }
 }
 
@@ -73,7 +73,7 @@ impl Parameter {
         self.param_types.has_infer(self.index)
     }
 
-    pub fn cast_infer_type(&mut self, data_type: DataType) {
+    pub fn cast_infer_type(&mut self, data_type: &DataType) {
         self.param_types.record_infer_type(self.index, data_type);
     }
 }

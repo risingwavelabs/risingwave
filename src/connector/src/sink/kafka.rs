@@ -44,7 +44,7 @@ use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
-use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
+use crate::sink::{Result, SinkWriterParam};
 use crate::source::kafka::{
     KafkaContextCommon, KafkaProperties, KafkaSplitEnumerator, RwProducerContext,
 };
@@ -346,7 +346,6 @@ impl TryFrom<SinkParam> for KafkaSink {
 }
 
 impl Sink for KafkaSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<KafkaSinkWriter>;
 
     const SINK_NAME: &'static str = KAFKA_SINK;
@@ -402,11 +401,14 @@ impl Sink for KafkaSink {
             Arc::new(SourceEnumeratorContext::dummy()),
         )
         .await?;
-        if !check.check_reachability().await {
-            return Err(SinkError::Config(anyhow!(
-                "cannot connect to kafka broker ({})",
-                self.config.connection.brokers
-            )));
+        if let Err(e) = check.check_reachability().await {
+            return Err(SinkError::Config(
+                anyhow!(
+                    "cannot connect to kafka broker ({})",
+                    self.config.connection.brokers,
+                )
+                .context(e),
+            ));
         }
         Ok(())
     }

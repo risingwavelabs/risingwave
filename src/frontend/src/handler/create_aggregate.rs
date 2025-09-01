@@ -86,8 +86,7 @@ pub async fn handle_create_aggregate(
     // resolve database and schema id
     let session = &handler_args.session;
     let db_name = &session.database();
-    let (schema_name, function_name) =
-        Binder::resolve_schema_qualified_name(db_name, name.clone())?;
+    let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     // check if the function exists in the catalog
@@ -146,6 +145,8 @@ pub async fn handle_create_aggregate(
         always_retry_on_network_error: false,
         is_async: None,
         is_batched: None,
+        created_at_epoch: None,
+        created_at_cluster_version: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

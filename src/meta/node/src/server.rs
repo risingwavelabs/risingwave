@@ -25,7 +25,6 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
-use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
@@ -191,8 +190,6 @@ pub async fn rpc_serve_with_store(
     init_session_config: SessionConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
-    register_jvm_builder();
-
     // TODO(shutdown): directly use cancellation token
     let (election_shutdown_tx, election_shutdown_rx) = watch::channel(());
 
@@ -524,6 +521,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         sink_manager.clone(),
         scale_controller.clone(),
+        barrier_scheduler.clone(),
     )
     .await;
     tracing::info!("GlobalBarrierManager started");
@@ -560,6 +558,7 @@ pub async fn start_service_as_election_leader(
         barrier_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
+        iceberg_compaction_mgr.clone(),
     )
     .await;
 
@@ -646,15 +645,12 @@ pub async fn start_service_as_election_leader(
         iceberg_compactor_event_rx,
     ));
 
-    sub_tasks.push(
-        serving::start_serving_vnode_mapping_worker(
-            env.notification_manager_ref(),
-            metadata_manager.clone(),
-            serving_vnode_mapping,
-            env.session_params_manager_impl_ref(),
-        )
-        .await,
-    );
+    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
+        env.notification_manager_ref(),
+        metadata_manager.clone(),
+        serving_vnode_mapping,
+        env.session_params_manager_impl_ref(),
+    ));
 
     {
         sub_tasks.push(ClusterController::start_heartbeat_checker(
@@ -677,7 +673,7 @@ pub async fn start_service_as_election_leader(
     let notification_mgr = env.notification_manager_ref();
     let stream_abort_handler = tokio::spawn(async move {
         let _ = abort_recv.await;
-        notification_mgr.abort_all().await;
+        notification_mgr.abort_all();
         compactor_manager.abort_all_compactors();
     });
     sub_tasks.push((stream_abort_handler, abort_sender));

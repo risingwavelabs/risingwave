@@ -17,9 +17,8 @@ use std::str::from_utf8;
 
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 
 /// `RewriteLikeExprRule` rewrites simple like expression, so that it can benefit from index selection.
@@ -27,7 +26,7 @@ use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 /// col like 'ABC%' => col >= 'ABC' and col < 'ABD'
 /// col like 'ABC%E' => col >= 'ABC' and col < 'ABD' and col like 'ABC%E'
 pub struct RewriteLikeExprRule {}
-impl Rule for RewriteLikeExprRule {
+impl Rule<Logical> for RewriteLikeExprRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         if filter.predicate().conjunctions.iter().any(|expr| {

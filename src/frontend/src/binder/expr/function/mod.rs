@@ -20,18 +20,19 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType};
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, OrderByExpr, Window,
+    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
+    OrderByExpr, Statement, Window,
 };
-use risingwave_sqlparser::parser::ParserError;
+use risingwave_sqlparser::parser::Parser;
 
+use crate::binder::Binder;
 use crate::binder::bind_context::Clause;
-use crate::binder::{Binder, UdfContext};
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -61,12 +62,6 @@ pub(super) fn is_sys_function_without_args(ident: &Ident) -> bool {
         .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
 }
 
-/// The global max calling depth for the global counter in `udf_context`
-/// To reduce the chance that the current running rw thread
-/// be killed by os, the current allowance depth of calling
-/// stack is set to `16`.
-const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
-
 macro_rules! reject_syntax {
     ($pred:expr, $msg:expr) => {
         if $pred {
@@ -93,17 +88,13 @@ impl Binder {
             within_group,
             filter,
             over,
-        }: Function,
+        }: &Function,
     ) -> Result<ExprImpl> {
         let (schema_name, func_name) = match name.0.as_slice() {
             [name] => (None, name.real_value()),
             [schema, name] => {
                 let schema_name = schema.real_value();
-                let func_name = if schema_name == PG_CATALOG_SCHEMA_NAME {
-                    // pg_catalog is always effectively part of the search path, so we can always bind the function.
-                    // Ref: https://www.postgresql.org/docs/current/ddl-schemas.html#DDL-SCHEMAS-CATALOG
-                    name.real_value()
-                } else if schema_name == INFORMATION_SCHEMA_SCHEMA_NAME {
+                let func_name = if schema_name == INFORMATION_SCHEMA_SCHEMA_NAME {
                     // definition of information_schema: https://github.com/postgres/postgres/blob/e0b2eed047df9045664da6f724cb42c10f8b12f0/src/backend/catalog/information_schema.sql
                     //
                     // FIXME: handle schema correctly, so that the functions are hidden if the schema is not in the search path.
@@ -117,12 +108,22 @@ impl Binder {
                     }
                     function_name
                 } else {
-                    bail_not_implemented!(
-                        issue = 12422,
-                        "Unsupported function name under schema: {}",
-                        schema_name
-                    );
+                    name.real_value()
                 };
+                (Some(schema_name), func_name)
+            }
+            [database, schema, name] => {
+                // Support database.schema.function qualified names when database matches current database
+                let database_name = database.real_value();
+                if database_name != self.db_name {
+                    return Err(ErrorCode::BindError(format!(
+                        "Cross-database function call is not supported: {}",
+                        name
+                    ))
+                    .into());
+                }
+                let schema_name = schema.real_value();
+                let func_name = name.real_value();
                 (Some(schema_name), func_name)
             }
             _ => bail_not_implemented!(issue = 112, "qualified function {}", name),
@@ -142,24 +143,24 @@ impl Binder {
         if func_name == "array_transform" || func_name == "map_filter" {
             return self.validate_and_bind_special_function_params(
                 &func_name,
-                scalar_as_agg,
+                *scalar_as_agg,
                 arg_list,
-                &within_group,
-                &filter,
-                &over,
+                within_group.as_deref(),
+                filter.as_deref(),
+                over.as_ref(),
             );
         }
 
         let mut args: Vec<_> = arg_list
             .args
             .iter()
-            .map(|arg| self.bind_function_arg(arg.clone()))
+            .map(|arg| self.bind_function_arg(arg))
             .flatten_ok()
             .try_collect()?;
 
         let mut referred_udfs = HashSet::new();
 
-        let wrapped_agg_type = if scalar_as_agg {
+        let wrapped_agg_type = if *scalar_as_agg {
             // Let's firstly try to apply the `AGGREGATE:` prefix.
             // We will reject functions that are not able to be wrapped as aggregate function.
             let mut array_args = args
@@ -204,8 +205,20 @@ impl Binder {
                 self.bind_builtin_scalar_function(&func_name, array_args, arg_list.variadic)?
             };
 
+            // `AggType::WrapScalar` requires the inner expression to be convertible to `ExprNode`
+            // and directly executable. If there's any subquery in the expression, this will fail.
+            let expr_node = match scalar_func_expr.try_to_expr_proto() {
+                Ok(expr_node) => expr_node,
+                Err(e) => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "function {func_name} cannot be used after `AGGREGATE:`: {e}",
+                    ))
+                    .into());
+                }
+            };
+
             // now this is either an aggregate/window function call
-            Some(AggType::WrapScalar(scalar_func_expr.to_expr_proto()))
+            Some(AggType::WrapScalar(expr_node))
         } else {
             None
         };
@@ -274,7 +287,13 @@ impl Binder {
             } else {
                 bail_not_implemented!(issue = 8961, "Unrecognized window function: {}", func_name);
             };
-            return self.bind_window_function(kind, args, arg_list.ignore_nulls, filter, over);
+            return self.bind_window_function(
+                kind,
+                args,
+                arg_list.ignore_nulls,
+                filter.as_deref(),
+                over,
+            );
         }
 
         // now it's an aggregate/scalar/table function call
@@ -293,9 +312,9 @@ impl Binder {
                 agg_type,
                 arg_list.distinct,
                 args,
-                arg_list.order_by,
-                within_group,
-                filter,
+                &arg_list.order_by,
+                within_group.as_deref(),
+                filter.as_deref(),
             );
         }
 
@@ -423,10 +442,10 @@ impl Binder {
         &mut self,
         func_name: &str,
         scalar_as_agg: bool,
-        arg_list: FunctionArgList,
-        within_group: &Option<Box<OrderByExpr>>,
-        filter: &Option<Box<risingwave_sqlparser::ast::Expr>>,
-        over: &Option<Window>,
+        arg_list: &FunctionArgList,
+        within_group: Option<&OrderByExpr>,
+        filter: Option<&risingwave_sqlparser::ast::Expr>,
+        over: Option<&Window>,
     ) -> Result<ExprImpl> {
         assert!(["array_transform", "map_filter"].contains(&func_name));
 
@@ -456,20 +475,20 @@ impl Binder {
             func_name
         );
         if func_name == "array_transform" {
-            self.bind_array_transform(arg_list.args)
+            self.bind_array_transform(&arg_list.args)
         } else {
-            self.bind_map_filter(arg_list.args)
+            self.bind_map_filter(&arg_list.args)
         }
     }
 
-    fn bind_array_transform(&mut self, args: Vec<FunctionArg>) -> Result<ExprImpl> {
-        let [array, lambda] = <[FunctionArg; 2]>::try_from(args).map_err(|args| -> RwError {
-            ErrorCode::BindError(format!(
+    fn bind_array_transform(&mut self, args: &[FunctionArg]) -> Result<ExprImpl> {
+        let [array, lambda] = args else {
+            return Err(ErrorCode::BindError(format!(
                 "`array_transform` expect two inputs `array` and `lambda`, but {} were given",
                 args.len()
             ))
-            .into()
-        })?;
+            .into());
+        };
 
         let bound_array = self.bind_function_arg(array)?;
         let [bound_array] = <[ExprImpl; 1]>::try_from(bound_array).map_err(|bound_array| -> RwError {
@@ -529,19 +548,20 @@ impl Binder {
     ) -> Result<ExprImpl> {
         let lambda_args = HashMap::from([(arg.real_value(), (0usize, input_ty))]);
         let orig_lambda_args = self.context.lambda_args.replace(lambda_args);
-        let body = self.bind_expr_inner(body)?;
+        let body = self.bind_expr_inner(&body)?;
         self.context.lambda_args = orig_lambda_args;
 
         Ok(body)
     }
 
-    fn bind_map_filter(&mut self, args: Vec<FunctionArg>) -> Result<ExprImpl> {
-        let [input, lambda] = <[FunctionArg; 2]>::try_from(args).map_err(|args| {
-            ErrorCode::BindError(format!(
+    fn bind_map_filter(&mut self, args: &[FunctionArg]) -> Result<ExprImpl> {
+        let [input, lambda] = args else {
+            return Err(ErrorCode::BindError(format!(
                 "`map_filter` requires two arguments (input_map and lambda), got {}",
                 args.len()
             ))
-        })?;
+            .into());
+        };
 
         let bound_input = self.bind_function_arg(input)?;
         let [bound_input] = <[ExprImpl; 1]>::try_from(bound_input).map_err(|e| {
@@ -622,7 +642,7 @@ impl Binder {
         ]);
 
         let orig_ctx = self.context.lambda_args.replace(lambda_args);
-        let bound_body = self.bind_expr_inner(body)?;
+        let bound_body = self.bind_expr_inner(&body)?;
         self.context.lambda_args = orig_ctx;
 
         Ok(bound_body)
@@ -650,90 +670,92 @@ impl Binder {
         Ok(())
     }
 
+    /// A common utility function to extract sql udf expression out from the input `ast`.
+    pub(crate) fn extract_udf_expr(ast: Vec<Statement>) -> Result<AstExpr> {
+        if ast.len() != 1 {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "the query for sql udf should contain only one statement".to_owned(),
+            )
+            .into());
+        }
+
+        // Extract the expression out
+        let Statement::Query(query) = ast.into_iter().next().unwrap() else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "invalid function definition, please recheck the syntax".to_owned(),
+            )
+            .into());
+        };
+
+        if let Some(expr) = query.as_single_select_item() {
+            // Inline SQL UDF.
+            Ok(expr.clone())
+        } else {
+            // Subquery SQL UDF.
+            Ok(AstExpr::Subquery(query))
+        }
+    }
+
+    pub fn bind_sql_udf_inner(
+        &mut self,
+        body: &str,
+        arg_names: &[String],
+        args: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        // This represents the current user defined function is `language sql`
+        let ast = Parser::parse_sql(body)?;
+
+        // Stash the current arguments.
+        // For subquery SQL UDF, as we always push a new context, there should be no arguments to stash.
+        // For inline SQL UDF, we need to stash the arguments in case of nesting.
+        let stashed_arguments = self.context.sql_udf_arguments.take();
+
+        // The actual inline logic for sql udf.
+        let mut arguments = HashMap::new();
+        for (i, arg) in args.into_iter().enumerate() {
+            if arg_names[i].is_empty() {
+                // unnamed argument, use `$1`, `$2` as the name
+                arguments.insert(format!("${}", i + 1), arg);
+            } else {
+                // named argument
+                arguments.insert(arg_names[i].clone(), arg);
+            }
+        }
+        self.context.sql_udf_arguments = Some(arguments);
+
+        let Ok(expr) = Self::extract_udf_expr(ast) else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "failed to parse the input query and extract the udf expression, \
+                please recheck the syntax"
+                    .to_owned(),
+            )
+            .into());
+        };
+
+        let bind_result = self.bind_expr(&expr);
+        // Restore arguments information for subsequent binding.
+        self.context.sql_udf_arguments = stashed_arguments;
+
+        bind_result
+    }
+
     fn bind_sql_udf(
         &mut self,
         func: Arc<FunctionCatalog>,
         args: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
-        if func.body.is_none() {
+        let Some(body) = &func.body else {
             return Err(
                 ErrorCode::InvalidInputSyntax("`body` must exist for sql udf".to_owned()).into(),
             );
-        }
+        };
 
-        // This represents the current user defined function is `language sql`
-        let parse_result =
-            risingwave_sqlparser::parser::Parser::parse_sql(func.body.as_ref().unwrap().as_str());
-        if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
-            parse_result
-        {
-            // Here we just return the original parse error message
-            return Err(ErrorCode::InvalidInputSyntax(err).into());
-        }
-
-        debug_assert!(parse_result.is_ok());
-
-        // We can safely unwrap here
-        let ast = parse_result.unwrap();
-
-        // Stash the current `udf_context`
-        // Note that the `udf_context` may be empty,
-        // if the current binding is the root (top-most) sql udf.
-        // In this case the empty context will be stashed
-        // and restored later, no need to maintain other flags.
-        let stashed_udf_context = self.udf_context.get_context();
-
-        // The actual inline logic for sql udf
-        // Note that we will always create new udf context for each sql udf
-        let mut udf_context = HashMap::new();
-        for (i, arg) in args.into_iter().enumerate() {
-            if func.arg_names[i].is_empty() {
-                // unnamed argument, use `$1`, `$2` as the name
-                udf_context.insert(format!("${}", i + 1), arg);
-            } else {
-                // named argument
-                udf_context.insert(func.arg_names[i].clone(), arg);
-            }
-        }
-        self.udf_context.update_context(udf_context);
-
-        // Check for potential recursive calling
-        if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
-            return Err(ErrorCode::BindError(format!(
-                "function {} calling stack depth limit exceeded",
-                func.name
-            ))
-            .into());
-        } else {
-            // Update the status for the global counter
-            self.udf_context.incr_global_count();
-        }
-
-        if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
-            let bind_result = self.bind_expr(expr);
-
-            // We should properly decrement global count after a successful binding
-            // Since the subsequent probe operation in `bind_column` or
-            // `bind_parameter` relies on global counting
-            self.udf_context.decr_global_count();
-
-            // Restore context information for subsequent binding
-            self.udf_context.update_context(stashed_udf_context);
-
-            return bind_result;
-        }
-
-        Err(ErrorCode::InvalidInputSyntax(
-            "failed to parse the input query and extract the udf expression,
-                please recheck the syntax"
-                .to_owned(),
-        )
-        .into())
+        self.bind_sql_udf_inner(body, &func.arg_names, args)
     }
 
     pub(in crate::binder) fn bind_function_expr_arg(
         &mut self,
-        arg_expr: FunctionArgExpr,
+        arg_expr: &FunctionArgExpr,
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
@@ -749,7 +771,7 @@ impl Binder {
 
     pub(in crate::binder) fn bind_function_arg(
         &mut self,
-        arg: FunctionArg,
+        arg: &FunctionArg,
     ) -> Result<Vec<ExprImpl>> {
         match arg {
             FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),
