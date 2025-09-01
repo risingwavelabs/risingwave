@@ -416,7 +416,6 @@ impl CatalogController {
     // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
     // making them the source of truth and performing a full replacement for those in the meta store?
     /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
-    #[expect(clippy::too_many_arguments)]
     #[await_tree::instrument("prepare_streaming_job_for_{}", if for_replace { "replace" } else { "create" }
     )]
     pub async fn prepare_streaming_job<'a, I: Iterator<Item = &'a crate::model::Fragment> + 'a>(
