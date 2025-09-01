@@ -160,6 +160,8 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
                 } else {
                     tracing::info!("RW recovery complete (compute case)");
                 }
+            } else {
+                tracing::error!("Other panics detected...");
             }
 
             (false, e.to_string())
