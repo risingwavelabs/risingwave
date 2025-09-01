@@ -14,28 +14,26 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::array::VECTOR_DISTANCE_TYPE;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::common::PbDistanceType;
 
 use crate::OptimizerContextRef;
 use crate::expr::{
-    ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, collect_input_refs,
+    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    TableFunction, TableFunctionType, collect_input_refs,
 };
+use crate::optimizer::plan_node::batch_vector_search::BatchVectorSearchCore;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{
     GenericPlanNode, GenericPlanRef, TopNLimit, ensure_sorted_required_cols,
 };
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
-use crate::optimizer::plan_node::{
-    BatchPlanRef, BatchProject, BatchTopN, ColPrunable, ColumnPruningContext, ExprRewritable,
-    Logical, LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary,
-    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamPlanRef, ToBatch,
-    ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
-};
+use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, *};
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
@@ -274,9 +272,8 @@ impl ToStream for LogicalVectorSearch {
     }
 }
 
-impl ToBatch for LogicalVectorSearch {
-    fn to_batch(&self) -> crate::error::Result<BatchPlanRef> {
-        let input = self.input().to_batch()?;
+impl LogicalVectorSearch {
+    fn to_top_n(&self) -> LogicalTopN {
         let (neg, expr_type) = match self.core.distance_type {
             PbDistanceType::Unspecified => {
                 unreachable!()
@@ -286,12 +283,17 @@ impl ToBatch for LogicalVectorSearch {
             PbDistanceType::Cosine => (false, ExprType::CosineDistance),
             PbDistanceType::InnerProduct => (true, ExprType::InnerProduct),
         };
-        let mut expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new(
+        let mut expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
             expr_type,
             vec![self.core.left.clone(), self.core.right.clone()],
-        )?));
+            VECTOR_DISTANCE_TYPE,
+        )));
         if neg {
-            expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new(ExprType::Neg, vec![expr])?));
+            expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+                ExprType::Neg,
+                vec![expr],
+                VECTOR_DISTANCE_TYPE,
+            )));
         }
         let exprs = generic::Project::out_col_idx_exprs(
             &self.core.input,
@@ -300,8 +302,7 @@ impl ToBatch for LogicalVectorSearch {
         .chain([expr])
         .collect();
 
-        let project = generic::Project::new(exprs, input);
-        let input = BatchProject::new(project).into();
+        let input = LogicalProject::new(self.input(), exprs).into();
         let top_n = generic::TopN::without_group(
             input,
             TopNLimit::Simple(self.core.top_n),
@@ -311,6 +312,155 @@ impl ToBatch for LogicalVectorSearch {
                 OrderType::ascending(),
             )]),
         );
-        Ok(BatchTopN::new(top_n).into())
+        top_n.into()
+    }
+
+    fn as_vector_table_scan(&self) -> Option<(&LogicalScan, ExprImpl, usize)> {
+        let scan = self.core.input.as_logical_scan()?;
+        if !scan.predicate().always_true() {
+            return None;
+        }
+        let (vector_input, vec) = match (&self.core.left, &self.core.right) {
+            (ExprImpl::InputRef(_), ExprImpl::InputRef(_)) => return None,
+            (ExprImpl::InputRef(input), other) | (other, ExprImpl::InputRef(input))
+                if other.only_literal_and_func() =>
+            {
+                (input, other.clone())
+            }
+            _ => return None,
+        };
+        Some((scan, vec, vector_input.index))
+    }
+}
+
+impl ToBatch for LogicalVectorSearch {
+    fn to_batch(&self) -> crate::error::Result<BatchPlanRef> {
+        if let Some((scan, vector_expr, vector_input_idx)) = self.as_vector_table_scan()
+            && !scan.vector_indexes().is_empty()
+        {
+            for index in scan.vector_indexes() {
+                if index.vector_column_idx != scan.output_col_idx()[vector_input_idx] {
+                    continue;
+                }
+                if index
+                    .index_table
+                    .vector_index_info
+                    .as_ref()
+                    .expect("vector index")
+                    .distance_type()
+                    != self.core.distance_type
+                {
+                    continue;
+                }
+
+                let primary_table_cols_idx = self
+                    .core
+                    .output_indices
+                    .iter()
+                    .map(|input_idx| scan.output_col_idx()[*input_idx])
+                    .collect_vec();
+                let mut covered_table_cols_idx = Vec::new();
+                let mut non_covered_table_cols_idx = Vec::new();
+                for table_col_idx in &primary_table_cols_idx {
+                    if index
+                        .primary_to_included_info_column_mapping
+                        .contains_key(table_col_idx)
+                    {
+                        covered_table_cols_idx.push(*table_col_idx);
+                    } else {
+                        non_covered_table_cols_idx.push(*table_col_idx);
+                    }
+                }
+                // not covering index
+                if !non_covered_table_cols_idx.is_empty() {
+                    continue;
+                }
+                let vector_data_type = vector_expr.return_type();
+                let literal_vector_input = BatchValues::new(LogicalValues::new(
+                    vec![vec![vector_expr]],
+                    Schema::from_iter([Field::unnamed(vector_data_type)]),
+                    self.core.ctx(),
+                ))
+                .into();
+                let core = BatchVectorSearchCore {
+                    input: literal_vector_input,
+                    top_n: self.core.top_n,
+                    distance_type: self.core.distance_type,
+                    index_name: index.index_table.name.clone(),
+                    index_table_id: index.index_table.id,
+                    info_column_desc: index.index_table.columns
+                        [1..=index.included_info_columns.len()]
+                        .iter()
+                        .map(|col| col.column_desc.clone())
+                        .collect(),
+                    vector_column_idx: 0,
+                    ctx: self.core.ctx(),
+                };
+                let vector_search: BatchPlanRef = {
+                    let vector_search: BatchPlanRef = BatchVectorSearch::with_core(core).into();
+                    let unnested_array: BatchPlanRef = BatchProjectSet::new(generic::ProjectSet {
+                        select_list: vec![ExprImpl::TableFunction(
+                            TableFunction::new(
+                                TableFunctionType::Unnest,
+                                vec![ExprImpl::InputRef(
+                                    InputRef::new(1, vector_search.schema()[1].data_type()).into(),
+                                )],
+                            )?
+                            .into(),
+                        )],
+                        input: vector_search,
+                    })
+                    .into();
+                    let DataType::Struct(struct_type) = &unnested_array.schema()[1].data_type
+                    else {
+                        panic!("{:?}", unnested_array.schema()[1].data_type);
+                    };
+                    let unnest_struct = BatchProject::new(generic::Project::new(
+                        struct_type
+                            .types()
+                            .enumerate()
+                            .map(|(idx, data_type)| {
+                                ExprImpl::FunctionCall(
+                                    FunctionCall::new_unchecked(
+                                        ExprType::Field,
+                                        vec![
+                                            ExprImpl::InputRef(
+                                                InputRef::new(
+                                                    1,
+                                                    DataType::Struct(struct_type.clone()),
+                                                )
+                                                .into(),
+                                            ),
+                                            ExprImpl::Literal(
+                                                Literal::new(
+                                                    Some(ScalarImpl::Int32(idx as _)),
+                                                    DataType::Int32,
+                                                )
+                                                .into(),
+                                            ),
+                                        ],
+                                        data_type.clone(),
+                                    )
+                                    .into(),
+                                )
+                            })
+                            .collect(),
+                        unnested_array,
+                    ));
+                    unnest_struct.into()
+                };
+                return Ok(BatchProject::new(generic::Project::with_out_col_idx(
+                    vector_search,
+                    covered_table_cols_idx
+                        .iter()
+                        .map(|table_col_idx| {
+                            index.primary_to_included_info_column_mapping[table_col_idx]
+                        })
+                        .chain([index.included_info_columns.len()]),
+                ))
+                .into());
+            }
+        }
+        self.to_top_n().to_batch()
     }
 }

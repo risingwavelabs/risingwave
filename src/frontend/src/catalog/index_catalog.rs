@@ -56,9 +56,14 @@ pub struct TableIndex {
     pub index_columns_len: u32,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Educe)]
+#[educe(Hash)]
 pub struct VectorIndex {
     pub index_table: Arc<TableCatalog>,
+    pub vector_column_idx: usize,
+    #[educe(Hash(ignore))]
+    pub primary_to_included_info_column_mapping: HashMap<usize, usize>,
+    pub included_info_columns: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -146,8 +151,30 @@ impl IndexCatalog {
             }
             TableType::VectorIndex => {
                 assert_eq!(index_prost.index_columns_len, 1);
+                let ExprImpl::InputRef(input) = &index_item[0] else {
+                    panic!(
+                        "vector index must be built on direct input column, but got: {:?}",
+                        &index_item[0]
+                    );
+                };
+                let included_info_columns = index_item[1..].iter().map(|item| {
+                    let ExprImpl::InputRef(input) = item else {
+                        panic!("vector index included columns must be from direct input column, but got: {:?}", item);
+                    };
+                    input.index
+                }).collect_vec();
+                let primary_to_included_info_column_mapping = included_info_columns
+                    .iter()
+                    .enumerate()
+                    .map(|(included_info_column_idx, primary_column_idx)| {
+                        (*primary_column_idx, included_info_column_idx)
+                    })
+                    .collect();
                 IndexType::Vector(Arc::new(VectorIndex {
                     index_table: index_table.clone(),
+                    vector_column_idx: input.index,
+                    primary_to_included_info_column_mapping,
+                    included_info_columns,
                 }))
             }
             TableType::Table | TableType::MaterializedView | TableType::Internal => {

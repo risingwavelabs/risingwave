@@ -156,6 +156,12 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             .await?;
 
         let deserializer = Arc::new(deserializer);
+        let sqrt_distance = match &self.measure {
+            DistanceMeasurement::L2Sqr => true,
+            DistanceMeasurement::L1
+            | DistanceMeasurement::Cosine
+            | DistanceMeasurement::InnerProduct => false,
+        };
 
         while let Some(chunk) = input.try_next().await? {
             let mut vector_info_columns_builder = ListArrayBuilder::with_type(
@@ -175,6 +181,11 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
                                 let mut values =
                                     Vec::with_capacity(deserializer.data_types().len() + 1);
                                 deserializer.deserialize_to(value, &mut values)?;
+                                let distance = if sqrt_distance {
+                                    distance.sqrt()
+                                } else {
+                                    distance
+                                };
                                 values.push(Some(ScalarImpl::Float64(distance.into())));
                                 Ok(StructValue::new(values))
                             },
