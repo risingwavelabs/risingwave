@@ -252,22 +252,31 @@ impl ObjectStore for OpendalObjectStore {
                 match object_lister.next().await {
                     Some(Ok(object)) => {
                         let key = object.path().to_owned();
-                        let mut meta = object.metadata().clone();
 
-                        // Check if we need to call stat() to get complete metadata
-
-                        if !full_capability.list_has_content_length
+                        // Check if we need to call stat() to get complete metadata.
+                        let (last_modified, total_size) = if !full_capability
+                            .list_has_content_length
                             || !full_capability.list_has_last_modified
                         {
+                            // Need complete metadata, call stat()
                             let stat_meta = op.stat(&key).await.ok()?;
-                            meta = stat_meta;
-                        }
-
-                        let last_modified = match meta.last_modified() {
-                            Some(t) => t.timestamp() as f64,
-                            None => 0_f64,
+                            let last_modified = match stat_meta.last_modified() {
+                                Some(t) => t.timestamp() as f64,
+                                None => 0_f64,
+                            };
+                            let total_size = stat_meta.content_length() as usize;
+                            (last_modified, total_size)
+                        } else {
+                            // Use metadata from list operation
+                            let meta = object.metadata();
+                            let last_modified = match meta.last_modified() {
+                                Some(t) => t.timestamp() as f64,
+                                None => 0_f64,
+                            };
+                            let total_size = meta.content_length() as usize;
+                            (last_modified, total_size)
                         };
-                        let total_size = meta.content_length() as usize;
+
                         let metadata = ObjectMetadata {
                             key,
                             last_modified,

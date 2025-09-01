@@ -96,24 +96,31 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                 match object_lister.next().await {
                     Some(Ok(object)) => {
                         let name = object.path().to_owned();
-                        let mut meta = object.metadata().clone();
 
                         // Check if we need to call stat() to get complete metadata
-
-                        if !full_capability.list_has_content_length
+                        let (t, size) = if !full_capability.list_has_content_length
                             || !full_capability.list_has_last_modified
                         {
+                            // Need complete metadata, call stat()
                             let stat_meta = op.stat(&name).await.ok()?;
-                            meta = stat_meta;
-                        }
-
-                        let t = match meta.last_modified() {
-                            Some(t) => t,
-                            None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+                            let t = match stat_meta.last_modified() {
+                                Some(t) => t,
+                                None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+                            };
+                            let size = stat_meta.content_length() as i64;
+                            (t, size)
+                        } else {
+                            // Use metadata from list operation
+                            let meta = object.metadata();
+                            let t = match meta.last_modified() {
+                                Some(t) => t,
+                                None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+                            };
+                            let size = meta.content_length() as i64;
+                            (t, size)
                         };
-                        let timestamp = Timestamptz::from(t);
-                        let size = meta.content_length() as i64;
 
+                        let timestamp = Timestamptz::from(t);
                         let metadata = FsPageItem {
                             name,
                             size,
