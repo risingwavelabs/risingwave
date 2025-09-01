@@ -371,7 +371,7 @@ impl RedShiftSinkJdbcWriter {
         let metrics = SinkWriterMetrics::new(&writer_param);
         let column_descs = &mut param.columns;
         param.properties.remove("create_table_if_not_exists");
-        param.properties.remove("schedule_seconds");
+        param.properties.remove("write.target.interval.seconds");
         let full_table_name = if is_append_only {
             config.table
         } else {
@@ -397,7 +397,8 @@ impl RedShiftSinkJdbcWriter {
             })?
         };
         param.properties.remove("intermediate.table.name");
-        param.properties.remove("target.table.name");
+        param.properties.remove("table.name");
+        param.properties.remove("with_s3");
         if let Some(schema_name) = param.properties.remove("schema") {
             param
                 .properties

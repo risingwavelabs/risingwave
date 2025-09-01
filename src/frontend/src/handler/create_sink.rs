@@ -251,7 +251,7 @@ pub async fn gen_sink_plan(
                     }
                 } else {
                     return Err(RwError::from(ErrorCode::BindError(
-                        "'target.table.name' option must be specified.".to_owned(),
+                        "'table.name' option must be specified.".to_owned(),
                     )));
                 }
             }

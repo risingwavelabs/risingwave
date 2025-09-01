@@ -38,6 +38,11 @@
             <artifactId>snowflake-jdbc</artifactId>
             <version>3.23.0</version>
         </dependency>
+        <dependency>
+            <groupId>com.amazon.redshift</groupId>
+            <artifactId>redshift-jdbc42</artifactId>
+            <version>2.1.0.33</version>
+        </dependency>
 
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>

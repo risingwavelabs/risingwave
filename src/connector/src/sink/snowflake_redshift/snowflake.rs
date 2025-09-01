@@ -149,7 +149,7 @@ impl SnowflakeV2Config {
         let target_table_name = self
             .snowflake_target_table_name
             .clone()
-            .ok_or(SinkError::Config(anyhow!("target.table.name is required")))?;
+            .ok_or(SinkError::Config(anyhow!("table.name is required")))?;
         let database = self
             .snowflake_database
             .clone()
