@@ -48,7 +48,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    AuthMethod, BatchConfig, ConnectionType, FrontendConfig, HbaEntry, MetaConfig, MetricLevel,
+    AuthMethod, BatchConfig, ConnectionType, FrontendConfig, HbaConfig, MetaConfig, MetricLevel,
     StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
@@ -75,11 +75,6 @@ use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
-
-// Manually add Ldap to EncryptionType
-impl EncryptionType {
-    pub const Ldap: i32 = 4; // Choose an appropriate unused value
-}
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
@@ -1545,23 +1540,24 @@ impl SessionManagerImpl {
                     let connection_type = match peer_addr.as_ref() {
                         Address::Tcp(_) => ConnectionType::Host,
                         Address::Unix(_) => ConnectionType::Local,
-                        _ => ConnectionType::Host,
                     };
 
-                    let hba_entry_opt = catalog_reader.hba_config().find_matching_entry(
+                    let client_addr = match peer_addr.as_ref() {
+                        Address::Tcp(socket_addr) => Some(&socket_addr.ip()),
+                        _ => None,
+                    };
+
+                    let hba_entry_opt = self.env.frontend_config().hba_config.find_matching_entry(
                         &connection_type,
                         database_name,
                         user_name,
-                        match peer_addr.as_ref() {
-                            Address::Tcp(socket_addr) => Some(socket_addr.ip()),
-                            _ => None,
-                        },
+                        client_addr,
                         false,
                     );
 
-                    if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
+                    if auth_info.encryption_type() == EncryptionType::Plaintext {
                         UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
-                    } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
+                    } else if auth_info.encryption_type() == EncryptionType::Md5 {
                         let mut salt = [0; 4];
                         let mut rng = rand::rng();
                         rng.fill_bytes(&mut salt);
@@ -1572,9 +1568,9 @@ impl SessionManagerImpl {
                             ),
                             salt,
                         }
-                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
+                    } else if auth_info.encryption_type() == EncryptionType::Oauth {
                         UserAuthenticator::OAuth(auth_info.metadata.clone())
-                    } else if auth_info.encryption_type == EncryptionType::Ldap as i32 {
+                    } else if auth_info.encryption_type() == EncryptionType::Ldap {
                         // LDAP authentication through HBA configuration
                         match hba_entry_opt {
                             Some(hba_entry) if hba_entry.auth_method == AuthMethod::Ldap => {

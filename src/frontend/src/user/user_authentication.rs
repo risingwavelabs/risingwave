@@ -110,6 +110,7 @@ pub fn encrypted_raw_password(info: &AuthInfo) -> String {
         EncryptionType::Sha256 => SHA256_ENCRYPTED_PREFIX,
         EncryptionType::Md5 => MD5_ENCRYPTED_PREFIX,
         EncryptionType::Oauth => "",
+        EncryptionType::Ldap => "", // No specific prefix for LDAP
     };
     format!("{}{}", prefix, encrypted_pwd)
 }
