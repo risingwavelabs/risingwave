@@ -1144,19 +1144,19 @@ impl ParseTo for UserOptions {
             }
 
             let option = parser.parse_identifier()?;
-            let s = option.value.to_ascii_uppercase();
-            let (item_mut_ref, user_option) = match &*s {
-                "SUPERUSER" => (&mut builder.super_user, UserOption::SuperUser),
-                "NOSUPERUSER" => (&mut builder.super_user, UserOption::NoSuperUser),
-                "CREATEDB" => (&mut builder.create_db, UserOption::CreateDB),
-                "NOCREATEDB" => (&mut builder.create_db, UserOption::NoCreateDB),
-                "CREATEUSER" => (&mut builder.create_user, UserOption::CreateUser),
-                "NOCREATEUSER" => (&mut builder.create_user, UserOption::NoCreateUser),
-                "LOGIN" => (&mut builder.login, UserOption::Login),
-                "NOLOGIN" => (&mut builder.login, UserOption::NoLogin),
-                "ADMIN" => (&mut builder.admin, UserOption::Admin),
-                "NOADMIN" => (&mut builder.admin, UserOption::NoAdmin),
-                "PASSWORD" => {
+            let s = option.real_value();
+            let (item_mut_ref, user_option) = match &s[..] {
+                "superuser" => (&mut builder.super_user, UserOption::SuperUser),
+                "nosuperuser" => (&mut builder.super_user, UserOption::NoSuperUser),
+                "createdb" => (&mut builder.create_db, UserOption::CreateDB),
+                "nocreatedb" => (&mut builder.create_db, UserOption::NoCreateDB),
+                "createuser" => (&mut builder.create_user, UserOption::CreateUser),
+                "nocreateuser" => (&mut builder.create_user, UserOption::NoCreateUser),
+                "login" => (&mut builder.login, UserOption::Login),
+                "nologin" => (&mut builder.login, UserOption::NoLogin),
+                "admin" => (&mut builder.admin, UserOption::Admin),
+                "noadmin" => (&mut builder.admin, UserOption::NoAdmin),
+                "password" => {
                     if parser.parse_keyword(Keyword::NULL) {
                         (&mut builder.password, UserOption::Password(None))
                     } else {
@@ -1166,10 +1166,10 @@ impl ParseTo for UserOptions {
                         )
                     }
                 }
-                "ENCRYPTED" => {
+                "encrypted" => {
                     let option = parser.parse_identifier()?;
-                    let s = option.value.to_ascii_uppercase();
-                    if s != "PASSWORD" {
+                    let s = option.real_value();
+                    if s != "password" {
                         parser_err!("expected PASSWORD after ENCRYPTED, found {}", option);
                     }
                     (
@@ -1177,7 +1177,7 @@ impl ParseTo for UserOptions {
                         UserOption::EncryptedPassword(AstString::parse_to(parser)?),
                     )
                 }
-                "OAUTH" => {
+                "oauth" => {
                     let options = parser.parse_options()?;
                     (&mut builder.password, UserOption::OAuth(options))
                 }
