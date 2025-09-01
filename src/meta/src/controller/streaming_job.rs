@@ -72,9 +72,9 @@ use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_internal_tables_by_id, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_user_info_by_ids,
+    check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
+    get_fragment_actor_ids, get_internal_tables_by_id, get_table_columns,
+    grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -366,6 +366,10 @@ impl CatalogController {
         let job_id = job.id() as ObjectId;
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        // Ensure the job exists.
+        ensure_job_not_canceled(job_id, &txn).await?;
+
         let mut table_id_map = HashMap::new();
         for table in &mut incomplete_internal_tables {
             let table_id = Self::create_object(
@@ -453,6 +457,9 @@ impl CatalogController {
 
         let mut objects_to_notify = if need_notify { Some(vec![]) } else { None };
         let txn = inner.db.begin().await?;
+
+        // Ensure the job exists.
+        ensure_job_not_canceled(job_id, &txn).await?;
 
         // Add fragments.
         let (fragments, actors): (Vec<_>, Vec<_>) = fragment_actors.into_iter().unzip();
