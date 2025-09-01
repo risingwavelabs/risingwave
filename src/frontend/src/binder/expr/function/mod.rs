@@ -397,6 +397,46 @@ impl Binder {
                 self.ensure_table_function_allowed()?;
                 return Ok(TableFunction::new_internal_source_backfill_progress().into());
             }
+            // `internal_get_channel_stats` table function
+            if func_name.eq("internal_get_channel_stats") {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+
+                match args.len() {
+                    0 => {
+                        return Ok(TableFunction::new_internal_get_channel_stats().into());
+                    }
+                    2 => {
+                        // Validate argument types
+                        if args[0].return_type() != DataType::Int64 {
+                            return Err(ErrorCode::BindError(
+                                "First argument 'at' must be of type uint64".to_owned(),
+                            )
+                            .into());
+                        }
+                        if args[1].return_type() != DataType::Int64 {
+                            return Err(ErrorCode::BindError(
+                                "Second argument 'offset' must be of type uint64".to_owned(),
+                            )
+                            .into());
+                        }
+                        return Ok(TableFunction::new_internal_get_channel_stats_with_params(
+                            args[0].clone(),
+                            args[1].clone(),
+                        )
+                        .into());
+                    }
+                    _ => {
+                        return Err(ErrorCode::BindError(
+                            "internal_get_channel_stats() expects 0 or 2 arguments".to_owned(),
+                        )
+                        .into());
+                    }
+                }
+            }
             // UDTF
             if let Some(ref udf) = udf
                 && udf.kind.is_table()
