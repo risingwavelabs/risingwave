@@ -225,7 +225,6 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::iceberg_sink_write_parquet_max_row_group_rows")]
     pub iceberg_sink_write_parquet_max_row_group_rows: usize,
 
-
     /// Whether by default enable preloading all rows in memory for state table.
     /// If true, all capable state tables will preload its state to memory
     #[serde(default = "default::streaming::default_enable_mem_preload_state_table")]
