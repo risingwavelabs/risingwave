@@ -104,8 +104,28 @@ risedev ci-resume mysql-offline-schema-change-test
 # If the bug is reproduced, you won't see rows with k=2 and k=3, check the logs of compute-node!
 
 sleep 20
-risedev psql -c "select * from t;"
+echo "\n\n\n-------------Verify data count------------\n\n\n"
 
-sleep 10
-risedev psql -c "select * from t1;"
+# Verify table t has 3 rows
+count_t=$(risedev psql -c "select count(*) from t;" --tuples-only | tr -d ' ')
+if [ "$count_t" -eq 3 ]; then
+    echo "Verification passed: table t has 3 rows"
+else
+    echo "Verification failed: table t is expected to have 3 rows, but actually has $count_t rows"
+    exit 1
+fi
+
+# Verify table t1 has 3 rows
+count_t1=$(risedev psql -c "select count(*) from t1;" --tuples-only | tr -d ' ')
+if [ "$count_t1" -eq 3 ]; then
+    echo "Verification passed: table t1 has 3 rows"
+else
+    echo "Verification failed: table t1 is expected to have 3 rows, but actually has $count_t1 rows"
+    exit 1
+fi
+
+echo "\n\n\n-------------All verifications passed------------\n\n\n"
+
+# Cleanup
+risedev kill && risedev clean-data
 
