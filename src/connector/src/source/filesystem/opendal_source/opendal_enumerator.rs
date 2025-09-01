@@ -88,6 +88,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         let object_lister = self.op.lister_with(&list_prefix).recursive(true).await?;
 
         let op = self.op.clone();
+        let full_capability = op.info().full_capability();
         let stream = stream::unfold(object_lister, move |mut object_lister| {
             let op = op.clone();
 
@@ -98,7 +99,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                         let mut meta = object.metadata().clone();
 
                         // Check if we need to call stat() to get complete metadata
-                        let full_capability = op.info().full_capability();
+
                         if !full_capability.list_has_content_length
                             || !full_capability.list_has_last_modified
                         {
