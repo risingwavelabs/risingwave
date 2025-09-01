@@ -46,6 +46,7 @@ mod tests;
 mod trace;
 mod utils;
 mod worker;
+mod background_job;
 
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignment;

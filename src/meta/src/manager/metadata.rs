@@ -819,11 +819,11 @@ impl MetadataManager {
 
     pub async fn get_job_backfill_scan_types(
         &self,
-        job_id: &TableId,
+        job_id: ObjectId,
     ) -> MetaResult<HashMap<FragmentId, PbStreamScanType>> {
         let backfill_types = self
             .catalog_controller
-            .get_job_fragment_backfill_scan_type(job_id.table_id as _)
+            .get_job_fragment_backfill_scan_type(job_id)
             .await?;
         Ok(backfill_types)
     }

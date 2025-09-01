@@ -521,4 +521,17 @@ impl CatalogController {
             .all(&inner.db)
             .await?)
     }
+
+    pub async fn list_streaming_jobs(
+        &self,
+        job_ids: Vec<ObjectId>,
+    ) -> MetaResult<HashMap<ObjectId, streaming_job::Model>> {
+        let inner = self.inner.read().await;
+        let jobs: Vec<_> = StreamingJob::find()
+            .filter(streaming_job::Column::JobId.is_in(job_ids))
+            .all(&inner.db)
+            .await?;
+
+        Ok(jobs.into_iter().map(|job| (job.job_id, job)).collect())
+    }
 }
