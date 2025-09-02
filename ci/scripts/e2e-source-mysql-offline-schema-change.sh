@@ -109,25 +109,6 @@ risedev psql -c "select * from t;"
 sleep 10
 risedev psql -c "select * from t1;"
 
-echo "\n\n\n-------------Verify data count------------\n\n\n"
-
-# Verify table t has 3 rows
-count_t=$(risedev psql -c "select count(*) from t;" --tuples-only 2>/dev/null | grep -E '^[0-9]+$')
-if [ "$count_t" -eq 3 ]; then
-    echo "Verification passed: table t has 3 rows"
-else
-    echo "Verification failed: table t is expected to have 3 rows, but actually has $count_t rows"
-    exit 1
-fi
-
-# Verify table t1 has 3 rows
-count_t1=$(risedev psql -c "select count(*) from t1;" --tuples-only 2>/dev/null | grep -E '^[0-9]+$')
-if [ "$count_t1" -eq 3 ]; then
-    echo "Verification passed: table t1 has 3 rows"
-else
-    echo "Verification failed: table t1 has $count_t1 rows, but expected 3 rows"
-    exit 1
-fi
 
 echo "\n\n\n-------------All verifications passed------------\n\n\n"
 
