@@ -46,11 +46,6 @@ def _(outer_panels: Panels):
                             "data cache - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
-                        panels.target(
-                            f"avg({metric('state_store_prefetch_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "prefetch cache - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
                     ],
                 ),
                 panels.timeseries_percentage(
