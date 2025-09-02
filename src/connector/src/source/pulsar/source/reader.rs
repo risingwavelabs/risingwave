@@ -14,6 +14,7 @@
 
 use anyhow::Context;
 use async_trait::async_trait;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
@@ -249,63 +250,43 @@ impl PulsarBrokerReader {
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         let mut already_read_offset = self.already_read_offset;
-        let mut res = Vec::with_capacity(max_chunk_size);
 
         #[for_await]
-        for msg_result in self.reader {
-            match msg_result {
-                Ok(msg) => {
-                    if let Some(PulsarFilterOffset {
-                        ledger_id,
-                        entry_id,
-                        batch_index,
-                    }) = already_read_offset
+        for msg_chunk in self.reader.ready_chunks(max_chunk_size) {
+            let mut res = Vec::with_capacity(msg_chunk.len());
+            for msg in msg_chunk {
+                let msg = msg?;
+                if let Some(PulsarFilterOffset {
+                    ledger_id,
+                    entry_id,
+                    batch_index,
+                }) = already_read_offset
+                {
+                    let message_id = msg.message_id();
+
+                    // If we have a previously stored offset, check that the messages we're consuming
+                    // appear after. Note that entry IDs and batch indexes are only monotonically increasing
+                    // within a BookKeeper ledger, so we must check that the ledger IDs match. If they don't match,
+                    // messages are coming from a new ledger and we can safely ignore the stored offset.
+                    if message_id.ledger_id == ledger_id
+                        && message_id.entry_id <= entry_id
+                        && message_id.batch_index <= batch_index
                     {
-                        let message_id = msg.message_id();
-
-                        // If we have a previously stored offset, check that the messages we're consuming
-                        // appear after. Note that entry IDs and batch indexes are only monotonically increasing
-                        // within a BookKeeper ledger, so we must check that the ledger IDs match. If they don't match,
-                        // messages are coming from a new ledger and we can safely ignore the stored offset.
-                        if message_id.ledger_id == ledger_id
-                            && message_id.entry_id <= entry_id
-                            && message_id.batch_index <= batch_index
-                        {
-                            tracing::info!(
-                                "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
-                                message_id.entry_id,
-                                message_id.batch_index,
-                                entry_id,
-                                batch_index
-                            );
-                            continue;
-                        } else {
-                            already_read_offset = None;
-                        }
-                    }
-
-                    let source_msg = SourceMessage::from(msg);
-                    res.push(source_msg);
-
-                    // Yield when we reach the max chunk size
-                    if res.len() >= max_chunk_size {
-                        let chunk = std::mem::replace(&mut res, Vec::with_capacity(max_chunk_size));
-                        yield chunk;
+                        tracing::info!(
+                            "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
+                            message_id.entry_id,
+                            message_id.batch_index,
+                            entry_id,
+                            batch_index
+                        );
+                        continue;
+                    } else {
+                        already_read_offset = None;
                     }
                 }
-                Err(e) => {
-                    // Yield any accumulated messages before propagating the error
-                    if !res.is_empty() {
-                        let chunk = std::mem::take(&mut res);
-                        yield chunk;
-                    }
-                    return Err(e.into());
-                }
+                let msg = SourceMessage::from(msg);
+                res.push(msg);
             }
-        }
-
-        // Yield any remaining messages
-        if !res.is_empty() {
             yield res;
         }
     }
