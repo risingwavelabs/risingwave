@@ -51,6 +51,7 @@ set -e
 failed_logs=$(ls $LOGDIR/fuzzing-*.log 2>/dev/null || true)
 
 if [[ -n "$failed_logs" ]]; then
+    ./risedev ci-kill && ./risedev ci-start ci-3cn-2fe
     echo "Simulation fuzzing failed, see logs in $LOGDIR"
     for log_file in $failed_logs; do
         seed=$(basename "$log_file" .log | cut -d'-' -f2)
@@ -64,7 +65,7 @@ if [[ -n "$failed_logs" ]]; then
         ./target/debug/sqlsmith-reducer \
           --input-file "$error_sql" \
           --output-file "$shrunk_sql" \
-          --run-rw-cmd './risedev k && ./risedev d ci-3cn-2fe'
+          --run-rw-cmd "MADSIM_TEST_SEED=$seed ./risingwave_simulation"
         echo "--- Reducer finished for seed $seed"
         echo "Reduced queries saved at $shrunk_sql"
     done
