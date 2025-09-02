@@ -130,9 +130,8 @@ impl SplitEnumerator for MqttSplitEnumerator {
             })
             .await?;
 
-        let Some(connection_check) = connection_check else {
-            bail!("failed to create or get mqtt client for {}", broker_url);
-        };
+        // connection_check always gets created if it doesn't exist
+        let connection_check = connection_check.unwrap();
 
         Ok(Self {
             topic: properties.topic,
