@@ -182,7 +182,9 @@ impl Rule<Logical> for ApplyAggTransposeRule {
                         | PbAggKind::PercentileDisc
                         | PbAggKind::Mode
                         // `grouping` has no *aggregate* input and unreachable when `is_scalar_agg`.
-                        | PbAggKind::Grouping)
+                        | PbAggKind::Grouping
+                        | PbAggKind::ArgMin
+                        | PbAggKind::ArgMax)
                         => {
                             // no-op when `agg(0 rows) == agg(1 row of nulls)`
                         }

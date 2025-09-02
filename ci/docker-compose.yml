@@ -87,7 +87,7 @@ services:
       retries: 5
 
   message_queue_sasl_1:
-    image: docker.io/bitnami/kafka:4.0
+    image: docker.io/bitnamilegacy/kafka:4.0
     ports:
       - "19092:19092"
     environment:
@@ -426,5 +426,3 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-

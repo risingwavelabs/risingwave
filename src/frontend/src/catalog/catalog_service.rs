@@ -198,7 +198,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()>;
 
-    async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
+    async fn drop_function(&self, function_id: FunctionId, cascade: bool) -> Result<()>;
 
     async fn drop_connection(&self, connection_id: u32, cascade: bool) -> Result<()>;
 
@@ -560,8 +560,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_function(&self, function_id: FunctionId) -> Result<()> {
-        let version = self.meta_client.drop_function(function_id).await?;
+    async fn drop_function(&self, function_id: FunctionId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_function(function_id, cascade).await?;
         self.wait_version(version).await
     }
 

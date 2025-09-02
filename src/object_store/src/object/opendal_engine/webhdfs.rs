@@ -45,6 +45,7 @@ impl OpendalObjectStore {
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
+
         Ok(Self {
             op,
             media_type: MediaType::Webhdfs,
