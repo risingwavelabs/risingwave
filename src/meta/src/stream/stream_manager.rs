@@ -656,7 +656,7 @@ impl GlobalStreamManager {
         streaming_job_ids: Vec<ObjectId>,
         state_table_ids: Vec<risingwave_meta_model::TableId>,
         fragment_ids: HashSet<FragmentId>,
-        dropped_sink_fragment_with_targets: Vec<(FragmentId, FragmentId)>,
+        dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     ) {
         // TODO(august): This is a workaround for canceling SITT via drop, remove it after refactoring SITT.
         for &job_id in &streaming_job_ids {
@@ -694,7 +694,7 @@ impl GlobalStreamManager {
                             .map(|table_id| TableId::new(*table_id as _))
                             .collect(),
                         unregistered_fragment_ids: fragment_ids,
-                        dropped_sink_fragment_with_targets,
+                        dropped_sink_fragment_by_targets,
                     },
                 )
                 .await

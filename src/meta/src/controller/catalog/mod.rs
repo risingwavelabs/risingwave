@@ -136,8 +136,8 @@ pub struct ReleaseContext {
     pub(crate) removed_actors: HashSet<ActorId>,
     pub(crate) removed_fragments: HashSet<FragmentId>,
 
-    /// Removed sink fragment with target fragment.
-    pub(crate) removed_sink_fragment_with_targets: Vec<(FragmentId, FragmentId)>,
+    /// Removed sink fragment by target fragment.
+    pub(crate) removed_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
 }
 
 impl CatalogController {

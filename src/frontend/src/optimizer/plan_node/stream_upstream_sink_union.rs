@@ -48,7 +48,7 @@ struct UpstreamSinkUnionInner {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamUpstreamSinkUnion {
     pub base: PlanBase<Stream>,
-    inner: UpstreamSinkUnionInner,
+    pub generated_column_exprs: Option<Vec<ExprImpl>>,
 }
 
 impl StreamUpstreamSinkUnion {
@@ -94,20 +94,34 @@ impl StreamUpstreamSinkUnion {
             }
         }
 
-        // TODO(zyx): Maybe some fields are incorrect.
+        let field_num = inner.schema.fields().len();
         let base = PlanBase::new_stream(
-            inner.ctx.clone(),
-            inner.schema.clone(),
-            inner.stream_key.clone(),
-            FunctionalDependencySet::new(inner.schema.fields().len()),
-            inner.dist.clone(),
+            inner.ctx,
+            inner.schema,
+            inner.stream_key, // maybe incorrect
+            FunctionalDependencySet::new(field_num),
+            inner.dist,
             inner.stream_kind,
             false, // emit_on_window_close
             out_watermark_columns,
             out_monotonicity_map,
         );
 
-        Self { base, inner }
+        Self {
+            base,
+            generated_column_exprs: inner.generated_column_exprs,
+        }
+    }
+
+    fn rebuild_inner(&self) -> UpstreamSinkUnionInner {
+        UpstreamSinkUnionInner {
+            ctx: self.base.ctx(),
+            schema: self.base.schema().clone(),
+            stream_key: self.base.stream_key().map(|keys| keys.to_vec()),
+            dist: self.base.distribution().clone(),
+            stream_kind: self.base.stream_kind(),
+            generated_column_exprs: self.generated_column_exprs.clone(),
+        }
     }
 }
 
@@ -137,11 +151,11 @@ impl StreamNode for StreamUpstreamSinkUnion {
 
 impl ExprRewritable<Stream> for StreamUpstreamSinkUnion {
     fn has_rewritable_expr(&self) -> bool {
-        self.inner.generated_column_exprs.is_some()
+        self.generated_column_exprs.is_some()
     }
 
     fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> super::PlanRef<Stream> {
-        let mut inner = self.inner.clone();
+        let mut inner = self.rebuild_inner();
         inner.generated_column_exprs = inner
             .generated_column_exprs
             .map(|exprs| exprs.into_iter().map(|expr| r.rewrite_expr(expr)).collect());
@@ -151,7 +165,7 @@ impl ExprRewritable<Stream> for StreamUpstreamSinkUnion {
 
 impl ExprVisitable for StreamUpstreamSinkUnion {
     fn visit_exprs(&self, v: &mut dyn crate::expr::ExprVisitor) {
-        if let Some(exprs) = self.inner.generated_column_exprs.as_ref() {
+        if let Some(exprs) = self.generated_column_exprs.as_ref() {
             exprs.iter().for_each(|expr| {
                 v.visit_expr(expr);
             });

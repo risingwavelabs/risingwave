@@ -74,7 +74,7 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
-    fetch_target_fragments, get_fragment_actor_ids, get_internal_tables_by_id,
+    get_fragment_actor_ids, get_internal_tables_by_id, get_mview_fragment_by_id,
     get_sink_fragment_by_id, get_table_columns, grant_default_privileges_automatically,
     insert_fragment_relations, list_user_info_by_ids, try_get_sink_into_table,
     update_table_incoming_sinks,
@@ -568,25 +568,24 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let dropped_sink_fragment_with_targets = if let Some((sink_id, _table_id)) =
+        let dropped_sink_fragment_by_targets = if let Some((sink_id, table_id)) =
             try_get_sink_into_table(&txn, table_fragments.stream_job_id.table_id as _).await?
         {
-            let dropped_sink_fragments =
-                get_sink_fragment_by_id(&txn, std::iter::once(sink_id)).await?;
-            let mut dropped_sink_fragment_with_targets =
-                Vec::with_capacity(dropped_sink_fragments.len());
-            for sink_fragment_id in dropped_sink_fragments {
-                let target_fragment = fetch_target_fragments(&txn, sink_fragment_id).await?;
-                assert_eq!(
-                    target_fragment.len(),
-                    1,
-                    "sink should have only one downstream fragment"
-                );
-                dropped_sink_fragment_with_targets.push((sink_fragment_id, target_fragment[0]));
-            }
-            dropped_sink_fragment_with_targets
+            let dropped_sink_fragment_id = get_sink_fragment_by_id(&txn, [sink_id])
+                .await?
+                .into_iter()
+                .exactly_one()
+                .map_err(|e| anyhow::anyhow!(e))?
+                .1;
+            let target_fragment_id = get_mview_fragment_by_id(&txn, [table_id])
+                .await?
+                .into_iter()
+                .exactly_one()
+                .map_err(|e| anyhow::anyhow!(e))?
+                .1;
+            HashMap::from([(target_fragment_id, vec![dropped_sink_fragment_id])])
         } else {
-            Vec::new()
+            HashMap::new()
         };
 
         Ok(Command::DropStreamingJobs {
@@ -597,9 +596,9 @@ impl CatalogController {
                 .map(catalog::TableId::new)
                 .collect(),
             unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
-            dropped_sink_fragment_with_targets: dropped_sink_fragment_with_targets
+            dropped_sink_fragment_by_targets: dropped_sink_fragment_by_targets
                 .into_iter()
-                .map(|(sink, target)| (sink as _, target as _))
+                .map(|(target, sinks)| (target as _, sinks.into_iter().map(|s| s as _).collect()))
                 .collect(),
         })
     }

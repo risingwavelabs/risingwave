@@ -313,8 +313,8 @@ pub enum Command {
         actors: Vec<ActorId>,
         unregistered_state_table_ids: HashSet<TableId>,
         unregistered_fragment_ids: HashSet<FragmentId>,
-        // sink_fragment -> target_fragment
-        dropped_sink_fragment_with_targets: Vec<(FragmentId, FragmentId)>,
+        // target_fragment -> [sink_fragments]
+        dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     },
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
@@ -471,25 +471,17 @@ impl Command {
             Command::Resume => None,
             Command::DropStreamingJobs {
                 unregistered_fragment_ids,
-                dropped_sink_fragment_with_targets,
+                dropped_sink_fragment_by_targets,
                 ..
             } => {
-                let mut dropped_sink_fragment_by_target: HashMap<FragmentId, Vec<FragmentId>> =
-                    HashMap::new();
-                for (sink_fragment, target_fragment) in dropped_sink_fragment_with_targets {
-                    dropped_sink_fragment_by_target
-                        .entry(*target_fragment)
-                        .or_default()
-                        .push(*sink_fragment);
-                }
                 let changes = unregistered_fragment_ids
                     .iter()
                     .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
-                    .chain(dropped_sink_fragment_by_target.into_iter().map(
+                    .chain(dropped_sink_fragment_by_targets.iter().map(
                         |(target_fragment, sink_fragments)| {
                             (
-                                target_fragment,
-                                CommandFragmentChanges::DropNodeUpstream(sink_fragments),
+                                *target_fragment,
+                                CommandFragmentChanges::DropNodeUpstream(sink_fragments.clone()),
                             )
                         },
                     ))
@@ -874,13 +866,14 @@ impl Command {
 
             Command::DropStreamingJobs {
                 actors,
-                dropped_sink_fragment_with_targets,
+                dropped_sink_fragment_by_targets,
                 ..
             } => Some(Mutation::Stop(StopMutation {
                 actors: actors.clone(),
-                dropped_sink_fragments: dropped_sink_fragment_with_targets
-                    .iter()
-                    .map(|(sink_fragment_id, _)| *sink_fragment_id)
+                dropped_sink_fragments: dropped_sink_fragment_by_targets
+                    .values()
+                    .flatten()
+                    .cloned()
                     .collect(),
             })),
 
@@ -922,7 +915,44 @@ impl Command {
                     get_nodes_with_backfill_dependencies(fragment_backfill_ordering)
                         .into_iter()
                         .collect();
-                let mut add_mutation = AddMutation {
+
+                let new_upstream_sinks =
+                    if let CreateStreamingJobType::SinkIntoTable(UpstreamSinkInfo {
+                        sink_fragment_id,
+                        sink_output_fields,
+                        project_exprs,
+                        new_sink_downstream,
+                        ..
+                    }) = job_type
+                    {
+                        let new_sink_actors = table_fragments
+                            .actors_to_create()
+                            .filter(|(fragment_id, _, _)| *fragment_id == *sink_fragment_id)
+                            .exactly_one()
+                            .map(|(_, _, actors)| {
+                                actors.into_iter().map(|(actor, worker_id)| PbActorInfo {
+                                    actor_id: actor.actor_id,
+                                    host: Some(control_stream_manager.host_addr(worker_id)),
+                                })
+                            })
+                            .unwrap_or_else(|_| panic!("should have exactly one sink actor"));
+                        let new_upstream_sink = PbNewUpstreamSink {
+                            info: Some(PbUpstreamSinkInfo {
+                                upstream_fragment_id: *sink_fragment_id,
+                                sink_output_schema: sink_output_fields.clone(),
+                                project_exprs: project_exprs.clone(),
+                            }),
+                            upstream_actors: new_sink_actors.collect(),
+                        };
+                        HashMap::from([(
+                            new_sink_downstream.downstream_fragment_id,
+                            new_upstream_sink.clone(),
+                        )])
+                    } else {
+                        HashMap::new()
+                    };
+
+                let add_mutation = AddMutation {
                     actor_dispatchers: edges
                         .dispatchers
                         .extract_if(|fragment_id, _| {
@@ -942,42 +972,8 @@ impl Command {
                             cdc_table_snapshot_split_assignment.clone(),
                         )
                         .into(),
-                    new_upstream_sinks: Default::default(),
+                    new_upstream_sinks,
                 };
-
-                if let CreateStreamingJobType::SinkIntoTable(UpstreamSinkInfo {
-                    sink_fragment_id,
-                    sink_output_fields,
-                    project_exprs,
-                    new_sink_downstream,
-                    ..
-                }) = job_type
-                {
-                    let new_sink_actors = table_fragments
-                        .actors_to_create()
-                        .filter(|(fragment_id, _, _)| *fragment_id == *sink_fragment_id)
-                        .exactly_one()
-                        .map(|(_, _, actors)| {
-                            actors.into_iter().map(|(actor, worker_id)| PbActorInfo {
-                                actor_id: actor.actor_id,
-                                host: Some(control_stream_manager.host_addr(worker_id)),
-                            })
-                        })
-                        .unwrap_or_else(|_| panic!("should have exactly one sink actor"));
-                    let new_upstream_sink = PbNewUpstreamSink {
-                        info: Some(PbUpstreamSinkInfo {
-                            upstream_fragment_id: *sink_fragment_id,
-                            sink_output_schema: sink_output_fields.clone(),
-                            project_exprs: project_exprs.clone(),
-                        }),
-                        upstream_actors: new_sink_actors.collect(),
-                    };
-                    let new_upstream_sinks = HashMap::from([(
-                        new_sink_downstream.downstream_fragment_id,
-                        new_upstream_sink.clone(),
-                    )]);
-                    add_mutation.new_upstream_sinks = new_upstream_sinks;
-                }
 
                 Some(Mutation::Add(add_mutation))
             }

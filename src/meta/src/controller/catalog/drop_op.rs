@@ -286,16 +286,23 @@ impl CatalogController {
         let removed_sink_fragments =
             get_sink_fragment_by_id(&txn, removed_sink_by_table.values().flatten().copied())
                 .await?;
-        let mut removed_sink_fragment_with_targets =
-            Vec::with_capacity(removed_sink_fragments.len());
-        for sink_fragment_id in removed_sink_fragments {
-            let target_fragment = fetch_target_fragments(&txn, sink_fragment_id).await?;
-            assert_eq!(
-                target_fragment.len(),
-                1,
-                "sink should have only one downstream fragment"
-            );
-            removed_sink_fragment_with_targets.push((sink_fragment_id, target_fragment[0]));
+        assert_eq!(
+            removed_sink_fragments.len(),
+            removed_sink_by_table.values().flatten().count()
+        );
+        let existing_target_fragments =
+            get_mview_fragment_by_id(&txn, removed_sink_by_table.keys().copied()).await?;
+        assert_eq!(existing_target_fragments.len(), removed_sink_by_table.len());
+
+        let mut removed_sink_fragment_by_targets =
+            HashMap::with_capacity(removed_sink_by_table.len());
+        for (table_id, removed_sink_ids) in removed_sink_by_table {
+            let target_fragment = existing_target_fragments.get(&table_id).unwrap();
+            let sink_fragments = removed_sink_ids
+                .into_iter()
+                .filter_map(|sink_id| removed_sink_fragments.get(&sink_id).cloned())
+                .collect_vec();
+            removed_sink_fragment_by_targets.insert(*target_fragment, sink_fragments);
         }
 
         // Find affect users with privileges on all this objects.
@@ -398,7 +405,7 @@ impl CatalogController {
                 removed_source_fragments,
                 removed_actors,
                 removed_fragments,
-                removed_sink_fragment_with_targets,
+                removed_sink_fragment_by_targets,
             },
             version,
         ))

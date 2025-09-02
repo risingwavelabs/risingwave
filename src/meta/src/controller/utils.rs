@@ -2203,13 +2203,13 @@ where
 pub async fn get_sink_fragment_by_id<C>(
     txn: &C,
     sink_ids: impl IntoIterator<Item = SinkId>,
-) -> MetaResult<Vec<FragmentId>>
+) -> MetaResult<HashMap<SinkId, FragmentId>>
 where
     C: ConnectionTrait,
 {
-    let fragment_ids: Vec<FragmentId> = Fragment::find()
+    let sink_fragments: Vec<(SinkId, FragmentId)> = Fragment::find()
         .select_only()
-        .column(fragment::Column::FragmentId)
+        .columns([fragment::Column::JobId, fragment::Column::FragmentId])
         .filter(
             fragment::Column::JobId
                 .is_in(sink_ids)
@@ -2219,25 +2219,29 @@ where
         .all(txn)
         .await?;
 
-    Ok(fragment_ids)
+    Ok(sink_fragments.into_iter().collect())
 }
 
-pub async fn fetch_target_fragments<C>(
+pub async fn get_mview_fragment_by_id<C>(
     txn: &C,
-    src_fragment_id: FragmentId,
-) -> MetaResult<Vec<FragmentId>>
+    table_ids: impl IntoIterator<Item = TableId>,
+) -> MetaResult<HashMap<TableId, FragmentId>>
 where
     C: ConnectionTrait,
 {
-    let target_fragments = FragmentRelation::find()
+    let mview_fragments: Vec<(TableId, FragmentId)> = Fragment::find()
         .select_only()
-        .column(fragment_relation::Column::TargetFragmentId)
-        .filter(fragment_relation::Column::SourceFragmentId.eq(src_fragment_id))
+        .columns([fragment::Column::JobId, fragment::Column::FragmentId])
+        .filter(
+            fragment::Column::JobId
+                .is_in(table_ids)
+                .and(FragmentTypeMask::intersects(FragmentTypeFlag::Mview)),
+        )
         .into_tuple()
         .all(txn)
         .await?;
 
-    Ok(target_fragments)
+    Ok(mview_fragments.into_iter().collect())
 }
 
 pub async fn get_job_fragments_by_id<C>(txn: &C, job_id: ObjectId) -> MetaResult<StreamJobFragments>

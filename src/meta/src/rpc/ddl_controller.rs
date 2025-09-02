@@ -1167,7 +1167,7 @@ impl DdlController {
             removed_source_fragments,
             removed_actors,
             removed_fragments,
-            removed_sink_fragment_with_targets,
+            removed_sink_fragment_by_targets,
         } = release_ctx;
 
         let _guard = self.source_manager.pause_tick().await;
@@ -1178,9 +1178,11 @@ impl DdlController {
                 removed_streaming_job_ids,
                 removed_state_table_ids,
                 removed_fragments.iter().map(|id| *id as _).collect(),
-                removed_sink_fragment_with_targets
+                removed_sink_fragment_by_targets
                     .into_iter()
-                    .map(|(sink, target)| (sink as _, target as _))
+                    .map(|(target, sinks)| {
+                        (target as _, sinks.into_iter().map(|id| id as _).collect())
+                    })
                     .collect(),
             )
             .await;
