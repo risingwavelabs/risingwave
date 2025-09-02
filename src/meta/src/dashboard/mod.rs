@@ -74,8 +74,9 @@ pub(super) mod handlers {
     };
     use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
     use risingwave_pb::monitor_service::{
-        ChannelDeltaStats, GetStreamingPrometheusStatsResponse, GetStreamingStatsResponse,
-        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+        ChannelDeltaStats, GetChannelDeltaStatsResponse, GetStreamingPrometheusStatsResponse,
+        GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
+        StackTraceResponse,
     };
     use risingwave_pb::user::PbUserInfo;
     use serde::{Deserialize, Serialize};
@@ -890,6 +891,146 @@ pub(super) mod handlers {
     pub async fn get_version(Extension(_srv): Extension<Service>) -> Result<Json<String>> {
         Ok(Json(risingwave_common::current_cluster_version()))
     }
+
+    pub async fn get_channel_delta_stats(
+        Query(params): Query<StreamingStatsPrometheusParams>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<GetChannelDeltaStatsResponse>> {
+        let mut channel_stats = HashMap::new();
+
+        // Get channel delta stats from Prometheus
+        if let Some(ref client) = srv.prometheus_client {
+            // Query channel delta stats: throughput and backpressure rate
+            let channel_input_throughput_query = format!(
+                "sum(rate(stream_actor_in_record_cnt{{{}}}[{}s])) by (fragment_id, upstream_fragment_id)",
+                srv.prometheus_selector, params.time_offset
+            );
+            let channel_output_throughput_query = format!(
+                "sum(rate(stream_actor_out_record_cnt{{{}}}[{}s])) by (fragment_id, upstream_fragment_id)",
+                srv.prometheus_selector, params.time_offset
+            );
+            let channel_backpressure_query = format!(
+                "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[{}s])) by (fragment_id, downstream_fragment_id) \
+                 / ignoring (downstream_fragment_id) group_left sum(stream_actor_count) by (fragment_id)",
+                srv.prometheus_selector, params.time_offset
+            );
+
+            // Execute all queries concurrently with optional time parameter
+            let (
+                channel_input_throughput_result,
+                channel_output_throughput_result,
+                channel_backpressure_result,
+            ) = {
+                let mut input_query = client.query(channel_input_throughput_query);
+                let mut output_query = client.query(channel_output_throughput_query);
+                let mut backpressure_query = client.query(channel_backpressure_query);
+
+                // Set the evaluation time if provided
+                if let Some(at_time) = params.at {
+                    input_query = input_query.at(at_time);
+                    output_query = output_query.at(at_time);
+                    backpressure_query = backpressure_query.at(at_time);
+                }
+
+                tokio::try_join!(
+                    input_query.get(),
+                    output_query.get(),
+                    backpressure_query.get(),
+                )
+                .map_err(err)?
+            };
+
+            // Process channel delta stats
+            // Collect input throughput
+            if let Some(channel_input_throughput_data) =
+                channel_input_throughput_result.data().as_vector()
+            {
+                for sample in channel_input_throughput_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Some(upstream_fragment_id_str) =
+                            sample.metric().get("upstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(upstream_fragment_id)) = (
+                            fragment_id_str.parse::<u32>(),
+                            upstream_fragment_id_str.parse::<u32>(),
+                        )
+                    {
+                        let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                        channel_stats
+                            .entry(key)
+                            .or_insert_with(|| ChannelDeltaStats {
+                                actor_count: 0,
+                                backpressure_rate: 0.0,
+                                recv_throughput: 0.0,
+                                send_throughput: 0.0,
+                            })
+                            .recv_throughput = sample.sample().value();
+                    }
+                }
+            }
+
+            // Collect output throughput
+            if let Some(channel_output_throughput_data) =
+                channel_output_throughput_result.data().as_vector()
+            {
+                for sample in channel_output_throughput_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Some(upstream_fragment_id_str) =
+                            sample.metric().get("upstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(upstream_fragment_id)) = (
+                            fragment_id_str.parse::<u32>(),
+                            upstream_fragment_id_str.parse::<u32>(),
+                        )
+                    {
+                        let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                        channel_stats
+                            .entry(key)
+                            .or_insert_with(|| ChannelDeltaStats {
+                                actor_count: 0,
+                                backpressure_rate: 0.0,
+                                recv_throughput: 0.0,
+                                send_throughput: 0.0,
+                            })
+                            .send_throughput = sample.sample().value();
+                    }
+                }
+            }
+
+            // Collect backpressure rate
+            if let Some(channel_backpressure_data) = channel_backpressure_result.data().as_vector()
+            {
+                for sample in channel_backpressure_data {
+                    if let Some(fragment_id_str) = sample.metric().get("fragment_id")
+                        && let Some(downstream_fragment_id_str) =
+                            sample.metric().get("downstream_fragment_id")
+                        && let (Ok(fragment_id), Ok(downstream_fragment_id)) = (
+                            fragment_id_str.parse::<u32>(),
+                            downstream_fragment_id_str.parse::<u32>(),
+                        )
+                    {
+                        let key = format!("{}_{}", fragment_id, downstream_fragment_id);
+                        channel_stats
+                            .entry(key)
+                            .or_insert_with(|| ChannelDeltaStats {
+                                actor_count: 0,
+                                backpressure_rate: 0.0,
+                                recv_throughput: 0.0,
+                                send_throughput: 0.0,
+                            })
+                            .backpressure_rate = sample.sample().value() / 1_000_000_000.0; // Convert ns to seconds
+                    }
+                }
+            }
+
+            // Set actor count for channels (using a default value since we don't have fragment stats here)
+            for channel_stats in channel_stats.values_mut() {
+                channel_stats.actor_count = 1; // Default to 1, could be enhanced later
+            }
+
+            Ok(Json(GetChannelDeltaStatsResponse { channel_stats }))
+        } else {
+            Err(err(anyhow!("Prometheus endpoint is not set")))
+        }
+    }
 }
 
 impl DashboardService {
@@ -931,6 +1072,7 @@ impl DashboardService {
                 "/metrics/streaming_stats_prometheus",
                 get(get_streaming_stats_from_prometheus),
             )
+            .route("/metrics/channel_delta_stats", get(get_channel_delta_stats))
             // /monitor/await_tree/{worker_id}/?format={text or json}
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             // /monitor/await_tree/?format={text or json}
