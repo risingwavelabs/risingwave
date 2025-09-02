@@ -80,11 +80,13 @@ implement_using_to_sql! {
     { Timestamptz, Timestamptz, |x: &Timestamptz| x.to_datetime_utc() }
 }
 
-impl ToBinary for ListRef<'_> {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
+fn list_to_binary_with_type(
+    iter: impl ExactSizeIterator<Item = Option<impl ToBinary>>,
+    ty: &DataType,
+) -> Result<Bytes> {
+    {
         // Reference: Postgres code `src/backend/utils/adt/arrayfuncs.c`
         // https://github.com/postgres/postgres/blob/c1c09007e219ae68d1f8428a54baf68ccc1f8683/src/backend/utils/adt/arrayfuncs.c#L1548
-        use crate::row::Row;
         let element_ty = match ty {
             DataType::List(ty) => ty.as_ref(),
             _ => unreachable!(),
@@ -99,9 +101,9 @@ impl ToBinary for ListRef<'_> {
         buf.put_i32(1); // Number of dimensions (must be 1)
         buf.put_i32(1); // Has nulls?
         buf.put_i32(element_ty.to_oid()); // Element type
-        buf.put_i32(self.len() as i32); // Length of 1st dimension
+        buf.put_i32(iter.len() as i32); // Length of 1st dimension
         buf.put_i32(1); // Offset of 1st dimension, starting from 1
-        for element in self.iter() {
+        for element in iter {
             match element {
                 None => {
                     buf.put_i32(-1); // -1 length means a NULL
@@ -140,6 +142,12 @@ impl ToBinary for StructRef<'_> {
     }
 }
 
+impl ToBinary for ListRef<'_> {
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
+        list_to_binary_with_type(self.iter(), ty)
+    }
+}
+
 impl ToBinary for ScalarRefImpl<'_> {
     fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
         match self {
@@ -161,7 +169,13 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            ScalarRefImpl::Vector(v) => {
+                assert_eq!(&DataType::Vector(v.dimension()), ty);
+                list_to_binary_with_type(
+                    v.as_slice().iter().cloned().map(Some),
+                    &DataType::List(DataType::Float32.into()),
+                )
+            }
             ScalarRefImpl::List(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Struct(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Map(_) => {

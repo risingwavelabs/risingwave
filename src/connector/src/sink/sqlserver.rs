@@ -611,7 +611,7 @@ fn bind_params(
                 ScalarRefImpl::UInt256(_) => return Err(data_type_not_supported("UInt256")),
                 ScalarRefImpl::Serial(_) => return Err(data_type_not_supported("Serial")),
                 ScalarRefImpl::Map(_) => return Err(data_type_not_supported("Map")),
-                ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+                ScalarRefImpl::Vector(_) => return Err(data_type_not_supported("Vector")),
             },
             None => match schema[col_idx].data_type {
                 DataType::Boolean => {
@@ -661,7 +661,7 @@ fn bind_params(
                 DataType::Int256 => return Err(data_type_not_supported("Int256")),
                 DataType::UInt256 => return Err(data_type_not_supported("UInt256")),
                 DataType::Map(_) => return Err(data_type_not_supported("Map")),
-                DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+                DataType::Vector(_) => return Err(data_type_not_supported("Vector")),
             },
         };
     }
@@ -697,7 +697,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Int256 => Err(data_type_not_supported("Int256")),
         DataType::UInt256 => Err(data_type_not_supported("UInt256")),
         DataType::Map(_) => Err(data_type_not_supported("Map")),
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Vector(_) => Err(data_type_not_supported("Vector")),
     }
 }
 

@@ -49,9 +49,10 @@
 use std::cmp::min;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::array::VectorDistanceType;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, Serial, Time, Timestamp, Timestamptz, UInt256,
@@ -61,7 +62,7 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::prelude::{PlanRef, *};
-use crate::catalog::IndexCatalog;
+use crate::catalog::index_catalog::TableIndex;
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, to_conjunctions,
     to_disjunctions,
@@ -91,7 +92,7 @@ pub struct IndexSelectionRule {}
 impl Rule<Logical> for IndexSelectionRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_scan: &LogicalScan = plan.as_logical_scan()?;
-        let indexes = logical_scan.indexes();
+        let indexes = logical_scan.table_indexes();
         if indexes.is_empty() {
             return None;
         }
@@ -204,30 +205,24 @@ impl IndexSelectionRule {
     fn gen_index_lookup(
         &self,
         logical_scan: &LogicalScan,
-        index: &IndexCatalog,
+        index: &TableIndex,
     ) -> (PlanRef, IndexCost) {
         // 1. logical_scan ->  logical_join
         //                      /        \
         //                index_scan   primary_table_scan
         let index_scan = LogicalScan::create(
-            index.index_table.name.clone(),
             index.index_table.clone(),
-            vec![],
             logical_scan.ctx(),
             logical_scan.as_of().clone(),
-            index.index_table.cardinality,
         );
         // We use `schema.len` instead of `index_item.len` here,
         // because schema contains system columns like `_rw_timestamp` column which is not represented in the index item.
-        let offset = index_scan.table_catalog().columns().len();
+        let offset = index_scan.table().columns().len();
 
         let primary_table_scan = LogicalScan::create(
-            index.primary_table.name.clone(),
             index.primary_table.clone(),
-            vec![],
             logical_scan.ctx(),
             logical_scan.as_of().clone(),
-            index.primary_table.cardinality,
         );
 
         let predicate = logical_scan.predicate().clone();
@@ -326,18 +321,15 @@ impl IndexSelectionRule {
         };
         let new_predicate = predicate.rewrite_expr(&mut shift_input_ref_rewriter);
 
-        let primary_table_desc = logical_scan.table_desc();
+        let primary_table = logical_scan.table();
 
         let primary_table_scan = LogicalScan::create(
-            logical_scan.table_name().to_owned(),
-            logical_scan.table_catalog(),
-            vec![],
+            logical_scan.table().clone(),
             logical_scan.ctx(),
             logical_scan.as_of().clone(),
-            logical_scan.table_cardinality(),
         );
 
-        let conjunctions = primary_table_desc
+        let conjunctions = primary_table
             .pk
             .iter()
             .enumerate()
@@ -346,7 +338,7 @@ impl IndexSelectionRule {
                     x,
                     schema.fields[x].data_type.clone(),
                     y.column_index + index_access_len,
-                    primary_table_desc.columns[y.column_index].data_type.clone(),
+                    primary_table.columns[y.column_index].data_type.clone(),
                 )
             })
             .chain(new_predicate)
@@ -518,7 +510,7 @@ impl IndexSelectionRule {
 
         let mut result = vec![];
 
-        for index in logical_scan.indexes() {
+        for index in logical_scan.table_indexes() {
             if let Some(column_index) = column_index {
                 assert_eq!(conjunctions.len(), 1);
                 let p2s_mapping = index.primary_to_secondary_mapping();
@@ -550,29 +542,28 @@ impl IndexSelectionRule {
         }
 
         // try primary index
-        let primary_table_desc = logical_scan.table_desc();
+        let primary_table = logical_scan.table();
         if let Some(idx) = column_index {
             assert_eq!(conjunctions.len(), 1);
-            if primary_table_desc.pk[0].column_index != idx {
+            if primary_table.pk[0].column_index != idx {
                 return result;
             }
         }
 
         let primary_access = generic::TableScan::new(
-            logical_scan.table_name().to_owned(),
-            primary_table_desc
+            primary_table
                 .pk
                 .iter()
                 .map(|x| x.column_index)
                 .collect_vec(),
-            logical_scan.table_catalog(),
+            logical_scan.table().clone(),
+            vec![],
             vec![],
             logical_scan.ctx(),
             Condition {
                 conjunctions: conjunctions.to_vec(),
             },
             logical_scan.as_of().clone(),
-            logical_scan.table_cardinality(),
         );
 
         result.push(primary_access.into());
@@ -583,7 +574,7 @@ impl IndexSelectionRule {
     /// build index access if predicate (refers to primary table) is covered by index
     fn build_index_access(
         &self,
-        index: Rc<IndexCatalog>,
+        index: Arc<TableIndex>,
         predicate: Condition,
         ctx: OptimizerContextRef,
         as_of: Option<AsOf>,
@@ -602,7 +593,6 @@ impl IndexSelectionRule {
 
         Some(
             generic::TableScan::new(
-                index.index_table.name.clone(),
                 index
                     .primary_table_pk_ref_to_index_table()
                     .iter()
@@ -610,10 +600,10 @@ impl IndexSelectionRule {
                     .collect_vec(),
                 index.index_table.clone(),
                 vec![],
+                vec![],
                 ctx,
                 new_predicate,
                 as_of,
-                index.index_table.cardinality,
             )
             .into(),
         )
@@ -727,18 +717,13 @@ impl<'a> TableScanIoEstimator<'a> {
     pub fn estimate_row_size(table_scan: &LogicalScan) -> usize {
         // 5 for table_id + 1 for vnode + 8 for epoch
         let row_meta_field_estimate_size = 14_usize;
-        let table_desc = table_scan.table_desc();
+        let table = table_scan.table();
         row_meta_field_estimate_size
-            + table_desc
+            + table
                 .columns
                 .iter()
                 // add order key twice for its appearance both in key and value
-                .chain(
-                    table_desc
-                        .pk
-                        .iter()
-                        .map(|x| &table_desc.columns[x.column_index]),
-                )
+                .chain(table.pk.iter().map(|x| &table.columns[x.column_index]))
                 .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
                 .sum::<usize>()
     }
@@ -768,7 +753,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
             DataType::Map(_) => 20,
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(d) => d * size_of::<VectorDistanceType>(),
         }
     }
 
@@ -783,13 +768,11 @@ impl<'a> TableScanIoEstimator<'a> {
     }
 
     fn estimate_conjunctions(&mut self, conjunctions: &[ExprImpl]) -> IndexCost {
-        let order_column_indices = self.table_scan.table_desc().order_column_indices();
-
         let mut new_conjunctions = conjunctions.to_owned();
 
         let mut match_item_vec = vec![];
 
-        for column_idx in order_column_indices {
+        for column_idx in self.table_scan.table().order_column_indices() {
             let match_item = self.match_index_column(column_idx, &mut new_conjunctions);
             // seeing range, we don't need to match anymore.
             let should_break = match match_item {

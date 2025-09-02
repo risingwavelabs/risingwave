@@ -311,6 +311,9 @@ message Index {
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 14;
   optional string created_at_cluster_version = 15;
+
+  // Whether it should use background ddl or block until backfill finishes.
+  CreateType create_type = 17;
 }
 
 // https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-INFO-INDEX-COLUMN-PROPS
@@ -347,6 +350,10 @@ message Function {
   optional bool is_async = 20;
   optional bool is_batched = 21;
 
+  optional uint64 created_at_epoch = 22;
+  // Cluster version (tracked by git commit) when created
+  optional string created_at_cluster_version = 23;
+
   oneof kind {
     ScalarFunction scalar = 11;
     TableFunction table = 12;
@@ -355,6 +362,17 @@ message Function {
   message ScalarFunction {}
   message TableFunction {}
   message AggregateFunction {}
+}
+
+message FlatIndexConfig {}
+
+message VectorIndexInfo {
+  uint32 dimension = 1;
+  common.DistanceType distance_type = 2;
+  oneof config {
+    // reserve 64 general configs
+    FlatIndexConfig flat = 65;
+  }
 }
 
 // Includes full information about a table.
@@ -370,6 +388,7 @@ message Table {
     MATERIALIZED_VIEW = 2;
     INDEX = 3;
     INTERNAL = 4;
+    VECTOR_INDEX = 5;
   }
 
   message TableVersion {
@@ -385,6 +404,15 @@ message Table {
     ENGINE_UNSPECIFIED = 0;
     HUMMOCK = 1;
     ICEBERG = 2;
+  }
+
+  enum CdcTableType {
+    CDC_TABLE_TYPE_UNSPECIFIED = 0;
+    CDC_TABLE_TYPE_POSTGRES = 1;
+    CDC_TABLE_TYPE_MYSQL = 2;
+    CDC_TABLE_TYPE_SQLSERVER = 3;
+    CDC_TABLE_TYPE_MONGO = 4;
+    CDC_TABLE_TYPE_CITUS = 5;
   }
 
   uint32 id = 1;
@@ -501,6 +529,11 @@ message Table {
   // Whether the table supports manual refresh operation:
   // reload data from external source and emit messages based on the diff with current data.
   bool refreshable = 45;
+
+  // only exist when table_type is VECTOR_INDEX.
+  optional VectorIndexInfo vector_index_info = 46;
+
+  optional CdcTableType cdc_table_type = 47;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for

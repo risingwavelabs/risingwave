@@ -17,17 +17,19 @@ use risingwave_common::types::{
     DataType, F32, F64, ListRef, ListValue, ScalarRefImpl, VectorRef, VectorVal,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::vector::MeasureDistanceBuilder;
+use risingwave_common::vector::distance::{L1Distance, L2SqrDistance, inner_product_faiss};
 use risingwave_expr::expr::Context;
 use risingwave_expr::{ExprError, Result, function};
 
-fn check_dims(name: &'static str, lhs: &[f32], rhs: &[f32]) -> Result<()> {
-    if lhs.len() != rhs.len() {
+fn check_dims(name: &'static str, lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<()> {
+    if lhs.dimension() != rhs.dimension() {
         return Err(ExprError::InvalidParam {
             name,
             reason: format!(
                 "different vector dimensions {} and {}",
-                lhs.len(),
-                rhs.len()
+                lhs.dimension(),
+                rhs.dimension()
             )
             .into(),
         });
@@ -66,23 +68,15 @@ fn check_dims(name: &'static str, lhs: &[f32], rhs: &[f32]) -> Result<()> {
 /// ```
 #[function("l2_distance(vector, vector) -> float8"/*, type_infer = "unreachable"*/)]
 fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
-    let lhs = lhs.into_slice();
-    let rhs = rhs.into_slice();
     check_dims("l2_distance", lhs, rhs)?;
-
-    let mut sum = 0.0f32;
-    for (l, r) in lhs.iter().zip_eq_fast(rhs.iter()) {
-        let diff = l - r;
-        sum += diff * diff;
-    }
-    Ok((sum as f64).sqrt().into())
+    Ok(L2SqrDistance::distance(lhs, rhs).sqrt().into())
 }
 
 /// ```slt
 /// query R
-/// SELECT cosine_distance('[1,2]'::vector(2), '[2,4]');
+/// SELECT abs(cosine_distance('[1,2]'::vector(2), '[2,4]')) < 1e-5;
 /// ----
-/// 0
+/// t
 ///
 /// query R
 /// SELECT cosine_distance('[1,2]'::vector(2), '[0,0]');
@@ -90,19 +84,19 @@ fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
 /// NaN
 ///
 /// query R
-/// SELECT cosine_distance('[1,1]'::vector(2), '[1,1]');
+/// SELECT abs(cosine_distance('[1,1]'::vector(2), '[1,1]')) < 1e-5;
 /// ----
-/// 0
+/// t
 ///
 /// query R
-/// SELECT cosine_distance('[1,0]'::vector(2), '[0,2]');
+/// SELECT abs(cosine_distance('[1,0]'::vector(2), '[0,2]') - 1.0) < 1e-5;
 /// ----
-/// 1
+/// t
 ///
 /// query R
-/// SELECT cosine_distance('[1,1]'::vector(2), '[-1,-1]');
+/// SELECT abs(cosine_distance('[1,1]'::vector(2), '[-1,-1]') - 2) < 1e-5;
 /// ----
-/// 2
+/// t
 ///
 /// query error dimensions
 /// SELECT cosine_distance('[1,2]'::vector(2), '[3]');
@@ -139,21 +133,8 @@ fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
 /// ```
 #[function("cosine_distance(vector, vector) -> float8")]
 fn cosine_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
-    let lhs = lhs.into_slice();
-    let rhs = rhs.into_slice();
     check_dims("cosine_distance", lhs, rhs)?;
-
-    let mut dot_product = 0.0f32;
-    let mut lhs_norm = 0.0f32;
-    let mut rhs_norm = 0.0f32;
-    for (l, r) in lhs.iter().zip_eq_fast(rhs.iter()) {
-        dot_product += l * r;
-        lhs_norm += l * l;
-        rhs_norm += r * r;
-    }
-    let similarity = dot_product as f64 / (lhs_norm as f64 * rhs_norm as f64).sqrt();
-
-    Ok((1.0 - similarity.clamp(-1.0, 1.0)).into())
+    Ok(risingwave_common::vector::distance::cosine_distance(lhs, rhs).into())
 }
 
 /// ```slt
@@ -192,15 +173,8 @@ fn cosine_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
 /// ```
 #[function("l1_distance(vector, vector) -> float8")]
 fn l1_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
-    let lhs = lhs.into_slice();
-    let rhs = rhs.into_slice();
     check_dims("l1_distance", lhs, rhs)?;
-
-    let mut sum = 0.0f32;
-    for (l, r) in lhs.iter().zip_eq_fast(rhs.iter()) {
-        sum += (l - r).abs();
-    }
-    Ok((sum as f64).into())
+    Ok(L1Distance::distance(lhs, rhs).into())
 }
 
 /// ```slt
@@ -229,15 +203,8 @@ fn l1_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
 /// ```
 #[function("inner_product(vector, vector) -> float8")]
 fn inner_product(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
-    let lhs = lhs.into_slice();
-    let rhs = rhs.into_slice();
     check_dims("inner_product", lhs, rhs)?;
-
-    let mut sum = 0.0f32;
-    for (l, r) in lhs.iter().zip_eq_fast(rhs.iter()) {
-        sum += l * r;
-    }
-    Ok((sum as f64).into())
+    Ok(inner_product_faiss(lhs, rhs).into())
 }
 
 /// ```slt
@@ -254,9 +221,9 @@ fn inner_product(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
 /// ```
 #[function("add(vector, vector) -> vector", type_infer = "unreachable")]
 fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
-    let lhs = lhs.into_slice();
-    let rhs = rhs.into_slice();
     check_dims("vector_add", lhs, rhs)?;
+    let lhs = lhs.as_raw_slice();
+    let rhs = rhs.as_raw_slice();
 
     let result = lhs
         .iter()
@@ -281,9 +248,9 @@ fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
 /// ```
 #[function("subtract(vector, vector) -> vector", type_infer = "unreachable")]
 fn vector_subtract(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
-    let lhs = lhs.into_slice();
-    let rhs = rhs.into_slice();
     check_dims("vector_subtract", lhs, rhs)?;
+    let lhs = lhs.as_raw_slice();
+    let rhs = rhs.as_raw_slice();
 
     let result = lhs
         .iter()
@@ -311,9 +278,9 @@ fn vector_subtract(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
 /// ```
 #[function("multiply(vector, vector) -> vector", type_infer = "unreachable")]
 fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
-    let lhs = lhs.into_slice();
-    let rhs = rhs.into_slice();
     check_dims("vector_multiply", lhs, rhs)?;
+    let lhs = lhs.as_raw_slice();
+    let rhs = rhs.as_raw_slice();
 
     let result = lhs
         .iter()
@@ -348,8 +315,8 @@ fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
 /// ```
 #[function("vec_concat(vector, vector) -> vector", type_infer = "unreachable")]
 fn vector_concat(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
-    let lhs = lhs.into_slice();
-    let rhs = rhs.into_slice();
+    let lhs = lhs.as_raw_slice();
+    let rhs = rhs.as_raw_slice();
 
     let result = lhs
         .iter()
@@ -369,7 +336,7 @@ fn vector_concat(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
 /// ```
 #[function("cast(vector) -> float4[]")]
 fn vector_to_float4(v: VectorRef<'_>) -> ListValue {
-    v.into_slice().iter().copied().map(F32::from).collect()
+    v.as_raw_slice().iter().copied().map(F32::from).collect()
 }
 
 /// ```slt
@@ -483,4 +450,74 @@ fn array_to_vector(array: ListRef<'_>, ctx: &Context) -> Result<VectorVal> {
         })
         .try_collect()?;
     Ok(result)
+}
+
+/// ```slt
+/// query R
+/// SELECT round(vector_norm('[1,1]'::vector(2))::numeric, 5);
+/// ----
+/// 1.41421
+///
+/// query R
+/// SELECT vector_norm('[3,4]'::vector(2));
+/// ----
+/// 5
+///
+/// query R
+/// SELECT vector_norm('[0,1]'::vector(2));
+/// ----
+/// 1
+///
+/// query R
+/// SELECT vector_norm('[3e18,4e18]'::vector(2))::real;
+/// ----
+/// 5e+18
+///
+/// query R
+/// SELECT vector_norm('[0,0]'::vector(2));
+/// ----
+/// 0
+///
+/// query R
+/// SELECT vector_norm('[2]'::vector(1));
+/// ----
+/// 2
+/// ```
+#[function("l2_norm(vector) -> float8")]
+fn l2_norm(vector: VectorRef<'_>) -> F64 {
+    (vector.l2_norm() as f64).into()
+}
+
+/// ```slt
+/// query R
+/// SELECT l2_normalize('[3,4]'::vector(2));
+/// ----
+/// [0.6,0.8]
+///
+/// query R
+/// SELECT l2_normalize('[3,0]'::vector(2));
+/// ----
+/// [1,0]
+///
+/// query R
+/// SELECT l2_normalize('[0,0.1]'::vector(2));
+/// ----
+/// [0,1]
+///
+/// query R
+/// SELECT l2_normalize('[0,0]'::vector(2));
+/// ----
+/// [0,0]
+///
+/// query R
+/// SELECT l2_normalize('[3e18]'::vector(1));
+/// ----
+/// [1]
+/// ```
+#[function(
+    "l2_normalize(vector) -> vector",
+    type_infer = "|args| Ok(args[0].clone())"
+)]
+fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
+    vector.normalized()
 }

@@ -209,6 +209,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::JsonbBuildArrayVariadic
             | Type::JsonbBuildObject
             | Type::JsonbPopulateRecord
+            | Type::JsonbToArray
             | Type::JsonbToRecord
             | Type::JsonbBuildObjectVariadic
             | Type::JsonbPathExists
@@ -275,6 +276,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::L1Distance
             | Type::InnerProduct
             | Type::VecConcat
+            | Type::L2Norm
+            | Type::L2Normalize
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
@@ -312,7 +315,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::PgTableIsVisible
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
-            | Type::HasDatabasePrivilege => self.impure = true,
+            | Type::HasDatabasePrivilege
+            | Type::Random => self.impure = true,
         }
     }
 }

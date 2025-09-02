@@ -603,19 +603,14 @@ pub(crate) mod tests {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
+            vector_index_info: None,
+            cdc_table_type: None,
         };
-        let batch_plan_node = LogicalScan::create(
-            "".to_owned(),
-            table_catalog.into(),
-            vec![],
-            ctx,
-            None,
-            Cardinality::unknown(),
-        )
-        .to_batch()
-        .unwrap()
-        .to_distributed()
-        .unwrap();
+        let batch_plan_node = LogicalScan::create(table_catalog.into(), ctx, None)
+            .to_batch()
+            .unwrap()
+            .to_distributed()
+            .unwrap();
         let batch_filter = BatchFilter::new(generic::Filter::new(
             Condition {
                 conjunctions: vec![],

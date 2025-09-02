@@ -32,8 +32,8 @@ use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::parser::{postgres_cell_to_scalar_impl, postgres_row_to_owned_row};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName,
+    CDC_TABLE_SPLIT_ID_START, CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption,
+    DebeziumOffset, ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -552,7 +552,7 @@ impl PostgresExternalTableReader {
     #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
     async fn as_uneven_splits(&self, options: CdcTableSnapshotSplitOption) {
         let split_column = self.split_column(&options);
-        let mut split_id = 1;
+        let mut split_id = CDC_TABLE_SPLIT_ID_START;
         let Some((min_value, max_value)) = self.min_and_max(&split_column).await? else {
             let left_bound_row = OwnedRow::new(vec![None]);
             let right_bound_row = OwnedRow::new(vec![None]);

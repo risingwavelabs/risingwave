@@ -17,6 +17,7 @@ use prost::Message;
 use prost_reflect::{
     DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value,
 };
+use risingwave_common::array::VECTOR_ITEM_TYPE;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, MapType, ScalarRefImpl, StructType};
@@ -458,7 +459,10 @@ fn on_field<D: MaybeData>(
                 return no_match_err();
             }
         }
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Vector(_) => match expect_list {
+            true => maybe.on_list(&VECTOR_ITEM_TYPE, proto_field)?,
+            false => return no_match_err(),
+        },
     };
 
     Ok(value)

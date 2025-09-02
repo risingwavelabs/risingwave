@@ -84,7 +84,7 @@ impl StreamProjectSet {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             out_watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity

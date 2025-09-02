@@ -113,6 +113,7 @@ pub trait Description {
 
 pub(super) type BoxedRule<C> = Box<dyn FallibleRule<C>>;
 
+mod correlated_expr_rewriter;
 mod logical_filter_expression_simplify_rule;
 pub use logical_filter_expression_simplify_rule::*;
 mod over_window_merge_rule;
@@ -125,6 +126,8 @@ mod project_merge_rule;
 pub use project_merge_rule::*;
 mod pull_up_correlated_predicate_rule;
 pub use pull_up_correlated_predicate_rule::*;
+mod pull_up_correlated_project_value_rule;
+pub use pull_up_correlated_project_value_rule::*;
 mod index_delta_join_rule;
 pub use index_delta_join_rule::*;
 mod left_deep_tree_join_ordering_rule;
@@ -177,7 +180,7 @@ mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
 pub use stream::generate_series_with_now_rule::*;
-pub use stream::separate_consecutive_join::*;
+pub use stream::separate_consecutive_join_rule::*;
 pub use stream::split_now_and_rule::*;
 pub use stream::split_now_or_rule::*;
 pub use stream::stream_project_merge_rule::*;
@@ -253,6 +256,7 @@ mod table_function_to_internal_backfill_progress;
 mod table_function_to_internal_source_backfill_progress;
 mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
+mod top_n_to_vector_search_rule;
 mod values_extract_project_rule;
 
 pub use add_logstore_rule::*;
@@ -267,6 +271,7 @@ pub use table_function_to_internal_backfill_progress::*;
 pub use table_function_to_internal_source_backfill_progress::*;
 pub use table_function_to_mysql_query_rule::*;
 pub use table_function_to_postgres_query_rule::*;
+pub use top_n_to_vector_search_rule::*;
 pub use values_extract_project_rule::*;
 
 use crate::optimizer::plan_node::ConventionMarker;
@@ -291,6 +296,7 @@ macro_rules! for_all_rules {
             , { ProjectJoinMergeRule }
             , { ProjectMergeRule }
             , { PullUpCorrelatedPredicateRule }
+            , { PullUpCorrelatedProjectValueRule }
             , { LeftDeepTreeJoinOrderingRule }
             , { TranslateApplyRule }
             , { PushCalculationOfJoinRule }
@@ -355,6 +361,7 @@ macro_rules! for_all_rules {
             , { SourceToIcebergScanRule }
             , { AddLogstoreRule }
             , { EmptyAggRemoveRule }
+            , { TopNToVectorSearchRule }
         }
     };
 }

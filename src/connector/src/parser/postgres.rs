@@ -116,8 +116,7 @@ pub fn postgres_cell_to_scalar_impl(
                 }
             }
         },
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
-        DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
+        DataType::Vector(_) | DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
             // Is this branch reachable?
             // Struct and Serial are not supported
             tracing::warn!(name, ?data_type, "unsupported data type, set to null");

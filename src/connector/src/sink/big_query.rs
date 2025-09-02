@@ -389,7 +389,9 @@ impl BigQuerySink {
             DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "MAP is not supported for BigQuery sink."
             ))),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "VECTOR is not supported for BigQuery sink."
+            ))),
         }
     }
 
@@ -450,7 +452,11 @@ impl BigQuerySink {
                     "MAP is not supported for BigQuery sink."
                 )));
             }
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "VECTOR is not supported for BigQuery sink."
+                )));
+            }
         };
         Ok(tfs)
     }
@@ -969,8 +975,10 @@ fn build_protobuf_field(
                 "UInt256 is not supported for BigQuery sink."
             )));
         }
-        DataType::Map(_) => todo!(),
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Map(_) => return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Map"))),
+        DataType::Vector(_) => {
+            return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Vector")));
+        }
     }
     Ok((field, None))
 }

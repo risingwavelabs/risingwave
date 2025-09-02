@@ -31,7 +31,8 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::{
-    CdcTableSnapshotSplitAssignment, build_pb_actor_cdc_table_snapshot_splits,
+    CdcTableSnapshotSplitAssignmentWithGeneration,
+    build_pb_actor_cdc_table_snapshot_splits_with_generation,
 };
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
@@ -58,6 +59,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
+use crate::barrier::cdc_progress::CdcTableBackfillTrackerRef;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
 };
@@ -98,7 +100,7 @@ struct ControlStreamNode {
 pub(super) struct ControlStreamManager {
     connected_nodes: HashMap<WorkerId, ControlStreamNode>,
     workers: HashMap<WorkerId, WorkerNode>,
-    env: MetaSrvEnv,
+    pub env: MetaSrvEnv,
 }
 
 impl ControlStreamManager {
@@ -387,6 +389,7 @@ pub(super) struct DatabaseInitialBarrierCollector {
     create_mview_tracker: CreateMviewProgressTracker,
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
     committed_epoch: u64,
+    cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
 }
 
 impl Debug for DatabaseInitialBarrierCollector {
@@ -441,6 +444,7 @@ impl DatabaseInitialBarrierCollector {
             self.database_state,
             self.committed_epoch,
             self.creating_streaming_job_controls,
+            self.cdc_table_backfill_tracker,
         )
     }
 
@@ -469,7 +473,7 @@ impl ControlStreamManager {
         mut subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
-        cdc_table_snapshot_split_assignment: &mut CdcTableSnapshotSplitAssignment,
+        cdc_table_snapshot_split_assignment: &mut CdcTableSnapshotSplitAssignmentWithGeneration,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
         let source_split_assignments = jobs
@@ -490,22 +494,31 @@ impl ControlStreamManager {
             .filter_map(|actor_id| {
                 let actor_id = *actor_id as ActorId;
                 cdc_table_snapshot_split_assignment
+                    .splits
                     .remove(&actor_id)
                     .map(|splits| (actor_id, splits))
             })
             .collect();
+        let database_cdc_table_snapshot_split_assignment =
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                database_cdc_table_snapshot_split_assignment,
+                cdc_table_snapshot_split_assignment.generation,
+            );
         let mutation = Mutation::Add(AddMutation {
             // Actors built during recovery is not treated as newly added actors.
             actor_dispatchers: Default::default(),
             added_actors: Default::default(),
             actor_splits: build_actor_connector_splits(&source_split_assignments),
-            actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
-                database_cdc_table_snapshot_split_assignment,
-            ),
+            actor_cdc_table_snapshot_splits:
+                build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                    database_cdc_table_snapshot_split_assignment,
+                )
+                .into(),
             pause: is_paused,
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan
             backfill_nodes_to_pause: Default::default(),
+            new_upstream_sinks: Default::default(),
         });
 
         fn resolve_jobs_committed_epoch(
@@ -764,6 +777,7 @@ impl ControlStreamManager {
             subscription_info,
             is_paused,
         );
+        let cdc_table_backfill_tracker = self.env.cdc_table_backfill_tracker();
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,
@@ -771,6 +785,7 @@ impl ControlStreamManager {
             create_mview_tracker: tracker,
             creating_streaming_job_controls,
             committed_epoch,
+            cdc_table_backfill_tracker,
         })
     }
 

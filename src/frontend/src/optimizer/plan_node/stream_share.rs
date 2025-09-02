@@ -47,7 +47,7 @@ impl StreamShare {
             PlanBase::new_stream_with_core(
                 &core,
                 dist,
-                input.append_only(),
+                input.stream_kind(),
                 input.emit_on_window_close(),
                 input.watermark_columns().clone(),
                 input.columns_monotonicity().clone(),
@@ -132,7 +132,7 @@ impl StreamShare {
                         .map(|x| *x as u32)
                         .collect(),
                     fields: self.schema().to_prost(),
-                    append_only: self.append_only(),
+                    stream_kind: self.stream_kind().to_protobuf() as i32,
                 };
 
                 state.add_share_stream_node(operator_id, stream_node.clone());

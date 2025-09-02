@@ -515,7 +515,9 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::ClickHouse(
                 "MAP is not supported for ClickHouse sink.".to_owned(),
             )),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::ClickHouse(
+                "VECTOR is not supported for ClickHouse sink.".to_owned(),
+            )),
         };
         if !is_match? {
             return Err(SinkError::ClickHouse(format!(
@@ -1050,7 +1052,11 @@ impl ClickHouseFieldWithNull {
                     "MAP is not supported for ClickHouse sink.".to_owned(),
                 ));
             }
-            ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            ScalarRefImpl::Vector(_) => {
+                return Err(SinkError::ClickHouse(
+                    "VECTOR is not supported for ClickHouse sink.".to_owned(),
+                ));
+            }
         };
         let data = if clickhouse_schema_feature.can_null {
             vec![ClickHouseFieldWithNull::WithSome(data)]

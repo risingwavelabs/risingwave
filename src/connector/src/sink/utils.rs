@@ -38,6 +38,7 @@ pub(crate) mod dummy {
 
     use anyhow::anyhow;
     use phf::{Set, phf_set};
+    use risingwave_common::catalog::Field;
     use risingwave_pb::connector_service::SinkMetadata;
     use sea_orm::DatabaseConnection;
     use tokio::sync::mpsc::UnboundedSender;
@@ -69,7 +70,12 @@ pub(crate) mod dummy {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }
 
-        async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
+        async fn commit(
+            &mut self,
+            _epoch: u64,
+            _metadata: Vec<SinkMetadata>,
+            _add_columns: Option<Vec<Field>>,
+        ) -> Result<()> {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }
     }

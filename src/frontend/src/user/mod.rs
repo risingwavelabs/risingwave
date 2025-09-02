@@ -33,5 +33,6 @@ pub fn has_access_to_object(
 ) -> bool {
     owner_id == current_user.id
         || schema_name == DEFAULT_SCHEMA_NAME
+        || current_user.is_admin
         || current_user.check_object_visibility(obj_id)
 }

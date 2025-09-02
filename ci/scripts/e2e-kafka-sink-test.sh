@@ -155,3 +155,6 @@ risedev slt 'e2e_test/sink/kafka/protobuf.slt'
 
 echo "testing avro"
 risedev slt 'e2e_test/sink/kafka/avro.slt'
+
+echo "testing avro-decimal"
+risedev slt 'e2e_test/sink/kafka/avro-decimal.slt'

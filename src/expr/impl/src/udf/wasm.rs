@@ -106,7 +106,7 @@ fn create_rust(opts: CreateOptions<'_>) -> Result<CreateFunctionOutput> {
             opts.arg_types,
             opts.return_type,
             opts.kind.is_table(),
-        );
+        )?;
         format!("#[function(\"{}\")]", identifier_v1)
     } else {
         String::new()
@@ -307,10 +307,10 @@ fn wasm_identifier_v1(
     args: &[DataType],
     ret: &DataType,
     table_function: bool,
-) -> String {
+) -> Result<String> {
     /// Convert a data type to string used in `arrow-udf-runtime/wasm`.
-    fn datatype_name(ty: &DataType) -> String {
-        match ty {
+    fn datatype_name(ty: &DataType) -> Result<String> {
+        let name = match ty {
             DataType::Boolean => "boolean".to_owned(),
             DataType::Int16 => "int16".to_owned(),
             DataType::Int32 => "int32".to_owned(),
@@ -329,23 +329,28 @@ fn wasm_identifier_v1(
             DataType::UInt256 => "uint256".to_owned(),
             DataType::Bytea => "binary".to_owned(),
             DataType::Varchar => "string".to_owned(),
-            DataType::List(inner) => format!("{}[]", datatype_name(inner)),
+            DataType::List(inner) => format!("{}[]", datatype_name(inner)?),
             DataType::Struct(s) => format!(
                 "struct<{}>",
                 s.iter()
-                    .map(|(name, ty)| format!("{}:{}", name, datatype_name(ty)))
+                    .map(|(name, ty)| datatype_name(ty)
+                        .map(|type_name| format!("{}:{}", name, type_name)))
+                    .try_collect::<_, Vec<_>, _>()?
                     .join(",")
             ),
-            DataType::Map(_m) => todo!("map in wasm udf"),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
-        }
+            _ => anyhow::bail!("unsupported data type: {:?}", ty),
+        };
+        Ok(name)
     }
 
-    format!(
+    Ok(format!(
         "{}({}){}{}",
         name,
-        args.iter().map(datatype_name).join(","),
+        args.iter()
+            .map(datatype_name)
+            .try_collect::<_, Vec<_>, _>()?
+            .join(","),
         if table_function { "->>" } else { "->" },
-        datatype_name(ret)
-    )
+        datatype_name(ret)?
+    ))
 }

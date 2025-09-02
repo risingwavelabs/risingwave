@@ -43,7 +43,11 @@ impl Rule<Stream> for SeparateConsecutiveJoinRule {
             join.join_type(),
             join.eq_join_predicate().all_cond(),
         );
-        Some(StreamHashJoin::new(core, join.eq_join_predicate().clone()).into())
+        Some(
+            StreamHashJoin::new(core, join.eq_join_predicate().clone())
+                .unwrap()
+                .into(),
+        )
     }
 }
 

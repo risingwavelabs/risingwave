@@ -19,7 +19,7 @@ use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
-    CdcTableType, ExternalTableConfig, SchemaTableName,
+    ExternalCdcTableType, ExternalTableConfig, SchemaTableName,
 };
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
@@ -27,6 +27,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{CdcBackfillExecutor, ExternalStorageTable, ParallelizedCdcBackfillExecutor};
+use crate::task::cdc_progress::CdcProgressReporter;
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -53,7 +54,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         assert_eq!(output_schema.data_types(), params.info.schema.data_types());
 
         let properties = table_desc.connect_properties.clone();
-
         let table_pk_order_types = table_desc
             .pk
             .iter()
@@ -73,7 +73,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 disable_backfill: node.disable_backfill,
                 ..Default::default()
             });
-        let table_type = CdcTableType::from_properties(&properties);
+        let table_type = ExternalCdcTableType::from_properties(&properties);
         // Filter out additional columns to construct the external table schema
         let table_schema: Schema = table_desc
             .columns
@@ -112,6 +112,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             let vnodes = None;
             let state_table =
                 StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
+            let progress = CdcProgressReporter::new(params.local_barrier_manager.clone());
             let exec = ParallelizedCdcBackfillExecutor::new(
                 params.actor_context.clone(),
                 external_table,
@@ -122,6 +123,8 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 state_table,
                 node.rate_limit,
                 scan_options,
+                properties,
+                Some(progress),
             );
             Ok((params.info, exec).into())
         } else {
@@ -141,6 +144,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 state_table,
                 node.rate_limit,
                 scan_options,
+                properties,
             );
             Ok((params.info, exec).into())
         }

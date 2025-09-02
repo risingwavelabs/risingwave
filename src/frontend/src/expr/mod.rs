@@ -52,7 +52,7 @@ mod type_inference;
 mod utils;
 
 pub use agg_call::AggCall;
-pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
+pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth, InputRefDepthRewriter};
 pub use expr_mutator::ExprMutator;
 pub use expr_rewriter::{ExprRewriter, default_rewrite_expr};
 pub use expr_visitor::{ExprVisitor, default_visit_expr};
@@ -81,8 +81,14 @@ pub trait Expr: Into<ExprImpl> {
     /// Get the return type of the expr
     fn return_type(&self) -> DataType;
 
-    /// Serialize the expression
-    fn to_expr_proto(&self) -> ExprNode;
+    /// Try to serialize the expression, returning an error if it's impossible.
+    fn try_to_expr_proto(&self) -> Result<ExprNode, String>;
+
+    /// Serialize the expression. Panic if it's impossible.
+    fn to_expr_proto(&self) -> ExprNode {
+        self.try_to_expr_proto()
+            .expect("failed to serialize expression to protobuf")
+    }
 }
 
 macro_rules! impl_expr_impl {
@@ -114,9 +120,9 @@ macro_rules! impl_expr_impl {
                 }
             }
 
-            fn to_expr_proto(&self) -> ExprNode {
+            fn try_to_expr_proto(&self) -> Result<ExprNode, String> {
                 match self {
-                    $(ExprImpl::$t(expr) => expr.to_expr_proto(),)*
+                    $(ExprImpl::$t(expr) => expr.try_to_expr_proto(),)*
                 }
             }
         }
@@ -572,11 +578,8 @@ impl ExprImpl {
         collector.correlated_indices
     }
 
-    /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
-    ///
-    /// The expression tree should only consist of literals and **pure** function calls.
-    pub fn is_const(&self) -> bool {
-        let only_literal_and_func = {
+    pub fn only_literal_and_func(&self) -> bool {
+        {
             struct HasOthers {
                 has_others: bool,
             }
@@ -631,11 +634,14 @@ impl ExprImpl {
             let mut visitor = HasOthers { has_others: false };
             visitor.visit_expr(self);
             !visitor.has_others
-        };
+        }
+    }
 
-        let is_pure = self.is_pure();
-
-        only_literal_and_func && is_pure
+    /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
+    ///
+    /// The expression tree should only consist of literals and **pure** function calls.
+    pub fn is_const(&self) -> bool {
+        self.only_literal_and_func() && self.is_pure()
     }
 
     /// Returns the `InputRefs` of an Equality predicate if it matches

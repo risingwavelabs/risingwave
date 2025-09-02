@@ -149,6 +149,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         sink_manager: SinkCoordinatorManager,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
+        barrier_scheduler: schedule::BarrierScheduler,
     ) -> Self {
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
 
@@ -160,6 +161,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             source_manager,
             scale_controller,
             env.clone(),
+            barrier_scheduler,
         ));
 
         Self::new_inner(env, sink_manager, request_rx, context).await

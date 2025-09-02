@@ -8,6 +8,11 @@ on:
         required: true
         type: string
         default: 'unlabeled'
+      push_dockerhub:
+        description: 'Whether to push to DockerHub'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build_image:
@@ -17,7 +22,7 @@ jobs:
       - name: 'Generate image tag'
         id: get_release_branch
         run: |
-          # Get current branch name
+          # Get branch name
           BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
           echo "BRANCH_NAME=$BRANCH_NAME"
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
@@ -46,6 +51,15 @@ jobs:
           IMAGE_TAG="v$VERSION--$LABEL--$COMMIT_SHA--$NO_SLASH_BRANCH_NAME"
           echo "IMAGE_TAG=$IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+          # Always set PUSH_DOCKERHUB based on input
+          if [[ "${{ github.event.inputs.push_dockerhub }}" == "true" ]]; then
+            PUSH_DOCKERHUB="true"
+          else
+            PUSH_DOCKERHUB="false"
+          fi
+          echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB"
+          echo "PUSH_DOCKERHUB=$PUSH_DOCKERHUB" >> $GITHUB_ENV
       - name: 'Trigger Docker build Workflow via Buildkite'
         uses: buildkite/trigger-pipeline-action@v2.3.0
         with:
@@ -54,4 +68,4 @@ jobs:
           branch: ${{ env.BRANCH_NAME }}
           commit: HEAD
           message: ':github: Triggering Docker build with image tag: ${{ env.IMAGE_TAG }}'
-          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}" }'
+          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}", "PUSH_DOCKERHUB": "${{ env.PUSH_DOCKERHUB }}" }'
