@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Display, Formatter};
+use std::iter::empty;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -175,7 +176,13 @@ impl StructType {
     /// Returns `None` if they are not present. See documentation on the field `field_ids`
     /// for the cases.
     pub fn ids(&self) -> Option<impl ExactSizeIterator<Item = ColumnId> + '_> {
-        self.0.field_ids.as_ref().map(|ids| ids.iter().copied())
+        if self.is_empty() {
+            Some(Either::Left(empty()))
+        } else if let Some(field_ids) = &self.0.field_ids {
+            Some(Either::Right(field_ids.iter().copied()))
+        } else {
+            None
+        }
     }
 
     /// Gets the field id at the given index.
@@ -183,7 +190,7 @@ impl StructType {
     /// Returns `None` if they are not present. See documentation on the field `field_ids`
     /// for the cases.
     pub fn id_at(&self, index: usize) -> Option<ColumnId> {
-        self.0.field_ids.as_ref().map(|ids| ids[index])
+        self.ids().map(|mut ids| ids.nth(index).unwrap())
     }
 
     /// Get an iterator over the field ids, or a sequence of placeholder ids if they are not present.
