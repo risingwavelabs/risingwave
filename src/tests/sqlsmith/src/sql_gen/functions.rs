@@ -217,9 +217,9 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Sha384 => Some(Expr::Function(make_simple_func("sha384", &exprs))),
         E::Sha512 => Some(Expr::Function(make_simple_func("sha512", &exprs))),
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
-        E::Position => Some(Expr::Function(make_simple_func("strpos", &exprs))),
+        // E::Position => Some(Expr::Function(make_simple_func("strpos", &exprs))),
         // TODO: Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
-        E::Translate => Some(Expr::Function(make_simple_func("translate", &exprs))),
+        // E::Translate => Some(Expr::Function(make_simple_func("translate", &exprs))),
         // NOTE(kwannoel): I disabled `Overlay`, its arguments require special handling.
         // We generate it in `gen_special_func` instead.
         // E::Overlay => Some(make_overlay(exprs)),
