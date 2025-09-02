@@ -21,6 +21,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_pb::catalog::vector_index_info;
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
 
@@ -373,14 +374,7 @@ impl ToBatch for LogicalVectorSearch {
                 ) {
                     continue;
                 }
-                if index
-                    .index_table
-                    .vector_index_info
-                    .as_ref()
-                    .expect("vector index")
-                    .distance_type()
-                    != self.core.distance_type
-                {
+                if index.vector_index_info.distance_type() != self.core.distance_type {
                     continue;
                 }
 
@@ -413,6 +407,16 @@ impl ToBatch for LogicalVectorSearch {
                     self.core.ctx(),
                 ))
                 .into();
+                let hnsw_ef_search = match index.vector_index_info.config.as_ref().unwrap() {
+                    vector_index_info::Config::Flat(_) => None,
+                    vector_index_info::Config::HnswFlat(_) => Some(
+                        self.core
+                            .ctx()
+                            .session_ctx()
+                            .config()
+                            .batch_hnsw_ef_search(),
+                    ),
+                };
                 let core = BatchVectorSearchCore {
                     input: literal_vector_input,
                     top_n: self.core.top_n,
@@ -425,6 +429,7 @@ impl ToBatch for LogicalVectorSearch {
                         .map(|col| col.column_desc.clone())
                         .collect(),
                     vector_column_idx: 0,
+                    hnsw_ef_search,
                     ctx: self.core.ctx(),
                 };
                 let vector_search: BatchPlanRef = {

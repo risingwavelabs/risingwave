@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, IndexId, Schema};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties};
+use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbVectorIndexInfo};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{OwnedByUserCatalog, TableCatalog};
@@ -65,6 +65,7 @@ pub struct VectorIndex {
     pub primary_to_included_info_column_mapping: HashMap<usize, usize>,
     pub primary_key_idx_in_info_columns: Vec<usize>,
     pub included_info_columns: Vec<usize>,
+    pub vector_index_info: PbVectorIndexInfo,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -176,6 +177,9 @@ impl IndexCatalog {
                     primary_to_included_info_column_mapping,
                     primary_key_idx_in_info_columns,
                     included_info_columns,
+                    vector_index_info: index_table
+                        .vector_index_info
+                        .expect("should exist for vector index"),
                 }))
             }
             TableType::Table | TableType::MaterializedView | TableType::Internal => {

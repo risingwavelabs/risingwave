@@ -366,12 +366,19 @@ message Function {
 
 message FlatIndexConfig {}
 
+message HnswFlatIndexConfig {
+  uint32 m = 1;
+  uint32 ef_construction = 2;
+  uint32 max_level = 3;
+}
+
 message VectorIndexInfo {
   uint32 dimension = 1;
   common.DistanceType distance_type = 2;
   oneof config {
     // reserve 64 general configs
     FlatIndexConfig flat = 65;
+    HnswFlatIndexConfig hnsw_flat = 66;
   }
 }
 
