@@ -17,13 +17,13 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::future::BoxFuture;
+use risingwave_common::array::{VectorItemType, VectorRef};
 use risingwave_common::vector::{decode_vector_payload, encode_vector_payload};
 use risingwave_hummock_sdk::HummockVectorFileId;
 use risingwave_hummock_sdk::vector_index::VectorFileInfo;
 use risingwave_object_store::object::ObjectStreamingUploader;
 
 use crate::hummock::{HummockError, HummockResult, xxhash64_checksum, xxhash64_verify};
-use crate::vector::VectorRef;
 
 const VECTOR_FILE_VERSION: u32 = 1;
 const VECTOR_FILE_MAGIC_NUM: u32 = 0x3866cd92;
@@ -31,7 +31,7 @@ const VECTOR_FILE_MAGIC_NUM: u32 = 0x3866cd92;
 #[cfg_attr(test, derive(PartialEq, Debug))]
 pub struct VectorBlockInner {
     dimension: usize,
-    vector_payload: Vec<f32>,
+    vector_payload: Vec<VectorItemType>,
     info_payload: Vec<u8>,
     info_offset: Vec<u32>,
 }
@@ -44,7 +44,7 @@ impl VectorBlockInner {
     pub fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
         let start = idx * self.dimension;
         let end = start + self.dimension;
-        VectorRef::from_slice(&self.vector_payload[start..end])
+        VectorRef::from_slice_unchecked(&self.vector_payload[start..end])
     }
 
     pub fn info(&self, idx: usize) -> &[u8] {

@@ -121,7 +121,7 @@ if [[ -n "${IMAGE_TAG+x}" ]]; then
   # Tag the image with the $IMAGE_TAG.
   TAG="${IMAGE_TAG}"
   pushGchr "${TAG}"
-  if [[ "${PUSH_DOCKERHUB}" == "true" ]]; then
+  if [[ "${PUSH_DOCKERHUB:-false}" == "true" ]]; then
     pushDockerhub "${TAG}"
   fi
 fi

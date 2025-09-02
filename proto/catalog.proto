@@ -311,6 +311,9 @@ message Index {
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 14;
   optional string created_at_cluster_version = 15;
+
+  // Whether it should use background ddl or block until backfill finishes.
+  CreateType create_type = 17;
 }
 
 // https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-INFO-INDEX-COLUMN-PROPS
@@ -401,6 +404,15 @@ message Table {
     ENGINE_UNSPECIFIED = 0;
     HUMMOCK = 1;
     ICEBERG = 2;
+  }
+
+  enum CdcTableType {
+    CDC_TABLE_TYPE_UNSPECIFIED = 0;
+    CDC_TABLE_TYPE_POSTGRES = 1;
+    CDC_TABLE_TYPE_MYSQL = 2;
+    CDC_TABLE_TYPE_SQLSERVER = 3;
+    CDC_TABLE_TYPE_MONGO = 4;
+    CDC_TABLE_TYPE_CITUS = 5;
   }
 
   uint32 id = 1;
@@ -520,6 +532,8 @@ message Table {
 
   // only exist when table_type is VECTOR_INDEX.
   optional VectorIndexInfo vector_index_info = 46;
+
+  optional CdcTableType cdc_table_type = 47;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for

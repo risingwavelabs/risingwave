@@ -29,7 +29,7 @@ use super::{
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
-    OrderBy, WindowFunction,
+    OrderBy, OrderByExpr, WindowFunction,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -781,6 +781,61 @@ impl LogicalAggBuilder {
                     };
                     Ok(push_agg_call(new_agg_call)?.into())
                 }
+            }
+            AggType::Builtin(PbAggKind::ArgMin | PbAggKind::ArgMax) => {
+                let mut agg_call = agg_call;
+
+                let comparison_arg_type = agg_call.args[1].return_type();
+                match comparison_arg_type {
+                    DataType::Struct(_)
+                    | DataType::List(_)
+                    | DataType::Map(_)
+                    | DataType::Vector(_)
+                    | DataType::Jsonb => {
+                        bail!(format!(
+                            "{} does not support struct, array, map, vector, jsonb for comparison argument, got {}",
+                            agg_call.agg_type.to_string(),
+                            comparison_arg_type
+                        ));
+                    }
+                    _ => {}
+                }
+
+                let not_null_exprs: Vec<ExprImpl> = agg_call
+                    .args
+                    .iter()
+                    .map(|arg| -> Result<ExprImpl> {
+                        Ok(FunctionCall::new(ExprType::IsNotNull, vec![arg.clone()])?.into())
+                    })
+                    .try_collect()?;
+
+                let comparison_expr = agg_call.args[1].clone();
+                let mut order_exprs = vec![OrderByExpr {
+                    expr: comparison_expr,
+                    order_type: if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) {
+                        OrderType::ascending()
+                    } else {
+                        OrderType::descending()
+                    },
+                }];
+
+                order_exprs.extend(agg_call.order_by.sort_exprs);
+
+                let order_by = OrderBy::new(order_exprs);
+
+                let filter = agg_call.filter.clone().and(Condition {
+                    conjunctions: not_null_exprs,
+                });
+
+                agg_call.args.truncate(1);
+
+                let new_agg_call = AggCall {
+                    agg_type: AggType::Builtin(PbAggKind::FirstValue),
+                    order_by,
+                    filter,
+                    ..agg_call
+                };
+                Ok(push_agg_call(new_agg_call)?.into())
             }
             _ => Ok(push_agg_call(agg_call)?.into()),
         }
