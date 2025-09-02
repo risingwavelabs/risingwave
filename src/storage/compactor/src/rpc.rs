@@ -18,7 +18,8 @@ use risingwave_pb::compactor::{
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetChannelDeltaStatsRequest,
+    GetChannelDeltaStatsResponse, GetProfileStatsRequest, GetProfileStatsResponse,
     GetStreamingStatsRequest, GetStreamingStatsResponse, HeapProfilingRequest,
     HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
     ProfilingResponse, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
@@ -153,11 +154,18 @@ impl MonitorService for MonitorServiceImpl {
     }
 
     async fn get_profile_stats(
-        &self,
         _request: Request<GetProfileStatsRequest>,
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         Err(Status::unimplemented(
             "Get Profile Stats unimplemented in compactor",
+        ))
+    }
+
+    async fn get_channel_delta_stats(
+        _request: Request<GetChannelDeltaStatsRequest>,
+    ) -> Result<Response<GetChannelDeltaStatsResponse>, Status> {
+        Err(Status::unimplemented(
+            "Get Channel Delta Stats unimplemented in compactor",
         ))
     }
 }
