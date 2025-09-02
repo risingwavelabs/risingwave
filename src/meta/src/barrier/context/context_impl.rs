@@ -33,6 +33,7 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
+use crate::model::FragmentDownstreamRelation;
 use crate::stream::SourceChange;
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
@@ -222,12 +223,8 @@ impl CommandContext {
                 job_type,
                 cross_db_snapshot_backfill_info,
             } => {
-                let mut replace_plan = None;
                 match job_type {
-                    CreateStreamingJobType::SinkIntoTable(plan) => {
-                        replace_plan = Some(plan);
-                    }
-                    CreateStreamingJobType::Normal => {
+                    CreateStreamingJobType::SinkIntoTable(_) | CreateStreamingJobType::Normal => {
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller
@@ -280,6 +277,23 @@ impl CommandContext {
                     init_split_assignment,
                     ..
                 } = info;
+                let sink_update_ctx = if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
+                    let target_table_id = info
+                        .streaming_job
+                        .try_as_sink_ref()
+                        .unwrap()
+                        .get_target_table()
+                        .unwrap();
+                    let new_downstreams = ctx.new_sink_downstream.clone();
+                    let new_downstreams = FragmentDownstreamRelation::from([(
+                        ctx.sink_fragment_id,
+                        vec![new_downstreams],
+                    )]);
+                    Some((*target_table_id as i32, new_downstreams))
+                } else {
+                    None
+                };
+
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
@@ -288,21 +302,9 @@ impl CommandContext {
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
-                        replace_plan,
+                        sink_update_ctx,
                     )
                     .await?;
-
-                if let Some(plan) = replace_plan {
-                    barrier_manager_context
-                        .source_manager
-                        .handle_replace_job(
-                            &plan.old_fragments,
-                            plan.new_fragments.stream_source_fragments(),
-                            init_split_assignment.clone(),
-                            plan,
-                        )
-                        .await;
-                }
 
                 let source_change = SourceChange::CreateJob {
                     added_source_fragments: stream_job_fragments.stream_source_fragments(),

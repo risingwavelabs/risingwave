@@ -46,8 +46,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    DdlProgress, PbTableJobType, ReplaceJobPlan, TableJobType, alter_name_request,
-    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
+    DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
+    alter_swap_rename_request, create_connection_request,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -378,7 +378,6 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        _affected_table_change: Option<ReplaceJobPlan>,
         _dependencies: HashSet<ObjectId>,
         _if_not_exists: bool,
     ) -> Result<()> {
@@ -518,12 +517,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(
-        &self,
-        sink_id: u32,
-        cascade: bool,
-        _target_table_change: Option<ReplaceJobPlan>,
-    ) -> Result<()> {
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_owned(),

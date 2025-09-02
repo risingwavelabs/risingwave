@@ -25,9 +25,10 @@
       └─StreamUnion { all: true }
         ├─StreamExchange [no_shuffle] { dist: SomeShard }
         │ └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
-        └─StreamExchange { dist: HashShard(_row_id) }
-          └─StreamDml { columns: [v1, v2, _row_id] }
-            └─StreamSource
+        ├─StreamExchange { dist: HashShard(_row_id) }
+        │ └─StreamDml { columns: [v1, v2, _row_id] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
 - id: csv_delimiter_semicolon
   sql: |
     explain create table s0 (v1 int, v2 varchar) with (
@@ -42,9 +43,10 @@
       └─StreamUnion { all: true }
         ├─StreamExchange [no_shuffle] { dist: SomeShard }
         │ └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
-        └─StreamExchange { dist: HashShard(_row_id) }
-          └─StreamDml { columns: [v1, v2, _row_id] }
-            └─StreamSource
+        ├─StreamExchange { dist: HashShard(_row_id) }
+        │ └─StreamDml { columns: [v1, v2, _row_id] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
 - id: csv_delimiter_tab
   sql: |
     explain create table s0 (v1 int, v2 varchar) with (
@@ -59,6 +61,7 @@
       └─StreamUnion { all: true }
         ├─StreamExchange [no_shuffle] { dist: SomeShard }
         │ └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
-        └─StreamExchange { dist: HashShard(_row_id) }
-          └─StreamDml { columns: [v1, v2, _row_id] }
-            └─StreamSource
+        ├─StreamExchange { dist: HashShard(_row_id) }
+        │ └─StreamDml { columns: [v1, v2, _row_id] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion

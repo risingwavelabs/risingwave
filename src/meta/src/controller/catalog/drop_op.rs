@@ -94,6 +94,7 @@ impl CatalogController {
 
         // TODO: record dependency info in object_dependency table for sink into table.
         // Special handling for 'sink into table'.
+        // Because no object will depend on sink, it is correct to only query it once (instead of cascading query).
         let removed_incoming_sinks: Vec<I32Array> = Table::find()
             .select_only()
             .column(table::Column::IncomingSinks)
@@ -130,28 +131,6 @@ impl CatalogController {
 
             removed_object_ids.extend(removed_sink_objs.iter().map(|obj| obj.oid));
             removed_objects.extend(removed_sink_objs);
-        }
-
-        // When there is a table sink in the dependency chain of drop cascade, an error message needs to be returned currently to manually drop the sink.
-        if object_type != ObjectType::Sink {
-            for obj in &removed_objects {
-                if obj.obj_type == ObjectType::Sink {
-                    let sink = Sink::find_by_id(obj.oid)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
-
-                    // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
-                    if let Some(target_table) = sink.target_table
-                        && !removed_object_ids.contains(&target_table)
-                    {
-                        return Err(MetaError::permission_denied(format!(
-                            "Found sink into table in dependency: {}, please drop it manually",
-                            sink.name,
-                        )));
-                    }
-                }
-            }
         }
 
         // 1. Detect when an Iceberg table is part of the dependencies.
@@ -276,6 +255,49 @@ impl CatalogController {
         let (removed_source_fragments, removed_actors, removed_fragments) =
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
+        let mut removed_sink_by_table: HashMap<TableId, Vec<SinkId>> = HashMap::new();
+        for obj in removed_objects.values() {
+            if obj.obj_type != ObjectType::Sink {
+                continue;
+            }
+            let sink = Sink::find_by_id(obj.oid)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
+            if let Some(target_table_id) = sink.target_table
+                && !removed_streaming_job_ids.contains(&target_table_id)
+            {
+                removed_sink_by_table
+                    .entry(target_table_id)
+                    .or_default()
+                    .push(sink.sink_id);
+            }
+        }
+
+        let mut updated_objects = Vec::with_capacity(removed_sink_by_table.len());
+        for (table_id, removed_sink_ids) in &removed_sink_by_table {
+            let pb_table =
+                update_table_incoming_sinks(&txn, *table_id, &[], removed_sink_ids).await?;
+            updated_objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Table(pb_table)),
+            });
+        }
+
+        let removed_sink_fragments =
+            get_sink_fragment_by_id(&txn, removed_sink_by_table.values().flatten().copied())
+                .await?;
+        let mut removed_sink_fragment_with_targets =
+            Vec::with_capacity(removed_sink_fragments.len());
+        for sink_fragment_id in removed_sink_fragments {
+            let target_fragment = fetch_target_fragments(&txn, sink_fragment_id).await?;
+            assert_eq!(
+                target_fragment.len(),
+                1,
+                "sink should have only one downstream fragment"
+            );
+            removed_sink_fragment_with_targets.push((sink_fragment_id, target_fragment[0]));
+        }
+
         // Find affect users with privileges on all this objects.
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
@@ -319,6 +341,17 @@ impl CatalogController {
         inner
             .dropped_tables
             .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
+
+        if !updated_objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: updated_objects,
+                }),
+            )
+            .await;
+        }
+
         let version = match object_type {
             ObjectType::Database => {
                 // TODO: Notify objects in other databases when the cross-database query is supported.
@@ -365,6 +398,7 @@ impl CatalogController {
                 removed_source_fragments,
                 removed_actors,
                 removed_fragments,
+                removed_sink_fragment_with_targets,
             },
             version,
         ))
