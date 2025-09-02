@@ -1802,9 +1802,11 @@ impl CatalogController {
         fragment_id: FragmentId,
     ) -> MetaResult<Vec<ActorId>> {
         let info = self.env.shared_actor_infos().read_guard();
-        let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id as _).unwrap();
 
-        let actors = actors.keys().map(|id| *id as _).collect();
+        let actors = info
+            .get_fragment(fragment_id as _)
+            .map(|SharedFragmentInfo { actors, .. }| actors.keys().map(|id| *id as _).collect_vec())
+            .unwrap_or_default();
 
         Ok(actors)
     }

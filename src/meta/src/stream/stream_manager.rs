@@ -840,6 +840,8 @@ impl GlobalStreamManager {
             }
         }
 
+        println!("x1");
+
         let job_id = TableId::new(job_id);
 
         let worker_nodes = self
@@ -850,6 +852,8 @@ impl GlobalStreamManager {
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
         let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+        println!("x2");
+
         let commands = self
             .scale_controller
             .reschedule_inplace(HashMap::from([(job_id.table_id as _, target)]), workers)

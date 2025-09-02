@@ -502,6 +502,7 @@ impl DdlController {
         target: ReschedulePolicy,
         mut deferred: bool,
     ) -> MetaResult<()> {
+        println!("altering job  {}", job_id);
         tracing::info!("alter parallelism");
         if self.barrier_manager.check_status_running().is_err() {
             tracing::info!(

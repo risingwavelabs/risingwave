@@ -86,13 +86,7 @@ async fn test_snapshot_mv() -> Result<()> {
     let workers = fragment.all_worker_count().into_keys().collect_vec();
 
     // prev cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
-    cluster
-        .reschedule(format!(
-            "{}:[{}]",
-            id,
-            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
-        ))
-        .await?;
+    session.run("alter table t1 set parallelism = 1").await?;
 
     sleep(Duration::from_secs(3)).await;
 
@@ -100,13 +94,7 @@ async fn test_snapshot_mv() -> Result<()> {
     test_no_backfill_state(&mut session).await?;
 
     // prev cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
-    cluster
-        .reschedule(format!(
-            "{}:[{}]",
-            id,
-            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
-        ))
-        .await?;
+    session.run("alter table t1 set parallelism = 6").await?;
 
     sleep(Duration::from_secs(3)).await;
 
@@ -151,13 +139,7 @@ async fn test_backfill_mv() -> Result<()> {
     let workers = fragment.all_worker_count().into_keys().collect_vec();
 
     // prev cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
-    cluster
-        .reschedule(format!(
-            "{}:[{}]",
-            id,
-            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
-        ))
-        .await?;
+    session.run("alter table t1 set parallelism = 1").await?;
 
     sleep(Duration::from_secs(3)).await;
 
@@ -168,13 +150,7 @@ async fn test_backfill_mv() -> Result<()> {
     assert_eq!(results.lines().collect_vec().len(), 256);
 
     // prev cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
-    cluster
-        .reschedule(format!(
-            "{}:[{}]",
-            id,
-            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
-        ))
-        .await?;
+    session.run("alter table t1 set parallelism = 6").await?;
 
     sleep(Duration::from_secs(3)).await;
 
@@ -217,18 +193,9 @@ async fn test_index_backfill() -> Result<()> {
         ])
         .await?;
 
-    let id = fragment.id();
-
-    let workers = fragment.all_worker_count().into_keys().collect_vec();
-
     // prev cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
-    cluster
-        .reschedule(format!(
-            "{}:[{}]",
-            id,
-            format_args!("{}:-1,{}:-2,{}:-2", workers[0], workers[1], workers[2]),
-        ))
-        .await?;
+    session.run("alter table t1 set parallelism = 1").await?;
+
     sleep(Duration::from_secs(3)).await;
 
     let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
@@ -238,13 +205,8 @@ async fn test_index_backfill() -> Result<()> {
     assert_eq!(results.lines().collect_vec().len(), 256);
 
     // prev cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
-    cluster
-        .reschedule(format!(
-            "{}:[{}]",
-            id,
-            format_args!("{}:1,{}:2,{}:2", workers[0], workers[1], workers[2]),
-        ))
-        .await?;
+    session.run("alter table t1 set parallelism = 6").await?;
+
     sleep(Duration::from_secs(3)).await;
 
     let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
