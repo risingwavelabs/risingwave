@@ -494,6 +494,21 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
     }
 }
 
+impl TableKey<Bytes> {
+    pub fn split_vnode_bytes(&self) -> (VirtualNode, Bytes) {
+        debug_assert!(
+            self.0.len() >= VirtualNode::SIZE,
+            "too short table key: {:?}",
+            self.0.as_ref()
+        );
+        let (vnode, _) = self.0.split_first_chunk::<{ VirtualNode::SIZE }>().unwrap();
+        (
+            VirtualNode::from_be_bytes(*vnode),
+            self.0.slice(VirtualNode::SIZE..),
+        )
+    }
+}
+
 impl<T: AsRef<[u8]>> TableKey<T> {
     pub fn split_vnode(&self) -> (VirtualNode, &[u8]) {
         debug_assert!(

@@ -199,7 +199,7 @@ stream_iceberg_fetch_batch_size = 1024
 stream_iceberg_sink_positional_delete_cache_size = 1024
 stream_iceberg_sink_write_parquet_max_row_group_rows = 100000
 stream_default_enable_mem_preload_state_table = false
-stream_mem_preload_state_table_ids_whilelist = []
+stream_mem_preload_state_table_ids_whitelist = []
 stream_mem_preload_state_table_ids_blacklist = []
 
 [streaming.developer.stream_compute_client_config]

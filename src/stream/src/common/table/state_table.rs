@@ -17,10 +17,12 @@ use std::marker::PhantomData;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use either::Either;
 use foyer::Hint;
+use futures::future::try_join_all;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::for_await;
 use itertools::Itertools;
@@ -41,8 +43,8 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{
-    CopyFromSlice, TableKey, TableKeyRange, end_bound_of_prefix, prefixed_range_with_vnode,
-    start_bound_of_excluded_prefix,
+    CopyFromSlice, TableKey, end_bound_of_prefix, next_key, prefix_slice_with_vnode,
+    prefixed_range_with_vnode, start_bound_of_excluded_prefix,
 };
 use risingwave_hummock_sdk::table_watermark::{
     VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
@@ -256,7 +258,7 @@ macro_rules! dispatch_value_indices {
 /// and returns `OwnedRow`, and write (`insert`, `delete`, `update`) on `(TableKey<Bytes>, OwnedRow)`.
 struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
     state_store: LS,
-    all_rows: Option<BTreeMap<TableKey<Bytes>, OwnedRow>>,
+    all_rows: Option<HashMap<VirtualNode, BTreeMap<Bytes, OwnedRow>>>,
 
     table_id: TableId,
     table_option: TableOption,
@@ -269,29 +271,44 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     async fn may_reload_all_rows(&mut self, vnode_bitmap: &Bitmap) -> StreamExecutorResult<()> {
         if let Some(rows) = &mut self.all_rows {
             rows.clear();
-            for vnode in vnode_bitmap.iter_vnodes() {
-                let memcomparable_range_with_vnode = prefixed_range_with_vnode::<Bytes>(.., vnode);
-                // TODO: set read options
-                let stream = deserialize_keyed_row_stream::<Bytes>(
-                    self.state_store
-                        .iter(
-                            memcomparable_range_with_vnode,
-                            ReadOptions {
-                                prefix_hint: None,
-                                prefetch_options: Default::default(),
-                                cache_policy: Default::default(),
-                                retention_seconds: self.table_option.retention_seconds,
-                            },
-                        )
-                        .await?,
-                    &*self.row_serde,
-                );
-                pin_mut!(stream);
-                while let Some((encoded_key, row)) = stream.try_next().await? {
-                    let key = TableKey(encoded_key);
-                    rows.try_insert(key, row).expect("non-duplicated");
+            let start_time = Instant::now();
+            *rows = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
+                let state_store = &self.state_store;
+                let retention_seconds = self.table_option.retention_seconds;
+                let row_serde = &self.row_serde;
+                async move {
+                    let mut rows = BTreeMap::new();
+                    let memcomparable_range_with_vnode =
+                        prefixed_range_with_vnode::<Bytes>(.., vnode);
+                    // TODO: set read options
+                    let stream = deserialize_keyed_row_stream::<Bytes>(
+                        state_store
+                            .iter(
+                                memcomparable_range_with_vnode,
+                                ReadOptions {
+                                    prefix_hint: None,
+                                    prefetch_options: Default::default(),
+                                    cache_policy: Default::default(),
+                                    retention_seconds,
+                                },
+                            )
+                            .await?,
+                        &**row_serde,
+                    );
+                    pin_mut!(stream);
+                    while let Some((encoded_key, row)) = stream.try_next().await? {
+                        let key = TableKey(encoded_key);
+                        let (iter_vnode, key) = key.split_vnode_bytes();
+                        assert_eq!(vnode, iter_vnode);
+                        rows.try_insert(key, row).expect("non-duplicated");
+                    }
+                    Ok((vnode, rows)) as StreamExecutorResult<_>
                 }
-            }
+            }))
+            .await?
+            .into_iter()
+            .collect();
+            info!(table_id = %self.table_id, vnode_count = vnode_bitmap.count_ones(), duration = ?start_time.elapsed(),"finished reloading all rows");
         }
         Ok(())
     }
@@ -321,10 +338,40 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)>,
         switch_consistent_op: Option<StateTableOpConsistencyLevel>,
     ) -> StreamExecutorResult<()> {
-        // TODO: remove the temp logic and clear range when seeing watermark
-        if table_watermarks.is_some() && self.all_rows.is_some() {
-            warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written watermark");
-            self.all_rows = None;
+        if let Some((direction, watermarks, serde_type)) = &table_watermarks
+            && let Some(rows) = &mut self.all_rows
+        {
+            match serde_type {
+                WatermarkSerdeType::PkPrefix => {
+                    for vnode_watermark in watermarks {
+                        match direction {
+                            WatermarkDirection::Ascending => {
+                                for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
+                                    if let Some(rows) = rows.get_mut(&vnode) {
+                                        // split_off returns everything after the given key, including the key.
+                                        *rows = rows.split_off(vnode_watermark.watermark());
+                                    }
+                                }
+                            }
+                            WatermarkDirection::Descending => {
+                                // Turn Exclude(vnode_watermark.watermark()) into Include(next_key(vnode_watermark.watermark())).
+                                let split_off_key = next_key(vnode_watermark.watermark());
+                                for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
+                                    if let Some(rows) = rows.get_mut(&vnode) {
+                                        // split_off away (Exclude(vnode_watermark.watermark())..) and keep
+                                        // (..Include(vnode_watermark.watermark()))
+                                        rows.split_off(split_off_key.as_slice());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                WatermarkSerdeType::NonPkPrefix => {
+                    warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written non pk prefix watermark");
+                    self.all_rows = None;
+                }
+            }
         }
         self.state_store
             .flush()
@@ -428,7 +475,7 @@ impl<
                 .contains(&self.table_catalog.id)
         } else {
             developer
-                .mem_preload_state_table_ids_whilelist
+                .mem_preload_state_table_ids_whitelist
                 .contains(&self.table_catalog.id)
         };
         self.with_preload_all_rows(preload_all_rows)
@@ -742,7 +789,7 @@ where
         Self {
             table_id,
             row_store: StateTableRowStore {
-                all_rows: preload_all_rows.then(BTreeMap::new),
+                all_rows: preload_all_rows.then(HashMap::new),
                 table_option,
                 state_store: local_state_store,
                 row_serde,
@@ -909,8 +956,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         key_bytes: TableKey<Bytes>,
         prefix_hint: Option<Bytes>,
     ) -> StreamExecutorResult<Option<OwnedRow>> {
-        if let Some(row) = &self.all_rows {
-            return Ok(row.get(&key_bytes).cloned());
+        if let Some(rows) = &self.all_rows {
+            let (vnode, key) = key_bytes.split_vnode();
+            return Ok(rows.get(&vnode).and_then(|rows| rows.get(key).cloned()));
         }
         let read_options = ReadOptions {
             prefix_hint,
@@ -936,8 +984,12 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         key_bytes: TableKey<Bytes>,
         prefix_hint: Option<Bytes>,
     ) -> StreamExecutorResult<bool> {
-        if let Some(row) = &self.all_rows {
-            return Ok(row.contains_key(&key_bytes));
+        if let Some(rows) = &self.all_rows {
+            let (vnode, key) = key_bytes.split_vnode();
+            return Ok(rows
+                .get(&vnode)
+                .map(|rows| rows.contains_key(key))
+                .unwrap_or(false));
         }
         let read_options = ReadOptions {
             prefix_hint,
@@ -1081,7 +1133,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         insane_mode_discard_point!();
         let value_bytes = self.row_serde.serialize(&value).into();
         if let Some(rows) = &mut self.all_rows {
-            rows.insert(key.clone(), value.into_owned_row());
+            let (vnode, key) = key.split_vnode_bytes();
+            rows.entry(vnode)
+                .or_default()
+                .insert(key, value.into_owned_row());
         }
         self.state_store
             .insert(key, value_bytes, None)
@@ -1092,7 +1147,8 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         insane_mode_discard_point!();
         let value_bytes = self.row_serde.serialize(value).into();
         if let Some(rows) = &mut self.all_rows {
-            rows.remove(&key);
+            let (vnode, key) = key.split_vnode();
+            rows.entry(vnode).or_default().remove(key);
         }
         self.state_store
             .delete(key, value_bytes)
@@ -1104,7 +1160,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         let new_value_bytes = self.row_serde.serialize(&new_value).into();
         let old_value_bytes = self.row_serde.serialize(old_value).into();
         if let Some(rows) = &mut self.all_rows {
-            rows.insert(key_bytes.clone(), new_value.into_owned_row());
+            let (vnode, key) = key_bytes.split_vnode_bytes();
+            rows.entry(vnode)
+                .or_default()
+                .insert(key, new_value.into_owned_row());
         }
         self.state_store
             .insert(key_bytes, new_value_bytes, Some(old_value_bytes))
@@ -1469,6 +1528,20 @@ pub trait RowStream<'a> = Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
 pub trait KeyedRowStream<'a> = Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
 pub trait PkRowStream<'a, K> = Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a;
 
+pub trait FromVnodeBytes {
+    fn from_vnode_bytes(vnode: VirtualNode, bytes: &Bytes) -> Self;
+}
+
+impl FromVnodeBytes for Bytes {
+    fn from_vnode_bytes(vnode: VirtualNode, bytes: &Bytes) -> Self {
+        prefix_slice_with_vnode(vnode, bytes)
+    }
+}
+
+impl FromVnodeBytes for () {
+    fn from_vnode_bytes(_vnode: VirtualNode, _bytes: &Bytes) -> Self {}
+}
+
 // Iterator functions
 impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
     StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
@@ -1521,44 +1594,23 @@ where
 }
 
 impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
-    async fn iter_kv<K: CopyFromSlice>(
+    async fn iter_kv<K: CopyFromSlice + FromVnodeBytes>(
         &self,
-        (start, end): TableKeyRange,
+        vnode: VirtualNode,
+        (start, end): (Bound<Bytes>, Bound<Bytes>),
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
         if let Some(rows) = &self.all_rows {
             return Ok(futures::future::Either::Left(futures::stream::iter(
-                rows.range((start, end))
-                    .map(|(key, value)| Ok((K::copy_from_slice(key.to_ref().0), value.clone()))),
-            )));
-        }
-        let read_options = ReadOptions {
-            prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
-            prefetch_options,
-            cache_policy: CachePolicy::Fill(Hint::Normal),
-        };
-
-        Ok(futures::future::Either::Right(
-            deserialize_keyed_row_stream(
-                self.state_store.iter((start, end), read_options).await?,
-                &*self.row_serde,
-            ),
-        ))
-    }
-
-    async fn rev_iter_kv<K: CopyFromSlice>(
-        &self,
-        (start, end): TableKeyRange,
-        prefix_hint: Option<Bytes>,
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
-        if let Some(rows) = &self.all_rows {
-            return Ok(futures::future::Either::Left(futures::stream::iter(
-                rows.range((start, end))
-                    .rev()
-                    .map(|(key, value)| Ok((K::copy_from_slice(key.to_ref().0), value.clone()))),
+                rows.get(&vnode)
+                    .map(move |rows| {
+                        rows.range((start, end)).map(move |(key, value)| {
+                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
+                        })
+                    })
+                    .into_iter()
+                    .flatten(),
             )));
         }
         let read_options = ReadOptions {
@@ -1571,7 +1623,43 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         Ok(futures::future::Either::Right(
             deserialize_keyed_row_stream(
                 self.state_store
-                    .rev_iter((start, end), read_options)
+                    .iter(prefixed_range_with_vnode((start, end), vnode), read_options)
+                    .await?,
+                &*self.row_serde,
+            ),
+        ))
+    }
+
+    async fn rev_iter_kv<K: CopyFromSlice + FromVnodeBytes>(
+        &self,
+        vnode: VirtualNode,
+        (start, end): (Bound<Bytes>, Bound<Bytes>),
+        prefix_hint: Option<Bytes>,
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
+        if let Some(rows) = &self.all_rows {
+            return Ok(futures::future::Either::Left(futures::stream::iter(
+                rows.get(&vnode)
+                    .map(move |rows| {
+                        rows.range((start, end)).rev().map(move |(key, value)| {
+                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
+                        })
+                    })
+                    .into_iter()
+                    .flatten(),
+            )));
+        }
+        let read_options = ReadOptions {
+            prefix_hint,
+            retention_seconds: self.table_option.retention_seconds,
+            prefetch_options,
+            cache_policy: CachePolicy::Fill(Hint::Normal),
+        };
+
+        Ok(futures::future::Either::Right(
+            deserialize_keyed_row_stream(
+                self.state_store
+                    .rev_iter(prefixed_range_with_vnode((start, end), vnode), read_options)
                     .await?,
                 &*self.row_serde,
             ),
@@ -1652,7 +1740,7 @@ where
         )
     }
 
-    async fn iter_with_prefix_inner<const REVERSE: bool, K: CopyFromSlice>(
+    async fn iter_with_prefix_inner<const REVERSE: bool, K: CopyFromSlice + FromVnodeBytes>(
         &self,
         pk_prefix: impl Row,
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
@@ -1696,26 +1784,16 @@ where
         let memcomparable_range =
             prefix_and_sub_range_to_memcomparable(&self.pk_serde, sub_range, pk_prefix);
 
-        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
-
         Ok(if REVERSE {
             futures::future::Either::Left(
                 self.row_store
-                    .rev_iter_kv(
-                        memcomparable_range_with_vnode,
-                        prefix_hint,
-                        prefetch_options,
-                    )
+                    .rev_iter_kv(vnode, memcomparable_range, prefix_hint, prefetch_options)
                     .await?,
             )
         } else {
             futures::future::Either::Right(
                 self.row_store
-                    .iter_kv(
-                        memcomparable_range_with_vnode,
-                        prefix_hint,
-                        prefetch_options,
-                    )
+                    .iter_kv(vnode, memcomparable_range, prefix_hint, prefetch_options)
                     .await?,
             )
         })
@@ -1723,7 +1801,7 @@ where
 
     /// This function scans raw key-values from the relational table with specific `pk_range` under
     /// the same `vnode`.
-    async fn iter_kv_with_pk_range<'a, K: CopyFromSlice>(
+    async fn iter_kv_with_pk_range<'a, K: CopyFromSlice + FromVnodeBytes>(
         &'a self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
@@ -1733,11 +1811,10 @@ where
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl PkRowStream<'a, K>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
-        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
         // TODO: provide a trace of useful params.
         self.row_store
-            .iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
+            .iter_kv(vnode, memcomparable_range, None, prefetch_options)
             .await
     }
 

@@ -233,7 +233,7 @@ pub struct StreamingDeveloperConfig {
     /// The list of state table ids to *enable* preloading all rows in memory for state table.
     /// Only takes effect when `default_enable_mem_preload_state_table` is false.
     #[serde(default)]
-    pub mem_preload_state_table_ids_whilelist: Vec<u32>,
+    pub mem_preload_state_table_ids_whitelist: Vec<u32>,
 
     /// The list of state table ids to *disable* preloading all rows in memory for state table.
     /// Only takes effect when `default_enable_mem_preload_state_table` is true.
@@ -246,6 +246,7 @@ pub mod default {
 
     pub mod streaming {
         use crate::config::AsyncStackTraceOption;
+        use crate::util::env_var::env_var_is_true;
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -266,7 +267,7 @@ pub mod default {
         }
 
         pub fn default_enable_mem_preload_state_table() -> bool {
-            false
+            env_var_is_true("DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE")
         }
     }
 }
