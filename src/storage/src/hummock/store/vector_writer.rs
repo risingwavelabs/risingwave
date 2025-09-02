@@ -26,6 +26,7 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::utils::wait_for_epoch;
 use crate::hummock::vector::writer::VectorWriterImpl;
 use crate::hummock::{HummockError, HummockResult, ObjectIdManagerRef, SstableStoreRef};
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::*;
 
@@ -75,6 +76,7 @@ pub struct HummockVectorWriter {
     sstable_store: SstableStoreRef,
     object_id_manager: ObjectIdManagerRef,
     hummock_event_sender: HummockEventSender,
+    stats: Arc<HummockStateStoreMetrics>,
     storage_opts: Arc<StorageOpts>,
 
     state: Option<VectorWriterState>,
@@ -87,6 +89,7 @@ impl HummockVectorWriter {
         sstable_store: SstableStoreRef,
         object_id_manager: ObjectIdManagerRef,
         hummock_event_sender: HummockEventSender,
+        stats: Arc<HummockStateStoreMetrics>,
         storage_opts: Arc<StorageOpts>,
     ) -> Self {
         Self {
@@ -95,6 +98,7 @@ impl HummockVectorWriter {
             sstable_store,
             object_id_manager,
             hummock_event_sender,
+            stats,
             storage_opts,
             state: None,
         }
@@ -117,9 +121,11 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
                 .replace(VectorWriterState {
                     epoch: opts.epoch,
                     writer_impl: VectorWriterImpl::new(
+                        self.table_id,
                         index,
                         self.sstable_store.clone(),
                         self.object_id_manager.clone(),
+                        self.stats.clone(),
                         &self.storage_opts,
                     )
                     .await?,
