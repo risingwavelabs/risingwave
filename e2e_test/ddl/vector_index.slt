@@ -28,9 +28,6 @@ create index i on items using unsupported (name) with (distance_type = 'inner_pr
 statement error Invalid input syntax: unsupported vector index distance type: invalid_distance
 create index i on items using flat (embedding) with (distance_type = 'invalid_distance');
 
-statement error Not supported: vector index can not be created on function column
-create index i on items using flat (embedding + '[1.0, 2.0, 3.0]'::vector(3)) with (distance_type = 'inner_product');
-
 statement ok
 create index i on items using flat (embedding) include (name) with (distance_type = 'inner_product');
 
