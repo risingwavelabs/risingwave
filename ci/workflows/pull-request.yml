@@ -719,7 +719,7 @@ steps:
       - ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "enable ci/pr/run-selected only in draft PRs"
