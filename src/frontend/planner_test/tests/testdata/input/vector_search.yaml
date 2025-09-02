@@ -114,6 +114,14 @@
 - before:
     - create_table_and_index
   sql: |
+    select id, name, unindexed, power(distance, 2)::int from (select id, name, unindexed, '[3,1,2]' <#> embedding as distance from items order by distance limit 2);
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  sql: |
     select count(*), id from (SELECT embedding, id FROM (select id, embedding <#> '[3,1,2]' as distance, embedding  from items) order by distance limit 5) where embedding <-> '[1,2,3]' < 2.0 group by id;
   expected_outputs:
     - logical_plan

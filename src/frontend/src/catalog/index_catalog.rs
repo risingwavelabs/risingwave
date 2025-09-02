@@ -63,6 +63,7 @@ pub struct VectorIndex {
     pub vector_column_idx: usize,
     #[educe(Hash(ignore))]
     pub primary_to_included_info_column_mapping: HashMap<usize, usize>,
+    pub primary_key_idx_in_info_columns: Vec<usize>,
     pub included_info_columns: Vec<usize>,
 }
 
@@ -163,17 +164,23 @@ impl IndexCatalog {
                     };
                     input.index
                 }).collect_vec();
-                let primary_to_included_info_column_mapping = included_info_columns
+                let primary_to_included_info_column_mapping: HashMap<_, _> = included_info_columns
                     .iter()
                     .enumerate()
                     .map(|(included_info_column_idx, primary_column_idx)| {
                         (*primary_column_idx, included_info_column_idx)
                     })
                     .collect();
+                let primary_key_idx_in_info_columns = primary_table
+                    .pk()
+                    .iter()
+                    .map(|order| primary_to_included_info_column_mapping[&order.column_index])
+                    .collect();
                 IndexType::Vector(Arc::new(VectorIndex {
                     index_table: index_table.clone(),
                     vector_column_idx: input.index,
                     primary_to_included_info_column_mapping,
+                    primary_key_idx_in_info_columns,
                     included_info_columns,
                 }))
             }
