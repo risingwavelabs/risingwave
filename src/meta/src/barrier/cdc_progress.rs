@@ -298,7 +298,7 @@ impl CdcTableBackfillTrackerInner {
 }
 
 async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, (u64, bool)>> {
-    let split_progress: Vec<(i32, i64, i64)> = cdc_table_snapshot_split::Entity::find()
+    let split_progress: Vec<(i32, i64, i16)> = cdc_table_snapshot_split::Entity::find()
         .select_only()
         .column(cdc_table_snapshot_split::Column::TableId)
         .column_as(
@@ -306,7 +306,9 @@ async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, 
             "split_total_count",
         )
         .column_as(
-            cdc_table_snapshot_split::Column::IsBackfillFinished.sum(),
+            // The sum of PG and MySQL behaves differently in terms of returning type and casting.
+            // Should use sum here but currently use max instead to work around compatibility issue.
+            cdc_table_snapshot_split::Column::IsBackfillFinished.max(),
             "split_completed_count",
         )
         .group_by(cdc_table_snapshot_split::Column::TableId)
