@@ -67,7 +67,7 @@ if [[ -n "$failed_logs" ]]; then
         ./target/debug/sqlsmith-reducer \
           --input-file "$error_sql" \
           --output-file "$shrunk_sql" \
-          --run-rw-cmd "MADSIM_TEST_SEED=$seed ./risingwave_simulation"
+          --run-rw-cmd './risedev ci-kill && ./risedev ci-start ci-3cn-1fe'
         echo "--- Reducer finished for seed $seed"
         echo "Reduced queries saved at $shrunk_sql"
     done
