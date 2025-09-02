@@ -266,6 +266,26 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "pulsar source check"
+    if: build.pull_request.labels includes "ci/run-pulsar-source-tests" || build.env("CI_STEPS") =~ /(^|,)pulsar-source-tests?(,|$$)/
+    command: "ci/scripts/pulsar-source-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            ASTRA_STREAMING_TEST_TOKEN: astra_streaming_test_token
+            STREAMNATIVE_CLOUD_TEST_CONF: streamnative_cloud_test_conf
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          environment:
+          - ASTRA_STREAMING_TEST_TOKEN
+          - STREAMNATIVE_CLOUD_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 20
+    retry: *auto-retry
+
   - label: "end-to-end mqtt sink test"
     if: build.pull_request.labels includes "ci/run-e2e-mqtt-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-mqtt-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-mqtt-sink-test.sh -p ci-dev"
