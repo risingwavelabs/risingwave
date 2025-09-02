@@ -311,7 +311,11 @@ async fn test_hnsw_vector() {
         .unwrap();
     test_env.wait_sync_committed_version().await;
 
-    fn on_nearest_item(_vec: VectorRef<'_>, distance: VectorDistance, info: &[u8]) -> (VectorDistance, Bytes) {
+    fn on_nearest_item(
+        _vec: VectorRef<'_>,
+        distance: VectorDistance,
+        info: &[u8],
+    ) -> (VectorDistance, Bytes) {
         (distance, Bytes::copy_from_slice(info))
     }
     let check_query = async |epoch, vectors: &[&Vec<(Vector, Bytes)>]| {

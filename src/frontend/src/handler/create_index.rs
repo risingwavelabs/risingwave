@@ -19,7 +19,6 @@ use std::sync::Arc;
 use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use thiserror_ext::AsReport;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableId};
 use risingwave_common::types::DataType;
@@ -32,6 +31,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::PbDistanceType;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::TableCatalog;
