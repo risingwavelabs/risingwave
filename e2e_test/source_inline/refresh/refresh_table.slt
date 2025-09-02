@@ -87,6 +87,9 @@ CREATE TABLE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
 
 
 statement ok
+create materialized view refresh_fs_t_mv as select * from refresh_fs_t;
+
+statement ok
 CREATE TABLE refresh_fs_t_on_conflict_ignore (id int PRIMARY KEY, name varchar)
 ON CONFLICT IGNORE
 WITH (
@@ -114,6 +117,15 @@ SELECT * FROM refresh_fs_t;
 1 alice
 2 bob
 
+
+# should keep consistent with upstream table
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice
+2 bob
+
+
 # ----
 # Test 2: Add new files and refresh (INSERT scenario)
 system ok
@@ -131,7 +143,7 @@ SELECT * FROM refresh_fs_t;
 1 alice
 2 bob
 
-statement ok
+statement ok retry 3 backoff 5s
 REFRESH TABLE refresh_fs_t;
 
 sleep 2s
@@ -143,6 +155,16 @@ SELECT * FROM refresh_fs_t;
 2 bob
 3 charlie
 4 david
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice
+2 bob
+3 charlie
+4 david
+
 
 sleep 2s
 
@@ -159,6 +181,16 @@ SELECT * FROM refresh_fs_t;
 2 bob
 3 charlie
 4 david
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice
+2 bob
+3 charlie
+4 david
+
 
 # ----
 # Test 3: Modify existing file content (UPDATE scenario)
@@ -181,6 +213,16 @@ SELECT * FROM refresh_fs_t;
 3 charlie
 4 david
 
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice_updated
+2 bob_updated
+3 charlie
+4 david
+
+
 # ----
 # Test 4: Remove files (DELETE scenario)
 system ok
@@ -199,6 +241,17 @@ SELECT * FROM refresh_fs_t;
 ----
 1 alice_updated
 2 bob_updated
+
+
+# delete event is not populate to downstream
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice_updated
+2 bob_updated
+3 charlie
+4 david
+
 
 # ----
 # Test 5: Mixed operations - add, update, delete simultaneously
@@ -226,14 +279,13 @@ REFRESH TABLE refresh_fs_t_on_conflict_ignore;
 
 sleep 2s
 
-
-
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
 ----
 1 alice_final
 5 eve
 6 frank_updated
+
 
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t_on_conflict_ignore;
@@ -280,7 +332,7 @@ SELECT * FROM refresh_fs_t;
 # ----
 # Cleanup
 statement ok
-DROP TABLE refresh_fs_t;
+DROP TABLE refresh_fs_t cascade;
 
 statement ok
 DROP TABLE refresh_fs_t_on_conflict_ignore;

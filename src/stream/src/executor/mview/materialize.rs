@@ -595,6 +595,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             .set(b_epoch.curr as i64);
 
                         if goto_stage2 {
+                            debug_assert!(self.refresh_args.is_some());
                             break 'stage1;
                         } else {
                             continue;
