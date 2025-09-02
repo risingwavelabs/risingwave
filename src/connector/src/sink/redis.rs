@@ -40,7 +40,7 @@ use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
+use crate::sink::{Result, Sink, SinkWriterParam};
 
 pub const REDIS_SINK: &str = "redis";
 pub const KEY_FORMAT: &str = "key_format";
@@ -283,7 +283,6 @@ impl TryFrom<SinkParam> for RedisSink {
 }
 
 impl Sink for RedisSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<RedisSinkWriter>;
 
     const SINK_NAME: &'static str = "redis";

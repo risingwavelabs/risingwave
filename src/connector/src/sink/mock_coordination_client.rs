@@ -119,7 +119,7 @@ impl MockSinkCoordinationRpcClient {
         match receiver_stream.try_recv() {
             Ok(CoordinateRequest {
                 msg:
-                    Some(risingwave_pb::connector_service::coordinate_request::Msg::StartRequest(
+                    Some(coordinate_request::Msg::StartRequest(
                         coordinate_request::StartCoordinationRequest {
                             param: Some(_param),
                             vnode_bitmap: Some(_vnode_bitmap),
@@ -155,21 +155,36 @@ impl MockSinkCoordinationRpcClient {
                 match receiver_stream.recv().await {
                     Some(CoordinateRequest {
                         msg:
-                            Some(risingwave_pb::connector_service::coordinate_request::Msg::CommitRequest(coordinate_request::CommitRequest {
-                                epoch,
-                                metadata,
-                            })),
+                            Some(coordinate_request::Msg::CommitRequest(
+                                coordinate_request::CommitRequest {
+                                    epoch, metadata, ..
+                                },
+                            )),
                     }) => {
-                        mock_coordinator_committer.clone().lock().await.commit(epoch, vec![metadata.unwrap()]).await.map_err(|e| Status::from_error(Box::new(e)))?;
-                        response_tx_clone.clone().send(Ok(CoordinateResponse {
-                            msg: Some(coordinate_response::Msg::CommitResponse(CommitResponse{epoch})),
-                        })).await.map_err(|e| Status::from_error(Box::new(e)))?;
-                    },
+                        mock_coordinator_committer
+                            .clone()
+                            .lock()
+                            .await
+                            .commit(epoch, vec![metadata.unwrap()], None)
+                            .await
+                            .map_err(|e| Status::from_error(Box::new(e)))?;
+                        response_tx_clone
+                            .clone()
+                            .send(Ok(CoordinateResponse {
+                                msg: Some(coordinate_response::Msg::CommitResponse(
+                                    CommitResponse { epoch },
+                                )),
+                            }))
+                            .await
+                            .map_err(|e| Status::from_error(Box::new(e)))?;
+                    }
                     msg => {
-                        return Err::<ReceiverStream<CoordinateResponse>, tonic::Status>(Status::invalid_argument(format!(
-                            "expected CoordinateRequest::CommitRequest , get {:?}",
-                            msg
-                        )));
+                        return Err::<ReceiverStream<CoordinateResponse>, tonic::Status>(
+                            Status::invalid_argument(format!(
+                                "expected CoordinateRequest::CommitRequest , get {:?}",
+                                msg
+                            )),
+                        );
                     }
                 }
             }

@@ -14,18 +14,25 @@
 
 mod prelude;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
+use std::hash::Hash;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Poll;
+use std::vec;
 
 use await_tree::InstrumentAwait;
 use enum_as_inner::EnumAsInner;
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, FusedStream, FuturesUnordered, StreamFuture};
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
+use prometheus::Histogram;
+use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -35,20 +42,25 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::{Expression, NonStrictExpression};
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
+use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
+use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
-    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    PbDispatcher, PbSinkAddColumns, PbStopMutation, PbStreamMessageBatch, PbUpdateMutation,
+    PbWatermark, ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation,
     SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
+use tokio::time::Instant;
 
 use crate::error::StreamResult;
+use crate::executor::exchange::input::BoxedInput;
+use crate::executor::watermark::BufferedWatermarks;
 use crate::task::{ActorId, FragmentId};
 
 mod actor;
@@ -94,6 +106,7 @@ mod temporal_join;
 mod top_n;
 mod troublemaker;
 mod union;
+mod upstream_sink_union;
 mod values;
 mod watermark;
 mod watermark_filter;
@@ -108,13 +121,16 @@ mod integration_tests;
 mod sync_kv_log_store;
 pub mod test_utils;
 mod utils;
+mod vector_index;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
 pub use approx_percentile::global::GlobalApproxPercentileExecutor;
 pub use approx_percentile::local::LocalApproxPercentileExecutor;
 pub use backfill::arrangement_backfill::*;
-pub use backfill::cdc::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
+pub use backfill::cdc::{
+    CdcBackfillExecutor, ExternalStorageTable, ParallelizedCdcBackfillExecutor,
+};
 pub use backfill::no_shuffle_backfill::*;
 pub use backfill::snapshot_backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
@@ -153,8 +169,10 @@ pub use top_n::{
 };
 pub use troublemaker::TroublemakerExecutor;
 pub use union::UnionExecutor;
+pub use upstream_sink_union::{UpstreamFragmentInfo, UpstreamSinkUnionExecutor};
 pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
+pub use vector_index::VectorIndexWriteExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
@@ -166,6 +184,12 @@ pub type DispatcherMessageStreamItem = StreamExecutorResult<DispatcherMessage>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+use risingwave_connector::sink::catalog::SinkId;
+use risingwave_connector::source::cdc::{
+    CdcTableSnapshotSplitAssignmentWithGeneration,
+    build_actor_cdc_table_snapshot_splits_with_generation,
+    build_pb_actor_cdc_table_snapshot_splits_with_generation,
+};
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
@@ -184,6 +208,9 @@ pub struct ExecutorInfo {
     /// pk indices are maintained independently.
     pub pk_indices: PkIndices,
 
+    /// The stream kind of the OUTPUT of the executor.
+    pub stream_kind: PbStreamKind,
+
     /// Identity of the executor.
     pub identity: String,
 
@@ -192,10 +219,11 @@ pub struct ExecutorInfo {
 }
 
 impl ExecutorInfo {
-    pub fn new(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
+    pub fn for_test(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
         Self {
             schema,
             pk_indices,
+            stream_kind: PbStreamKind::Retract, // dummy value for test
             identity,
             id,
         }
@@ -242,6 +270,10 @@ impl Executor {
         &self.info.pk_indices
     }
 
+    pub fn stream_kind(&self) -> PbStreamKind {
+        self.info.stream_kind
+    }
+
     pub fn identity(&self) -> &str {
         &self.info.identity
     }
@@ -282,6 +314,7 @@ type UpstreamFragmentId = FragmentId;
 type SplitAssignments = HashMap<ActorId, Vec<SplitImpl>>;
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct UpdateMutation {
     pub dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
     pub merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
@@ -289,9 +322,12 @@ pub struct UpdateMutation {
     pub dropped_actors: HashSet<ActorId>,
     pub actor_splits: SplitAssignments,
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
+    pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
+    pub sink_add_columns: HashMap<SinkId, Vec<Field>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct AddMutation {
     pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
     pub added_actors: HashSet<ActorId>,
@@ -302,12 +338,21 @@ pub struct AddMutation {
     pub subscriptions_to_add: Vec<(TableId, u32)>,
     /// nodes which should start backfill
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
+    pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
+    pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
+pub struct StopMutation {
+    pub dropped_actors: HashSet<ActorId>,
+    pub dropped_sink_fragments: HashSet<FragmentId>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
-    Stop(HashSet<ActorId>),
+    Stop(StopMutation),
     Update(UpdateMutation),
     Add(AddMutation),
     SourceChangeSplit(SplitAssignments),
@@ -322,6 +367,14 @@ pub enum Mutation {
     },
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
+    },
+    RefreshStart {
+        table_id: TableId,
+        associated_source_id: TableId,
+    },
+    /// This mutation is generated by the source executor
+    LoadFinish {
+        associated_source_id: TableId,
     },
 }
 
@@ -390,7 +443,10 @@ impl Barrier {
 
     #[must_use]
     pub fn with_stop(self) -> Self {
-        self.with_mutation(Mutation::Stop(HashSet::default()))
+        self.with_mutation(Mutation::Stop(StopMutation {
+            dropped_actors: Default::default(),
+            dropped_sink_fragments: Default::default(),
+        }))
     }
 
     /// Whether this barrier carries stop mutation.
@@ -456,7 +512,7 @@ impl Barrier {
     /// Get all actors that to be stopped (dropped) by this barrier.
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
         match self.mutation.as_deref() {
-            Some(Mutation::Stop(actors)) => Some(actors),
+            Some(Mutation::Stop(StopMutation { dropped_actors, .. })) => Some(dropped_actors),
             Some(Mutation::Update(UpdateMutation { dropped_actors, .. }))
             | Some(Mutation::AddAndUpdate(_, UpdateMutation { dropped_actors, .. })) => {
                 Some(dropped_actors)
@@ -533,7 +589,9 @@ impl Barrier {
             | Mutation::Throttle(_)
             | Mutation::DropSubscriptions { .. }
             | Mutation::ConnectorPropsChange(_)
-            | Mutation::StartFragmentBackfill { .. } => false,
+            | Mutation::StartFragmentBackfill { .. }
+            | Mutation::RefreshStart { .. }
+            | Mutation::LoadFinish { .. } => false,
         }
     }
 
@@ -585,7 +643,32 @@ impl Barrier {
                 | Mutation::AddAndUpdate(_, UpdateMutation { merges, .. }) => {
                     merges.get(&(actor_id, upstream_fragment_id))
                 }
+                _ => None,
+            })
+    }
 
+    /// Returns the new upstream sink information if this barrier is to add a new upstream sink for
+    /// the specified downstream fragment.
+    pub fn as_new_upstream_sink(&self, fragment_id: FragmentId) -> Option<&PbNewUpstreamSink> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Add(AddMutation {
+                    new_upstream_sinks, ..
+                }) => new_upstream_sinks.get(&fragment_id),
+                _ => None,
+            })
+    }
+
+    /// Returns the dropped upstream sink-fragment if this barrier is to drop any sink.
+    pub fn as_dropped_upstream_sinks(&self) -> Option<&HashSet<FragmentId>> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Stop(StopMutation {
+                    dropped_sink_fragments,
+                    ..
+                }) => Some(dropped_sink_fragments),
                 _ => None,
             })
     }
@@ -603,6 +686,23 @@ impl Barrier {
                 | Mutation::AddAndUpdate(_, UpdateMutation { vnode_bitmaps, .. }) => {
                     vnode_bitmaps.get(&actor_id).cloned()
                 }
+                _ => None,
+            })
+    }
+
+    pub fn as_sink_add_columns(&self, sink_id: SinkId) -> Option<Vec<Field>> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Update(UpdateMutation {
+                    sink_add_columns, ..
+                })
+                | Mutation::AddAndUpdate(
+                    _,
+                    UpdateMutation {
+                        sink_add_columns, ..
+                    },
+                ) => sink_add_columns.get(&sink_id).cloned(),
                 _ => None,
             })
     }
@@ -673,8 +773,12 @@ impl Mutation {
         };
 
         match self {
-            Mutation::Stop(actors) => PbMutation::Stop(StopMutation {
-                actors: actors.iter().copied().collect::<Vec<_>>(),
+            Mutation::Stop(StopMutation {
+                dropped_actors,
+                dropped_sink_fragments,
+            }) => PbMutation::Stop(PbStopMutation {
+                actors: dropped_actors.iter().copied().collect(),
+                dropped_sink_fragments: dropped_sink_fragments.iter().copied().collect(),
             }),
             Mutation::Update(UpdateMutation {
                 dispatchers,
@@ -683,6 +787,8 @@ impl Mutation {
                 dropped_actors,
                 actor_splits,
                 actor_new_dispatchers,
+                actor_cdc_table_snapshot_splits,
+                sink_add_columns,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -703,6 +809,22 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                actor_cdc_table_snapshot_splits:
+                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                        actor_cdc_table_snapshot_splits.clone(),
+                    )
+                    .into(),
+                sink_add_columns: sink_add_columns
+                    .iter()
+                    .map(|(sink_id, add_columns)| {
+                        (
+                            sink_id.sink_id,
+                            PbSinkAddColumns {
+                                fields: add_columns.iter().map(|field| field.to_prost()).collect(),
+                            },
+                        )
+                    })
+                    .collect(),
             }),
             Mutation::Add(AddMutation {
                 adds,
@@ -711,6 +833,8 @@ impl Mutation {
                 pause,
                 subscriptions_to_add,
                 backfill_nodes_to_pause,
+                actor_cdc_table_snapshot_splits,
+                new_upstream_sinks,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -734,6 +858,15 @@ impl Mutation {
                     })
                     .collect(),
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
+                actor_cdc_table_snapshot_splits:
+                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                        actor_cdc_table_snapshot_splits.clone(),
+                    )
+                    .into(),
+                new_upstream_sinks: new_upstream_sinks
+                    .iter()
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect(),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -803,14 +936,27 @@ impl Mutation {
                     fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
+            Mutation::RefreshStart {
+                table_id,
+                associated_source_id,
+            } => PbMutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
+                table_id: table_id.table_id,
+                associated_source_id: associated_source_id.table_id,
+            }),
+            Mutation::LoadFinish {
+                associated_source_id,
+            } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
+                associated_source_id: associated_source_id.table_id,
+            }),
         }
     }
 
     fn from_protobuf(prost: &PbMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
-            PbMutation::Stop(stop) => {
-                Mutation::Stop(HashSet::from_iter(stop.actors.iter().cloned()))
-            }
+            PbMutation::Stop(stop) => Mutation::Stop(StopMutation {
+                dropped_actors: stop.actors.iter().copied().collect(),
+                dropped_sink_fragments: stop.dropped_sink_fragments.iter().copied().collect(),
+            }),
 
             PbMutation::Update(update) => Mutation::Update(UpdateMutation {
                 dispatchers: update
@@ -847,6 +993,23 @@ impl Mutation {
                     .actor_new_dispatchers
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
+                    .collect(),
+                actor_cdc_table_snapshot_splits:
+                    build_actor_cdc_table_snapshot_splits_with_generation(
+                        update
+                            .actor_cdc_table_snapshot_splits
+                            .clone()
+                            .unwrap_or_default(),
+                    ),
+                sink_add_columns: update
+                    .sink_add_columns
+                    .iter()
+                    .map(|(sink_id, add_columns)| {
+                        (
+                            SinkId::new(*sink_id),
+                            add_columns.fields.iter().map(Field::from_prost).collect(),
+                        )
+                    })
                     .collect(),
             }),
 
@@ -887,6 +1050,17 @@ impl Mutation {
                     )
                     .collect(),
                 backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
+                actor_cdc_table_snapshot_splits:
+                    build_actor_cdc_table_snapshot_splits_with_generation(
+                        add.actor_cdc_table_snapshot_splits
+                            .clone()
+                            .unwrap_or_default(),
+                    ),
+                new_upstream_sinks: add
+                    .new_upstream_sinks
+                    .iter()
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect(),
             }),
 
             PbMutation::Splits(s) => {
@@ -949,6 +1123,13 @@ impl Mutation {
                         .collect(),
                 }
             }
+            PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
+                table_id: TableId::new(refresh_start.table_id),
+                associated_source_id: TableId::new(refresh_start.associated_source_id),
+            },
+            PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
+                associated_source_id: TableId::new(load_finish.associated_source_id),
+            },
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {
@@ -1301,4 +1482,233 @@ pub trait StreamConsumer: Send + 'static {
     type BarrierStream: Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream;
+}
+
+type BoxedMessageInput<InputId, M> = BoxedInput<InputId, MessageStreamItemInner<M>>;
+
+/// A stream for merging messages from multiple upstreams.
+/// Can dynamically add and delete upstream streams.
+/// For the meaning of the generic parameter `M` used, refer to `BarrierInner<M>`.
+pub struct DynamicReceivers<InputId, M> {
+    /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
+    barrier: Option<BarrierInner<M>>,
+    /// The start timestamp of the current barrier. Used for measuring the alignment duration.
+    start_ts: Option<Instant>,
+    /// The upstreams that're blocked by the `barrier`.
+    blocked: Vec<BoxedMessageInput<InputId, M>>,
+    /// The upstreams that're not blocked and can be polled.
+    active: FuturesUnordered<StreamFuture<BoxedMessageInput<InputId, M>>>,
+    /// watermark column index -> `BufferedWatermarks`
+    buffered_watermarks: BTreeMap<usize, BufferedWatermarks<InputId>>,
+    /// Currently only used for union.
+    barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
+    /// Only for merge. If None, then we don't take `Instant::now()` and `observe` during `poll_next`
+    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+}
+
+impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> Stream
+    for DynamicReceivers<InputId, M>
+{
+    type Item = MessageStreamItemInner<M>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        if self.is_empty() {
+            return Poll::Ready(None);
+        }
+
+        loop {
+            match futures::ready!(self.active.poll_next_unpin(cx)) {
+                // Directly forward the error.
+                Some((Some(Err(e)), _)) => {
+                    return Poll::Ready(Some(Err(e)));
+                }
+                // Handle the message from some upstream.
+                Some((Some(Ok(message)), remaining)) => {
+                    let input_id = remaining.id();
+                    match message {
+                        MessageInner::Chunk(chunk) => {
+                            // Continue polling this upstream by pushing it back to `active`.
+                            self.active.push(remaining.into_future());
+                            return Poll::Ready(Some(Ok(MessageInner::Chunk(chunk))));
+                        }
+                        MessageInner::Watermark(watermark) => {
+                            // Continue polling this upstream by pushing it back to `active`.
+                            self.active.push(remaining.into_future());
+                            if let Some(watermark) = self.handle_watermark(input_id, watermark) {
+                                return Poll::Ready(Some(Ok(MessageInner::Watermark(watermark))));
+                            }
+                        }
+                        MessageInner::Barrier(barrier) => {
+                            // Block this upstream by pushing it to `blocked`.
+                            if self.blocked.is_empty() {
+                                self.start_ts = Some(Instant::now());
+                            }
+                            self.blocked.push(remaining);
+                            if let Some(current_barrier) = self.barrier.as_ref() {
+                                if current_barrier.epoch != barrier.epoch {
+                                    return Poll::Ready(Some(Err(
+                                        StreamExecutorError::align_barrier(
+                                            current_barrier.clone().map_mutation(|_| None),
+                                            barrier.map_mutation(|_| None),
+                                        ),
+                                    )));
+                                }
+                            } else {
+                                self.barrier = Some(barrier);
+                            }
+                        }
+                    }
+                }
+                // We use barrier as the control message of the stream. That is, we always stop the
+                // actors actively when we receive a `Stop` mutation, instead of relying on the stream
+                // termination.
+                //
+                // Besides, in abnormal cases when the other side of the `Input` closes unexpectedly,
+                // we also yield an `Err(ExchangeChannelClosed)`, which will hit the `Err` arm above.
+                // So this branch will never be reached in all cases.
+                Some((None, remaining)) => {
+                    return Poll::Ready(Some(Err(StreamExecutorError::channel_closed(format!(
+                        "upstream input {:?} unexpectedly closed",
+                        remaining.id()
+                    )))));
+                }
+                // There's no active upstreams. Process the barrier and resume the blocked ones.
+                None => {
+                    assert!(!self.blocked.is_empty());
+
+                    let start_ts = self
+                        .start_ts
+                        .take()
+                        .expect("should have received at least one barrier");
+                    if let Some(barrier_align_duration) = &self.barrier_align_duration {
+                        barrier_align_duration.inc_by(start_ts.elapsed().as_nanos() as u64);
+                    }
+                    if let Some(merge_barrier_align_duration) = &self.merge_barrier_align_duration {
+                        // Observe did a few atomic operation inside, we want to avoid the overhead.
+                        merge_barrier_align_duration.observe(start_ts.elapsed().as_secs_f64())
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        assert!(self.active.is_terminated());
+
+        let barrier = self.barrier.take().unwrap();
+
+        let upstreams = std::mem::take(&mut self.blocked);
+        self.extend_active(upstreams);
+        assert!(!self.active.is_terminated());
+
+        Poll::Ready(Some(Ok(MessageInner::Barrier(barrier))))
+    }
+}
+
+impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId, M> {
+    pub fn new(
+        upstreams: Vec<BoxedMessageInput<InputId, M>>,
+        barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+    ) -> Self {
+        let mut this = Self {
+            barrier: None,
+            start_ts: None,
+            blocked: Vec::with_capacity(upstreams.len()),
+            active: Default::default(),
+            buffered_watermarks: Default::default(),
+            merge_barrier_align_duration,
+            barrier_align_duration,
+        };
+        this.extend_active(upstreams);
+        this
+    }
+
+    /// Extend the active upstreams with the given upstreams. The current stream must be at the
+    /// clean state right after a barrier.
+    pub fn extend_active(
+        &mut self,
+        upstreams: impl IntoIterator<Item = BoxedMessageInput<InputId, M>>,
+    ) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+
+        self.active
+            .extend(upstreams.into_iter().map(|s| s.into_future()));
+    }
+
+    /// Handle a new watermark message. Optionally returns the watermark message to emit.
+    pub fn handle_watermark(
+        &mut self,
+        input_id: InputId,
+        watermark: Watermark,
+    ) -> Option<Watermark> {
+        let col_idx = watermark.col_idx;
+        // Insert a buffer watermarks when first received from a column.
+        let upstream_ids: Vec<_> = self.upstream_input_ids().collect();
+        let watermarks = self
+            .buffered_watermarks
+            .entry(col_idx)
+            .or_insert_with(|| BufferedWatermarks::with_ids(upstream_ids));
+        watermarks.handle_watermark(input_id, watermark)
+    }
+
+    /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state
+    /// right after a barrier.
+    pub fn add_upstreams_from(
+        &mut self,
+        new_inputs: impl IntoIterator<Item = BoxedMessageInput<InputId, M>>,
+    ) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+
+        let new_inputs: Vec<_> = new_inputs.into_iter().collect();
+        let input_ids = new_inputs.iter().map(|input| input.id());
+        self.buffered_watermarks.values_mut().for_each(|buffers| {
+            // Add buffers to the buffered watermarks for all cols
+            buffers.add_buffers(input_ids.clone());
+        });
+        self.active
+            .extend(new_inputs.into_iter().map(|s| s.into_future()));
+    }
+
+    /// Remove upstreams from `self` in `upstream_input_ids`. The current stream must be at the
+    /// clean state right after a barrier.
+    /// The current container does not necessarily contain all the input ids passed in.
+    pub fn remove_upstreams(&mut self, upstream_input_ids: &HashSet<InputId>) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+
+        let new_upstreams = std::mem::take(&mut self.active)
+            .into_iter()
+            .map(|s| s.into_inner().unwrap())
+            .filter(|u| !upstream_input_ids.contains(&u.id()));
+        self.extend_active(new_upstreams);
+        self.buffered_watermarks.values_mut().for_each(|buffers| {
+            // Call `check_heap` in case the only upstream(s) that does not have
+            // watermark in heap is removed
+            buffers.remove_buffer(upstream_input_ids.clone());
+        });
+    }
+
+    pub fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
+        self.merge_barrier_align_duration.clone()
+    }
+
+    pub fn flush_buffered_watermarks(&mut self) {
+        self.buffered_watermarks
+            .values_mut()
+            .for_each(|buffers| buffers.clear());
+    }
+
+    pub fn upstream_input_ids(&self) -> impl Iterator<Item = InputId> + '_ {
+        self.blocked
+            .iter()
+            .map(|s| s.id())
+            .chain(self.active.iter().map(|s| s.get_ref().unwrap().id()))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.blocked.is_empty() && self.active.is_empty()
+    }
 }

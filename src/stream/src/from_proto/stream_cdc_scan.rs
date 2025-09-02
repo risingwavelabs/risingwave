@@ -17,15 +17,17 @@ use std::sync::Arc;
 use anyhow::Context;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
-    CdcTableType, ExternalTableConfig, SchemaTableName,
+    ExternalCdcTableType, ExternalTableConfig, SchemaTableName,
 };
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
+use crate::executor::{CdcBackfillExecutor, ExternalStorageTable, ParallelizedCdcBackfillExecutor};
+use crate::task::cdc_progress::CdcProgressReporter;
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -52,7 +54,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         assert_eq!(output_schema.data_types(), params.info.schema.data_types());
 
         let properties = table_desc.connect_properties.clone();
-
         let table_pk_order_types = table_desc
             .pk
             .iter()
@@ -72,8 +73,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 disable_backfill: node.disable_backfill,
                 ..Default::default()
             });
-        let table_type = CdcTableType::from_properties(&properties);
-
+        let table_type = ExternalCdcTableType::from_properties(&properties);
         // Filter out additional columns to construct the external table schema
         let table_schema: Schema = table_desc
             .columns
@@ -106,25 +106,47 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             table_pk_indices,
         );
 
-        let vnodes = params.vnode_bitmap.map(Arc::new);
-        // cdc backfill should be singleton, so vnodes must be None.
-        assert_eq!(None, vnodes);
-        let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
-
         let output_columns = table_desc.columns.iter().map(Into::into).collect_vec();
-        let exec = CdcBackfillExecutor::new(
-            params.actor_context.clone(),
-            external_table,
-            upstream,
-            output_indices,
-            output_columns,
-            None,
-            params.executor_stats,
-            state_table,
-            node.rate_limit,
-            scan_options,
-        );
-        Ok((params.info, exec).into())
+        if scan_options.is_parallelized_backfill() {
+            // Set state table's vnodes to None to allow splits to be assigned to any actors, without following vnode constraints.
+            let vnodes = None;
+            let state_table =
+                StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
+            let progress = CdcProgressReporter::new(params.local_barrier_manager.clone());
+            let exec = ParallelizedCdcBackfillExecutor::new(
+                params.actor_context.clone(),
+                external_table,
+                upstream,
+                output_indices,
+                output_columns,
+                params.executor_stats,
+                state_table,
+                node.rate_limit,
+                scan_options,
+                properties,
+                Some(progress),
+            );
+            Ok((params.info, exec).into())
+        } else {
+            let vnodes = params.vnode_bitmap.map(Arc::new);
+            // cdc backfill should be singleton, so vnodes must be None.
+            assert_eq!(None, vnodes);
+            let state_table =
+                StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
+            let exec = CdcBackfillExecutor::new(
+                params.actor_context.clone(),
+                external_table,
+                upstream,
+                output_indices,
+                output_columns,
+                None,
+                params.executor_stats,
+                state_table,
+                node.rate_limit,
+                scan_options,
+                properties,
+            );
+            Ok((params.info, exec).into())
+        }
     }
 }

@@ -71,7 +71,7 @@ async fn test_merger_sum_aggr() {
         let (tx, rx) = channel_for_test();
         let actor_future = async move {
             let input = Executor::new(
-                ExecutorInfo::new(
+                ExecutorInfo::for_test(
                     input_schema,
                     PkIndices::new(),
                     "ReceiverExecutor".to_owned(),
@@ -136,7 +136,7 @@ async fn test_merger_sum_aggr() {
         let expr_context = expr_context.clone();
         async move {
             let receiver_op = Executor::new(
-                ExecutorInfo::new(
+                ExecutorInfo::for_test(
                     // input schema of local simple agg
                     Schema::new(vec![Field::unnamed(DataType::Int64)]),
                     PkIndices::new(),
@@ -185,7 +185,7 @@ async fn test_merger_sum_aggr() {
                 Field::unnamed(DataType::Int64),
             ]);
             let merger = Executor::new(
-                ExecutorInfo::new(
+                ExecutorInfo::for_test(
                     // output schema of local simple agg
                     schema.clone(),
                     PkIndices::new(),
@@ -197,6 +197,8 @@ async fn test_merger_sum_aggr() {
                     outputs,
                     local_barrier_manager.clone(),
                     schema,
+                    100,
+                    None,
                 )
                 .boxed(),
             );
@@ -281,8 +283,10 @@ async fn test_merger_sum_aggr() {
             .unwrap();
         epoch.inc_epoch();
     }
-    let b = Barrier::new_test_barrier(epoch)
-        .with_mutation(Mutation::Stop(actors.clone().into_iter().collect()));
+    let b = Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(StopMutation {
+        dropped_actors: actors.clone().into_iter().collect(),
+        ..Default::default()
+    }));
     barrier_test_env.inject_barrier(&b, actors);
     input
         .send(Message::Barrier(b.into_dispatcher()).into())

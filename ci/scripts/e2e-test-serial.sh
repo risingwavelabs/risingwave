@@ -83,6 +83,11 @@ chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 echo "--- Install Python Dependencies"
 python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 
+echo "--- e2e, $mode, dashboard"
+cluster_start
+risedev slt -p 4566 -d dev './e2e_test/dashboard/**/*.slt'
+cluster_stop
+
 echo "--- e2e, $mode, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
 cluster_start
@@ -105,7 +110,7 @@ echo "--- e2e, $mode, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
 risedev slt -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}" --label "can-use-recover"
-risedev slt -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
+risedev slt -p 4566 -d dev './e2e_test/background_ddl/*.slt' --junit "batch-ddl-${profile}"
 
 if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
   risedev slt -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}" --label "serial"
@@ -126,6 +131,16 @@ python3 ./e2e_test/subscription/main.py
 
 echo "--- e2e, $mode, Apache Superset"
 risedev slt -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
+
+echo "--- e2e, $mode, embedding"
+cargo build -p openai_embedding_service --bin mocked_service
+cargo run -p openai_embedding_service --bin mocked_service &
+MOCKED_EMBEDDING_SERVICE_PID=$!
+# wait for embedding service up
+sleep 3
+risedev slt -p 4566 -d dev './e2e_test/vector_search/**/*.slt'
+kill $MOCKED_EMBEDDING_SERVICE_PID
+
 
 echo "--- Kill cluster"
 cluster_stop

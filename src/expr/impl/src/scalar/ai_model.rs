@@ -24,6 +24,8 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, F32, ScalarImpl};
 use risingwave_expr::expr::{BoxedExpression, Expression};
 use risingwave_expr::{ExprError, Result, build_function};
+use serde::Deserialize;
+use serde_json::Value;
 use thiserror_ext::AsReport;
 
 /// `OpenAI` embedding context that holds the client and model configuration
@@ -33,14 +35,40 @@ pub struct OpenAiEmbeddingContext {
     pub model: String,
 }
 
+#[derive(Deserialize)]
+struct OpenAiEmbeddingConfig {
+    model: String,
+    api_key: Option<String>,
+    org_id: Option<String>,
+    project_id: Option<String>,
+    api_base: Option<String>,
+}
+
 impl OpenAiEmbeddingContext {
     /// Create a new `OpenAI` embedding context from `api_key` and model
-    pub fn from_config(api_key: &str, model: &str) -> Result<Self> {
-        let config = OpenAIConfig::new().with_api_key(api_key);
+    pub fn from_config(config: Value) -> Result<Self> {
+        let param: OpenAiEmbeddingConfig = serde_json::from_value(config).map_err(|err| {
+            invalid_param_err(format!("failed to parse config: {}", err.as_report()))
+        })?;
+
+        let mut config = OpenAIConfig::new();
+        if let Some(api_key) = param.api_key {
+            config = config.with_api_key(api_key);
+        }
+        if let Some(org_id) = param.org_id {
+            config = config.with_org_id(org_id);
+        }
+        if let Some(proj_id) = param.project_id {
+            config = config.with_project_id(proj_id);
+        }
+        if let Some(api_base) = param.api_base {
+            config = config.with_api_base(api_base);
+        }
+
         let client = Client::with_config(config);
         Ok(Self {
             client,
-            model: model.to_owned(),
+            model: param.model,
         })
     }
 }
@@ -70,7 +98,10 @@ impl OpenAiEmbedding {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e.as_report(), "Failed to get embedding from OpenAI");
-                ExprError::Custom("failed to get embedding from OpenAI".into())
+                ExprError::Custom(format!(
+                    "failed to get embedding from OpenAI: {}",
+                    e.as_report()
+                ))
             })?;
 
         if response.data.is_empty() {
@@ -173,55 +204,39 @@ impl Expression for OpenAiEmbedding {
     }
 }
 
-#[build_function("openai_embedding(varchar, varchar, varchar) -> float4[]")]
+fn invalid_param_err(reason: impl Into<String>) -> ExprError {
+    ExprError::InvalidParam {
+        name: "openai_embedding",
+        reason: reason.into().into(),
+    }
+}
+
+#[build_function("openai_embedding(jsonb, varchar) -> float4[]")]
 fn build_openai_embedding_expr(
     _: DataType,
     mut children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
-    if children.len() != 3 {
-        return Err(ExprError::InvalidParam {
-            name: "openai_embedding",
-            reason: "expected 3 arguments".into(),
-        });
+    if children.len() != 2 {
+        return Err(invalid_param_err("expected 2 arguments"));
     }
 
     // Check if the first two parameters are constants
-    let api_key = if let Ok(Some(api_key_scalar)) = children[0].eval_const() {
-        if let ScalarImpl::Utf8(api_key_str) = api_key_scalar {
-            api_key_str.to_string()
+    let config = if let Ok(Some(config_scalar)) = children[0].eval_const() {
+        if let ScalarImpl::Jsonb(config) = config_scalar {
+            config.take()
         } else {
-            return Err(ExprError::InvalidParam {
-                name: "openai_embedding",
-                reason: "`api_key` must be a string constant".into(),
-            });
+            return Err(invalid_param_err(
+                "`embedding_config` must be a jsonb constant",
+            ));
         }
     } else {
-        return Err(ExprError::InvalidParam {
-            name: "openai_embedding",
-            reason: "`api_key` must be a constant".into(),
-        });
+        return Err(invalid_param_err("`embedding_config` must be a constant"));
     };
 
-    let model = if let Ok(Some(model_scalar)) = children[1].eval_const() {
-        if let ScalarImpl::Utf8(model_str) = model_scalar {
-            model_str.to_string()
-        } else {
-            return Err(ExprError::InvalidParam {
-                name: "openai_embedding",
-                reason: "`model` must be a string constant".into(),
-            });
-        }
-    } else {
-        return Err(ExprError::InvalidParam {
-            name: "openai_embedding",
-            reason: "`model` must be a constant".into(),
-        });
-    };
-
-    let context = OpenAiEmbeddingContext::from_config(&api_key, &model)?;
+    let context = OpenAiEmbeddingContext::from_config(config)?;
 
     Ok(Box::new(OpenAiEmbedding {
-        text_expr: children.pop().unwrap(), // Take the third expression
+        text_expr: children.pop().unwrap(), // Take the second expression
         context,
     }))
 }

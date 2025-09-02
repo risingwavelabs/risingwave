@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::FragmentTypeMask;
+
 use super::*;
+use crate::controller::fragment::FragmentTypeMaskExt;
 
 pub(crate) async fn update_internal_tables(
     txn: &DatabaseTransaction,
@@ -397,25 +400,22 @@ impl CatalogController {
             .await?;
             updated_table_ids.push(table_id);
 
-            let fragments: Vec<(FragmentId, StreamNode, i32)> = Fragment::find()
+            let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
                 .select_only()
                 .columns(vec![
                     fragment::Column::FragmentId,
                     fragment::Column::StreamNode,
-                    fragment::Column::FragmentTypeMask,
                 ])
-                .filter(fragment::Column::JobId.eq(table_id))
+                .filter(fragment::Column::JobId.eq(table_id).and(
+                    // dirty downstream should be materialize fragment of table
+                    FragmentTypeMask::intersects(FragmentTypeFlag::Mview),
+                ))
                 .into_tuple()
                 .all(txn)
                 .await?;
 
-            for (fragment_id, stream_node, fragment_mask) in fragments {
+            for (fragment_id, stream_node) in fragments {
                 {
-                    // dirty downstream should be materialize fragment of table
-                    if fragment_mask & FragmentTypeFlag::Mview as i32 == 0 {
-                        continue;
-                    }
-
                     let mut dirty_upstream_fragment_ids = HashSet::new();
 
                     let mut pb_stream_node = stream_node.to_protobuf();

@@ -31,6 +31,7 @@ use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatab
 use thiserror_ext::AsReport;
 use tracing::{debug, warn};
 
+use crate::barrier::cdc_progress::CdcTableBackfillTrackerRef;
 use crate::barrier::checkpoint::creating_job::{CompleteJobType, CreatingStreamingJobControl};
 use crate::barrier::checkpoint::recovery::{
     DatabaseRecoveringState, DatabaseStatusAction, EnterInitializing, EnterRunning,
@@ -39,7 +40,7 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
-use crate::barrier::info::InflightStreamingJobInfo;
+use crate::barrier::info::{InflightStreamingJobInfo, SharedActorInfos};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{ControlStreamManager, from_partial_graph_id};
@@ -69,12 +70,14 @@ impl CheckpointControl {
     }
 
     pub(crate) fn recover(
-        databases: impl IntoIterator<Item = (DatabaseId, DatabaseCheckpointControl)>,
+        databases: HashMap<DatabaseId, DatabaseCheckpointControl>,
         failed_databases: HashSet<DatabaseId>,
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: HummockVersionStats,
         env: MetaSrvEnv,
     ) -> Self {
+        env.shared_actor_infos()
+            .retain_databases(databases.keys().chain(&failed_databases).cloned());
         Self {
             env,
             databases: databases
@@ -225,7 +228,11 @@ impl CheckpointControl {
                         job_type: CreateStreamingJobType::Normal,
                         ..
                     } => {
-                        let new_database = DatabaseCheckpointControl::new(database_id);
+                        let new_database = DatabaseCheckpointControl::new(
+                            database_id,
+                            self.env.shared_actor_infos().clone(),
+                            self.env.cdc_table_backfill_tracker(),
+                        );
                         control_stream_manager.add_partial_graph(database_id, None);
                         entry
                             .insert(DatabaseCheckpointControlStatus::Running(new_database))
@@ -535,20 +542,26 @@ pub(crate) struct DatabaseCheckpointControl {
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
 
     create_mview_tracker: CreateMviewProgressTracker,
+    cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
 
     metrics: DatabaseCheckpointControlMetrics,
 }
 
 impl DatabaseCheckpointControl {
-    fn new(database_id: DatabaseId) -> Self {
+    fn new(
+        database_id: DatabaseId,
+        shared_actor_infos: SharedActorInfos,
+        cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
+    ) -> Self {
         Self {
             database_id,
-            state: BarrierWorkerState::new(),
+            state: BarrierWorkerState::new(database_id, shared_actor_infos),
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: None,
             creating_streaming_job_controls: Default::default(),
             create_mview_tracker: Default::default(),
+            cdc_table_backfill_tracker,
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
@@ -559,6 +572,7 @@ impl DatabaseCheckpointControl {
         state: BarrierWorkerState,
         committed_epoch: u64,
         creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
+        cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
     ) -> Self {
         Self {
             database_id,
@@ -568,6 +582,7 @@ impl DatabaseCheckpointControl {
             committed_epoch: Some(committed_epoch),
             creating_streaming_job_controls,
             create_mview_tracker,
+            cdc_table_backfill_tracker,
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
@@ -815,12 +830,31 @@ impl DatabaseCheckpointControl {
                 let (_, mut node) = self.command_ctx_queue.pop_first().expect("non-empty");
                 assert!(node.state.creating_jobs_to_wait.is_empty());
                 assert!(node.state.node_to_collect.is_empty());
+
+                // Process load_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
+                let load_finished_source_ids: Vec<_> = node
+                    .state
+                    .resps
+                    .iter()
+                    .flat_map(|resp| &resp.load_finished_source_ids)
+                    .cloned()
+                    .collect();
+                if !load_finished_source_ids.is_empty() {
+                    // Add load_finished_source_ids to the task for processing
+                    let task = task.get_or_insert_default();
+                    task.load_finished_source_ids
+                        .extend(load_finished_source_ids);
+                }
+
                 let mut finished_jobs = self.create_mview_tracker.apply_collected_command(
                     node.command_ctx.command.as_ref(),
                     &node.command_ctx.barrier_info,
                     &node.state.resps,
                     hummock_version_stats,
                 );
+                let finished_cdc_backfill = self
+                    .cdc_table_backfill_tracker
+                    .apply_collected_command(&node.state.resps);
                 if !node.command_ctx.barrier_info.kind.is_checkpoint() {
                     assert!(finished_jobs.is_empty());
                     node.notifiers.into_iter().for_each(|notifier| {
@@ -842,10 +876,7 @@ impl DatabaseCheckpointControl {
                     .drain()
                     .for_each(|(job_id, resps)| {
                         node.state.resps.extend(resps);
-                        finished_jobs.push(TrackingJob::New(TrackingCommand {
-                            job_id,
-                            replace_stream_job: None,
-                        }));
+                        finished_jobs.push(TrackingJob::New(TrackingCommand { job_id }));
                     });
                 let task = task.get_or_insert_default();
                 node.command_ctx.collect_commit_epoch_info(
@@ -855,6 +886,8 @@ impl DatabaseCheckpointControl {
                 );
                 self.completing_barrier = Some(node.command_ctx.barrier_info.prev_epoch());
                 task.finished_jobs.extend(finished_jobs);
+                task.finished_cdc_table_backfill
+                    .extend(finished_cdc_backfill);
                 task.notifiers.extend(node.notifiers);
                 task.epoch_infos
                     .try_insert(
@@ -982,11 +1015,11 @@ impl DatabaseCheckpointControl {
             warn!("ignore reschedule when creating streaming job with snapshot backfill");
             for notifier in notifiers {
                 notifier.notify_start_failed(
-                        anyhow!(
+                    anyhow!(
                             "cannot reschedule when creating streaming job with snapshot backfill",
                         )
                         .into(),
-                    );
+                );
             }
             return Ok(());
         }
@@ -1067,17 +1100,21 @@ impl DatabaseCheckpointControl {
                         .cloned()
                         .collect();
 
-                    self.creating_streaming_job_controls.insert(
-                        job_id,
-                        CreatingStreamingJobControl::new(
-                            info,
-                            snapshot_backfill_upstream_tables,
-                            barrier_info.prev_epoch(),
-                            hummock_version_stats,
-                            control_stream_manager,
-                            edges.as_mut().expect("should exist"),
-                        )?,
-                    );
+                    let job = CreatingStreamingJobControl::new(
+                        info,
+                        snapshot_backfill_upstream_tables,
+                        barrier_info.prev_epoch(),
+                        hummock_version_stats,
+                        control_stream_manager,
+                        edges.as_mut().expect("should exist"),
+                    )?;
+
+                    self.state
+                        .inflight_graph_info
+                        .shared_actor_infos
+                        .upsert(self.database_id, job.graph_info().fragment_infos.values());
+
+                    self.creating_streaming_job_controls.insert(job_id, job);
                 }
             }
         }

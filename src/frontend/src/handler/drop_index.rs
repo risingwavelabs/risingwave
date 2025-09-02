@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::StreamJobStatus;
+use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -32,16 +34,16 @@ pub async fn handle_drop_index(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = &session.database();
-    let (schema_name, index_name) = Binder::resolve_schema_qualified_name(db_name, index_name)?;
+    let (schema_name, index_name) = Binder::resolve_schema_qualified_name(db_name, &index_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let index_id = {
+    let index = {
         let reader = session.env().catalog_reader().read_guard();
-        match reader.get_index_by_name(db_name, schema_path, &index_name) {
+        match reader.get_any_index_by_name(db_name, schema_path, &index_name) {
             Ok((index, _)) => {
-                if !session.is_super_user() && session.user_id() != index.index_table.owner {
+                if !session.is_super_user() && session.user_id() != index.index_table().owner {
                     return Err(PermissionDenied(format!(
                         "must be owner of index \"{}\"",
                         index.name
@@ -49,7 +51,7 @@ pub async fn handle_drop_index(
                     .into());
                 }
 
-                index.id
+                index.clone()
             }
             Err(err) => {
                 match err {
@@ -85,8 +87,22 @@ pub async fn handle_drop_index(
         }
     };
 
-    let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_index(index_id, cascade).await?;
+    let index_id = index.id;
+
+    // If the index is being created, use cancel RPC instead of normal drop
+    if index.index_table().stream_job_status == StreamJobStatus::Creating {
+        let canceled_jobs = session
+            .env()
+            .meta_client()
+            .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
+                job_ids: vec![index_id.index_id],
+            }))
+            .await?;
+        tracing::info!(?canceled_jobs, "cancelled creating index job");
+    } else {
+        let catalog_writer = session.catalog_writer()?;
+        catalog_writer.drop_index(index_id, cascade).await?;
+    }
 
     Ok(PgResponse::empty_result(StatementType::DROP_INDEX))
 }

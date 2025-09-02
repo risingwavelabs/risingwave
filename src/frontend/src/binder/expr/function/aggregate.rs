@@ -51,9 +51,9 @@ impl Binder {
         agg_type: AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
-        order_by: Vec<ast::OrderByExpr>,
-        within_group: Option<Box<ast::OrderByExpr>>,
-        filter: Option<Box<ast::Expr>>,
+        order_by: &[ast::OrderByExpr],
+        within_group: Option<&ast::OrderByExpr>,
+        filter: Option<&ast::Expr>,
     ) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
 
@@ -68,7 +68,7 @@ impl Binder {
                 let mut clause = Some(Clause::Filter);
                 std::mem::swap(&mut self.context.clause, &mut clause);
                 let expr = self
-                    .bind_expr_inner(*filter)
+                    .bind_expr_inner(filter)
                     .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
                 self.context.clause = clause;
                 if expr.has_subquery() {
@@ -100,8 +100,8 @@ impl Binder {
         kind: &AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
-        order_by: Vec<ast::OrderByExpr>,
-        within_group: Option<Box<ast::OrderByExpr>>,
+        order_by: &[ast::OrderByExpr],
+        within_group: Option<&ast::OrderByExpr>,
     ) -> Result<(Vec<Literal>, Vec<ExprImpl>, OrderBy)> {
         // Syntax:
         // aggregate_name ( [ expression [ , ... ] ] ) WITHIN GROUP ( order_by_clause ) [ FILTER
@@ -124,7 +124,7 @@ impl Binder {
             .into());
         }
 
-        let within_group = *within_group.ok_or_else(|| {
+        let within_group = within_group.ok_or_else(|| {
             ErrorCode::InvalidInputSyntax(format!(
                 "`WITHIN GROUP` is expected for ordered-set aggregation `{}`",
                 kind
@@ -133,7 +133,7 @@ impl Binder {
 
         let mut direct_args = args;
         let mut args =
-            self.bind_function_expr_arg(FunctionArgExpr::Expr(within_group.expr.clone()))?;
+            self.bind_function_expr_arg(&FunctionArgExpr::Expr(within_group.expr.clone()))?;
         let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
 
         // check signature and do implicit cast
@@ -142,7 +142,7 @@ impl Binder {
                 let fraction = &mut direct_args[0];
                 decimal_to_float64(fraction, kind)?;
                 if matches!(&kind, AggType::Builtin(PbAggKind::PercentileCont)) {
-                    arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
+                    arg.cast_implicit_mut(&DataType::Float64).map_err(|_| {
                         ErrorCode::InvalidInputSyntax(format!(
                             "arg in `{}` must be castable to float64",
                             kind
@@ -210,8 +210,8 @@ impl Binder {
         kind: &AggType,
         distinct: bool,
         args: Vec<ExprImpl>,
-        order_by: Vec<ast::OrderByExpr>,
-        within_group: Option<Box<ast::OrderByExpr>>,
+        order_by: &[ast::OrderByExpr],
+        within_group: Option<&ast::OrderByExpr>,
     ) -> Result<(Vec<Literal>, Vec<ExprImpl>, OrderBy)> {
         // Syntax:
         // aggregate_name (expression [ , ... ] [ order_by_clause ] ) [ FILTER ( WHERE
@@ -234,7 +234,7 @@ impl Binder {
 
         let order_by = OrderBy::new(
             order_by
-                .into_iter()
+                .iter()
                 .map(|e| self.bind_order_by_expr(e))
                 .try_collect()?,
         );
@@ -286,7 +286,7 @@ impl Binder {
 }
 
 fn decimal_to_float64(decimal_expr: &mut ExprImpl, kind: &AggType) -> Result<()> {
-    if decimal_expr.cast_implicit_mut(DataType::Float64).is_err() {
+    if decimal_expr.cast_implicit_mut(&DataType::Float64).is_err() {
         return Err(ErrorCode::InvalidInputSyntax(format!(
             "direct arg in `{}` must be castable to float64",
             kind

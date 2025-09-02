@@ -24,7 +24,8 @@ use barrier_control::CreatingStreamingJobBarrierControl;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::WorkerId;
+use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
+use risingwave_meta_model::{CreateType, WorkerId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::AddMutation;
@@ -54,6 +55,7 @@ pub(crate) struct CreatingStreamingJobControl {
     database_id: DatabaseId,
     pub(super) job_id: TableId,
     definition: String,
+    create_type: CreateType,
     pub(super) snapshot_backfill_upstream_tables: HashSet<TableId>,
     backfill_epoch: u64,
 
@@ -139,6 +141,12 @@ impl CreatingStreamingJobControl {
             pause: false,
             subscriptions_to_add: Default::default(),
             backfill_nodes_to_pause,
+            actor_cdc_table_snapshot_splits:
+                build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                    info.cdc_table_snapshot_split_assignment.clone(),
+                )
+                .into(),
+            new_upstream_sinks: Default::default(),
         });
 
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
@@ -159,6 +167,7 @@ impl CreatingStreamingJobControl {
         Ok(Self {
             database_id,
             definition: info.definition.clone(),
+            create_type: info.create_type.into(),
             job_id,
             snapshot_backfill_upstream_tables,
             barrier_control,
@@ -370,6 +379,7 @@ impl CreatingStreamingJobControl {
             database_id,
             job_id,
             definition,
+            create_type: CreateType::Background,
             snapshot_backfill_upstream_tables,
             backfill_epoch,
             graph_info,
@@ -429,6 +439,7 @@ impl CreatingStreamingJobControl {
         DdlProgress {
             id: self.job_id.table_id as u64,
             statement: self.definition.clone(),
+            create_type: self.create_type.as_str().to_owned(),
             progress,
         }
     }
@@ -636,5 +647,9 @@ impl CreatingStreamingJobControl {
 
     pub fn state_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         self.graph_info.existing_table_ids()
+    }
+
+    pub fn graph_info(&self) -> &InflightStreamingJobInfo {
+        &self.graph_info
     }
 }

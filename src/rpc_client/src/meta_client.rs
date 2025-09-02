@@ -84,6 +84,7 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::hosted_iceberg_catalog_service_client::HostedIcebergCatalogServiceClient;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -230,8 +231,15 @@ impl MetaClient {
         Ok(resp.connections)
     }
 
-    pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<WaitVersion> {
-        let request = DropConnectionRequest { connection_id };
+    pub async fn drop_connection(
+        &self,
+        connection_id: ConnectionId,
+        cascade: bool,
+    ) -> Result<WaitVersion> {
+        let request = DropConnectionRequest {
+            connection_id,
+            cascade,
+        };
         let resp = self.inner.drop_connection(request).await?;
         Ok(resp
             .version
@@ -641,6 +649,21 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_cdc_table_backfill_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+    ) -> Result<()> {
+        let request = AlterCdcTableBackfillParallelismRequest {
+            table_id,
+            parallelism: Some(parallelism),
+        };
+        self.inner
+            .alter_cdc_table_backfill_parallelism(request)
+            .await?;
+        Ok(())
+    }
+
     pub async fn alter_resource_group(
         &self,
         table_id: u32,
@@ -773,6 +796,18 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
+    pub async fn compact_iceberg_table(&self, sink_id: u32) -> Result<u64> {
+        let request = CompactIcebergTableRequest { sink_id };
+        let resp = self.inner.compact_iceberg_table(request).await?;
+        Ok(resp.task_id)
+    }
+
+    pub async fn expire_iceberg_table_snapshots(&self, sink_id: u32) -> Result<()> {
+        let request = ExpireIcebergTableSnapshotsRequest { sink_id };
+        let _resp = self.inner.expire_iceberg_table_snapshots(request).await?;
+        Ok(())
+    }
+
     pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
@@ -832,9 +867,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_function(&self, function_id: FunctionId) -> Result<WaitVersion> {
+    pub async fn drop_function(
+        &self,
+        function_id: FunctionId,
+        cascade: bool,
+    ) -> Result<WaitVersion> {
         let request = DropFunctionRequest {
             function_id: function_id.0,
+            cascade,
         };
         let resp = self.inner.drop_function(request).await?;
         Ok(resp
@@ -1692,6 +1732,12 @@ impl MetaClient {
         Ok(resp.rate_limits)
     }
 
+    pub async fn list_cdc_progress(&self) -> Result<HashMap<u32, PbCdcProgress>> {
+        let request = ListCdcProgressRequest {};
+        let resp = self.inner.list_cdc_progress(request).await?;
+        Ok(resp.cdc_progress)
+    }
+
     pub async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         let request = ListIcebergTablesRequest {};
         let resp = self.inner.list_iceberg_tables(request).await?;
@@ -1714,6 +1760,10 @@ impl MetaClient {
         let request = SetSyncLogStoreAlignedRequest { job_id, aligned };
         self.inner.set_sync_log_store_aligned(request).await?;
         Ok(())
+    }
+
+    pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
+        self.inner.refresh(request).await
     }
 }
 
@@ -2307,14 +2357,17 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
+            ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
+            ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
@@ -2351,6 +2404,8 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
+            ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
+            ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

@@ -23,6 +23,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::StreamingParallelism;
 use thiserror_ext::AsReport;
@@ -35,6 +36,7 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
     RescheduleOptions, SourceChange, StreamFragmentGraph,
@@ -73,22 +75,24 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn list_background_mv_progress(&self) -> MetaResult<Vec<(String, StreamJobFragments)>> {
+    async fn list_background_job_progress(&self) -> MetaResult<Vec<(String, StreamJobFragments)>> {
         let mgr = &self.metadata_manager;
-        let mviews = mgr
+        let job_info = mgr
             .catalog_controller
-            .list_background_creating_mviews(false)
+            .list_background_creating_jobs(false)
             .await?;
 
-        try_join_all(mviews.into_iter().map(|mview| async move {
-            let table_id = TableId::new(mview.table_id as _);
-            let stream_job_fragments = mgr
-                .catalog_controller
-                .get_job_fragments_by_id(mview.table_id)
-                .await?;
-            assert_eq!(stream_job_fragments.stream_job_id(), table_id);
-            Ok((mview.definition, stream_job_fragments))
-        }))
+        try_join_all(
+            job_info
+                .into_iter()
+                .map(|(id, definition, _init_at)| async move {
+                    let table_id = TableId::new(id as _);
+                    let stream_job_fragments =
+                        mgr.catalog_controller.get_job_fragments_by_id(id).await?;
+                    assert_eq!(stream_job_fragments.stream_job_id(), table_id);
+                    Ok((definition, stream_job_fragments))
+                }),
+        )
         .await
         // If failed, enter recovery mode.
     }
@@ -157,7 +161,14 @@ impl GlobalBarrierWorkerContextImpl {
         };
         let mut min_downstream_committed_epochs = HashMap::new();
         for (_, job) in background_jobs.values() {
-            let job_committed_epoch = get_table_committed_epoch(job.stream_job_id)?;
+            let Ok(job_committed_epoch) = get_table_committed_epoch(job.stream_job_id) else {
+                // Question: should we get the committed epoch from any state tables in the job?
+                warn!(
+                    "background job {} has no committed epoch, skip resolving epochs",
+                    job.stream_job_id
+                );
+                continue;
+            };
             if let (Some(snapshot_backfill_info), _) =
                 StreamFragmentGraph::collect_snapshot_backfill_info_impl(
                     job.fragments()
@@ -249,25 +260,24 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
-                    // Mview progress needs to be recovered.
-                    tracing::info!("recovering mview progress");
+                    // Background job progress needs to be recovered.
+                    tracing::info!("recovering background job progress");
                     let background_jobs = {
                         let jobs = self
-                            .list_background_mv_progress()
+                            .list_background_job_progress()
                             .await
-                            .context("recover mview progress should not fail")?;
+                            .context("recover background job progress should not fail")?;
                         let mut background_jobs = HashMap::new();
                         for (definition, stream_job_fragments) in jobs {
                             if stream_job_fragments
                                 .tracking_progress_actor_ids()
                                 .is_empty()
                             {
-                                // If there's no tracking actor in the mview, we can finish the job directly.
+                                // If there's no tracking actor in the job, we can finish the job directly.
                                 self.metadata_manager
                                     .catalog_controller
                                     .finish_streaming_job(
                                         stream_job_fragments.stream_job_id().table_id as _,
-                                        None,
                                     )
                                     .await?;
                             } else {
@@ -282,7 +292,7 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs
                     };
 
-                    tracing::info!("recovered mview progress");
+                    tracing::info!("recovered background job progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
@@ -411,9 +421,9 @@ impl GlobalBarrierWorkerContextImpl {
 
                     let background_jobs = {
                         let jobs = self
-                            .list_background_mv_progress()
+                            .list_background_job_progress()
                             .await
-                            .context("recover mview progress should not fail")?;
+                            .context("recover background job progress should not fail")?;
                         let mut background_jobs = HashMap::new();
                         for (definition, stream_job_fragments) in jobs {
                             background_jobs
@@ -434,6 +444,35 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // get split assignments for all actors
                     let source_splits = self.source_manager.list_assignments().await;
+                    let cdc_table_backfill_actors = self
+                        .metadata_manager
+                        .catalog_controller
+                        .cdc_table_backfill_actor_ids()
+                        .await?;
+                    let cdc_table_ids = cdc_table_backfill_actors
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    let cdc_table_snapshot_split_assignment =
+                        assign_cdc_table_snapshot_splits_pairs(
+                            cdc_table_backfill_actors,
+                            self.env.meta_store_ref(),
+                            self.env.cdc_table_backfill_tracker.completed_job_ids(),
+                        )
+                        .await?;
+                    let cdc_table_snapshot_split_assignment =
+                        if cdc_table_snapshot_split_assignment.is_empty() {
+                            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+                        } else {
+                            let generation = self
+                                .env
+                                .cdc_table_backfill_tracker
+                                .next_generation(cdc_table_ids.into_iter());
+                            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                                cdc_table_snapshot_split_assignment,
+                                generation,
+                            )
+                        };
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
@@ -446,6 +485,7 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs,
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
                         database_infos,
+                        cdc_table_snapshot_split_assignment,
                     })
                 }
             }
@@ -460,13 +500,16 @@ impl GlobalBarrierWorkerContextImpl {
             .await
             .context("clean dirty streaming jobs")?;
 
-        // Mview progress needs to be recovered.
-        tracing::info!(?database_id, "recovering mview progress of database");
+        // Background job progress needs to be recovered.
+        tracing::info!(
+            ?database_id,
+            "recovering background job progress of database"
+        );
         let background_jobs = self
-            .list_background_mv_progress()
+            .list_background_job_progress()
             .await
-            .context("recover mview progress of database should not fail")?;
-        tracing::info!(?database_id, "recovered mview progress");
+            .context("recover background job progress of database should not fail")?;
+        tracing::info!(?database_id, "recovered background job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
         let _ = self
@@ -498,13 +541,10 @@ impl GlobalBarrierWorkerContextImpl {
                     .tracking_progress_actor_ids()
                     .is_empty()
                 {
-                    // If there's no tracking actor in the mview, we can finish the job directly.
+                    // If there's no tracking actor in the job, we can finish the job directly.
                     self.metadata_manager
                         .catalog_controller
-                        .finish_streaming_job(
-                            stream_job_fragments.stream_job_id().table_id as _,
-                            None,
-                        )
+                        .finish_streaming_job(stream_job_fragments.stream_job_id().table_id as _)
                         .await?;
                 } else {
                     background_jobs
@@ -560,6 +600,33 @@ impl GlobalBarrierWorkerContextImpl {
 
         // get split assignments for all actors
         let source_splits = self.source_manager.list_assignments().await;
+
+        let cdc_table_backfill_actors = self
+            .metadata_manager
+            .catalog_controller
+            .cdc_table_backfill_actor_ids()
+            .await?;
+        let cdc_table_ids = cdc_table_backfill_actors
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
+            cdc_table_backfill_actors,
+            self.env.meta_store_ref(),
+            self.env.cdc_table_backfill_tracker.completed_job_ids(),
+        )
+        .await?;
+        let cdc_table_snapshot_split_assignment = if cdc_table_snapshot_split_assignment.is_empty()
+        {
+            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+        } else {
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                cdc_table_snapshot_split_assignment,
+                self.env
+                    .cdc_table_backfill_tracker
+                    .next_generation(cdc_table_ids.into_iter()),
+            )
+        };
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,
@@ -569,6 +636,7 @@ impl GlobalBarrierWorkerContextImpl {
             fragment_relations,
             source_splits,
             background_jobs,
+            cdc_table_snapshot_split_assignment,
         }))
     }
 }
@@ -832,9 +900,12 @@ impl GlobalBarrierWorkerContextImpl {
 
             let plan = self
                 .scale_controller
-                .generate_job_reschedule_plan(JobReschedulePolicy {
-                    targets: local_reschedule_targets,
-                })
+                .generate_job_reschedule_plan(
+                    JobReschedulePolicy {
+                        targets: local_reschedule_targets,
+                    },
+                    false,
+                )
                 .await?;
 
             // no need to update

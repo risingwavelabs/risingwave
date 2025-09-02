@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::Fields;
+use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
 
@@ -33,6 +33,8 @@ struct RwFunction {
     link: Option<String>,
     acl: Vec<String>,
     always_retry_on_network_error: bool,
+    created_at: Option<Timestamptz>,
+    created_at_cluster_version: Option<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_functions")]
@@ -62,6 +64,8 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFunction>> {
                     username_map,
                 ),
                 always_retry_on_network_error: function.always_retry_on_network_error,
+                created_at: function.created_at_epoch.map(|e| e.as_timestamptz()),
+                created_at_cluster_version: function.created_at_cluster_version.clone(),
             })
         })
         .collect())

@@ -25,9 +25,10 @@ use futures::pin_mut;
 use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
 
@@ -35,6 +36,7 @@ use crate::WithPropertiesExt;
 use crate::connector_common::{PostgresExternalTable, SslMode};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::CdcSourceType;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::mysql::{
@@ -45,17 +47,18 @@ use crate::source::cdc::external::sql_server::{
     SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
 };
 
-#[derive(Debug, Clone)]
-pub enum CdcTableType {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ExternalCdcTableType {
     Undefined,
     Mock,
     MySql,
     Postgres,
     SqlServer,
     Citus,
+    Mongo,
 }
 
-impl CdcTableType {
+impl ExternalCdcTableType {
     pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
         let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
@@ -63,6 +66,7 @@ impl CdcTableType {
             "postgres-cdc" => Self::Postgres,
             "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
+            "mongodb-cdc" => Self::Mongo,
             _ => Self::Undefined,
         }
     }
@@ -87,24 +91,54 @@ impl CdcTableType {
         config: ExternalTableConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
+        schema_table_name: SchemaTableName,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(config, schema)?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(config, schema, pk_indices).await?,
+                PostgresExternalTableReader::new(config, schema, pk_indices, schema_table_name)
+                    .await?,
             )),
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
+            // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+impl From<ExternalCdcTableType> for PbCdcTableType {
+    fn from(cdc_table_type: ExternalCdcTableType) -> Self {
+        match cdc_table_type {
+            ExternalCdcTableType::Postgres => Self::Postgres,
+            ExternalCdcTableType::MySql => Self::Mysql,
+            ExternalCdcTableType::SqlServer => Self::Sqlserver,
+
+            ExternalCdcTableType::Citus => Self::Citus,
+            ExternalCdcTableType::Mongo => Self::Mongo,
+            ExternalCdcTableType::Undefined | ExternalCdcTableType::Mock => Self::Unspecified,
+        }
+    }
+}
+
+impl From<PbCdcTableType> for ExternalCdcTableType {
+    fn from(cdc_table_type: PbCdcTableType) -> Self {
+        match cdc_table_type {
+            PbCdcTableType::Postgres => Self::Postgres,
+            PbCdcTableType::Mysql => Self::MySql,
+            PbCdcTableType::Sqlserver => Self::SqlServer,
+            PbCdcTableType::Mongo => Self::Mongo,
+            PbCdcTableType::Citus => Self::Citus,
+            PbCdcTableType::Unspecified => Self::Undefined,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SchemaTableName {
     // namespace of the table, e.g. database in mysql, schema in postgres
     pub schema_name: String,
@@ -117,18 +151,20 @@ pub const DATABASE_NAME_KEY: &str = "database.name";
 
 impl SchemaTableName {
     pub fn from_properties(properties: &BTreeMap<String, String>) -> Self {
-        let table_type = CdcTableType::from_properties(properties);
+        let table_type = ExternalCdcTableType::from_properties(properties);
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
         let schema_name = match table_type {
-            CdcTableType::MySql => properties
+            ExternalCdcTableType::MySql => properties
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
-            CdcTableType::Postgres | CdcTableType::Citus => {
+            ExternalCdcTableType::Postgres | ExternalCdcTableType::Citus => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
-            CdcTableType::SqlServer => properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default(),
+            ExternalCdcTableType::SqlServer => {
+                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
+            }
             _ => {
                 unreachable!("invalid external table type: {:?}", table_type);
             }
@@ -213,6 +249,25 @@ pub trait ExternalTableReader: Sized {
         primary_keys: Vec<String>,
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
+
+    fn get_parallel_cdc_splits(
+        &self,
+        options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>>;
+
+    fn split_snapshot_read(
+        &self,
+        table_name: SchemaTableName,
+        left: OwnedRow,
+        right: OwnedRow,
+        split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
+}
+
+pub struct CdcTableSnapshotSplitOption {
+    pub backfill_num_rows_per_split: u64,
+    pub backfill_as_even_splits: bool,
+    pub backfill_split_pk_column_index: u32,
 }
 
 pub enum ExternalTableReaderImpl {
@@ -291,6 +346,23 @@ impl ExternalTableReader for ExternalTableReaderImpl {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        self.get_parallel_cdc_splits_inner(options)
+    }
+
+    fn split_snapshot_read(
+        &self,
+        table_name: SchemaTableName,
+        left: OwnedRow,
+        right: OwnedRow,
+        split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        self.split_snapshot_read_inner(table_name, left, right, split_columns)
+    }
 }
 
 impl ExternalTableReaderImpl {
@@ -327,6 +399,53 @@ impl ExternalTableReaderImpl {
             }
             ExternalTableReaderImpl::Mock(mock) => {
                 mock.snapshot_read(table_name, start_pk, primary_keys, limit)
+            }
+        };
+
+        pin_mut!(stream);
+        #[for_await]
+        for row in stream {
+            let row = row?;
+            yield row;
+        }
+    }
+
+    #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
+    async fn get_parallel_cdc_splits_inner(&self, options: CdcTableSnapshotSplitOption) {
+        let stream = match self {
+            ExternalTableReaderImpl::MySql(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Postgres(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::SqlServer(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Mock(e) => e.get_parallel_cdc_splits(options),
+        };
+        pin_mut!(stream);
+        #[for_await]
+        for row in stream {
+            let row = row?;
+            yield row;
+        }
+    }
+
+    #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
+    async fn split_snapshot_read_inner(
+        &self,
+        table_name: SchemaTableName,
+        left: OwnedRow,
+        right: OwnedRow,
+        split_columns: Vec<Field>,
+    ) {
+        let stream = match self {
+            ExternalTableReaderImpl::MySql(mysql) => {
+                mysql.split_snapshot_read(table_name, left, right, split_columns)
+            }
+            ExternalTableReaderImpl::Postgres(postgres) => {
+                postgres.split_snapshot_read(table_name, left, right, split_columns)
+            }
+            ExternalTableReaderImpl::SqlServer(sql_server) => {
+                sql_server.split_snapshot_read(table_name, left, right, split_columns)
+            }
+            ExternalTableReaderImpl::Mock(mock) => {
+                mock.split_snapshot_read(table_name, left, right, split_columns)
             }
         };
 
@@ -390,3 +509,5 @@ impl ExternalTableImpl {
         }
     }
 }
+
+pub const CDC_TABLE_SPLIT_ID_START: i64 = 1;

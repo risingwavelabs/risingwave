@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
 use futures::{StreamExt, TryStreamExt};
-use opendal::{Metakey, Operator};
+use opendal::Operator;
 use risingwave_common::types::Timestamptz;
 
 use super::OpendalSource;
@@ -53,8 +53,9 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
     async fn list_splits(&mut self) -> ConnectorResult<Vec<OpendalFsSplit<Src>>> {
         let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
         let prefix = self.prefix.as_deref().unwrap_or("/");
+        let list_prefix = Self::extract_list_prefix(prefix);
 
-        let mut lister = self.op.lister(prefix).await?;
+        let mut lister = self.op.lister(&list_prefix).await?;
         // fetch one item as validation, no need to get all
         match lister.try_next().await {
             Ok(_) => return Ok(vec![empty_split]),
@@ -68,42 +69,70 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 }
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
+    /// Extract the directory to list from a prefix.
+    /// If prefix ends with "/", use it as-is (directory).
+    /// Otherwise, extract parent directory.
+    fn extract_list_prefix(prefix: &str) -> String {
+        if prefix.ends_with("/") {
+            prefix.to_owned()
+        } else if let Some(parent_pos) = prefix.rfind('/') {
+            prefix[..=parent_pos].to_owned()
+        } else {
+            "/".to_owned()
+        }
+    }
+
     pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
         let prefix = self.prefix.as_deref().unwrap_or("/");
-        let list_prefix = match prefix.ends_with("/") {
-            true => prefix,
-            false => "/",
-        };
-        let object_lister = self
-            .op
-            .lister_with(list_prefix)
-            .recursive(true)
-            .metakey(Metakey::ContentLength | Metakey::LastModified)
-            .await?;
-        let stream = stream::unfold(object_lister, |mut object_lister| async move {
-            match object_lister.next().await {
-                Some(Ok(object)) => {
-                    let name = object.path().to_owned();
-                    let om = object.metadata();
+        let list_prefix = Self::extract_list_prefix(prefix);
+        let object_lister = self.op.lister_with(&list_prefix).recursive(true).await?;
 
-                    let t = match om.last_modified() {
-                        Some(t) => t,
-                        None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
-                    };
-                    let timestamp = Timestamptz::from(t);
-                    let size = om.content_length() as i64;
+        let op = self.op.clone();
+        let full_capability = op.info().full_capability();
+        let stream = stream::unfold(object_lister, move |mut object_lister| {
+            let op = op.clone();
 
-                    let metadata = FsPageItem {
-                        name,
-                        size,
-                        timestamp,
-                    };
-                    Some((Ok(metadata), object_lister))
-                }
-                Some(Err(err)) => Some((Err(err.into()), object_lister)),
-                None => {
-                    tracing::info!("list object completed.");
-                    None
+            async move {
+                match object_lister.next().await {
+                    Some(Ok(object)) => {
+                        let name = object.path().to_owned();
+
+                        // Check if we need to call stat() to get complete metadata
+                        let (t, size) = if !full_capability.list_has_content_length
+                            || !full_capability.list_has_last_modified
+                        {
+                            // Need complete metadata, call stat()
+                            let stat_meta = op.stat(&name).await.ok()?;
+                            let t = match stat_meta.last_modified() {
+                                Some(t) => t,
+                                None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+                            };
+                            let size = stat_meta.content_length() as i64;
+                            (t, size)
+                        } else {
+                            // Use metadata from list operation
+                            let meta = object.metadata();
+                            let t = match meta.last_modified() {
+                                Some(t) => t,
+                                None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+                            };
+                            let size = meta.content_length() as i64;
+                            (t, size)
+                        };
+
+                        let timestamp = Timestamptz::from(t);
+                        let metadata = FsPageItem {
+                            name,
+                            size,
+                            timestamp,
+                        };
+                        Some((Ok(metadata), object_lister))
+                    }
+                    Some(Err(err)) => Some((Err(err.into()), object_lister)),
+                    None => {
+                        tracing::info!("list object completed.");
+                        None
+                    }
                 }
             }
         });
@@ -120,3 +149,55 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
     }
 }
 pub type ObjectMetadataIter = BoxStream<'static, ConnectorResult<FsPageItem>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::filesystem::opendal_source::OpendalS3;
+    use crate::source::filesystem::s3::enumerator::get_prefix;
+
+    fn calculate_list_prefix(prefix: &str) -> String {
+        OpendalEnumerator::<OpendalS3>::extract_list_prefix(prefix)
+    }
+
+    #[test]
+    fn test_prefix_logic() {
+        let test_cases = vec![
+            ("a/b/c/hello*/*.json", "a/b/c/hello", "a/b/c/"),
+            ("a/b/c.json", "a/b/c.json", "a/b/"),
+            ("a/b/c/", "a/b/c/", "a/b/c/"),
+            ("a/b/c", "a/b/c", "a/b/"),
+            ("file.json", "file.json", "/"),
+            ("*.json", "", "/"),
+            ("a/b/c/[h]ello*/*.json", "a/b/c/", "a/b/c/"),
+        ];
+
+        for (pattern, expected_prefix, expected_list_prefix) in test_cases {
+            let prefix = get_prefix(pattern);
+            let list_prefix = calculate_list_prefix(&prefix);
+
+            assert_eq!(
+                prefix, expected_prefix,
+                "get_prefix failed for: {}",
+                pattern
+            );
+            assert_eq!(
+                list_prefix, expected_list_prefix,
+                "list_prefix failed for: {}",
+                pattern
+            );
+        }
+    }
+
+    #[test]
+    fn test_bug_fix() {
+        let problematic_pattern = "a/b/c/hello*/*.json";
+        let prefix = get_prefix(problematic_pattern);
+        let list_prefix = calculate_list_prefix(&prefix);
+
+        // Before fix: would fallback to "/"
+        // After fix: should use parent directory "a/b/c/"
+        assert_eq!(prefix, "a/b/c/hello");
+        assert_eq!(list_prefix, "a/b/c/");
+    }
+}

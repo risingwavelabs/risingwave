@@ -24,7 +24,10 @@ use thiserror_ext::AsReport;
 use super::{
     Datum, F64, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum,
 };
-use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
+use crate::types::{
+    DEBEZIUM_UNAVAILABLE_JSON, DEBEZIUM_UNAVAILABLE_VALUE, DataType, Scalar, ScalarRef, StructType,
+    StructValue,
+};
 use crate::util::iter_util::ZipEqDebug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -143,6 +146,18 @@ impl std::str::FromStr for JsonbVal {
     type Err = <Value as std::str::FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.parse()?))
+    }
+}
+
+impl JsonbVal {
+    /// Create a `JsonbVal` from a string, with special handling for Debezium's unavailable value placeholder.
+    /// Returns a Result to handle parsing errors properly.
+    pub fn from_debezium_unavailable_value(s: &str) -> Result<Self, serde_json::Error> {
+        // Special handling for Debezium's unavailable value placeholder
+        if s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE {
+            return Ok(DEBEZIUM_UNAVAILABLE_JSON.clone());
+        }
         Ok(Self(s.parse()?))
     }
 }

@@ -1,0 +1,129 @@
+- id: create_table
+  sql: |
+    create table items (id int primary key, embedding vector(3));
+  expected_outputs: []
+- before:
+    - create_table
+  id: no_vector_search_with_offset
+  sql: |
+    SELECT * FROM items order by embedding <-> '[3,1,2]' limit 5 offset 1;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table
+  sql: |
+    SELECT * FROM items order by embedding <-> '[3,1,2]' limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+  - create_table
+  sql: |
+    SELECT * FROM (select *, _rw_timestamp, embedding <-> '[3,1,2]' as distance from items) order by distance limit 5;
+  expected_outputs:
+      - logical_plan
+      - optimized_logical_plan_for_batch
+      - batch_plan
+- before:
+    - create_table
+  sql: |
+    SELECT * FROM (select distance, distance + 1 as distance_ref from (select *, _rw_timestamp, embedding <-> '[3,1,2]' as distance  from items)) order by distance limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table
+  sql: |
+    select count(*), id from (SELECT embedding, id FROM (select id, _rw_timestamp, embedding <=> '[3,1,2]' as distance, embedding  from items) order by distance limit 5) group by id;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table
+  sql: |
+    SELECT embedding, distance, id FROM (select id, _rw_timestamp, embedding <#> '[3,1,2]' as distance, embedding from items) order by distance limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- id: explain_create_table_and_index
+  sql: |
+    create table items (id int primary key, name string, unindexed timestamptz, embedding vector(3)) append only;
+    explain create index vector_index on items using flat (embedding) include (name) with (distance_type = 'inner_product');
+  expected_outputs:
+    - explain_output
+- id: create_table_and_index
+  sql: |
+    create table items (id int primary key, unindexed timestamptz, name string, embedding vector(3)) append only;
+    create index vector_index on items using flat (embedding) include (name) with (distance_type = 'inner_product');
+  expected_outputs: []
+- before:
+    - create_table_and_index
+  sql: |
+    SELECT id, name FROM items order by embedding <#> '[1, 2, 3]'::vector(3) limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  id: no_vector_index_search_on_table_scan_with_predicate
+  sql: |
+    SELECT id, name FROM items where id > 0 order by embedding <#> '[1, 2, 3]'::vector(3) limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  sql: |
+    SELECT id, name FROM items order by embedding <#> openai_embedding('{"model": "model"}'::jsonb, 'hello')::vector(3) limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  sql: |
+    select count(*), id from (SELECT id + 1 as id FROM items order by embedding <#> '[3,1,2]' limit 5) group by id;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  sql: |
+    SELECT id, name, embedding FROM items order by embedding <#> '[3,1,2]' limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  sql: |
+    SELECT id, name, unindexed FROM items order by embedding <#> '[3,1,2]' limit 5;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  sql: |
+    select id, name, unindexed, power(distance, 2)::int from (select id, name, unindexed, '[3,1,2]' <#> embedding as distance from items order by distance limit 2);
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_table_and_index
+  sql: |
+    select count(*), id from (SELECT embedding, id FROM (select id, embedding <#> '[3,1,2]' as distance, embedding  from items) order by distance limit 5) where embedding <-> '[1,2,3]' < 2.0 group by id;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan

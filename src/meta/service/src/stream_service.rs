@@ -30,6 +30,7 @@ use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingPar
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
+use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -512,6 +513,26 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListRateLimitsResponse { rate_limits }))
     }
 
+    #[cfg_attr(coverage, coverage(off))]
+    async fn refresh(
+        &self,
+        request: Request<RefreshRequest>,
+    ) -> Result<Response<RefreshResponse>, Status> {
+        let req = request.into_inner();
+
+        tracing::info!("Refreshing table with id: {}", req.table_id);
+
+        // Create refresh manager and execute refresh
+        let refresh_manager = risingwave_meta::stream::RefreshManager::new(
+            self.metadata_manager.clone(),
+            self.barrier_scheduler.clone(),
+        );
+
+        let response = refresh_manager.refresh_table(req).await?;
+
+        Ok(Response::new(response))
+    }
+
     async fn alter_connector_props(
         &self,
         request: Request<AlterConnectorPropsRequest>,
@@ -601,13 +622,36 @@ impl StreamManagerService for StreamServiceImpl {
                             visited = true
                         }
                     });
-                    visited
+                    Ok(visited)
                 },
                 "no fragments found with synced log store",
             )
             .await?;
 
         Ok(Response::new(SetSyncLogStoreAlignedResponse {}))
+    }
+
+    async fn list_cdc_progress(
+        &self,
+        _request: Request<ListCdcProgressRequest>,
+    ) -> Result<Response<ListCdcProgressResponse>, Status> {
+        let cdc_progress = self
+            .env
+            .cdc_table_backfill_tracker()
+            .list_cdc_progress()
+            .into_iter()
+            .map(|(job_id, p)| {
+                (
+                    job_id,
+                    PbCdcProgress {
+                        split_total_count: p.split_total_count,
+                        split_backfilled_count: p.split_backfilled_count,
+                        split_completed_count: p.split_completed_count,
+                    },
+                )
+            })
+            .collect();
+        Ok(Response::new(ListCdcProgressResponse { cdc_progress }))
     }
 }
 

@@ -32,7 +32,7 @@ use super::{
 use crate::stream::StreamFragmentGraph;
 use crate::{MetaError, MetaResult};
 
-// This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
+// This enum is used to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 #[derive(Debug, Clone, EnumIs, EnumTryAs)]
 pub enum StreamingJob {
@@ -241,6 +241,9 @@ impl StreamingJob {
                 table.get_create_type().unwrap_or(CreateType::Foreground)
             }
             Self::Sink(s, _) => s.get_create_type().unwrap_or(CreateType::Foreground),
+            Self::Index(index, _) => {
+                CreateType::try_from(index.create_type).unwrap_or(CreateType::Foreground)
+            }
             _ => CreateType::Foreground,
         }
     }
@@ -315,10 +318,18 @@ impl StreamingJob {
                 // No version check for materialized view, since `ALTER MATERIALIZED VIEW AS QUERY`
                 // is a full rewrite.
             }
-            StreamingJob::Sink(_, _) | StreamingJob::Index(_, _) => {
+            StreamingJob::Sink(_, _) => {
+                // No version check for sink, since sink fragment altering is triggered along with Table
+            }
+            StreamingJob::Index(_, _) => {
                 bail_not_implemented!("schema change for {}", self.job_type_str())
             }
         }
         Ok(())
+    }
+
+    // Check whether we should notify the FE about the `CREATING` catalog of this job.
+    pub fn should_notify_creating(&self) -> bool {
+        self.is_materialized_view() || matches!(self.create_type(), CreateType::Background)
     }
 }

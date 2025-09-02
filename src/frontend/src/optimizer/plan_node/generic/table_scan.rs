@@ -13,31 +13,30 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
 use std::sync::Arc;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::GenericPlanNode;
 use crate::TableCatalog;
+use crate::catalog::ColumnId;
+use crate::catalog::index_catalog::{TableIndex, VectorIndex};
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
+use crate::optimizer::property::{FunctionalDependencySet, Order, WatermarkColumns};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
 /// [`TableScan`] returns contents of a RisingWave Table.
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct TableScan {
-    pub table_name: String,
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
     pub output_col_idx: Vec<usize>,
@@ -49,9 +48,9 @@ pub struct TableScan {
     // It's introduced in https://github.com/risingwavelabs/risingwave/pull/13622.
     // We kept this field to avoid extensive refactor in that PR.
     /// Table Desc (subset of table catalog).
-    pub table_desc: Rc<TableDesc>,
     /// Descriptors of all indexes on this table
-    pub indexes: Vec<Rc<IndexCatalog>>,
+    pub table_indexes: Vec<Arc<TableIndex>>,
+    pub vector_indexes: Vec<Arc<VectorIndex>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
@@ -59,8 +58,6 @@ pub struct TableScan {
     /// syntax `FOR SYSTEM_TIME AS OF 499162860` is used for iceberg.
     /// syntax `FOR SYSTEM_VERSION AS OF 10963874102873;` is used for iceberg.
     pub as_of: Option<AsOf>,
-    /// The cardinality of the table **without** applying the predicate.
-    pub table_cardinality: Cardinality,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
@@ -73,6 +70,10 @@ impl TableScan {
 
     pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.predicate.visit_expr(v);
+    }
+
+    pub fn table_name(&self) -> &str {
+        self.table_catalog.name()
     }
 
     /// The mapped distribution key of the scan operator.
@@ -88,7 +89,7 @@ impl TableScan {
             .enumerate()
             .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
             .collect::<HashMap<_, _>>();
-        self.table_desc
+        self.table_catalog
             .distribution_key
             .iter()
             .map(|&tb_idx| tb_idx_to_op_idx.get(&tb_idx).cloned())
@@ -104,7 +105,7 @@ impl TableScan {
     }
 
     pub fn primary_key(&self) -> &[ColumnOrder] {
-        &self.table_desc.pk
+        &self.table_catalog.pk
     }
 
     pub fn watermark_columns(&self) -> WatermarkColumns {
@@ -113,7 +114,7 @@ impl TableScan {
         // a separate watermark group. We should record the watermark group information in
         // `TableDesc` later.
         let mut watermark_columns = WatermarkColumns::new();
-        for idx in self.table_desc.watermark_columns.ones() {
+        for idx in self.table_catalog.watermark_columns.ones() {
             watermark_columns.insert(idx, self.ctx.next_watermark_group_id());
         }
         watermark_columns.map_clone(&self.i2o_col_mapping())
@@ -122,7 +123,7 @@ impl TableScan {
     pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {
         self.output_col_idx
             .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
+            .map(|&i| format!("{}.{}", self.table_name(), self.get_table_columns()[i].name))
             .collect()
     }
 
@@ -139,32 +140,30 @@ impl TableScan {
     }
 
     pub(crate) fn order_names(&self) -> Vec<String> {
-        self.table_desc
+        self.table_catalog
             .order_column_indices()
-            .iter()
-            .map(|&i| self.get_table_columns()[i].name.clone())
+            .map(|i| self.get_table_columns()[i].name.clone())
             .collect()
     }
 
     pub(crate) fn order_names_with_table_prefix(&self) -> Vec<String> {
-        self.table_desc
+        self.table_catalog
             .order_column_indices()
-            .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
+            .map(|i| format!("{}.{}", self.table_name(), self.get_table_columns()[i].name))
             .collect()
     }
 
     /// Return indices of fields the output is ordered by and
     /// corresponding direction
     pub fn get_out_column_index_order(&self) -> Order {
-        let id_to_tb_idx = self.table_desc.get_id_to_op_idx_mapping();
+        let id_to_tb_idx = self.table_catalog.get_id_to_op_idx_mapping();
         let order = Order::new(
-            self.table_desc
+            self.table_catalog
                 .pk
                 .iter()
                 .map(|order| {
                     let idx = id_to_tb_idx
-                        .get(&self.table_desc.columns[order.column_index].column_id)
+                        .get(&self.table_catalog.columns[order.column_index].column_id)
                         .unwrap();
                     ColumnOrder::new(*idx, order.order_type)
                 })
@@ -197,7 +196,6 @@ impl TableScan {
     /// scan.
     pub fn to_index_scan(
         &self,
-        index_name: &str,
         index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
@@ -245,51 +243,46 @@ impl TableScan {
         let new_predicate = self.predicate.clone().rewrite_expr(&mut rewriter);
 
         Self::new(
-            index_name.to_owned(),
             new_output_col_idx,
             index_table_catalog,
+            vec![],
             vec![],
             self.ctx.clone(),
             new_predicate,
             self.as_of.clone(),
-            self.table_cardinality,
         )
     }
 
     /// Create a `LogicalScan` node. Used internally by optimizer.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
         table_catalog: Arc<TableCatalog>,
-        indexes: Vec<Rc<IndexCatalog>>,
+        table_indexes: Vec<Arc<TableIndex>>,
+        vector_indexes: Vec<Arc<VectorIndex>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
-        table_cardinality: Cardinality,
     ) -> Self {
         Self::new_inner(
-            table_name,
             output_col_idx,
             table_catalog,
-            indexes,
+            table_indexes,
+            vector_indexes,
             ctx,
             predicate,
             as_of,
-            table_cardinality,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_inner(
-        table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
         table_catalog: Arc<TableCatalog>,
-        indexes: Vec<Rc<IndexCatalog>>,
+        table_indexes: Vec<Arc<TableIndex>>,
+        vector_indexes: Vec<Arc<VectorIndex>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
-        table_cardinality: Cardinality,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -307,18 +300,14 @@ impl TableScan {
             }
         });
 
-        let table_desc = Rc::new(table_catalog.table_desc());
-
         Self {
-            table_name,
             required_col_idx,
             output_col_idx,
             table_catalog,
-            table_desc,
-            indexes,
+            table_indexes,
+            vector_indexes,
             predicate,
             as_of,
-            table_cardinality,
             ctx,
         }
     }
@@ -337,10 +326,10 @@ impl TableScan {
 
     pub(crate) fn fields_pretty_schema(&self) -> Schema {
         let fields = self
-            .table_desc
+            .table_catalog
             .columns
             .iter()
-            .map(|col| Field::from_with_table_name_prefix(col, &self.table_name))
+            .map(|col| Field::from_with_table_name_prefix(&col.column_desc, self.table_name()))
             .collect();
         Schema { fields }
     }
@@ -353,7 +342,7 @@ impl GenericPlanNode for TableScan {
             .iter()
             .map(|tb_idx| {
                 let col = &self.get_table_columns()[*tb_idx];
-                Field::from_with_table_name_prefix(col, &self.table_name)
+                Field::from_with_table_name_prefix(&col.column_desc, self.table_name())
             })
             .collect();
         Schema { fields }
@@ -363,13 +352,14 @@ impl GenericPlanNode for TableScan {
         if matches!(self.table_catalog.table_type, TableType::Internal) {
             return None;
         }
-        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
-        self.table_desc
+        let id_to_op_idx =
+            Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_catalog);
+        self.table_catalog
             .stream_key
             .iter()
             .map(|&c| {
                 id_to_op_idx
-                    .get(&self.table_desc.columns[c].column_id)
+                    .get(&self.table_catalog.columns[c].column_id)
                     .copied()
             })
             .collect::<Option<Vec<_>>>()
@@ -390,35 +380,27 @@ impl GenericPlanNode for TableScan {
 }
 
 impl TableScan {
-    pub fn get_table_columns(&self) -> &[ColumnDesc] {
-        &self.table_desc.columns
+    pub fn get_table_columns(&self) -> &[ColumnCatalog] {
+        &self.table_catalog.columns
     }
 
     pub fn append_only(&self) -> bool {
-        self.table_desc.append_only
+        self.table_catalog.append_only
     }
 
     /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
         self.output_col_idx
             .iter()
-            .map(|&i| self.get_table_columns()[i].clone())
+            .map(|&i| self.get_table_columns()[i].column_desc.clone())
             .collect()
     }
 
     /// Helper function to create a mapping from `column_id` to `operator_idx`
     pub fn get_id_to_op_idx_mapping(
         output_col_idx: &[usize],
-        table_desc: &Rc<TableDesc>,
+        table_catalog: &TableCatalog,
     ) -> HashMap<ColumnId, usize> {
-        let mut id_to_op_idx = HashMap::new();
-        output_col_idx
-            .iter()
-            .enumerate()
-            .for_each(|(op_idx, tb_idx)| {
-                let col = &table_desc.columns[*tb_idx];
-                id_to_op_idx.insert(col.column_id, op_idx);
-            });
-        id_to_op_idx
+        ColumnDesc::get_id_to_op_idx_mapping(&table_catalog.columns, Some(output_col_idx))
     }
 }

@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use futures::future::try_join_all;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::bitmap::Bitmap;
@@ -269,7 +270,9 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         emit_on_window_close: bool,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamExecutorResult<(Self, AggStateCacheStats)> {
+        let mut stats = AggStateCacheStats::default();
+
         let inter_states = intermediate_state_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
@@ -303,11 +306,12 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         };
 
         if !this.emit_on_window_close && this.prev_inter_states.is_some() {
-            let (outputs, _stats) = this.get_outputs(storages, agg_funcs).await?;
+            let (outputs, init_stats) = this.get_outputs(storages, agg_funcs).await?;
             this.prev_outputs = Some(outputs);
+            stats.merge(init_stats);
         }
 
-        Ok(this)
+        Ok((this, stats))
     }
 
     /// Create a group from intermediate states for EOWC output.
@@ -383,12 +387,24 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         if self.curr_row_count() == 0 {
             tracing::trace!(group = ?self.ctx.group_key_row(), "first time see this group");
         }
-        for (((state, call), func), visibility) in (self.states.iter_mut())
-            .zip_eq_fast(calls)
-            .zip_eq_fast(funcs)
-            .zip_eq_fast(visibilities)
-        {
-            state.apply_chunk(chunk, call, func, visibility).await?;
+
+        let concurrency = 10;
+        let len = self.states.len();
+
+        for chunk_start in (0..len).step_by(concurrency) {
+            let chunk_end = std::cmp::min(chunk_start + concurrency, len);
+
+            // Create futures for this chunk
+            let futures = &mut self.states[chunk_start..chunk_end]
+                .iter_mut()
+                .zip_eq_fast(&calls[chunk_start..chunk_end])
+                .zip_eq_fast(&funcs[chunk_start..chunk_end])
+                .zip_eq_fast(&visibilities[chunk_start..chunk_end])
+                .map(|(((state, call), func), visibility)| {
+                    state.apply_chunk(chunk, call, func, visibility.clone())
+                });
+
+            try_join_all(futures).await?;
         }
 
         if self.curr_row_count() == 0 {

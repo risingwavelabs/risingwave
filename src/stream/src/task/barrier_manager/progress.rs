@@ -18,10 +18,10 @@ use std::fmt::{Display, Formatter};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
-use super::LocalBarrierManager;
-use crate::task::ActorId;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
-use crate::task::barrier_manager::managed_state::DatabaseManagedBarrierState;
+use crate::task::barrier_worker::managed_state::DatabaseManagedBarrierState;
+use crate::task::cdc_progress::CdcTableBackfillState;
+use crate::task::{ActorId, LocalBarrierManager};
 
 type ConsumedEpoch = u64;
 type ConsumedRows = u64;
@@ -102,6 +102,26 @@ impl DatabaseManagedBarrierState {
                 .insert(actor, state);
         } else {
             warn!(?epoch, actor, ?state, "ignore create mview progress");
+        }
+    }
+
+    pub(crate) fn update_cdc_table_backfill_progress(
+        &mut self,
+        epoch: EpochPair,
+        actor: ActorId,
+        state: CdcTableBackfillState,
+    ) {
+        if let Some(actor_state) = self.actor_states.get(&actor)
+            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
+            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
+        {
+            graph_state
+                .cdc_table_backfill_progress
+                .entry(epoch.curr)
+                .or_default()
+                .insert(actor, state);
+        } else {
+            warn!(?epoch, actor, ?state, "ignore CDC table backfill progress");
         }
     }
 }
