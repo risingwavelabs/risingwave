@@ -104,10 +104,15 @@ risedev ci-resume mysql-offline-schema-change-test
 # If the bug is reproduced, you won't see rows with k=2 and k=3, check the logs of compute-node!
 
 sleep 20
+risedev psql -c "select * from t;"
+
+sleep 10
+risedev psql -c "select * from t1;"
+
 echo "\n\n\n-------------Verify data count------------\n\n\n"
 
 # Verify table t has 3 rows
-count_t=$(risedev psql -c "select count(*) from t;" --tuples-only | tr -d ' ')
+count_t=$(risedev psql -c "select count(*) from t;" --tuples-only 2>/dev/null | grep -E '^[0-9]+$')
 if [ "$count_t" -eq 3 ]; then
     echo "Verification passed: table t has 3 rows"
 else
@@ -116,15 +121,27 @@ else
 fi
 
 # Verify table t1 has 3 rows
-count_t1=$(risedev psql -c "select count(*) from t1;" --tuples-only | tr -d ' ')
+count_t1=$(risedev psql -c "select count(*) from t1;" --tuples-only 2>/dev/null | grep -E '^[0-9]+$')
 if [ "$count_t1" -eq 3 ]; then
     echo "Verification passed: table t1 has 3 rows"
 else
-    echo "Verification failed: table t1 is expected to have 3 rows, but actually has $count_t1 rows"
+    echo "Verification failed: table t1 has $count_t1 rows, but expected 3 rows"
     exit 1
 fi
 
 echo "\n\n\n-------------All verifications passed------------\n\n\n"
+
+echo "\n\n\n-------------Cleanup test environment------------\n\n\n"
+
+# Drop tables first
+risedev psql -c "drop table t;"
+risedev psql -c "drop table t1;"
+
+# Drop sources
+risedev psql -c "drop source s;"
+risedev psql -c "drop source s1;"
+
+echo "\n\n\n-------------Cleanup completed------------\n\n\n"
 
 # Cleanup
 risedev kill && risedev clean-data
