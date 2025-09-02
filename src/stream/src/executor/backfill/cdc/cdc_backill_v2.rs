@@ -477,12 +477,12 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
                                     let chunk_cdc_offset =
                                         get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
-                                    // TODO(zw): fix Mock
-                                    if let Some(cur) = actor_cdc_offset_low.as_ref()
+                                    // TODO(zw): enable for other cdc table type
+                                    if *self.external_table.table_type()
+                                        == ExternalCdcTableType::Postgres
+                                        && let Some(cur) = actor_cdc_offset_low.as_ref()
                                         && let Some(chunk_offset) = chunk_cdc_offset
                                         && chunk_offset < *cur
-                                        && *self.external_table.table_type()
-                                            != ExternalCdcTableType::Mock
                                     {
                                         continue;
                                     }
@@ -633,11 +633,11 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
                         let chunk_cdc_offset =
                             get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
-                        // TODO(zw): fix Mock
-                        if let Some(cur) = actor_cdc_offset_low.as_ref()
+                        // TODO(zw): enable for other cdc table type
+                        if *self.external_table.table_type() == ExternalCdcTableType::Postgres
+                            && let Some(cur) = actor_cdc_offset_low.as_ref()
                             && let Some(ref chunk_offset) = chunk_cdc_offset
                             && *chunk_offset < *cur
-                            && *self.external_table.table_type() != ExternalCdcTableType::Mock
                         {
                             continue;
                         }
