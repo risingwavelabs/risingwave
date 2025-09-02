@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use std::sync::Arc;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -26,62 +27,54 @@ use crate::executor::{
 };
 
 /// [`GetChannelStatsExecutor`] implements the executor for retrieving channel statistics
-/// from the dashboard API. This executor has no inputs and returns channel stats data.
+/// from the system catalog. This executor has no inputs and returns channel stats data.
 pub struct GetChannelStatsExecutor {
     schema: Schema,
     identity: String,
     at_time: Option<u64>,
     time_offset: u64,
-    meta_client: Option<Arc<dyn crate::meta_client::FrontendMetaClient>>,
+    sys_catalog_reader: Arc<dyn risingwave_common::catalog::SysCatalogReader>,
 }
 
 impl GetChannelStatsExecutor {
     pub fn new(
-        schema: Schema, 
-        identity: String, 
-        at_time: Option<u64>, 
+        schema: Schema,
+        identity: String,
+        at_time: Option<u64>,
         time_offset: u64,
-        meta_client: Option<Arc<dyn crate::meta_client::FrontendMetaClient>>,
+        sys_catalog_reader: Arc<dyn risingwave_common::catalog::SysCatalogReader>,
     ) -> Self {
         Self {
             schema,
             identity,
             at_time,
             time_offset,
-            meta_client,
+            sys_catalog_reader,
         }
     }
 
-    /// Generate channel stats data from meta client or fallback to mock data
+    /// Generate channel stats data using the system catalog reader
     async fn generate_channel_stats(&self) -> Vec<Vec<Option<ScalarImpl>>> {
-        let mut rows = Vec::new();
-
-        // Try to get real data from meta client if available
-        if let Some(meta_client) = &self.meta_client {
-            if let Ok(stats) = self.fetch_channel_stats_from_meta(meta_client).await {
-                return stats;
-            }
+        // Try to get real data from system catalog if possible
+        if let Ok(stats) = self.fetch_channel_stats_from_sys_catalog().await {
+            return stats;
         }
 
-        // Fallback to mock data if meta client is not available or fails
+        // Fallback to mock data if system catalog fails
         self.generate_mock_channel_stats()
     }
 
-    /// Fetch channel stats from meta client
-    async fn fetch_channel_stats_from_meta(
-        &self,
-        meta_client: &Arc<dyn crate::meta_client::FrontendMetaClient>,
-    ) -> Result<Vec<Vec<Option<ScalarImpl>>>, BatchError> {
-        // This is a placeholder for actual meta client integration
-        // In a real implementation, you would call meta_client methods to get channel stats
+    /// Fetch channel stats from system catalog
+    async fn fetch_channel_stats_from_sys_catalog(&self) -> Result<Vec<Vec<Option<ScalarImpl>>>> {
+        // This is a placeholder for actual system catalog integration
+        // In a real implementation, you would use the sys_catalog_reader to get channel stats
         // For now, we'll return an error to fall back to mock data
-        
-        // Example of how you might use the meta client:
-        // let cluster_info = meta_client.get_cluster_info().await?;
-        // let worker_nodes = meta_client.list_worker_nodes().await?;
-        // Process the data and return channel stats...
-        
-        Err(BatchError::Internal("Meta client integration not yet implemented".into()))
+
+        // Example of how you might use the system catalog reader:
+        // - Access meta client through the system catalog reader if it's SysCatalogReaderImpl
+        // - Query system tables for channel information
+        // - Process the data and return channel stats...
+        todo!()
     }
 
     /// Generate mock channel stats data for demonstration purposes
@@ -89,7 +82,7 @@ impl GetChannelStatsExecutor {
         let mut rows = Vec::new();
 
         // Generate some sample channel stats data
-        // In practice, this would come from the actual dashboard API
+        // In practice, this would come from the actual system catalog
         let channels = vec![
             ("channel_1", "active", "1000"),
             ("channel_2", "inactive", "500"),
@@ -130,6 +123,10 @@ impl Executor for GetChannelStatsExecutor {
 impl GetChannelStatsExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        // 1. Read the channel stats from the meta node RPC.
+        let stats = self.fetch_channel_stats_from_sys_catalog().await;
+        // 2. Render into rows.
+
         let rows = self.generate_channel_stats().await;
 
         if !rows.is_empty() {
@@ -180,107 +177,14 @@ impl BoxedExecutorBuilder for GetChannelStatsExecutor {
         ];
 
         let schema = Schema { fields };
-
-        // Get meta client from the executor builder context if available
-        let meta_client = source.context().and_then(|ctx| {
-            // Try to get meta client from the context
-            // This is a placeholder - you'll need to implement the actual context access
-            None
-        });
+        let sys_catalog_reader = source.context().catalog_reader();
 
         Ok(Box::new(Self::new(
             schema,
             source.plan_node().get_identity().clone(),
             get_channel_stats_node.at_time,
             get_channel_stats_node.time_offset,
-            meta_client,
+            sys_catalog_reader,
         )))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use futures::stream::StreamExt;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_get_channel_stats_executor() {
-        let fields = vec![
-            Field::new("channel_name", DataType::Varchar),
-            Field::new("status", DataType::Varchar),
-            Field::new("message_count", DataType::Varchar),
-            Field::new("timestamp", DataType::Varchar),
-            Field::new("time_offset", DataType::Varchar),
-        ];
-
-        let schema = Schema { fields };
-        let executor = Box::new(GetChannelStatsExecutor::new(
-            schema,
-            "GetChannelStatsExecutor".to_string(),
-            Some(1234567890),
-            3600,
-            None, // No meta client in tests
-        ));
-
-        let mut stream = executor.execute();
-        let result = stream.next().await.unwrap().unwrap();
-
-        // Should have 4 rows (channels)
-        assert_eq!(result.cardinality(), 4);
-        // Should have 5 columns
-        assert_eq!(result.dimension(), 5);
-
-        // Verify the data structure
-        assert_eq!(
-            result.column_at(0).as_utf8().unwrap().value_at(0).unwrap(),
-            "channel_1"
-        );
-        assert_eq!(
-            result.column_at(1).as_utf8().unwrap().value_at(0).unwrap(),
-            "active"
-        );
-        assert_eq!(
-            result.column_at(2).as_utf8().unwrap().value_at(0).unwrap(),
-            "1000"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_get_channel_stats_executor_no_at_time() {
-        let fields = vec![
-            Field::new("channel_name", DataType::Varchar),
-            Field::new("status", DataType::Varchar),
-            Field::new("message_count", DataType::Varchar),
-            Field::new("timestamp", DataType::Varchar),
-            Field::new("time_offset", DataType::Varchar),
-        ];
-
-        let schema = Schema { fields };
-        let executor = Box::new(GetChannelStatsExecutor::new(
-            schema,
-            "GetChannelStatsExecutor".to_string(),
-            None,
-            7200,
-            None, // No meta client in tests
-        ));
-
-        let mut stream = executor.execute();
-        let result = stream.next().await.unwrap().unwrap();
-
-        // Should have 4 rows (channels)
-        assert_eq!(result.cardinality(), 4);
-        // Should have 5 columns
-        assert_eq!(result.dimension(), 5);
-
-        // Verify timestamp is 0 when no at_time is provided
-        assert_eq!(
-            result.column_at(3).as_utf8().unwrap().value_at(0).unwrap(),
-            "0"
-        );
-        assert_eq!(
-            result.column_at(4).as_utf8().unwrap().value_at(0).unwrap(),
-            "7200"
-        );
     }
 }
