@@ -94,4 +94,11 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<monitor_service::GetProfileStatsResponse>, Status> {
         Err(Status::unimplemented("not implemented in meta node"))
     }
+
+    async fn get_channel_delta_stats(
+        &self,
+        _request: Request<monitor_service::GetChannelDeltaStatsRequest>,
+    ) -> Result<Response<monitor_service::GetChannelDeltaStatsResponse>, Status> {
+        Err(Status::unimplemented("not implemented in meta node"))
+    }
 }
