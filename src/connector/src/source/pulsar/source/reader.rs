@@ -14,12 +14,12 @@
 
 use anyhow::Context;
 use async_trait::async_trait;
-use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
-use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
+use pulsar::reader::Reader;
+use pulsar::{ConsumerBuilder, ConsumerOptions, Pulsar, TokioExecutor};
 use risingwave_common::{bail, ensure};
 
 use crate::error::ConnectorResult;
@@ -95,7 +95,7 @@ struct PulsarFilterOffset {
 pub struct PulsarBrokerReader {
     #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
-    consumer: Consumer<Vec<u8>, TokioExecutor>,
+    reader: Reader<Vec<u8>, TokioExecutor>,
     #[expect(dead_code)]
     split: PulsarSplit,
     #[expect(dead_code)]
@@ -164,10 +164,9 @@ impl SplitReader for PulsarBrokerReader {
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
-            .consumer()
+            .reader()
             .with_topic(&topic)
-            .with_subscription_type(SubType::Exclusive)
-            .with_subscription(format!(
+            .with_consumer_name(format!(
                 "{}-{}-{}",
                 props
                     .subscription_name_prefix
@@ -189,16 +188,12 @@ impl SplitReader for PulsarBrokerReader {
                     )
                 } else {
                     builder.with_options(
-                        ConsumerOptions::default()
-                            .with_initial_position(InitialPosition::Earliest)
-                            .durable(false),
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
                     )
                 }
             }
             PulsarEnumeratorOffset::Latest => builder.with_options(
-                ConsumerOptions::default()
-                    .with_initial_position(InitialPosition::Latest)
-                    .durable(false),
+                ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
             ),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
@@ -216,7 +211,6 @@ impl SplitReader for PulsarBrokerReader {
                         batch_index: start_message_id.batch_index,
                     });
                     builder.with_options(pulsar::ConsumerOptions {
-                        durable: Some(false),
                         start_message_id: Some(start_message_id),
                         ..Default::default()
                     })
@@ -226,17 +220,15 @@ impl SplitReader for PulsarBrokerReader {
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
 
-        let consumer: Consumer<Vec<u8>, _> = builder.build().await?;
-        if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
-            // FIXME: Here we need pulsar-rs to support the send + sync consumer
-            // consumer
-            //     .seek(None, None, Some(ts as u64), pulsar.clone())
-            //     .await?;
+        let mut reader: Reader<Vec<u8>, _> = builder.into_reader().await?;
+        if let PulsarEnumeratorOffset::Timestamp(ts) = split.start_offset {
+            // Use Reader's seek method to seek to timestamp
+            reader.seek(None, Some(ts as u64)).await?;
         }
 
         Ok(Self {
             pulsar,
-            consumer,
+            reader,
             split_id: split.id(),
             split,
             parser_config,
@@ -257,44 +249,63 @@ impl PulsarBrokerReader {
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         let mut already_read_offset = self.already_read_offset;
+        let mut res = Vec::with_capacity(max_chunk_size);
+
         #[for_await]
-        for msgs in self.consumer.ready_chunks(max_chunk_size) {
-            let mut res = Vec::with_capacity(msgs.len());
-            for msg in msgs {
-                let msg = msg?;
-
-                if let Some(PulsarFilterOffset {
-                    ledger_id,
-                    entry_id,
-                    batch_index,
-                }) = already_read_offset
-                {
-                    let message_id = msg.message_id();
-
-                    // If we have a previously stored offset, check that the messages we're consuming
-                    // appear after. Note that entry IDs and batch indexes are only monotonically increasing
-                    // within a BookKeeper ledger, so we must check that the ledger IDs match. If they don't match,
-                    // messages are coming from a new ledger and we can safely ignore the stored offset.
-                    if message_id.ledger_id == ledger_id
-                        && message_id.entry_id <= entry_id
-                        && message_id.batch_index <= batch_index
+        for msg_result in self.reader {
+            match msg_result {
+                Ok(msg) => {
+                    if let Some(PulsarFilterOffset {
+                        ledger_id,
+                        entry_id,
+                        batch_index,
+                    }) = already_read_offset
                     {
-                        tracing::info!(
-                            "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
-                            message_id.entry_id,
-                            message_id.batch_index,
-                            entry_id,
-                            batch_index
-                        );
-                        continue;
-                    } else {
-                        already_read_offset = None;
+                        let message_id = msg.message_id();
+
+                        // If we have a previously stored offset, check that the messages we're consuming
+                        // appear after. Note that entry IDs and batch indexes are only monotonically increasing
+                        // within a BookKeeper ledger, so we must check that the ledger IDs match. If they don't match,
+                        // messages are coming from a new ledger and we can safely ignore the stored offset.
+                        if message_id.ledger_id == ledger_id
+                            && message_id.entry_id <= entry_id
+                            && message_id.batch_index <= batch_index
+                        {
+                            tracing::info!(
+                                "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
+                                message_id.entry_id,
+                                message_id.batch_index,
+                                entry_id,
+                                batch_index
+                            );
+                            continue;
+                        } else {
+                            already_read_offset = None;
+                        }
+                    }
+
+                    let source_msg = SourceMessage::from(msg);
+                    res.push(source_msg);
+
+                    // Yield when we reach the max chunk size
+                    if res.len() >= max_chunk_size {
+                        let chunk = std::mem::replace(&mut res, Vec::with_capacity(max_chunk_size));
+                        yield chunk;
                     }
                 }
-
-                let msg = SourceMessage::from(msg);
-                res.push(msg);
+                Err(e) => {
+                    // Yield any accumulated messages before propagating the error
+                    if !res.is_empty() {
+                        let chunk = std::mem::take(&mut res);
+                        yield chunk;
+                    }
+                    return Err(e.into());
+                }
             }
+        }
+
+        // Yield any remaining messages
+        if !res.is_empty() {
             yield res;
         }
     }
