@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
@@ -1393,13 +1394,28 @@ impl CatalogController {
 
         let mut associate_table_id = None;
 
+        let mut definition_from_table = false;
+        let definition = if let Some(table_id) = source.optional_associated_table_id {
+            definition_from_table = true;
+            tracing::debug!("Get definition from table.");
+            let (table, _obj) = Table::find_by_id(table_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(ObjectType::Table.as_str(), table_id)
+                })?;
+            table.definition
+        } else {
+            tracing::debug!("Get definition from source.");
+            source.definition.clone()
+        };
+
         // can be source_id or table_id
         // if updating an associated source, the preferred_id is the table_id
         // otherwise, it is the source_id
         let mut preferred_id: i32 = source_id;
         let rewrite_sql = {
-            let definition = source.definition.clone();
-
             let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
                 .map_err(|e| {
                     MetaError::from(MetaErrorInner::Connector(ConnectorError::from(
@@ -1407,7 +1423,7 @@ impl CatalogController {
                     )))
                 })?
                 .try_into()
-                .unwrap();
+                .map_err(|e| anyhow!("failed to parse source deifnition SQL {:?}", e))?;
 
             /// Formats SQL options with secret values properly resolved
             ///
@@ -1449,14 +1465,17 @@ impl CatalogController {
 
             match &mut stmt {
                 Statement::CreateSource { stmt } => {
+                    assert!(!definition_from_table);
                     stmt.with_properties.0 =
                         format_with_option_secret_resolved(&txn, &options_with_secret).await?;
                 }
                 Statement::CreateTable { with_options, .. } => {
+                    assert!(definition_from_table);
                     *with_options =
                         format_with_option_secret_resolved(&txn, &options_with_secret).await?;
                     associate_table_id = source.optional_associated_table_id;
-                    preferred_id = associate_table_id.unwrap();
+                    preferred_id =
+                        associate_table_id.ok_or_else(|| anyhow!("expect associate_table_id"))?;
                 }
                 _ => unreachable!(),
             }
