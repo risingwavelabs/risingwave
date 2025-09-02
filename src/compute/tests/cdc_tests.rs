@@ -82,8 +82,6 @@ impl MockOffsetGenExecutor {
                 lsn: Some(start_offset as _),
                 lsn_commit: Some(start_offset as _),
                 lsn_proc: Some(start_offset as _),
-                lsn_commit: None,
-                lsn_proc: None,
                 txid: None,
                 tx_usec: None,
                 change_lsn: None,
