@@ -107,6 +107,10 @@ message GetStreamingPrometheusStatsResponse {
   map<uint32, RelationStats> relation_stats = 3;
 }
 
+message GetChannelStatsResponse {
+  map<string, ChannelStats> channel_stats = 1;
+}
+
 message TieredCacheTracingRequest {
   bool enable = 1;
   optional uint32 record_hybrid_insert_threshold_ms = 2;
