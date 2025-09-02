@@ -341,7 +341,7 @@ table description t NULL NULL
 query I
 SELECT count(*) from t;
 ----
-2
+3
 
 statement ok
 drop source s cascade;
