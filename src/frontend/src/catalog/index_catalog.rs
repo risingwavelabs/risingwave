@@ -60,7 +60,7 @@ pub struct TableIndex {
 #[educe(Hash)]
 pub struct VectorIndex {
     pub index_table: Arc<TableCatalog>,
-    pub vector_column_idx: usize,
+    pub vector_expr: ExprImpl,
     #[educe(Hash(ignore))]
     pub primary_to_included_info_column_mapping: HashMap<usize, usize>,
     pub primary_key_idx_in_info_columns: Vec<usize>,
@@ -152,12 +152,6 @@ impl IndexCatalog {
             }
             TableType::VectorIndex => {
                 assert_eq!(index_prost.index_columns_len, 1);
-                let ExprImpl::InputRef(input) = &index_item[0] else {
-                    panic!(
-                        "vector index must be built on direct input column, but got: {:?}",
-                        &index_item[0]
-                    );
-                };
                 let included_info_columns = index_item[1..].iter().map(|item| {
                     let ExprImpl::InputRef(input) = item else {
                         panic!("vector index included columns must be from direct input column, but got: {:?}", item);
@@ -178,7 +172,7 @@ impl IndexCatalog {
                     .collect();
                 IndexType::Vector(Arc::new(VectorIndex {
                     index_table: index_table.clone(),
-                    vector_column_idx: input.index,
+                    vector_expr: index_item[0].clone(),
                     primary_to_included_info_column_mapping,
                     primary_key_idx_in_info_columns,
                     included_info_columns,
