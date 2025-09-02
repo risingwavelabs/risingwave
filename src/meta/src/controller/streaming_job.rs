@@ -1855,6 +1855,7 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
         let connector = source.with_properties.0.get_connector().unwrap();
+        let is_shared_source = source.is_shared();
 
         // Use check_source_allow_alter_on_fly_fields to validate allowed properties
         let prop_keys: Vec<String> = alter_props
@@ -2025,6 +2026,7 @@ impl CatalogController {
                     *found = true;
                 }
             },
+            is_shared_source,
         )
         .await?;
 
@@ -2484,6 +2486,7 @@ async fn update_connector_props_fragments<F>(
     job_id: i32,
     expect_flag: FragmentTypeFlag,
     mut alter_stream_node_fn: F,
+    is_shared_source: bool,
 ) -> MetaResult<()>
 where
     F: FnMut(&mut PbNodeBody, &mut bool),
@@ -2511,7 +2514,7 @@ where
         })
         .collect_vec();
     assert!(
-        !fragments.is_empty(),
+        !fragments.is_empty() && is_shared_source, /* shared source should be used by at least one fragment */
         "job {} (type: {:?}) should be used by at least one fragment",
         job_id,
         expect_flag

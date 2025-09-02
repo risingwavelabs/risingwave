@@ -20,6 +20,9 @@ statement ok
 create secret s2 with ( backend = 'meta' ) as '2000000000';
 
 statement ok
+create secret s3 with ( backend = 'meta' ) as '3000000000';
+
+statement ok
 create connection conn with (
     type = 'kafka',
     properties.bootstrap.server ='${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
@@ -105,6 +108,25 @@ query I
 select count(*)  from rw_sources where definition ILIKE '%secret s2%' and name = 'plain_students';
 ----
 1
+
+
+query I
+select count(*)  from rw_sources where definition ILIKE '%secret s2%' and name = 'plain_students_source';
+----
+1
+
+
+statement ok
+create materialized view plain_students_source_mv as select * from plain_students_source;
+
+statement ok
+ALTER SOURCE plain_students_source CONNECTOR WITH (properties.receive.message.max.bytes = secret s3);
+
+query I
+select count(*)  from rw_sources where definition ILIKE '%secret s3%' and name = 'plain_students_source';
+----
+1
+
 
 statement ok
 drop secret s1;
