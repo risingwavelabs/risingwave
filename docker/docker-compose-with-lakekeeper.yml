@@ -28,7 +28,7 @@ services:
                     --prometheus-host 0.0.0.0:1250 \
                     --prometheus-endpoint http://prometheus-0:9500 \
                     --backend sql \
-                    --sql-endpoint postgres://postgres:@postgres-0:5432/metadata \
+                    --sql-endpoint postgres://postgres:123456@postgres-0:5432/metadata \
                     --state-store hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001 \
                     --data-directory hummock_001 \
                     --config-path /risingwave.toml\" \
@@ -39,10 +39,10 @@ services:
                     --advertise-addr 0.0.0.0:5688 \
                     --async-stack-trace verbose \
                     --parallelism 8 \
-                    --total-memory-bytes 21474836480 \
+                    --total-memory-bytes 4174836480 \
                     --role both \
                     --meta-address http://0.0.0.0:5690 \
-                    --memory-manager-target-bytes 22333829939 \" \
+                    --memory-manager-target-bytes 4333829939 \" \
                  --frontend-opts=\" \
                    --config-path /risingwave.toml \
                    --listen-addr 0.0.0.0:4566 \
@@ -324,6 +324,108 @@ services:
     container_name: lakekeeper-db
     networks:
       - default
+
+  lakekeeper-bootstrap:
+    image: curlimages/curl:latest
+    restart: "no"
+    depends_on:
+      lakekeeper:
+        condition: service_healthy
+    networks:
+      - default
+    command: |
+      sh -c '
+        echo "Waiting for Lakekeeper to be ready..."
+        sleep 5
+        
+        # Bootstrap Lakekeeper
+        echo "Bootstrapping Lakekeeper..."
+        for attempt in 1 2 3 4 5; do
+          response=$$(curl -s -w "%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"accept-terms-of-use\": true, \"is-operator\": true}" \
+            http://lakekeeper:8181/management/v1/bootstrap \
+            -o /tmp/bootstrap.json)
+          
+          http_code=$${response##*[^0-9]}
+          
+          if [ "$$http_code" = "200" ] || [ "$$http_code" = "201" ]; then
+            echo "✓ Successfully bootstrapped Lakekeeper!"
+            break
+          elif [ "$$http_code" = "400" ] || [ "$$http_code" = "409" ]; then
+            if grep -q "already bootstrapped\|Server already initialized" /tmp/bootstrap.json 2>/dev/null; then
+              echo "✓ Lakekeeper already bootstrapped, skipping..."
+              break
+            else
+              echo "✗ Bootstrap conflict"
+              cat /tmp/bootstrap.json 2>/dev/null || true
+              exit 1
+            fi
+          else
+            echo "Bootstrap attempt $$attempt failed (HTTP $$http_code)"
+            if [ $$attempt -eq 5 ]; then
+              cat /tmp/bootstrap.json 2>/dev/null || true
+              exit 1
+            fi
+            sleep $$((2 ** attempt))
+          fi
+        done
+        
+        # Create default warehouse
+        echo "Creating default warehouse..."
+        sleep 2
+        for attempt in 1 2 3 4 5; do
+          response=$$(curl -s -w "%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"warehouse-name\": \"risingwave-warehouse\",
+              \"storage-profile\": {
+                \"type\": \"s3\",
+                \"bucket\": \"hummock001\",
+                \"key-prefix\": \"risingwave-lakekeeper\",
+                \"region\": \"us-east-1\",
+                \"sts-enabled\": false,
+                \"flavor\": \"s3-compat\",
+                \"endpoint\": \"http://minio-0:9301/\",
+                \"path-style-access\": true
+              },
+              \"storage-credential\": {
+                \"type\": \"s3\",
+                \"credential-type\": \"access-key\",
+                \"aws-access-key-id\": \"hummockadmin\",
+                \"aws-secret-access-key\": \"hummockadmin\"
+              }
+            }" \
+            http://lakekeeper:8181/management/v1/warehouse \
+            -o /tmp/warehouse.json)
+          
+          http_code=$${response##*[^0-9]}
+          
+          if [ "$$http_code" = "200" ] || [ "$$http_code" = "201" ]; then
+            echo "✓ Successfully created default warehouse!"
+            break
+          elif [ "$$http_code" = "400" ]; then
+            if grep -q "Storage profile overlaps" /tmp/warehouse.json 2>/dev/null; then
+              echo "✓ Warehouse already exists, skipping..."
+              break
+            else
+              echo "✗ Warehouse creation failed"
+              cat /tmp/warehouse.json 2>/dev/null || true
+              exit 1
+            fi
+          else
+            echo "Warehouse creation attempt $$attempt failed (HTTP $$http_code)"
+            if [ $$attempt -eq 5 ]; then
+              cat /tmp/warehouse.json 2>/dev/null || true
+              exit 1
+            fi
+            sleep $$((2 ** attempt))
+          fi
+        done
+        
+        echo "🎉 Lakekeeper setup completed successfully!"
+        echo "Lakekeeper is ready with warehouse: risingwave-warehouse"
+      '
 
 volumes:
   postgres-0:
