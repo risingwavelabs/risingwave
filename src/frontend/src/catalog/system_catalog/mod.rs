@@ -119,6 +119,11 @@ impl SysCatalogReaderImpl {
             system_params,
         }
     }
+
+    /// Get a reference to the meta client for direct access in table functions.
+    pub fn meta_client(&self) -> &Arc<dyn FrontendMetaClient> {
+        &self.meta_client
+    }
 }
 
 pub struct BuiltinTable {
