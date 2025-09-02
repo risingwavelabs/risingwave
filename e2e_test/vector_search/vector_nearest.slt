@@ -109,7 +109,7 @@ explain(verbose) select * from query_view;
 BatchExchange { order: [], dist: Single }
 └─BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
   └─BatchProjectSet { select_list: [Unnest($1)] }
-    └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2, index_name: "i", vector:  }
+    └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector:  }
       └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
 
 
@@ -141,7 +141,7 @@ BatchProject { exprs: [$expr2, $expr1, items.extra, Pow($expr3, 2:Float64)::Int3
   └─BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
       └─BatchProjectSet { select_list: [Unnest($1)] }
-        └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2, index_name: "i", vector:  }
+        └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector:  }
           └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
 
 query T
