@@ -713,7 +713,6 @@ fn is_supported_even_split_data_type(data_type: &DataType) -> bool {
 
 pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
     let ty_name_lower = ty_name.to_lowercase();
-
     // Handle array types (prefixed with _)
     if let Some(base_type) = ty_name_lower.strip_prefix('_') {
         match base_type {
@@ -725,6 +724,10 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "float8" => Some(PgType::FLOAT8_ARRAY),
             "numeric" => Some(PgType::NUMERIC_ARRAY),
             "bool" => Some(PgType::BOOL_ARRAY),
+            "xml" | "macaddr" | "macaddr8" | "cidr" | "inet" | "int4range" | "int8range"
+            | "numrange" | "tsrange" | "tstzrange" | "daterange" | "citext" => {
+                Some(PgType::VARCHAR_ARRAY)
+            }
             "varchar" => Some(PgType::VARCHAR_ARRAY),
             "text" => Some(PgType::TEXT_ARRAY),
             "bytea" => Some(PgType::BYTEA_ARRAY),
@@ -738,6 +741,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "uuid" => Some(PgType::UUID_ARRAY),
             "point" => Some(PgType::POINT_ARRAY),
             "oid" => Some(PgType::OID_ARRAY),
+            "money" => Some(PgType::MONEY_ARRAY),
             _ => None,
         }
     } else {
@@ -747,9 +751,9 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "bit" => Some(PgType::BIT),
             "int" | "int4" => Some(PgType::INT4),
             "int8" => Some(PgType::INT8),
-            "real" | "float4" => Some(PgType::FLOAT4),
-            "double precision" | "float8" => Some(PgType::FLOAT8),
-            "numeric" | "decimal" => Some(PgType::NUMERIC),
+            "float4" => Some(PgType::FLOAT4),
+            "float8" => Some(PgType::FLOAT8),
+            "numeric" => Some(PgType::NUMERIC),
             "money" => Some(PgType::MONEY),
             "boolean" | "bool" => Some(PgType::BOOL),
             "inet" | "xml" | "varchar" | "character varying" | "int4range" | "int8range"
@@ -760,8 +764,8 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "bytea" => Some(PgType::BYTEA),
             "date" => Some(PgType::DATE),
             "time" | "timetz" => Some(PgType::TIME),
-            "timestamp" | "timestamp without time zone" => Some(PgType::TIMESTAMP),
-            "timestamptz" | "timestamp with time zone" => Some(PgType::TIMESTAMPTZ),
+            "timestamp" => Some(PgType::TIMESTAMP),
+            "timestamptz" => Some(PgType::TIMESTAMPTZ),
             "interval" => Some(PgType::INTERVAL),
             "json" => Some(PgType::JSON),
             "jsonb" => Some(PgType::JSONB),
@@ -818,6 +822,7 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::UUID_ARRAY => DataType::List(Box::new(DataType::Varchar)),
         PgType::OID => DataType::Int64,
         PgType::OID_ARRAY => DataType::List(Box::new(DataType::Int64)),
+        PgType::MONEY_ARRAY => DataType::List(Box::new(DataType::Decimal)),
         PgType::POINT_ARRAY => DataType::List(Box::new(DataType::Struct(
             risingwave_common::types::StructType::new(vec![
                 ("x", DataType::Float32),
