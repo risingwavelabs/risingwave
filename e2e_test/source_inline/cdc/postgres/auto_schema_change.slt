@@ -5,6 +5,7 @@ system ok
 psql -c "
     DROP TABLE IF EXISTS t;
     CREATE EXTENSION IF NOT EXISTS citext;
+    CREATE TYPE mood_enum AS ENUM ('happy', 'sad', 'angry');
     CREATE TABLE t (
         v1 uuid DEFAULT gen_random_uuid() PRIMARY KEY,
         v2 jsonb NOT NULL,
@@ -46,8 +47,17 @@ psql -c "
         v39 macaddr8,
         v40 int[],
         v41 bit(1),
+        v42 mood_enum,
+        v43 smallserial,
+        v44 serial,
+        v45 bigserial,
         v46 oid
     );
+"
+
+system ok
+psql -c "
+    INSERT INTO t (v1, v42, v43, v44, v45) VALUES (1, 'happy', 100, 200, 300);
 "
 
 statement ok
@@ -105,12 +115,16 @@ create table t (
   v39 character varying,
   v40 integer[],
   v41 boolean,
+  v42 character varying,
+  v43 smallint,
+  v44 int,
+  v45 bigint,
   v46 bigint
 ) from s table 'public.t';
 
 system ok
 psql -c "
-    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v46) VALUES (
+    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46) VALUES (
         '{\"test\": \"abc\"}',
         'source1',
         42,
@@ -150,6 +164,10 @@ psql -c "
         '08:00:2b:01:02:03:04:05',
         '{1, 2, 3, 4, 5}',
         B'1',
+        'happy',
+        100,
+        200,
+        300,
         12345
     );
 "
@@ -166,7 +184,7 @@ SELECT count(*) from t;
 system ok
 psql -c "
     ALTER TABLE t ADD COLUMN foo JSONB;
-    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v46, foo) VALUES (
+    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46, foo) VALUES (
         '{\"test\": \"abc\"}',
         'source2',
         43,
@@ -207,7 +225,11 @@ psql -c "
         '{10, 20, 30, 40, 50}',
         B'0',
         12345,
-        '{\"new\": \"column\"}'
+        'happy',
+        100,
+        200,
+        300,
+        '{\"new\": \"column\"}
     );
 "
 
@@ -259,6 +281,10 @@ v38 character varying false NULL
 v39 character varying false NULL
 v40 integer[] false NULL
 v41 boolean false NULL
+v42 character varying false NULL
+v43 smallint false NULL
+v44 integer false NULL
+v45 bigint false NULL
 v46 bigint false NULL
 foo jsonb false NULL
 _rw_timestamp timestamp with time zone true NULL
