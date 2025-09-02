@@ -81,8 +81,7 @@ impl MockOffsetGenExecutor {
                 snapshot: None,
                 file: Some("1.binlog".to_owned()),
                 pos: Some(start_offset as _),
-                // pg uses it to filter out unnecessary data.
-                lsn: Some(start_offset as _),
+                lsn: None,
                 txid: None,
                 tx_usec: None,
                 change_lsn: None,
