@@ -213,18 +213,6 @@ pub async fn gen_sink_plan(
                         "auto schema change not supported for sink-into-table".to_owned(),
                     )));
                 }
-                match connector.as_str() {
-                    RedshiftSink::SINK_NAME
-                    | SnowflakeV2Sink::SINK_NAME
-                    | BlackHoleSink::SINK_NAME
-                    | ElasticSearchSink::SINK_NAME => {}
-                    _ => {
-                        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
-                            "auto schema change not supported for {}",
-                            connector
-                        ))));
-                    }
-                }
             }
             if resolved_with_options
                 .value_eq_ignore_case(SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, "true")
