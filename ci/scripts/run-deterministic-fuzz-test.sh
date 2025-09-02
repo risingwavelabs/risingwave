@@ -51,7 +51,6 @@ set -e
 failed_logs=$(ls $LOGDIR/fuzzing-*.log 2>/dev/null || true)
 
 if [[ -n "$failed_logs" ]]; then
-    ./risedev ci-kill && ./risedev ci-start ci-3cn-2fe
     echo "Simulation fuzzing failed, see logs in $LOGDIR"
     for log_file in $failed_logs; do
         seed=$(basename "$log_file" .log | cut -d'-' -f2)
@@ -60,6 +59,8 @@ if [[ -n "$failed_logs" ]]; then
 
         echo "Processing seed $seed (log: $log_file)"
         extract_error_sql "$log_file" > "$error_sql"
+
+        risedev ci-kill && risedev ci-start ci-3cn-2fe
 
         echo "--- Running reducer on failing queries for seed $seed"
         ./target/debug/sqlsmith-reducer \
