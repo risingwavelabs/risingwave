@@ -13,13 +13,16 @@
 // limitations under the License.
 
 use std::mem::take;
+use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use prost::Message;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use risingwave_common::array::VectorRef;
+use risingwave_common::catalog::TableId;
 use risingwave_common::dispatch_distance_measurement;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::HummockObjectId;
 use risingwave_hummock_sdk::vector_index::{
@@ -27,9 +30,11 @@ use risingwave_hummock_sdk::vector_index::{
 };
 use risingwave_pb::hummock::PbHnswGraph;
 
-use crate::hummock::vector::file::FileVectorStore;
+use crate::hummock::vector::file::{FileVectorStore, FileVectorStoreCtx};
+use crate::hummock::vector::monitor::report_hnsw_stat;
 use crate::hummock::vector::writer::VectorObjectIdManagerRef;
 use crate::hummock::{HummockResult, SstableStoreRef};
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::vector::hnsw::{
     HnswBuilderOptions, HnswGraphBuilder, VectorAccessor, insert_graph, new_node,
@@ -40,8 +45,10 @@ pub(crate) struct HnswFlatIndexWriter {
     options: HnswBuilderOptions,
     sstable_store: SstableStoreRef,
     object_id_manager: VectorObjectIdManagerRef,
+    stats: HnswFlatIndexWriterStats,
 
     vector_store: FileVectorStore,
+    ctx: FileVectorStoreCtx,
     next_pending_vector_id: usize,
     graph_builder: Option<HnswGraphBuilder>,
     unseal_vector_files: Vec<VectorFileInfo>,
@@ -51,22 +58,30 @@ pub(crate) struct HnswFlatIndexWriter {
 
 impl HnswFlatIndexWriter {
     pub(crate) async fn new(
+        table_id: TableId,
         index: &HnswFlatIndex,
         dimension: usize,
         measure: DistanceMeasurement,
         sstable_store: SstableStoreRef,
         object_id_manager: VectorObjectIdManagerRef,
+        stats: Arc<HummockStateStoreMetrics>,
         storage_opts: &StorageOpts,
     ) -> HummockResult<Self> {
+        let stats = HnswFlatIndexWriterStats::new(table_id, stats);
+        let mut ctx = FileVectorStoreCtx::default();
         let graph_builder = if let Some(graph_file) = &index.graph_file {
+            stats.hnsw_file_size.set(graph_file.file_size as _);
             Some(HnswGraphBuilder::from_protobuf(
-                &*sstable_store.get_hnsw_graph(graph_file).await?,
+                &*sstable_store
+                    .get_hnsw_graph(graph_file, &mut ctx.stats)
+                    .await?,
                 index.config.m as _,
             ))
         } else {
             None
         };
-        Ok(Self {
+
+        let mut writer = Self {
             measure,
             options: HnswBuilderOptions {
                 m: index.config.m.try_into().unwrap(),
@@ -80,6 +95,7 @@ impl HnswFlatIndexWriter {
                 object_id_manager.clone(),
                 storage_opts,
             ),
+            ctx,
             sstable_store,
             object_id_manager,
             graph_builder,
@@ -87,7 +103,12 @@ impl HnswFlatIndexWriter {
             flushed_graph_file: None,
             rng: StdRng::from_os_rng(),
             next_pending_vector_id: index.vector_store_info.next_vector_id,
-        })
+            stats,
+        };
+
+        writer.report_index_stats();
+
+        Ok(writer)
     }
 
     pub(crate) fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> HummockResult<()> {
@@ -112,13 +133,15 @@ impl HnswFlatIndexWriter {
             assert_eq!(self.flushed_graph_file, None);
             return None;
         }
+        let next_vector_id = building_vectors.file_builder.next_vector_id();
+        self.report_index_stats();
         let new_graph_info = self
             .flushed_graph_file
             .take()
             .expect("should have new graph info when having new data");
         Some(HnswFlatIndexAdd {
             vector_store_info_delta: VectorStoreInfoDelta {
-                next_vector_id: building_vectors.file_builder.next_vector_id(),
+                next_vector_id,
                 added_vector_files,
             },
             graph_file: new_graph_info,
@@ -181,24 +204,123 @@ impl HnswFlatIndexWriter {
             .building_vectors
             .as_ref()
             .expect("for write");
+        let mut stats = Vec::with_capacity(
+            building_vectors.file_builder.next_vector_id() - self.next_pending_vector_id,
+        );
         for i in self.next_pending_vector_id..building_vectors.file_builder.next_vector_id() {
             let node = new_node(&self.options, &mut self.rng);
             if let Some(graph_builder) = &mut self.graph_builder {
                 dispatch_distance_measurement!(&self.measure, M, {
-                    insert_graph::<M>(
+                    let stat = insert_graph::<M, _>(
                         &self.vector_store,
+                        &mut self.ctx,
                         graph_builder,
                         node,
                         building_vectors.file_builder.get_vector(i).vec_ref(),
                         self.options.ef_construction,
                     )
                     .await?;
+                    stats.push(stat);
                 });
             } else {
                 self.graph_builder = Some(HnswGraphBuilder::first(node));
             }
         }
+        take(&mut self.ctx.stats).report(self.stats.table_id, "hnsw_write", &self.stats.stats);
+        report_hnsw_stat(
+            &self.stats.stats,
+            self.stats.table_id,
+            "hnsw_write",
+            self.options.m,
+            self.options.ef_construction,
+            stats,
+        );
         self.next_pending_vector_id = building_vectors.file_builder.next_vector_id();
         Ok(())
+    }
+
+    fn report_index_stats(&mut self) {
+        if let Some(graph) = &self.graph_builder {
+            for new_level_idx in self.stats.level_node_count.len()..graph.level_node_count().len() {
+                self.stats
+                    .level_node_count
+                    .push(self.stats.new_level_node_gauge(new_level_idx));
+            }
+            for (level_idx, node_count) in graph.level_node_count().iter().enumerate() {
+                self.stats.level_node_count[level_idx].set(*node_count as _);
+            }
+            let total_vector_file_data_size: usize = self
+                .vector_store
+                .flushed_vector_files()
+                .iter()
+                .map(|file| file.file_size as usize)
+                .sum();
+            let total_vector_file_meta_size: usize = self
+                .vector_store
+                .flushed_vector_files()
+                .iter()
+                .map(|file| file.file_size as usize - file.meta_offset)
+                .sum();
+            self.stats
+                .vector_file_count
+                .set(self.vector_store.flushed_vector_files().len() as _);
+            self.stats
+                .vector_file_data_size
+                .set(total_vector_file_data_size as _);
+            self.stats
+                .vector_file_meta_size
+                .set(total_vector_file_meta_size as _);
+            if let Some(graph_info) = &self.flushed_graph_file {
+                self.stats.hnsw_file_size.set(graph_info.file_size as _);
+            }
+        }
+    }
+}
+
+struct HnswFlatIndexWriterStats {
+    table_id: TableId,
+    stats: Arc<HummockStateStoreMetrics>,
+    level_node_count: Vec<LabelGuardedIntGauge>,
+    vector_file_count: LabelGuardedIntGauge,
+    vector_file_data_size: LabelGuardedIntGauge,
+    vector_file_meta_size: LabelGuardedIntGauge,
+    hnsw_file_size: LabelGuardedIntGauge,
+}
+
+impl HnswFlatIndexWriterStats {
+    fn new_level_node_gauge(&self, level_idx: usize) -> LabelGuardedIntGauge {
+        let table_id_label = format!("{}", self.table_id);
+        self.stats
+            .vector_hnsw_graph_level_node_count
+            .with_guarded_label_values(&[
+                table_id_label.as_str(),
+                format!("{}", level_idx).as_str(),
+            ])
+    }
+
+    fn new(table_id: TableId, stats: Arc<HummockStateStoreMetrics>) -> Self {
+        let table_id_label = format!("{}", table_id);
+        let vector_file_count = stats
+            .vector_index_file_count
+            .with_guarded_label_values(&[table_id_label.as_str()]);
+        let vector_file_data_size = stats
+            .vector_index_file_size
+            .with_guarded_label_values(&[table_id_label.as_str(), "vector_file_data"]);
+        let vector_file_meta_size = stats
+            .vector_index_file_size
+            .with_guarded_label_values(&[table_id_label.as_str(), "vector_file_meta"]);
+        let hnsw_file_size = stats
+            .vector_index_file_size
+            .with_guarded_label_values(&[table_id_label.as_str(), "hnsw_graph_file"]);
+
+        Self {
+            table_id,
+            stats,
+            level_node_count: vec![],
+            vector_file_count,
+            vector_file_data_size,
+            vector_file_meta_size,
+            hnsw_file_size,
+        }
     }
 }
