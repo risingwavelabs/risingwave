@@ -168,7 +168,7 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
 
 /// Wait until RW recovery finishes (`rw_recovery_status() = 'RUNNING'`)
 pub async fn wait_for_recovery(client: &Client) -> anyhow::Result<()> {
-    let timeout = Duration::from_secs(200);
+    let timeout = Duration::from_secs(300);
     let mut interval = tokio::time::interval(Duration::from_millis(100));
 
     let res: Result<(), anyhow::Error> = tokio::time::timeout(timeout, async {
