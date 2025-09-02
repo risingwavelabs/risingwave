@@ -144,6 +144,8 @@ SELECT * FROM refresh_fs_t;
 3 charlie
 4 david
 
+sleep 2s
+
 # Test refresh without any external changes
 statement ok retry 3 backoff 5s
 REFRESH TABLE refresh_fs_t;
@@ -171,8 +173,6 @@ REFRESH TABLE refresh_fs_t;
 
 sleep 2s
 
-
-
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
 ----
@@ -193,8 +193,6 @@ statement ok
 REFRESH TABLE refresh_fs_t;
 
 sleep 2s
-
-
 
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
