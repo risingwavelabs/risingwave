@@ -64,6 +64,15 @@ mod new_serde {
     //
     // Recursively construct a new column-aware `Serializer` for nested fields.
     fn new_serialize_struct(struct_type: &StructType, value: StructRef<'_>, buf: &mut impl BufMut) {
+        // Do not encode empty struct. This is consistent with `plain` serialization, making all empty structs alterable.
+        if struct_type.is_empty() {
+            debug_assert!(
+                value.is_empty(),
+                "empty struct type ({struct_type:?}) but non-empty value ({value:?})"
+            );
+            return;
+        }
+
         let serializer = super::Serializer::from_struct(struct_type.clone()); // cloning `StructType` is lightweight
 
         // `StructRef` is interpreted as a `Row` here.
@@ -127,6 +136,11 @@ mod new_serde {
     //
     // Recursively construct a new column-aware `Deserializer` for nested fields.
     fn new_deserialize_struct(struct_def: &StructType, data: &mut &[u8]) -> Result<ScalarImpl> {
+        // Do not encode empty struct. This is consistent with `plain` serialization, making all empty structs alterable.
+        if struct_def.is_empty() {
+            return Ok(ScalarImpl::Struct(StructValue::empty()));
+        }
+
         let deserializer = super::Deserializer::from_struct(struct_def.clone()); // cloning `StructType` is lightweight
         let encoded_len = data.get_u32_le() as usize;
 

@@ -270,6 +270,13 @@ impl From<&PbDataType> for DataType {
                 } else {
                     StructType::new(field_names.into_iter().zip_eq_fast(fields))
                 };
+                // `field_ids` is used for nested-schema evolution. Cases when `field_ids` is empty:
+                //
+                // 1. The data type is not associated with a table column, so we don't need to set it.
+                // 2. The column is created before nested-schema evolution is supported, thus is using
+                //    the old serialization format and does not have field ids.
+                // 3. This is an empty struct, which is always considered alterable, and setting ids
+                //    is a no-op.
                 if !field_ids.is_empty() {
                     struct_type = struct_type.with_ids(field_ids);
                 }
@@ -617,8 +624,8 @@ impl DataType {
             data_types::simple!() => None,
             DataType::Struct(struct_type) => {
                 // As long as we meet a struct type, we can check its `ids` field to determine if
-                // it can be altered.
-                let struct_can_alter = struct_type.has_ids();
+                // it can be altered. Empty struct is always considered alterable.
+                let struct_can_alter = struct_type.is_empty() || struct_type.has_ids();
                 // In debug build, we assert that once a struct type does (or does not) have ids,
                 // all its composite fields should have the same property.
                 if cfg!(debug_assertions) {

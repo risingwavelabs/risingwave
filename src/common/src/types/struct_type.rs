@@ -103,6 +103,8 @@ impl StructType {
     }
 
     /// Attaches given field ids to the struct type.
+    ///
+    /// Note that for empty struct, this method is a no-op.
     pub fn with_ids(self, ids: impl IntoIterator<Item = ColumnId>) -> Self {
         let ids: Box<[ColumnId]> = ids.into_iter().collect();
 
@@ -111,6 +113,11 @@ impl StructType {
             ids.iter().all(|id| *id != ColumnId::placeholder()),
             "ids should not contain placeholder value"
         );
+
+        // Do not set the field ids to `Some(<empty>)` to avoid confusion.
+        if self.is_empty() {
+            return self;
+        }
 
         let mut inner = Arc::unwrap_or_clone(self.0);
         inner.field_ids = Some(ids);
