@@ -58,11 +58,11 @@ use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
+use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait, TransactionTrait,
+    JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+    TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -70,6 +70,7 @@ use super::rename::IndexItemRewriter;
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
+use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
@@ -2141,23 +2142,20 @@ impl CatalogController {
         };
         active_sink.update(&txn).await?;
 
-        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
             .select_only()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::FragmentTypeMask,
-                fragment::Column::StreamNode,
-            ])
-            .filter(fragment::Column::JobId.eq(sink_id))
+            .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+            .filter(
+                fragment::Column::JobId
+                    .eq(sink_id)
+                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Sink)),
+            )
             .into_tuple()
             .all(&txn)
             .await?;
         let fragments = fragments
             .into_iter()
-            .filter(|(_, fragment_type_mask, _)| {
-                FragmentTypeMask::from(*fragment_type_mask).contains(FragmentTypeFlag::Sink)
-            })
-            .filter_map(|(id, _, stream_node)| {
+            .filter_map(|(id, stream_node)| {
                 let mut stream_node = stream_node.to_protobuf();
                 let mut found = false;
                 visit_stream_node_mut(&mut stream_node, |node| {
@@ -2400,9 +2398,9 @@ impl CatalogController {
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
-            .filter(fragment_type_mask_intersects(FragmentTypeFlag::raw_flag(
+            .filter(FragmentTypeMask::intersects_any(
                 FragmentTypeFlag::rate_limit_fragments(),
-            ) as _))
+            ))
             .into_tuple()
             .all(&txn)
             .await?;
@@ -2464,16 +2462,6 @@ impl CatalogController {
     }
 }
 
-fn bitflag_intersects(column: SimpleExpr, value: i32) -> SimpleExpr {
-    column
-        .binary(BinOper::Custom("&"), value)
-        .binary(BinOper::NotEqual, 0)
-}
-
-fn fragment_type_mask_intersects(value: i32) -> SimpleExpr {
-    bitflag_intersects(fragment::Column::FragmentTypeMask.into_simple_expr(), value)
-}
-
 pub struct SinkIntoTableContext {
     /// For creating sink into table, this is `Some`, otherwise `None`.
     pub creating_sink_id: Option<SinkId>,
@@ -2500,21 +2488,20 @@ async fn update_connector_props_fragments<F>(
 where
     F: FnMut(&mut PbNodeBody, &mut bool),
 {
-    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+    let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
         .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::FragmentTypeMask,
-            fragment::Column::StreamNode,
-        ])
-        .filter(fragment::Column::JobId.eq(job_id))
+        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+        .filter(
+            fragment::Column::JobId
+                .eq(job_id)
+                .and(FragmentTypeMask::intersects(expect_flag)),
+        )
         .into_tuple()
         .all(txn)
         .await?;
     let fragments = fragments
         .into_iter()
-        .filter(|(_, fragment_type_mask, _)| *fragment_type_mask & expect_flag as i32 != 0)
-        .filter_map(|(id, _, stream_node)| {
+        .filter_map(|(id, stream_node)| {
             let mut stream_node = stream_node.to_protobuf();
             let mut found = false;
             visit_stream_node_mut(&mut stream_node, |node| {
