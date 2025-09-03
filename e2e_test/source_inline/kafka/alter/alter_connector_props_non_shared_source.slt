@@ -73,7 +73,7 @@ select * from non_shared_source_1_mv order by x;
 3
 
 
-system ok
+statement ok
 alter secret s_broker with ( backend = 'meta' ) as 'message_queue_sasl_2:19093';
 
 # alter source connector also triggers re-apply secret
