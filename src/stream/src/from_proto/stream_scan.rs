@@ -181,8 +181,10 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 );
 
                 let state_table = node.get_state_table()?;
+                // if we enable preload memory for this state table, the test in e2e_test/backfill/sink/different_pk_and_dist_key.slt
+                // will become flaky. It can occasionally fail due to consistency check in storage mem table.
                 let state_table = StateTableBuilder::new(state_table, state_store.clone(), vnodes)
-                    .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                    .forbid_preload_all_rows()
                     .build()
                     .await;
 
