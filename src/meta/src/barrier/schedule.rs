@@ -866,6 +866,10 @@ mod tests {
         ) -> MetaResult<()> {
             unimplemented!()
         }
+
+        async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+            unimplemented!()
+        }
     }
 
     #[tokio::test]
