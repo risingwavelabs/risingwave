@@ -509,3 +509,50 @@ async fn test_background_agg_mv_recovery() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_background_index_creation() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+
+    // Create table and insert some data
+    session.run("CREATE TABLE t(v1 int, v2 int);").await?;
+    session
+        .run("INSERT INTO t SELECT generate_series, generate_series * 2 FROM generate_series(1, 100);")
+        .await?;
+    session.flush().await?;
+
+    // Enable background DDL and create index
+    session.run(SET_RATE_LIMIT_2).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session.run("CREATE INDEX idx_v1 ON t(v1);").await?;
+
+    // Kill CN and recover to test background index recovery
+    kill_cn_and_wait_recover(&cluster).await;
+
+    // Add more data
+    session
+        .run("INSERT INTO t SELECT generate_series, generate_series * 2 FROM generate_series(101, 200);")
+        .await?;
+    session.flush().await?;
+
+    // Wait for background index creation to complete
+    session.run(WAIT).await?;
+
+    // Verify the index was created successfully
+    let index_exists = session
+        .run("SELECT 1 FROM rw_catalog.rw_indexes WHERE name = 'idx_v1';")
+        .await?;
+    assert!(!index_exists.is_empty(), "Index should be created");
+
+    // Verify index can be used (basic functionality test)
+    let count = session.run("SELECT COUNT(*) FROM t WHERE v1 = 50;").await?;
+    assert_eq!(count.trim(), "1");
+
+    // Clean up
+    session.run("DROP INDEX idx_v1;").await?;
+    session.run("DROP TABLE t;").await?;
+
+    Ok(())
+}
