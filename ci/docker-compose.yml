@@ -166,7 +166,7 @@ services:
   rw-build-env:
     image: "${ACR_LOGIN_SERVER}/${ACR_REPOSITORY}:${BUILD_ENV_VERSION}"
     volumes:
-      - ..:/risingwave
+      - .:/risingwave
     working_dir: /risingwave
     stop_grace_period: 30s
 
