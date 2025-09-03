@@ -1,9 +1,7 @@
 control substitution on
 
-# Test comprehensive PostgreSQL data types with auto schema change
 system ok
 psql -c "
-    DROP EXTENSION IF EXISTS citext CASCADE;
     DROP TABLE IF EXISTS t;
     CREATE EXTENSION IF NOT EXISTS citext;
     CREATE TYPE mood_enum AS ENUM ('happy', 'sad', 'angry');
@@ -20,7 +18,7 @@ psql -c "
         v10 double precision,
         v11 char(10),
         v12 varchar(50),
-        v13 character(20),
+        v13 text,
         v14 character varying(100),
         v15 timestamptz,
         v16 timetz,
@@ -37,6 +35,7 @@ psql -c "
         v27 tsrange,
         v28 tstzrange,
         v29 daterange,
+        v30 daterange,
         v31 date,
         v32 time(3),
         v33 timestamp(3),
@@ -54,11 +53,7 @@ psql -c "
         v45 bigserial,
         v46 oid
     );
-"
-
-system ok
-psql -c "
-    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46) VALUES (
+    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46) VALUES (
         '{\"test\": \"abc\"}',
         'source1',
         42,
@@ -70,7 +65,7 @@ psql -c "
         2.718281828459045,
         'char10',
         'varchar50',
-        'char20',
+        'This is v13 text field',
         'varchar100',
         NOW() AT TIME ZONE 'UTC',
         '12:34:56.789'::time,
@@ -87,6 +82,7 @@ psql -c "
         '[2023-01-01,2023-12-31)',
         '[2023-01-01 00:00:00+00,2023-12-31 23:59:59+00)',
         '[2023-01-01,2023-12-31)',
+        '[2023-01-01,2023-12-31)',
         '2023-12-25',
         '12:34:56.789',
         '2023-12-25 12:34:56.789',
@@ -99,24 +95,24 @@ psql -c "
         '{1, 2, 3, 4, 5}',
         B'1',
         'happy',
-        100,
-        200,
-        300,
+        12345,
+        67890,
+        123456789,
         12345
     );
-"
+    "
 
 statement ok
 create source s with (
- connector = 'postgres-cdc',
- hostname = '${PGHOST:localhost}',
- port = '${PGPORT:5432}',
- username = '${PGUSER:$USER}',
- password = '${PGPASSWORD:}',
- database.name = '${PGDATABASE:postgres}',
- schema.name = 'public',
- slot.name = 'rw_slot',
- auto.schema.change = 'true'
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'rw_slot',
+  auto.schema.change = 'true'
 );
 
 statement ok
@@ -133,7 +129,7 @@ create table t (
   v10 double precision,
   v11 character varying,
   v12 character varying,
-  v13 character varying,
+  v13 text,
   v14 character varying,
   v15 timestamp with time zone,
   v16 time without time zone,
@@ -150,6 +146,7 @@ create table t (
   v27 character varying,
   v28 character varying,
   v29 character varying,
+  v30 character varying,
   v31 date,
   v32 time without time zone,
   v33 timestamp without time zone,
@@ -168,12 +165,14 @@ create table t (
   v46 bigint
 ) from s table 'public.t';
 
+sleep 2s
+
 system ok
 psql -c "
-    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46) VALUES (
+    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46) VALUES (
         '{\"test\": \"abc\"}',
         'source1',
-        42,
+        84,
         NOW(),
         true,
         123,
@@ -182,7 +181,7 @@ psql -c "
         2.718281828459045,
         'char10',
         'varchar50',
-        'char20',
+        'This is v13 text field for second record',
         'varchar100',
         NOW() AT TIME ZONE 'UTC',
         '12:34:56.789'::time,
@@ -199,6 +198,7 @@ psql -c "
         '[2023-01-01,2023-12-31)',
         '[2023-01-01 00:00:00+00,2023-12-31 23:59:59+00)',
         '[2023-01-01,2023-12-31)',
+        '[2023-01-01,2023-12-31)',
         '2023-12-25',
         '12:34:56.789',
         '2023-12-25 12:34:56.789',
@@ -211,26 +211,25 @@ psql -c "
         '{1, 2, 3, 4, 5}',
         B'1',
         'happy',
-        100,
-        200,
-        300,
+        12345,
+        67890,
+        123456789,
         12345
     );
-"
-
-sleep 3s
+    "
 
 # Verify initial data
 query I
 SELECT count(*) from t;
 ----
 2
+sleep 10s
 
 # Test schema change by adding a new column
 system ok
 psql -c "
     ALTER TABLE t ADD COLUMN foo JSONB;
-    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46, foo) VALUES (
+    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46, foo) VALUES (
         '{\"test\": \"abc\"}',
         'source2',
         43,
@@ -242,7 +241,7 @@ psql -c "
         3.141592653589793,
         'char10_2',
         'varchar50_2',
-        'char20_2',
+        'This is v13 text field for third record',
         'varchar100_2',
         NOW() AT TIME ZONE 'UTC',
         '23:45:12.123'::time,
@@ -258,6 +257,7 @@ psql -c "
         '[2.5,3.5)',
         '[2024-01-01,2024-12-31)',
         '[2024-01-01 00:00:00+00,2024-12-31 23:59:59+00)',
+        '[2024-01-01,2024-12-31)',
         '[2024-01-01,2024-12-31)',
         '2024-12-25',
         '23:45:12.123',
@@ -297,7 +297,7 @@ v9 real false NULL
 v10 double precision false NULL
 v11 character varying false NULL
 v12 character varying false NULL
-v13 character varying false NULL
+v13 text false NULL
 v14 character varying false NULL
 v15 timestamp with time zone false NULL
 v16 time without time zone false NULL
@@ -316,6 +316,7 @@ v26 character varying false NULL
 v27 character varying false NULL
 v28 character varying false NULL
 v29 character varying false NULL
+v30 character varying false NULL
 v31 date false NULL
 v32 time without time zone false NULL
 v33 timestamp without time zone false NULL
@@ -338,19 +339,99 @@ primary key v1 NULL NULL
 distribution key v1 NULL NULL
 table description t NULL NULL
 
-# Verify both rows exist with the new column
+# Verify all rows exist with the new column
 query I
 SELECT count(*) from t;
 ----
 3
 
+# Test 1: Unsuopported LTREE type should cause schema mismatch error
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_ltree;
+    CREATE EXTENSION IF NOT EXISTS ltree;
+    CREATE TABLE t_ltree (
+        id serial PRIMARY KEY,
+        path ltree NOT NULL
+    );
+    INSERT INTO t_ltree (path) VALUES ('Top.Science.Astronomy.Cosmology');
+    INSERT INTO t_ltree (path) VALUES ('Top.Collections.Pictures.Astronomy.Stars');
+"
+
+statement error Incompatible data type of column path
+create table t_ltree_mismatch (
+  id int primary key,
+  path character varying
+) from s table 'public.t_ltree';
+
+# Test 2: bit(1) type should cause schema mismatch error when mapped to bytea
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_bit;
+    CREATE TABLE t_bit (
+        id serial PRIMARY KEY,
+        flag bit(1) NOT NULL
+    );
+    INSERT INTO t_bit (flag) VALUES (B'1');
+    INSERT INTO t_bit (flag) VALUES (B'0');
+"
+
+statement error Incompatible data type of column flag
+create table t_bit_mismatch (
+  id int primary key,
+  flag bytea
+) from s table 'public.t_bit';
+
+# Test 3: Unsuopported HSTORE type should cause schema mismatch error
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_hstore;
+    CREATE EXTENSION IF NOT EXISTS hstore;
+    CREATE TABLE t_hstore (
+        id serial PRIMARY KEY,
+        attributes hstore NOT NULL
+    );
+    INSERT INTO t_hstore (attributes) VALUES ('key1=>value1, key2=>value2');
+    INSERT INTO t_hstore (attributes) VALUES ('color=>red, size=>large');
+"
+
+statement error Incompatible data type of column attributes
+create table t_hstore_mismatch (
+  id int primary key,
+  attributes jsonb
+) from s table 'public.t_hstore';
+
+# Test 4: bit(8) type should cause schema mismatch error when mapped to bytea
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_bit8;
+    CREATE TABLE t_bit8 (
+        id serial PRIMARY KEY,
+        flags bit(8) NOT NULL
+    );
+    INSERT INTO t_bit8 (flags) VALUES (B'00000001');
+    INSERT INTO t_bit8 (flags) VALUES (B'11111111');
+"
+
+statement error
+create table t_bit8_mismatch (
+  id int primary key,
+  flags byteas
+) from s table 'public.t_bit8';
+
+# Clean up all resources created during this test
 statement ok
 drop source s cascade;
 
-# Clean up the custom types and extensions created for this test
 system ok
 psql -c "
     DROP TABLE IF EXISTS t;
+    DROP TABLE IF EXISTS t_ltree;
+    DROP TABLE IF EXISTS t_bit;
+    DROP TABLE IF EXISTS t_hstore;
+    DROP TABLE IF EXISTS t_bit8;
     DROP TYPE IF EXISTS mood_enum;
     DROP EXTENSION IF EXISTS citext;
+    DROP EXTENSION IF EXISTS ltree;
+    DROP EXTENSION IF EXISTS hstore;
 "
