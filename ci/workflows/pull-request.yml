@@ -70,6 +70,64 @@ steps:
                 label: "ci build images"
   - wait
 
+- label: "🔍 Debug Docker Environment"
+  command: |
+    echo "=== HOST ENVIRONMENT ==="
+    echo "Current host directory: $(pwd)"
+    echo "Host directory contents:"
+    ls -la
+    echo ""
+    echo "Host ci/ directory exists?"
+    ls -la ci/ || echo "❌ No ci/ directory on host"
+    echo ""
+    echo "Host ci/scripts/ directory exists?"
+    ls -la ci/scripts/ || echo "❌ No ci/scripts/ directory on host"
+    echo ""
+    echo "Host build script exists?"
+    ls -la ci/scripts/build.sh || echo "❌ No ci/scripts/build.sh on host"
+    echo ""
+    echo "=== CONTAINER ENVIRONMENT ==="
+    echo "Container working directory:"
+    pwd
+    echo ""
+    echo "Container root directory contents:"
+    ls -la /
+    echo ""
+    echo "Container /risingwave directory exists?"
+    ls -la /risingwave || echo "❌ No /risingwave directory in container"
+    echo ""
+    echo "Container /risingwave contents:"
+    ls -la /risingwave/ || echo "❌ Cannot list /risingwave contents"
+    echo ""
+    echo "Container ci/ directory exists?"
+    ls -la /risingwave/ci/ || echo "❌ No /risingwave/ci/ directory in container"
+    echo ""
+    echo "Container ci/scripts/ directory exists?"
+    ls -la /risingwave/ci/scripts/ || echo "❌ No /risingwave/ci/scripts/ directory in container"
+    echo ""
+    echo "Container build script exists?"
+    ls -la /risingwave/ci/scripts/build.sh || echo "❌ No /risingwave/ci/scripts/build.sh in container"
+    echo ""
+    echo "=== LOOKING FOR BUILD SCRIPT EVERYWHERE ==="
+    find /risingwave -name "build.sh" 2>/dev/null || echo "❌ build.sh not found anywhere in /risingwave"
+    echo ""
+    echo "=== DOCKER MOUNT DEBUG ==="
+    echo "Docker mounts:"
+    mount | grep risingwave || echo "❌ No risingwave mounts found"
+    echo ""
+    echo "=== PARENT DIRECTORY CHECK ==="
+    echo "What's in the parent of current directory:"
+    ls -la ../ || echo "❌ Cannot access parent directory"
+    echo ""
+    echo "=== CURRENT DIRECTORY CHECK ==="
+    echo "What's in current directory:"
+    ls -la ./ 
+  plugins:
+    - docker-compose#v5.5.0:
+        run: rw-build-env
+        config: ci/docker-compose.yml
+  - wait
+
   - label: "build"
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
