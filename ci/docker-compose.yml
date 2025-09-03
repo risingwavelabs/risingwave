@@ -167,7 +167,7 @@ services:
     image: "${ACR_LOGIN_SERVER}/${ACR_REPOSITORY}:${BUILD_ENV_VERSION}"
     volumes:
       - ..:/risingwave
-      - /shared-bin/buildkite-agent:/usr/local/bin/buildkite-agent:ro
+      - /data/buildkite/buildkite-agent:/bin/buildkite-agent:ro
     #working_dir: /risingwave
     stop_grace_period: 30s
 
