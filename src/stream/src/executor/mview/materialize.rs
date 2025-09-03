@@ -679,10 +679,18 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                 // Process collected rows for deletion
                 tracing::trace!(?rows_to_delete, "on_load_finish: rows to delete");
-                for row in rows_to_delete {
+                // let to_delete_chunk = StreamChunk::from_rows(rows, data_types)
+                for row in &rows_to_delete {
                     self.state_table.delete(row);
-                    // TODO: yield streamchunk to downstream
                 }
+                let to_delete_chunk = StreamChunk::from_rows(
+                    &rows_to_delete
+                        .iter()
+                        .map(|row| (Op::Delete, row))
+                        .collect_vec(),
+                    &self.schema.data_types(),
+                );
+                yield Message::Chunk(to_delete_chunk);
 
                 if merge_complete {
                     tracing::info!("merge sort completed");

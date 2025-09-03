@@ -243,14 +243,11 @@ SELECT * FROM refresh_fs_t;
 2 bob_updated
 
 
-# delete event is not populate to downstream
 query II rowsort retry 3 backoff 1s
 SELECT * FROM refresh_fs_t_mv;
 ----
 1 alice_updated
 2 bob_updated
-3 charlie
-4 david
 
 
 # ----
@@ -324,6 +321,13 @@ sleep 2s
 
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
+----
+7 grace
+8 henry
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
 ----
 7 grace
 8 henry
