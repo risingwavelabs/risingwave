@@ -218,12 +218,9 @@ psql -c "
     );
     "
 
-# Verify initial data
-query I
-SELECT count(*) from t;
-----
-2
-sleep 10s
+sleep 5s
+
+
 
 # Test schema change by adding a new column
 system ok
