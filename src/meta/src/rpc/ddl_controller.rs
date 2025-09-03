@@ -917,6 +917,7 @@ impl DdlController {
             let sink = sink.expect("sink not found");
             Self::inject_replace_table_plan_for_sink(
                 sink.id,
+                sink,
                 &sink_fragment,
                 target_table,
                 &mut replace_table_ctx,
@@ -953,6 +954,7 @@ impl DdlController {
 
                 Self::inject_replace_table_plan_for_sink(
                     sink_id,
+                    &sink,
                     &sink_fragment,
                     target_table,
                     &mut replace_table_ctx,
@@ -1009,6 +1011,7 @@ impl DdlController {
 
     pub(crate) fn inject_replace_table_plan_for_sink(
         sink_id: u32,
+        sink: &PbSink,
         sink_fragment: &Fragment,
         table: &Table,
         replace_table_ctx: &mut ReplaceStreamJobContext,
@@ -1023,7 +1026,51 @@ impl DdlController {
             .map(|(idx, _)| idx as _)
             .collect_vec();
 
-        let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
+        let get_dist_key_indices = || -> MetaResult<Vec<u32>> {
+            let sink_columns = if !sink.original_target_columns.is_empty() {
+                sink.original_target_columns.clone()
+            } else {
+                table.columns.clone()
+            };
+            let sink_idx_by_col_id = sink_columns
+                .into_iter()
+                .enumerate()
+                .map(|(idx, col)| {
+                    let column_desc = col.column_desc.ok_or_else(|| {
+                        MetaError::from(anyhow::anyhow!("sink column_desc is None"))
+                    })?;
+                    Ok((column_desc.column_id, idx as u32))
+                })
+                .collect::<MetaResult<HashMap<_, _>>>()?;
+            let dist_key_indices = table
+                .distribution_key
+                .iter()
+                .map(|dist_idx| {
+                    let column_desc = table.columns[*dist_idx as usize]
+                        .column_desc
+                        .as_ref()
+                        .ok_or_else(|| {
+                            MetaError::from(anyhow::anyhow!("table column_desc is None"))
+                        })?;
+                    let sink_idx =
+                        sink_idx_by_col_id
+                            .get(&column_desc.column_id)
+                            .ok_or_else(|| {
+                                MetaError::from(anyhow::anyhow!(
+                                    "column id {} not found in sink",
+                                    column_desc.column_id
+                                ))
+                            })?;
+                    Ok(*sink_idx)
+                })
+                .collect::<MetaResult<Vec<_>>>()?;
+            Ok(dist_key_indices)
+        };
+
+        let dist_key_indices = get_dist_key_indices().unwrap_or_else(|e| {
+            tracing::error!("Failed to get distribution key indices: {}", e);
+            table.distribution_key.iter().map(|i| *i as _).collect_vec()
+        });
 
         let sink_fragment_downstreams = replace_table_ctx
             .upstream_fragment_downstreams
@@ -1034,7 +1081,7 @@ impl DdlController {
             sink_fragment_downstreams.push(DownstreamFragmentRelation {
                 downstream_fragment_id: union_fragment.fragment_id,
                 dispatcher_type: DispatcherType::Hash,
-                dist_key_indices: dist_key_indices.clone(),
+                dist_key_indices,
                 output_mapping: PbDispatchOutputMapping::simple(output_indices),
             });
         }
@@ -1799,6 +1846,7 @@ impl DdlController {
 
                     Self::inject_replace_table_plan_for_sink(
                         *sink_id,
+                        &sink,
                         &sink_fragment,
                         table,
                         &mut ctx,
