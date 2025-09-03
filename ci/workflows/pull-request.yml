@@ -29,7 +29,7 @@ anchors:
     - docker-compose: &docker-compose
         run: rw-build-env
         config: ci/docker-compose.yml
-        mount-buildkite-agent: true
+        #mount-buildkite-agent: true
         propagate-environment: true
 
 other-sql-backend: &other-sql-backend
@@ -69,7 +69,7 @@ steps:
                 command: "ci/build-ci-image.sh"
                 label: "ci build images"
   - wait
-  
+
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
