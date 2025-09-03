@@ -129,3 +129,6 @@ rpk topic delete test_alter_non_shared_source -X brokers=message_queue_sasl_1:19
 
 system ok
 rpk topic delete test_alter_non_shared_source -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
+
+statement ok
+set streaming_use_shared_source to true;
