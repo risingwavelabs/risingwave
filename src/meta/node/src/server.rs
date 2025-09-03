@@ -398,6 +398,11 @@ pub async fn start_service_as_election_leader(
         prometheus_http_query::Client::from_str(x).unwrap()
     });
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
+
+    // Clone the prometheus client and selector for use in multiple services
+    let prometheus_client_clone = prometheus_client.clone();
+    let prometheus_selector_clone = prometheus_selector.clone();
+
     let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
         metadata_manager.clone(),
         env.await_tree_reg().clone(),
@@ -605,6 +610,8 @@ pub async fn start_service_as_election_leader(
     let monitor_srv = MonitorServiceImpl {
         metadata_manager: metadata_manager.clone(),
         await_tree_reg: env.await_tree_reg().clone(),
+        prometheus_client: prometheus_client_clone,
+        prometheus_selector: prometheus_selector_clone,
     };
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
