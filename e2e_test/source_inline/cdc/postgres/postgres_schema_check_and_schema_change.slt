@@ -294,7 +294,7 @@ v9 real false NULL
 v10 double precision false NULL
 v11 character varying false NULL
 v12 character varying false NULL
-v13 text false NULL
+v13 character varying false NULL
 v14 character varying false NULL
 v15 timestamp with time zone false NULL
 v16 time without time zone false NULL
