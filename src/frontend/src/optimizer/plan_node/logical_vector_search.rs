@@ -19,8 +19,9 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_pb::catalog::vector_index_info;
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
 
@@ -319,41 +320,61 @@ impl LogicalVectorSearch {
         top_n.into()
     }
 
-    fn as_vector_table_scan(&self) -> Option<(&LogicalScan, ExprImpl, usize)> {
+    fn as_vector_table_scan(&self) -> Option<(&LogicalScan, ExprImpl, &ExprImpl)> {
         let scan = self.core.input.as_logical_scan()?;
         if !scan.predicate().always_true() {
             return None;
         }
-        let (vector_input, vec) = match (&self.core.left, &self.core.right) {
-            (ExprImpl::InputRef(_), ExprImpl::InputRef(_)) => return None,
-            (ExprImpl::InputRef(input), other) | (other, ExprImpl::InputRef(input))
-                if other.only_literal_and_func() =>
-            {
-                (input, other.clone())
+        let left_const = (self.core.left.only_literal_and_func(), &self.core.left);
+        let right_const = (self.core.right.only_literal_and_func(), &self.core.right);
+        let (vector_column_expr, vector_expr) = match (left_const, right_const) {
+            ((true, _), (true, _)) => {
+                return None;
             }
+            ((_, vector_column_expr), (true, vector_expr))
+            | ((true, vector_expr), (_, vector_column_expr)) => (vector_column_expr, vector_expr),
             _ => return None,
         };
-        Some((scan, vec, vector_input.index))
+        Some((scan, vector_expr.clone(), vector_column_expr))
+    }
+
+    fn is_matched_vector_column_expr(
+        index_expr: &ExprImpl,
+        column_expr: &ExprImpl,
+        scan_output_col_idx: &[usize],
+    ) -> bool {
+        match (index_expr, column_expr) {
+            (ExprImpl::Literal(l1), ExprImpl::Literal(l2)) => l1 == l2,
+            (ExprImpl::InputRef(i1), ExprImpl::InputRef(i2)) => {
+                i1.index == scan_output_col_idx[i2.index]
+            }
+            (ExprImpl::FunctionCall(f1), ExprImpl::FunctionCall(f2)) => {
+                f1.func_type() == f2.func_type()
+                    && f1.return_type() == f2.return_type()
+                    && f1.inputs().len() == f2.inputs().len()
+                    && f1.inputs().iter().zip_eq_fast(f2.inputs()).all(|(e1, e2)| {
+                        Self::is_matched_vector_column_expr(e1, e2, scan_output_col_idx)
+                    })
+            }
+            _ => false,
+        }
     }
 }
 
 impl ToBatch for LogicalVectorSearch {
     fn to_batch(&self) -> crate::error::Result<BatchPlanRef> {
-        if let Some((scan, vector_expr, vector_input_idx)) = self.as_vector_table_scan()
+        if let Some((scan, vector_expr, vector_column_expr)) = self.as_vector_table_scan()
             && !scan.vector_indexes().is_empty()
         {
             for index in scan.vector_indexes() {
-                if index.vector_column_idx != scan.output_col_idx()[vector_input_idx] {
+                if !Self::is_matched_vector_column_expr(
+                    &index.vector_expr,
+                    vector_column_expr,
+                    scan.output_col_idx(),
+                ) {
                     continue;
                 }
-                if index
-                    .index_table
-                    .vector_index_info
-                    .as_ref()
-                    .expect("vector index")
-                    .distance_type()
-                    != self.core.distance_type
-                {
+                if index.vector_index_info.distance_type() != self.core.distance_type {
                     continue;
                 }
 
@@ -386,6 +407,16 @@ impl ToBatch for LogicalVectorSearch {
                     self.core.ctx(),
                 ))
                 .into();
+                let hnsw_ef_search = match index.vector_index_info.config.as_ref().unwrap() {
+                    vector_index_info::Config::Flat(_) => None,
+                    vector_index_info::Config::HnswFlat(_) => Some(
+                        self.core
+                            .ctx()
+                            .session_ctx()
+                            .config()
+                            .batch_hnsw_ef_search(),
+                    ),
+                };
                 let core = BatchVectorSearchCore {
                     input: literal_vector_input,
                     top_n: self.core.top_n,
@@ -398,6 +429,7 @@ impl ToBatch for LogicalVectorSearch {
                         .map(|col| col.column_desc.clone())
                         .collect(),
                     vector_column_idx: 0,
+                    hnsw_ef_search,
                     ctx: self.core.ctx(),
                 };
                 let vector_search: BatchPlanRef = {

@@ -22,14 +22,16 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableId};
 use risingwave_common::types::DataType;
+use risingwave_common::util::recursive::{Recurse, tracker};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{
-    CreateType, PbFlatIndexConfig, PbIndex, PbIndexColumnProperties, PbStreamJobStatus,
-    PbVectorIndexInfo,
+    CreateType, PbFlatIndexConfig, PbHnswFlatIndexConfig, PbIndex, PbIndexColumnProperties,
+    PbStreamJobStatus, PbVectorIndexInfo,
 };
 use risingwave_pb::common::PbDistanceType;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::TableCatalog;
@@ -37,7 +39,7 @@ use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, is_impure_func_call};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
@@ -48,6 +50,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRoot, OptimizerContext, OptimizerContextRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
+use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
 
 pub(crate) fn resolve_index_schema(
@@ -68,6 +71,66 @@ pub(crate) fn resolve_index_schema(
     let (table, schema_name) =
         read_guard.get_created_table_by_name(db_name, schema_path, &table_name)?;
     Ok((schema_name.to_owned(), table.clone(), index_table_name))
+}
+
+struct IndexColumnExprValidator {
+    allow_impure: bool,
+    result: Result<()>,
+}
+
+impl IndexColumnExprValidator {
+    fn unsupported_expr_err(expr: &ExprImpl) -> ErrorCode {
+        ErrorCode::NotSupported(
+            format!("unsupported index column expression type: {:?}", expr),
+            "use columns or expressions instead".into(),
+        )
+    }
+
+    fn validate(expr: &ExprImpl, allow_impure: bool) -> Result<()> {
+        match expr {
+            ExprImpl::InputRef(_) | ExprImpl::FunctionCall(_) => {}
+            other_expr => {
+                return Err(Self::unsupported_expr_err(other_expr).into());
+            }
+        }
+        let mut visitor = Self {
+            allow_impure,
+            result: Ok(()),
+        };
+        visitor.visit_expr(expr);
+        visitor.result
+    }
+}
+
+impl ExprVisitor for IndexColumnExprValidator {
+    fn visit_expr(&mut self, expr: &ExprImpl) {
+        if self.result.is_err() {
+            return;
+        }
+        tracker!().recurse(|t| {
+            if t.depth_reaches(crate::expr::EXPR_DEPTH_THRESHOLD) {
+                notice_to_user(crate::expr::EXPR_TOO_DEEP_NOTICE);
+            }
+
+            match expr {
+                ExprImpl::InputRef(_) | ExprImpl::Literal(_) => {}
+                ExprImpl::FunctionCall(inner) => {
+                    if !self.allow_impure && is_impure_func_call(inner) {
+                        self.result = Err(ErrorCode::NotSupported(
+                            "this expression is impure".into(),
+                            "use a pure expression instead".into(),
+                        )
+                        .into());
+                        return;
+                    }
+                    self.visit_function_call(inner)
+                }
+                other_expr => {
+                    self.result = Err(Self::unsupported_expr_err(other_expr).into());
+                }
+            }
+        })
+    }
 }
 
 pub(crate) fn gen_create_index_plan(
@@ -101,6 +164,42 @@ pub(crate) fn gen_create_index_plan(
             "flat" => Some(risingwave_pb::catalog::vector_index_info::PbConfig::Flat(
                 PbFlatIndexConfig {},
             )),
+            "hnsw" => {
+                let with_options = context.with_options();
+                let parse_non_zero_u32 = |key: &str, default| {
+                    with_options
+                        .get(key)
+                        .map(|v| {
+                            let v = v.parse::<u32>().map_err(|e| {
+                                ErrorCode::InvalidInputSyntax(format!(
+                                    "invalid {} value {}: failed to parse {}",
+                                    key,
+                                    v,
+                                    e.as_report()
+                                ))
+                            })?;
+                            if v == 0 {
+                                Err(ErrorCode::InvalidInputSyntax(format!(
+                                    "invalid {} value {}: should not be zero",
+                                    key, v
+                                )))
+                            } else {
+                                Ok(v)
+                            }
+                        })
+                        .transpose()
+                        .map(|v| v.unwrap_or(default))
+                };
+                Some(
+                    risingwave_pb::catalog::vector_index_info::PbConfig::HnswFlat(
+                        PbHnswFlatIndexConfig {
+                            m: parse_non_zero_u32("m", 16)?, /* default value borrowed from pg_vector */
+                            ef_construction: parse_non_zero_u32("ef_construction", 64)?, /* default value borrowed from pg_vector */
+                            max_level: parse_non_zero_u32("max_level", 10)?,
+                        },
+                    ),
+                )
+            }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "invalid index method {}",
@@ -150,32 +249,8 @@ pub(crate) fn gen_create_index_plan(
         let mut const_eval = ConstEvalRewriter { error: None };
         let expr_impl = const_eval.rewrite_expr(expr_impl);
         let expr_impl = context.session_timezone().rewrite_expr(expr_impl);
-        match expr_impl {
-            ExprImpl::InputRef(_) => {}
-            ExprImpl::FunctionCall(_) => {
-                if is_vector_index {
-                    return Err(ErrorCode::NotSupported(
-                        "vector index can not be created on function column".to_owned(),
-                        "create index on table column only".to_owned(),
-                    )
-                    .into());
-                }
-                if !is_vector_index && expr_impl.is_impure() {
-                    return Err(ErrorCode::NotSupported(
-                        "this expression is impure".into(),
-                        "use a pure expression instead".into(),
-                    )
-                    .into());
-                }
-            }
-            _ => {
-                return Err(ErrorCode::NotSupported(
-                    "index columns should be columns or expressions".into(),
-                    "use columns or expressions instead".into(),
-                )
-                .into());
-            }
-        }
+        let allow_impure = is_vector_index;
+        IndexColumnExprValidator::validate(&expr_impl, allow_impure)?;
         if is_vector_index {
             match expr_impl.return_type() {
                 DataType::Vector(d) => {
