@@ -298,3 +298,20 @@ create table t_bit8_mismatch (
   id int primary key,
   flags byteas
 ) from s table 'public.t_bit8';
+
+# Clean up all resources created during this test
+statement ok
+drop source s cascade;
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t;
+    DROP TABLE IF EXISTS t_ltree;
+    DROP TABLE IF EXISTS t_bit;
+    DROP TABLE IF EXISTS t_hstore;
+    DROP TABLE IF EXISTS t_bit8;
+    DROP TYPE IF EXISTS mood_enum;
+    DROP EXTENSION IF EXISTS citext;
+    DROP EXTENSION IF EXISTS ltree;
+    DROP EXTENSION IF EXISTS hstore;
+"

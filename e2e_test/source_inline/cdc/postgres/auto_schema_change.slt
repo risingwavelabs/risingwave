@@ -345,3 +345,11 @@ SELECT count(*) from t;
 
 statement ok
 drop source s cascade;
+
+# Clean up the custom types and extensions created for this test
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t;
+    DROP TYPE IF EXISTS mood_enum;
+    DROP EXTENSION IF EXISTS citext;
+"
