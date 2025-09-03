@@ -1705,6 +1705,19 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
         let connector = source.with_properties.0.get_connector().unwrap();
+        let is_shared_source = source.is_shared();
+
+        let mut dep_source_job_ids: Vec<ObjectId> = Vec::new();
+        if !is_shared_source {
+            // mv using non-shared source holds a copy of source in their fragments
+            dep_source_job_ids = ObjectDependency::find()
+                .select_only()
+                .column(object_dependency::Column::UsedBy)
+                .filter(object_dependency::Column::Oid.eq(source_id))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+        }
 
         {
             let allow_props_set =
@@ -1874,15 +1887,20 @@ impl CatalogController {
             active_table_model.update(&txn).await?;
         }
 
+        let to_check_job_ids = vec![if let Some(associate_table_id) = associate_table_id {
+            // if updating table with connector, the fragment_id is table id
+            associate_table_id
+        } else {
+            source_id
+        }]
+        .into_iter()
+        .chain(dep_source_job_ids.into_iter())
+        .collect_vec();
+
         // update fragments
         update_connector_props_fragments(
             &txn,
-            if let Some(associate_table_id) = associate_table_id {
-                // if updating table with connector, the fragment_id is table id
-                associate_table_id
-            } else {
-                source_id
-            },
+            to_check_job_ids,
             FragmentTypeFlag::Source,
             |node, found| {
                 if let PbNodeBody::Source(node) = node
@@ -1893,6 +1911,7 @@ impl CatalogController {
                     *found = true;
                 }
             },
+            is_shared_source,
         )
         .await?;
 
@@ -2415,9 +2434,10 @@ pub struct SinkIntoTableContext {
 
 async fn update_connector_props_fragments<F>(
     txn: &DatabaseTransaction,
-    job_id: i32,
+    job_ids: Vec<i32>,
     expect_flag: FragmentTypeFlag,
     mut alter_stream_node_fn: F,
+    is_shared_source: bool,
 ) -> MetaResult<()>
 where
     F: FnMut(&mut PbNodeBody, &mut bool),
@@ -2429,7 +2449,7 @@ where
             fragment::Column::FragmentTypeMask,
             fragment::Column::StreamNode,
         ])
-        .filter(fragment::Column::JobId.eq(job_id))
+        .filter(fragment::Column::JobId.is_in(job_ids.clone()))
         .into_tuple()
         .all(txn)
         .await?;
@@ -2445,12 +2465,17 @@ where
             if found { Some((id, stream_node)) } else { None }
         })
         .collect_vec();
-    assert!(
-        !fragments.is_empty(),
-        "job {} (type: {:?}) should be used by at least one fragment",
-        job_id,
-        expect_flag
-    );
+    if is_shared_source || job_ids.len() > 1 {
+        // the first element is the source_id or associated table_id
+        // if the source is non-shared, there is no updated fragments
+        // job_ids.len() > 1 means the source is used by other streaming jobs, so there should be at least one fragment updated
+        assert!(
+            !fragments.is_empty(),
+            "job ids {:?} (type: {:?}) should be used by at least one fragment",
+            job_ids,
+            expect_flag
+        );
+    }
 
     for (id, stream_node) in fragments {
         fragment::ActiveModel {
