@@ -34,9 +34,12 @@ use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::{
-    CdcTableType, DebeziumOffset, DebeziumSourceOffset, ExternalTableConfig, SchemaTableName,
+    DebeziumOffset, DebeziumSourceOffset, ExternalCdcTableType, ExternalTableConfig,
+    SchemaTableName,
 };
-use risingwave_connector::source::cdc::{CdcScanOptions, DebeziumCdcSplit};
+use risingwave_connector::source::cdc::{
+    CdcScanOptions, CdcTableSnapshotSplitAssignmentWithGeneration, DebeziumCdcSplit,
+};
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
@@ -180,7 +183,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         table_name,
         "mydb".to_owned(),
         config,
-        CdcTableType::Mock,
+        ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),
@@ -489,7 +492,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         table_name,
         "mydb".to_owned(),
         config,
-        CdcTableType::Mock,
+        ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),
@@ -546,6 +549,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
                 ..Default::default()
             },
             BTreeMap::default(),
+            None,
         )
         .boxed(),
     );
@@ -629,7 +633,7 @@ async fn test_parallelized_cdc_backfill() {
         actor_id,
         vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None, None))],
     );
-    let actor_cdc_table_snapshot_splits = [(
+    let splits = [(
         actor_id,
         vec![CdcTableSnapshotSplitRaw {
             split_id: 1,
@@ -640,6 +644,10 @@ async fn test_parallelized_cdc_backfill() {
     )]
     .into_iter()
     .collect();
+    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration {
+        splits,
+        generation: 10,
+    };
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
             splits: source_splits,
@@ -801,7 +809,7 @@ async fn test_parallelized_cdc_backfill_reschedule() {
         actor_id,
         vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None, None))],
     );
-    let actor_cdc_table_snapshot_splits = [(
+    let splits = [(
         actor_id,
         vec![CdcTableSnapshotSplitRaw {
             split_id: 2,
@@ -812,6 +820,10 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     )]
     .into_iter()
     .collect();
+    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration {
+        splits,
+        generation: 10,
+    };
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
             splits: source_splits.clone(),
@@ -867,7 +879,7 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     tx.push_chunk(stream_chunk1);
 
     // Send reschedule barrier.
-    let actor_cdc_table_snapshot_splits = [(
+    let splits = [(
         actor_id,
         vec![
             CdcTableSnapshotSplitRaw {
@@ -888,6 +900,10 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     )]
     .into_iter()
     .collect();
+    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration {
+        splits,
+        generation: 10,
+    };
     curr_epoch.inc_epoch();
     let reschedule_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Update(UpdateMutation {

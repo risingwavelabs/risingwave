@@ -271,6 +271,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "catalog.FlatIndexConfig",
             "#[derive(Eq, Hash)]",
         )
+        .type_attribute(
+            "catalog.HnswFlatIndexConfig",
+            "#[derive(Eq, Hash)]",
+        )
         // proto version enums
         .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")
         .type_attribute(

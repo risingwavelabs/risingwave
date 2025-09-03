@@ -216,6 +216,7 @@ impl ConfigExpander {
                     "schema-registry" => {
                         ServiceConfig::SchemaRegistry(serde_yaml::from_str(&out_str)?)
                     }
+                    "moat" => ServiceConfig::Moat(serde_yaml::from_str(&out_str)?),
                     other => return Err(anyhow!("unsupported use type: {}", other)),
                 };
                 Ok(result)

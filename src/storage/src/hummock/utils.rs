@@ -394,6 +394,7 @@ async fn get_from_state_store(
 
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
+    table_id: TableId,
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
@@ -412,6 +413,7 @@ pub(crate) async fn do_insert_sanity_check(
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
+            table_id,
             key: key.clone(),
             prev: KeyOp::Insert(stored_value),
             new: KeyOp::Insert(value.clone()),
@@ -423,6 +425,7 @@ pub(crate) async fn do_insert_sanity_check(
 
 /// Make sure that the key to delete should exist in storage and the value should be matched.
 pub(crate) async fn do_delete_sanity_check(
+    table_id: TableId,
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
@@ -443,6 +446,7 @@ pub(crate) async fn do_delete_sanity_check(
     };
     match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
+            table_id,
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
             new: KeyOp::Delete(old_value.clone()),
@@ -451,6 +455,7 @@ pub(crate) async fn do_delete_sanity_check(
         Some(stored_value) => {
             if !old_value_checker(&stored_value, old_value) {
                 Err(Box::new(MemTableError::InconsistentOperation {
+                    table_id,
                     key: key.clone(),
                     prev: KeyOp::Insert(stored_value),
                     new: KeyOp::Delete(old_value.clone()),
@@ -465,6 +470,7 @@ pub(crate) async fn do_delete_sanity_check(
 
 /// Make sure that the key to update should exist in storage and the value should be matched
 pub(crate) async fn do_update_sanity_check(
+    table_id: TableId,
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     new_value: &Bytes,
@@ -487,6 +493,7 @@ pub(crate) async fn do_update_sanity_check(
 
     match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
+            table_id,
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
             new: KeyOp::Update((old_value.clone(), new_value.clone())),
@@ -495,6 +502,7 @@ pub(crate) async fn do_update_sanity_check(
         Some(stored_value) => {
             if !old_value_checker(&stored_value, old_value) {
                 Err(Box::new(MemTableError::InconsistentOperation {
+                    table_id,
                     key: key.clone(),
                     prev: KeyOp::Insert(stored_value),
                     new: KeyOp::Update((old_value.clone(), new_value.clone())),

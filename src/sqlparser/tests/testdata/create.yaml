@@ -108,6 +108,8 @@
   formatted_sql: CREATE TABLE T ("FULL" INT)
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("FULL")
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("FULL")
+- input: CREATE TABLE T ("FULL" INT, MORE INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("MORE", "FULL")
+  formatted_sql: CREATE TABLE T ("FULL" INT, MORE INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("MORE", "FULL")
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO NOTHING
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO NOTHING
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN
@@ -129,6 +131,11 @@
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
 - input: CREATE TABLE t (a int, b int, ts timestamptz as proctime(), primary key (a)) ON CONFLICT DO UPDATE IF NOT NULL INCLUDE timestamp AS ts_col WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') FORMAT PLAIN ENCODE JSON
   formatted_sql: CREATE TABLE t (a INT, b INT, ts timestamptz AS proctime(), PRIMARY KEY (a)) ON CONFLICT DO UPDATE IF NOT NULL INCLUDE timestamp AS ts_col WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') FORMAT PLAIN ENCODE JSON
+- input: create table t_error5 (id int, v1 int, primary key(id)) on conflict do update if not null with version column();
+  error_msg: |-
+    sql parser error: expected identifier, found: )
+    LINE 1: create table t_error5 (id int, v1 int, primary key(id)) on conflict do update if not null with version column();
+                                                                                                                          ^
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
 - input: CREATE USER admin_user WITH ADMIN

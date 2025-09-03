@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
 use futures::{StreamExt, TryStreamExt};
-use opendal::{Metakey, Operator};
+use opendal::Operator;
 use risingwave_common::types::Timestamptz;
 
 use super::OpendalSource;
@@ -85,36 +85,54 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
         let prefix = self.prefix.as_deref().unwrap_or("/");
         let list_prefix = Self::extract_list_prefix(prefix);
-        let object_lister = self
-            .op
-            .lister_with(&list_prefix)
-            .recursive(true)
-            .metakey(Metakey::ContentLength | Metakey::LastModified)
-            .await?;
-        let stream = stream::unfold(object_lister, |mut object_lister| async move {
-            match object_lister.next().await {
-                Some(Ok(object)) => {
-                    let name = object.path().to_owned();
-                    let om = object.metadata();
+        let object_lister = self.op.lister_with(&list_prefix).recursive(true).await?;
 
-                    let t = match om.last_modified() {
-                        Some(t) => t,
-                        None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
-                    };
-                    let timestamp = Timestamptz::from(t);
-                    let size = om.content_length() as i64;
+        let op = self.op.clone();
+        let full_capability = op.info().full_capability();
+        let stream = stream::unfold(object_lister, move |mut object_lister| {
+            let op = op.clone();
 
-                    let metadata = FsPageItem {
-                        name,
-                        size,
-                        timestamp,
-                    };
-                    Some((Ok(metadata), object_lister))
-                }
-                Some(Err(err)) => Some((Err(err.into()), object_lister)),
-                None => {
-                    tracing::info!("list object completed.");
-                    None
+            async move {
+                match object_lister.next().await {
+                    Some(Ok(object)) => {
+                        let name = object.path().to_owned();
+
+                        // Check if we need to call stat() to get complete metadata
+                        let (t, size) = if !full_capability.list_has_content_length
+                            || !full_capability.list_has_last_modified
+                        {
+                            // Need complete metadata, call stat()
+                            let stat_meta = op.stat(&name).await.ok()?;
+                            let t = match stat_meta.last_modified() {
+                                Some(t) => t,
+                                None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+                            };
+                            let size = stat_meta.content_length() as i64;
+                            (t, size)
+                        } else {
+                            // Use metadata from list operation
+                            let meta = object.metadata();
+                            let t = match meta.last_modified() {
+                                Some(t) => t,
+                                None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+                            };
+                            let size = meta.content_length() as i64;
+                            (t, size)
+                        };
+
+                        let timestamp = Timestamptz::from(t);
+                        let metadata = FsPageItem {
+                            name,
+                            size,
+                            timestamp,
+                        };
+                        Some((Ok(metadata), object_lister))
+                    }
+                    Some(Err(err)) => Some((Err(err.into()), object_lister)),
+                    None => {
+                        tracing::info!("list object completed.");
+                        None
+                    }
                 }
             }
         });

@@ -56,6 +56,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::WithOptionsSecResolved;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
+const CREATE_TABLE_IF_NOT_EXISTS: &str = "create_table_if_not_exists";
 
 /// ## Why we need `PartitionComputeInfo`?
 ///
@@ -256,7 +257,7 @@ impl StreamSink {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
         let mut downstream_pk = {
-            let from_properties =
+            let downstream_pk =
                 Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
             if let Some(t) = &target_table {
                 let user_defined_primary_key_table = t.row_id_index.is_none();
@@ -288,8 +289,13 @@ impl StreamSink {
                         })
                         .try_collect::<_, _, RwError>()?
                 }
+            } else if properties.get(CREATE_TABLE_IF_NOT_EXISTS) == Some(&"true".to_owned())
+                && sink_type == SinkType::Upsert
+                && downstream_pk.is_empty()
+            {
+                pk.iter().map(|k| k.column_index).collect_vec()
             } else {
-                from_properties
+                downstream_pk
             }
         };
         if let Some(upstream_table) = &auto_refresh_schema_from_table

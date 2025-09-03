@@ -657,7 +657,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict_behavior: 0,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint: 1,
             version: None,
             watermark_indices: vec![],
@@ -679,6 +679,7 @@ mod tests {
             clean_watermark_index_in_pk: None,
             refreshable: false,
             vector_index_info: None,
+            cdc_table_type: None,
         }
     }
 

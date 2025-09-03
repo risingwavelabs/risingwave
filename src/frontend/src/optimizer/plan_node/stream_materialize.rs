@@ -128,7 +128,7 @@ impl StreamMaterialize {
             columns,
             definition,
             ConflictBehavior::NoCheck,
-            None,
+            vec![],
             None,
             None,
             table_type,
@@ -160,7 +160,7 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
-        version_column_index: Option<usize>,
+        version_column_indices: Vec<usize>,
         pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: TableVersion,
@@ -180,7 +180,7 @@ impl StreamMaterialize {
             columns,
             definition,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             Some(pk_column_indices),
             row_id_index,
             TableType::Table,
@@ -260,7 +260,7 @@ impl StreamMaterialize {
         columns: Vec<ColumnCatalog>,
         definition: String,
         conflict_behavior: ConflictBehavior,
-        version_column_index: Option<usize>,
+        version_column_indices: Vec<usize>,
         pk_column_indices: Option<Vec<usize>>, // Is some when create table
         row_id_index: Option<usize>,
         table_type: TableType,
@@ -314,7 +314,7 @@ impl StreamMaterialize {
             value_indices,
             definition,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             read_prefix_len_hint,
             version,
             watermark_columns,
@@ -347,6 +347,7 @@ impl StreamMaterialize {
             clean_watermark_index_in_pk: None, // TODO: fill this field
             refreshable,
             vector_index_info: None,
+            cdc_table_type: None,
         })
     }
 

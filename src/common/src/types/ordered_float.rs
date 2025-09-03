@@ -50,7 +50,7 @@ use core::ops::{
 };
 use core::str::FromStr;
 use std::error::Error;
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 
 use bytes::BytesMut;
 pub use num_traits::Float;
@@ -96,9 +96,15 @@ const CANONICAL_ZERO_BITS: u64 = 0x0u64;
 /// s.insert(OrderedFloat(NAN));
 /// assert!(s.contains(&OrderedFloat(NAN)));
 /// ```
-#[derive(Debug, Default, Clone, Copy, Serialize)]
+#[derive(Default, Clone, Copy, Serialize)]
 #[repr(transparent)]
 pub struct OrderedFloat<T>(pub T);
+
+impl<T: Debug> Debug for OrderedFloat<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        T::fmt(&self.0, f)
+    }
+}
 
 impl<T: Float> OrderedFloat<T> {
     /// Get the value out.
@@ -112,12 +118,6 @@ impl<T: Float> OrderedFloat<T> {
 
         // Safety: OrderedFloat is #[repr(transparent)] and has no invalid values.
         unsafe { std::slice::from_raw_parts(ptr, slice.len()) }
-    }
-
-    pub fn from_inner_vec(vec: Vec<T>) -> Vec<Self> {
-        let (ptr, len, cap) = vec.into_raw_parts();
-        // Safety: OrderedFloat is #[repr(transparent)] and has no invalid values.
-        unsafe { Vec::from_raw_parts(ptr as *mut Self, len, cap) }
     }
 }
 
