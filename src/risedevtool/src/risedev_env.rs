@@ -36,6 +36,7 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                         c.provide_opendal.as_ref().unwrap(),
                         c.provide_minio.as_ref().unwrap(),
                         c.provide_aws_s3.as_ref().unwrap(),
+                        c.provide_moat.as_ref().unwrap(),
                         HummockInMemoryStrategy::Disallowed,
                         &mut cmd,
                     )

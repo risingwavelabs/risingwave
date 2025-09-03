@@ -53,6 +53,7 @@ use crate::hummock::utils::{
     filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap,
     search_sst_idx,
 };
+use crate::hummock::vector::file::FileVectorStore;
 use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
@@ -68,6 +69,7 @@ use crate::monitor::{
 use crate::store::{
     OnNearestItemFn, ReadLogOptions, ReadOptions, Vector, VectorNearestOptions, gen_min_epoch,
 };
+use crate::vector::hnsw::nearest;
 use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 
 pub type CommittedVersion = PinnedVersion;
@@ -1231,6 +1233,26 @@ impl HummockVersionReader {
                     }
                 }
                 Ok(builder.finish())
+            }
+            VectorIndexImpl::HnswFlat(hnsw_flat) => {
+                let Some(graph_file) = &hnsw_flat.graph_file else {
+                    return Ok(vec![]);
+                };
+
+                let graph = self.sstable_store.get_hnsw_graph(graph_file).await?;
+
+                let vector_store =
+                    FileVectorStore::new_for_reader(hnsw_flat, self.sstable_store.clone());
+                let (items, _stats) = nearest::<O, M>(
+                    &vector_store,
+                    &*graph,
+                    target.to_ref(),
+                    on_nearest_item_fn,
+                    options.hnsw_ef_search,
+                    options.top_n,
+                )
+                .await?;
+                Ok(items)
             }
         }
     }

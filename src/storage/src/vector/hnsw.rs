@@ -18,12 +18,13 @@ use std::marker::PhantomData;
 use faiss::index::hnsw::Hnsw;
 use rand::Rng;
 use rand::distr::uniform::{UniformFloat, UniformSampler};
+use risingwave_pb::hummock::PbHnswGraph;
+use risingwave_pb::hummock::hnsw_graph::{PbHnswLevel, PbHnswNeighbor, PbHnswNode};
 
 use crate::hummock::HummockResult;
 use crate::vector::utils::{BoundedNearest, MinDistanceHeap};
 use crate::vector::{
-    MeasureDistance, MeasureDistanceBuilder, OnNearestItem, VectorDistance, VectorInner,
-    VectorItem, VectorRef,
+    MeasureDistance, MeasureDistanceBuilder, OnNearestItem, VectorDistance, VectorItem, VectorRef,
 };
 
 pub struct HnswBuilderOptions {
@@ -70,17 +71,17 @@ impl VectorHnswNode {
     }
 }
 
-struct VectorStoreImpl {
-    vector_len: usize,
+struct InMemoryVectorStore {
+    dimension: usize,
     vector_payload: Vec<VectorItem>,
     info_payload: Vec<u8>,
     info_offsets: Vec<usize>,
 }
 
-impl VectorStoreImpl {
-    fn new(vector_len: usize) -> Self {
+impl InMemoryVectorStore {
+    fn new(dimension: usize) -> Self {
         Self {
-            vector_len,
+            dimension,
             vector_payload: vec![],
             info_payload: Default::default(),
             info_offsets: vec![],
@@ -93,9 +94,9 @@ impl VectorStoreImpl {
 
     fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
         assert!(idx < self.info_offsets.len());
-        let start = idx * self.vector_len;
-        let end = start + self.vector_len;
-        VectorInner(&self.vector_payload[start..end])
+        let start = idx * self.dimension;
+        let end = start + self.dimension;
+        VectorRef::from_slice_unchecked(&self.vector_payload[start..end])
     }
 
     fn info(&self, idx: usize) -> &[u8] {
@@ -109,9 +110,9 @@ impl VectorStoreImpl {
     }
 
     fn add(&mut self, vec: VectorRef<'_>, info: &[u8]) {
-        assert_eq!(vec.0.len(), self.vector_len);
+        assert_eq!(vec.dimension(), self.dimension);
 
-        self.vector_payload.extend_from_slice(vec.0);
+        self.vector_payload.extend_from_slice(vec.as_slice());
         let offset = self.info_payload.len();
         self.info_payload.extend_from_slice(info);
         self.info_offsets.push(offset);
@@ -131,12 +132,12 @@ pub trait VectorStore: 'static {
     async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>>;
 }
 
-pub struct VectorStoreImplAccessor<'a> {
-    vector_store_impl: &'a VectorStoreImpl,
+pub struct InMemoryVectorStoreAccessor<'a> {
+    vector_store_impl: &'a InMemoryVectorStore,
     idx: usize,
 }
 
-impl VectorAccessor for VectorStoreImplAccessor<'_> {
+impl VectorAccessor for InMemoryVectorStoreAccessor<'_> {
     fn vec_ref(&self) -> VectorRef<'_> {
         self.vector_store_impl.vec_ref(self.idx)
     }
@@ -146,11 +147,11 @@ impl VectorAccessor for VectorStoreImplAccessor<'_> {
     }
 }
 
-impl VectorStore for VectorStoreImpl {
-    type Accessor<'a> = VectorStoreImplAccessor<'a>;
+impl VectorStore for InMemoryVectorStore {
+    type Accessor<'a> = InMemoryVectorStoreAccessor<'a>;
 
     async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>> {
-        Ok(VectorStoreImplAccessor {
+        Ok(InMemoryVectorStoreAccessor {
             vector_store_impl: self,
             idx,
         })
@@ -169,6 +170,37 @@ pub trait HnswGraph {
     ) -> impl Iterator<Item = (usize, VectorDistance)> + '_;
 }
 
+impl HnswGraph for PbHnswGraph {
+    fn entrypoint(&self) -> usize {
+        self.entrypoint_id as _
+    }
+
+    fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    fn node_level(&self, idx: usize) -> usize {
+        self.nodes[idx].levels.len()
+    }
+
+    fn node_neighbours(
+        &self,
+        idx: usize,
+        level: usize,
+    ) -> impl Iterator<Item = (usize, VectorDistance)> + '_ {
+        self.nodes[idx]
+            .levels
+            .get(level)
+            .into_iter()
+            .flat_map(|level| {
+                level
+                    .neighbors
+                    .iter()
+                    .map(|neighbor| (neighbor.vector_id as usize, neighbor.distance))
+            })
+    }
+}
+
 pub struct HnswGraphBuilder {
     /// entrypoint of the graph: Some(`entrypoint_vector_idx`)
     entrypoint: usize,
@@ -181,6 +213,51 @@ impl HnswGraphBuilder {
             entrypoint: 0,
             nodes: vec![node],
         }
+    }
+
+    pub fn to_protobuf(&self) -> PbHnswGraph {
+        let mut nodes = Vec::with_capacity(self.nodes.len());
+        for node in &self.nodes {
+            let mut levels = Vec::with_capacity(node.level());
+            for level in &node.level_neighbours {
+                let mut neighbors = Vec::with_capacity(level.len());
+                for (distance, &neighbor_index) in level {
+                    neighbors.push(PbHnswNeighbor {
+                        vector_id: neighbor_index as u64,
+                        distance,
+                    });
+                }
+                levels.push(PbHnswLevel { neighbors });
+            }
+            nodes.push(PbHnswNode { levels });
+        }
+        PbHnswGraph {
+            entrypoint_id: self.entrypoint as u64,
+            nodes,
+        }
+    }
+
+    pub fn from_protobuf(pb: &PbHnswGraph) -> Self {
+        let entrypoint = pb.entrypoint_id as usize;
+        let nodes = pb
+            .nodes
+            .iter()
+            .map(|node| {
+                let level_neighbours = node
+                    .levels
+                    .iter()
+                    .map(|level| {
+                        let mut nearest = BoundedNearest::new(level.neighbors.len());
+                        for neighbor in &level.neighbors {
+                            nearest.insert(neighbor.distance, || neighbor.vector_id as _);
+                        }
+                        nearest
+                    })
+                    .collect();
+                VectorHnswNode { level_neighbours }
+            })
+            .collect();
+        Self { entrypoint, nodes }
     }
 }
 
@@ -251,12 +328,12 @@ impl VecSet {
     }
 }
 
-impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphBuilder, M, R> {
-    pub fn new(vector_len: usize, rng: R, options: HnswBuilderOptions) -> Self {
+impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<InMemoryVectorStore, HnswGraphBuilder, M, R> {
+    pub fn new(dimension: usize, rng: R, options: HnswBuilderOptions) -> Self {
         Self {
             options,
             graph: None,
-            vector_store: VectorStoreImpl::new(vector_len),
+            vector_store: InMemoryVectorStore::new(dimension),
             rng,
             _measure: Default::default(),
         }
@@ -268,7 +345,7 @@ impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<VectorStoreImpl, HnswGraphBu
         let levels = faiss_hnsw.levels_raw();
         let Some(graph) = &self.graph else {
             assert_eq!(levels.len(), 0);
-            return Self::new(self.vector_store.vector_len, self.rng, self.options);
+            return Self::new(self.vector_store.dimension, self.rng, self.options);
         };
         assert_eq!(levels.len(), graph.nodes.len());
         let mut nodes = Vec::with_capacity(graph.nodes.len());
@@ -479,7 +556,7 @@ pub async fn nearest<O: Send, M: MeasureDistanceBuilder>(
         )
         .await?;
         Ok((
-            entrypoints.collect_with(|(_, output)| output, Some(top_n)),
+            entrypoints.collect_with(|_, (_, output)| output, Some(top_n)),
             stats,
         ))
     }
@@ -554,9 +631,10 @@ mod tests {
     use itertools::Itertools;
     use rand::SeedableRng;
     use rand::prelude::StdRng;
+    use risingwave_common::types::F32;
+    use risingwave_common::vector::distance::InnerProductDistance;
 
     use crate::vector::NearestBuilder;
-    use crate::vector::distance::InnerProductDistance;
     use crate::vector::hnsw::{HnswBuilder, HnswBuilderOptions, nearest};
     use crate::vector::test_utils::{gen_info, gen_vector};
 
@@ -612,7 +690,7 @@ mod tests {
         .unwrap();
 
         faiss_hnsw
-            .add(&hnsw_builder.vector_store.vector_payload)
+            .add(F32::inner_slice(&hnsw_builder.vector_store.vector_payload))
             .unwrap();
         // for (vec, info) in &input {
         //     faiss_hnsw.add(&vec.0).unwrap();
@@ -662,7 +740,7 @@ mod tests {
             .map(|(i, query)| {
                 let start_time = Instant::now();
                 let actual = faiss_hnsw
-                    .assign(&query.0, TOP_N)
+                    .assign(query.as_raw_slice(), TOP_N)
                     .unwrap()
                     .labels
                     .into_iter()

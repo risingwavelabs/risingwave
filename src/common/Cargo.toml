@@ -40,6 +40,7 @@ either = "1"
 enum-as-inner = "0.6"
 enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
+faiss = { workspace = true }
 fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -53,6 +54,7 @@ itoa = "1.0"
 jiff = "0.1.15"
 jni = { workspace = true }
 jsonbb = { workspace = true }
+linkme = { workspace = true }
 lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"

@@ -818,20 +818,48 @@ impl SchemaCatalog {
         self.subscription_by_id.get(subscription_id)
     }
 
-    pub fn get_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
-        self.index_by_name.get(index_name)
+    pub fn get_index_by_name(
+        &self,
+        index_name: &str,
+        bind_creating: bool,
+    ) -> Option<&Arc<IndexCatalog>> {
+        self.index_by_name
+            .get(index_name)
+            .filter(|i| bind_creating || i.is_created())
+    }
+
+    pub fn get_any_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
+        self.get_index_by_name(index_name, true)
+    }
+
+    pub fn get_created_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
+        self.get_index_by_name(index_name, false)
     }
 
     pub fn get_index_by_id(&self, index_id: &IndexId) -> Option<&Arc<IndexCatalog>> {
         self.index_by_id.get(index_id)
     }
 
-    /// Returns all indexes on the given table. Will not check if the table exists.
-    pub fn get_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+    pub fn get_indexes_by_table_id(
+        &self,
+        table_id: &TableId,
+        include_creating: bool,
+    ) -> Vec<Arc<IndexCatalog>> {
         self.indexes_by_table_id
             .get(table_id)
             .cloned()
             .unwrap_or_default()
+            .into_iter()
+            .filter(|i| include_creating || i.is_created())
+            .collect()
+    }
+
+    pub fn get_any_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+        self.get_indexes_by_table_id(table_id, true)
+    }
+
+    pub fn get_created_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+        self.get_indexes_by_table_id(table_id, false)
     }
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&Arc<SystemTableCatalog>> {

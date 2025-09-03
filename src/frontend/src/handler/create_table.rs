@@ -29,7 +29,7 @@ use risingwave_common::catalog::{
     ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
-use risingwave_common::global_jvm::JVM;
+use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -718,7 +718,7 @@ pub struct CreateTableProps {
     pub definition: String,
     pub append_only: bool,
     pub on_conflict: EitherOnConflict,
-    pub with_version_column: Option<String>,
+    pub with_version_columns: Vec<String>,
     pub webhook_info: Option<PbWebhookSourceInfo>,
     pub engine: Engine,
 }
@@ -805,7 +805,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     cdc_with_options: WithOptionsSecResolved,
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
+    with_version_columns: Vec<String>,
     include_column_options: IncludeOption,
     table_name: ObjectName,
     resolved_table_name: String, // table name without schema prefix
@@ -917,7 +917,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             definition,
             append_only: false,
             on_conflict: on_conflict.into(),
-            with_version_column,
+            with_version_columns,
             webhook_info: None,
             engine,
         },
@@ -1043,7 +1043,7 @@ pub(super) async fn handle_create_table_plan(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
+    with_version_columns: Vec<String>,
     include_column_options: IncludeOption,
     webhook_info: Option<WebhookSourceInfo>,
     engine: Engine,
@@ -1069,7 +1069,7 @@ pub(super) async fn handle_create_table_plan(
         definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict: on_conflict.into(),
-        with_version_column: with_version_column.clone(),
+        with_version_columns: with_version_columns.clone(),
         webhook_info,
         engine,
     };
@@ -1196,7 +1196,7 @@ pub(super) async fn handle_create_table_plan(
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
-                with_version_column,
+                with_version_columns,
                 include_column_options,
                 table_name.clone(),
                 resolved_table_name,
@@ -1383,7 +1383,7 @@ pub async fn handle_create_table(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
+    with_version_columns: Vec<String>,
     cdc_table_info: Option<CdcTableInfo>,
     include_column_options: IncludeOption,
     webhook_info: Option<WebhookSourceInfo>,
@@ -1438,7 +1438,7 @@ pub async fn handle_create_table(
             source_watermarks,
             append_only,
             on_conflict,
-            with_version_column,
+            with_version_columns,
             include_column_options,
             webhook_info,
             engine,
@@ -2021,7 +2021,7 @@ pub async fn create_iceberg_engine_table(
 
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
-    let _ = JVM.get_or_init()?;
+    let _ = Jvm::get_or_init()?;
 
     let catalog_writer = session.catalog_writer()?;
     // TODO(iceberg): make iceberg engine table creation ddl atomic
@@ -2129,7 +2129,7 @@ pub async fn generate_stream_graph_for_replace_table(
         source_watermarks,
         append_only,
         on_conflict,
-        with_version_column,
+        with_version_columns,
         wildcard_idx,
         cdc_table_info,
         format_encode,
@@ -2167,7 +2167,10 @@ pub async fn generate_stream_graph_for_replace_table(
         definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict: on_conflict.into(),
-        with_version_column: with_version_column.as_ref().map(|x| x.real_value()),
+        with_version_columns: with_version_columns
+            .iter()
+            .map(|col| col.real_value())
+            .collect(),
         webhook_info: original_catalog.webhook_info.clone(),
         engine,
     };
@@ -2229,7 +2232,10 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
-                with_version_column.map(|x| x.real_value()),
+                with_version_columns
+                    .iter()
+                    .map(|col| col.real_value())
+                    .collect(),
                 include_column_options,
                 table_name,
                 resolved_table_name,

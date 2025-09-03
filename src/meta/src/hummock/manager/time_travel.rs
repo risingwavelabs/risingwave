@@ -288,7 +288,7 @@ impl HummockManager {
         let mut result: HashSet<_> = objects
             .filter(|object_id| match object_id {
                 HummockObjectId::Sstable(_) => true,
-                HummockObjectId::VectorFile(_) => false,
+                HummockObjectId::VectorFile(_) | HummockObjectId::HnswGraphFile(_) => false,
             })
             .collect();
         let mut remain_sst: VecDeque<_> = result.iter().copied().collect();
