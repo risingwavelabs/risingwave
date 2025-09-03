@@ -58,7 +58,7 @@ d
 # It needs some time for the split change to be reflected in MV
 sleep 40s
 
-query ?
+query ? retry 3 backoff 5s
 SELECT * FROM mv order by x;
 ----
 a
