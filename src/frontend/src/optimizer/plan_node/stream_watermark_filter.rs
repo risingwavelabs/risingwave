@@ -50,7 +50,7 @@ impl StreamWatermarkFilter {
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.append_only(),
+            input.stream_kind(),
             false, // TODO(rc): decide EOWC property
             watermark_columns,
             // watermark filter preserves input order and hence monotonicity

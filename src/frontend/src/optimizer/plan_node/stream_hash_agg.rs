@@ -51,7 +51,7 @@ impl StreamHashAgg {
         core: generic::Agg<PlanRef>,
         vnode_col_idx: Option<usize>,
         row_count_idx: usize,
-    ) -> Self {
+    ) -> Result<Self> {
         Self::new_with_eowc(core, vnode_col_idx, row_count_idx, false)
     }
 
@@ -60,8 +60,9 @@ impl StreamHashAgg {
         vnode_col_idx: Option<usize>,
         row_count_idx: usize,
         emit_on_window_close: bool,
-    ) -> Self {
+    ) -> Result<Self> {
         assert_eq!(core.agg_calls[row_count_idx], PlanAggCall::count_star());
+        reject_upsert_input!(core.input);
 
         let input = core.input.clone();
         let input_dist = input.distribution();
@@ -95,19 +96,25 @@ impl StreamHashAgg {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            emit_on_window_close, // in EOWC mode, we produce append only output
+            if emit_on_window_close {
+                // in EOWC mode, we produce append only output
+                StreamKind::AppendOnly
+            } else {
+                StreamKind::Retract
+            },
             emit_on_window_close,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
-        StreamHashAgg {
+
+        Ok(StreamHashAgg {
             base,
             core,
             vnode_col_idx,
             row_count_idx,
             emit_on_window_close,
             window_col_idx,
-        }
+        })
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -135,7 +142,7 @@ impl StreamHashAgg {
             self.vnode_col_idx,
             self.row_count_idx,
             true,
-        )
+        )?
         .into())
     }
 }
@@ -167,12 +174,14 @@ impl PlanTreeNodeUnary<Stream> for StreamHashAgg {
             input,
             ..self.core.clone()
         };
+
         Self::new_with_eowc(
             logical,
             self.vnode_col_idx,
             self.row_count_idx,
             self.emit_on_window_close,
         )
+        .unwrap()
     }
 }
 impl_plan_tree_node_for_unary! { Stream, StreamHashAgg }
@@ -235,6 +244,7 @@ impl ExprRewritable<Stream> for StreamHashAgg {
             self.row_count_idx,
             self.emit_on_window_close,
         )
+        .unwrap()
         .into()
     }
 }

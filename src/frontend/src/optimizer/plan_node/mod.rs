@@ -56,6 +56,7 @@ use super::property::{
 };
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
+use crate::optimizer::property::StreamKind;
 use crate::session::current::notice_to_user;
 use crate::utils::{PrettySerde, build_graph_from_pretty};
 
@@ -67,6 +68,7 @@ pub trait ConventionMarker: 'static + Sized + Clone + Debug + Eq + PartialEq + H
     type Extra: 'static + Eq + Hash + Clone + Debug;
     type ShareNode: ShareNode<Self>;
     type PlanRefDyn: PlanNodeCommon<Self> + Eq + Hash + ?Sized;
+    type PlanNodeType;
 
     fn as_share(plan: &Self::PlanRefDyn) -> Option<&Self::ShareNode>;
 }
@@ -101,7 +103,7 @@ impl<C: ConventionMarker> PlanTreeNodeUnary<C> for NoShareNode<C> {
 }
 
 impl<C: ConventionMarker> AnyPlanNodeMeta<C> for NoShareNode<C> {
-    fn node_type(&self) -> PlanNodeType {
+    fn node_type(&self) -> C::PlanNodeType {
         unreachable!()
     }
 
@@ -115,6 +117,7 @@ impl<C: ConventionMarker> AnyPlanNodeMeta<C> for NoShareNode<C> {
 pub struct Logical;
 impl ConventionMarker for Logical {
     type Extra = plan_base::NoExtra;
+    type PlanNodeType = LogicalPlanNodeType;
     type PlanRefDyn = dyn LogicalPlanNode;
     type ShareNode = LogicalShare;
 
@@ -128,6 +131,7 @@ impl ConventionMarker for Logical {
 pub struct Batch;
 impl ConventionMarker for Batch {
     type Extra = plan_base::BatchExtra;
+    type PlanNodeType = BatchPlanNodeType;
     type PlanRefDyn = dyn BatchPlanNode;
     type ShareNode = NoShareNode<Batch>;
 
@@ -141,6 +145,7 @@ impl ConventionMarker for Batch {
 pub struct Stream;
 impl ConventionMarker for Stream {
     type Extra = plan_base::StreamExtra;
+    type PlanNodeType = StreamPlanNodeType;
     type PlanRefDyn = dyn StreamPlanNode;
     type ShareNode = StreamShare;
 
@@ -152,9 +157,7 @@ impl ConventionMarker for Stream {
 /// The trait for accessing the meta data and [`PlanBase`] for plan nodes.
 pub trait PlanNodeMeta {
     type Convention: ConventionMarker;
-
-    const NODE_TYPE: PlanNodeType;
-
+    const NODE_TYPE: <Self::Convention as ConventionMarker>::PlanNodeType;
     /// Get the reference to the [`PlanBase`] with corresponding convention.
     fn plan_base(&self) -> &PlanBase<Self::Convention>;
 }
@@ -167,7 +170,7 @@ mod plan_node_meta {
     ///
     /// Check [`PlanNodeMeta`] for more details.
     pub trait AnyPlanNodeMeta<C: ConventionMarker> {
-        fn node_type(&self) -> PlanNodeType;
+        fn node_type(&self) -> C::PlanNodeType;
         fn plan_base(&self) -> &PlanBase<C>;
     }
 
@@ -176,7 +179,7 @@ mod plan_node_meta {
     where
         P: PlanNodeMeta,
     {
-        fn node_type(&self) -> PlanNodeType {
+        fn node_type(&self) -> <P::Convention as ConventionMarker>::PlanNodeType {
             P::NODE_TYPE
         }
 
@@ -196,15 +199,17 @@ pub trait PlanNodeCommon<C: ConventionMarker> = PlanTreeNode<C>
     + Downcast
     + ExprRewritable<C>
     + ExprVisitable
-    + AnyPlanNodeMeta<C>
-    + ToPb;
+    + AnyPlanNodeMeta<C>;
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
 ///
 /// We split the trait into lots of sub-trait so that we can easily use macro to impl them.
-pub trait StreamPlanNode: PlanNodeCommon<Stream> {}
-pub trait BatchPlanNode: PlanNodeCommon<Batch> + ToDistributedBatch + ToLocalBatch {}
+pub trait StreamPlanNode: PlanNodeCommon<Stream> + TryToStreamPb {}
+pub trait BatchPlanNode:
+    PlanNodeCommon<Batch> + ToDistributedBatch + ToLocalBatch + TryToBatchPb
+{
+}
 pub trait LogicalPlanNode:
     PlanNodeCommon<Logical> + ColPrunable + PredicatePushdown + ToBatch + ToStream
 {
@@ -410,7 +415,7 @@ impl LogicalPlanRef {
 
                 // If it is the first visit, recursively call `prune_col` for its input and
                 // replace it.
-                if ctx.visit_share_at_second_round(self.id()) {
+                if ctx.visit_share_at_first_round(self.id()) {
                     let new_logical_share: &LogicalShare = new_share
                         .as_logical_share()
                         .expect("must be share operator");
@@ -607,12 +612,12 @@ impl<C: ConventionMarker> PlanRef<C> {
 }
 
 /// Implement again for the `dyn` newtype wrapper.
-impl<C: ConventionMarker> AnyPlanNodeMeta<C> for PlanRef<C> {
-    fn node_type(&self) -> PlanNodeType {
+impl<C: ConventionMarker> PlanRef<C> {
+    pub fn node_type(&self) -> C::PlanNodeType {
         self.0.node_type()
     }
 
-    fn plan_base(&self) -> &PlanBase<C> {
+    pub fn plan_base(&self) -> &PlanBase<C> {
         self.0.plan_base()
     }
 }
@@ -658,8 +663,8 @@ impl PhysicalPlanRef for StreamPlanRef {
 /// Allow access to all fields defined in [`StreamPlanNodeMetadata`] for the type-erased plan node.
 // TODO: may also implement on `dyn PlanNode` directly.
 impl StreamPlanNodeMetadata for StreamPlanRef {
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only()
+    fn stream_kind(&self) -> StreamKind {
+        self.plan_base().stream_kind()
     }
 
     fn emit_on_window_close(&self) -> bool {
@@ -895,7 +900,7 @@ impl dyn StreamPlanNode {
                     .map(|x| *x as u32)
                     .collect(),
                 fields: self.schema().to_prost(),
-                append_only: self.plan_base().append_only(),
+                stream_kind: self.plan_base().stream_kind().to_protobuf() as i32,
             })
         })
     }
@@ -1071,11 +1076,13 @@ mod logical_file_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
 
+mod batch_vector_search;
 mod logical_mysql_query;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_union;
+mod stream_vector_index_write;
 pub mod utils;
 
 pub use batch_delete::BatchDelete;
@@ -1111,6 +1118,7 @@ pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
+pub use batch_vector_search::BatchVectorSearch;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
@@ -1187,6 +1195,7 @@ pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 pub use stream_values::StreamValues;
+pub use stream_vector_index_write::StreamVectorIndexWrite;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
@@ -1283,6 +1292,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
+            , { Batch, VectorSearch }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1323,6 +1333,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, AsOfJoin }
             , { Stream, SyncLogStore }
             , { Stream, MaterializedExprs }
+            , { Stream, VectorIndexWrite }
             $(,$rest)*
         }
     };
@@ -1354,103 +1365,42 @@ macro_rules! for_each_convention_all_plan_nodes {
     }
 }
 
-/// `for_logical_plan_nodes` includes all plan nodes with logical convention.
-#[macro_export]
-macro_rules! for_logical_plan_nodes {
-    ($macro:ident) => {
-        $crate::for_each_convention_all_plan_nodes! {
-              $crate::for_logical_plan_nodes, $macro
-        }
-    };
-    (
-        {
-            Logical, { $( $logical_name:ident ),* },
-            Batch, { $( $batch_name:ident ),* },
-            Stream, { $( $stream_name:ident ),* }
-        }
-        , $macro:ident
-    ) => {
-        $macro! {
-            $( { Logical, $logical_name } ),*
-        }
-    }
-}
-
-/// `for_batch_plan_nodes` includes all plan nodes with batch convention.
-#[macro_export]
-macro_rules! for_batch_plan_nodes {
-    ($macro:ident) => {
-        $crate::for_each_convention_all_plan_nodes! {
-              $crate::for_batch_plan_nodes, $macro
-        }
-    };
-    (
-        {
-            Logical, { $( $logical_name:ident ),* },
-            Batch, { $( $batch_name:ident ),* },
-            Stream, { $( $stream_name:ident ),* }
-        }
-        , $macro:ident
-    ) => {
-        $macro! {
-            $( { Batch, $batch_name } ),*
-        }
-    }
-}
-
-/// `for_stream_plan_nodes` includes all plan nodes with stream convention.
-#[macro_export]
-macro_rules! for_stream_plan_nodes {
-    ($macro:ident) => {
-        $crate::for_each_convention_all_plan_nodes! {
-              $crate::for_stream_plan_nodes, $macro
-        }
-    };
-    (
-        {
-            Logical, { $( $logical_name:ident ),* },
-            Batch, { $( $batch_name:ident ),* },
-            Stream, { $( $stream_name:ident ),* }
-        }
-        , $macro:ident
-    ) => {
-        $macro! {
-            $( { Stream, $stream_name } ),*
-        }
-    }
-}
-
-/// impl [`PlanNodeType`] fn for each node.
+/// impl `PlanNodeType` fn for each node.
 macro_rules! impl_plan_node_meta {
-    ($( { $convention:ident, $name:ident }),*) => {
+    ({
+        $( $convention:ident, { $( $name:ident ),* }),*
+    }) => {
         paste!{
-            /// each enum value represent a `PlanNode` struct type, help us to dispatch and downcast
-            #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq, Serialize)]
-            pub enum PlanNodeType {
-                $( [<$convention $name>] ),*
-            }
-
-            $(impl PlanNodeMeta for [<$convention $name>] {
-                type Convention = $convention;
-                const NODE_TYPE: PlanNodeType = PlanNodeType::[<$convention $name>];
-
-                fn plan_base(&self) -> &PlanBase<$convention> {
-                    &self.base
+            $(
+                /// each enum value represent a `PlanNode` struct type, help us to dispatch and downcast
+                #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq, Serialize)]
+                pub enum [<$convention PlanNodeType>] {
+                    $( [<$convention $name>] ),*
                 }
-            }
+            )*
+            $(
+                $(impl PlanNodeMeta for [<$convention $name>] {
+                    type Convention = $convention;
+                    const NODE_TYPE: [<$convention PlanNodeType>] = [<$convention PlanNodeType>]::[<$convention $name>];
 
-            impl Deref for [<$convention $name>] {
-                type Target = PlanBase<$convention>;
-
-                fn deref(&self) -> &Self::Target {
-                    &self.base
+                    fn plan_base(&self) -> &PlanBase<$convention> {
+                        &self.base
+                    }
                 }
-            })*
+
+                impl Deref for [<$convention $name>] {
+                    type Target = PlanBase<$convention>;
+
+                    fn deref(&self) -> &Self::Target {
+                        &self.base
+                    }
+                })*
+            )*
         }
     }
 }
 
-for_all_plan_nodes! { impl_plan_node_meta }
+for_each_convention_all_plan_nodes! { impl_plan_node_meta }
 
 macro_rules! impl_plan_node {
     ($({ $convention:ident, $name:ident }),*) => {

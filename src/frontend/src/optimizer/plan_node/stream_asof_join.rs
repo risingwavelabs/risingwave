@@ -63,16 +63,12 @@ impl StreamAsOfJoin {
         core: generic::Join<PlanRef>,
         eq_join_predicate: EqJoinPredicate,
         inequality_desc: AsOfJoinDesc,
-    ) -> Self {
+    ) -> Result<Self> {
         let ctx = core.ctx();
 
         assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
 
-        // Inner join won't change the append-only behavior of the stream. The rest might.
-        let append_only = match core.join_type {
-            JoinType::Inner => core.left.append_only() && core.right.append_only(),
-            _ => false,
-        };
+        let stream_kind = core.stream_kind()?;
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),
@@ -87,20 +83,20 @@ impl StreamAsOfJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            stream_kind,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
             eq_join_predicate,
-            is_append_only: append_only,
+            is_append_only: stream_kind.is_append_only(),
             inequality_desc,
             join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
-        }
+        })
     }
 
     /// Get join type
@@ -227,7 +223,8 @@ impl PlanTreeNodeBinary<Stream> for StreamAsOfJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone(), self.inequality_desc)
+
+        Self::new(core, self.eq_join_predicate.clone(), self.inequality_desc).unwrap()
     }
 }
 
@@ -306,7 +303,8 @@ impl ExprRewritable<Stream> for StreamAsOfJoin {
             core.left.schema().len(),
         )
         .unwrap();
-        Self::new(core, eq_join_predicate, desc).into()
+
+        Self::new(core, eq_join_predicate, desc).unwrap().into()
     }
 }
 

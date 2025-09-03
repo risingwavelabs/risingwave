@@ -172,9 +172,7 @@ pub async fn gen_sink_plan(
         .unwrap_or(false);
 
     if is_auto_schema_change {
-        Feature::SinkAutoSchemaChange
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
+        Feature::SinkAutoSchemaChange.check_available()?;
     }
 
     // Used for debezium's table name

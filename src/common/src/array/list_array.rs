@@ -249,8 +249,7 @@ impl ListArray {
         );
         debug_assert!(
             (array.array_type == PbArrayType::List as i32)
-                || (array.array_type == PbArrayType::Map as i32)
-                || (array.array_type == PbArrayType::Vector as i32),
+                || (array.array_type == PbArrayType::Map as i32),
             "invalid array type for list: {}",
             array.array_type
         );

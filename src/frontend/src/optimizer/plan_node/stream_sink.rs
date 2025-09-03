@@ -41,7 +41,7 @@ use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
 use super::{
-    ExprRewritable, PlanBase, StreamNode, StreamPlanRef as PlanRef, StreamProject,
+    ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanRef as PlanRef, StreamProject,
     StreamSyncLogStore, generic,
 };
 use crate::TableCatalog;
@@ -174,6 +174,15 @@ impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc, log_store_type: SinkLogStoreType) -> Self {
         let base = input.plan_base().clone_with_new_plan_id();
+
+        if let SinkType::AppendOnly = sink_desc.sink_type {
+            let kind = input.stream_kind();
+            assert_matches!(
+                kind,
+                StreamKind::AppendOnly,
+                "{kind} stream cannot be used as input of append-only sink",
+            );
+        }
 
         Self {
             base,
@@ -355,6 +364,14 @@ impl StreamSink {
             }
         };
         let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
+        let input = if input.ctx().session_ctx().config().streaming_separate_sink()
+            && input.as_stream_exchange().is_none()
+        {
+            StreamExchange::new_no_shuffle(input).into()
+        } else {
+            input
+        };
+
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let create_type = if input.ctx().session_ctx().config().background_ddl()
             && plan_can_use_background_ddl(&input)

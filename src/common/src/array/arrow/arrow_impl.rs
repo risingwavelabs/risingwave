@@ -54,7 +54,7 @@ use super::arrow_schema::IntervalUnit;
 use super::{ArrowIntervalType, arrow_array, arrow_buffer, arrow_cast, arrow_schema};
 // Other import should always use the absolute path.
 use crate::array::*;
-use crate::types::{DataType as RwDataType, *};
+use crate::types::{DataType as RwDataType, Scalar, *};
 use crate::util::iter_util::ZipEqFast;
 
 /// Defines how to convert RisingWave arrays to Arrow arrays.
@@ -118,7 +118,7 @@ pub trait ToArrow {
             ArrayImpl::List(array) => self.list_to_arrow(data_type, array),
             ArrayImpl::Struct(array) => self.struct_to_arrow(data_type, array),
             ArrayImpl::Map(array) => self.map_to_arrow(data_type, array),
-            ArrayImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            ArrayImpl::Vector(inner) => self.vector_to_arrow(data_type, inner),
         }?;
         if arrow_array.data_type() != data_type {
             arrow_cast::cast(&arrow_array, data_type).map_err(ArrayError::to_arrow)
@@ -254,6 +254,31 @@ pub trait ToArrow {
     }
 
     #[inline]
+    fn vector_to_arrow(
+        &self,
+        data_type: &arrow_schema::DataType,
+        array: &VectorArray,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        let arrow_schema::DataType::List(field) = data_type else {
+            return Err(ArrayError::to_arrow("Invalid list type"));
+        };
+        if field.data_type() != &arrow_schema::DataType::Float32 {
+            return Err(ArrayError::to_arrow("Invalid list inner type for vector"));
+        }
+        let values = Arc::new(arrow_array::Float32Array::from(
+            array.as_raw_slice().to_vec(),
+        ));
+        let offsets = OffsetBuffer::new(array.offsets().iter().map(|&o| o as i32).collect());
+        let nulls = (!array.null_bitmap().all()).then(|| array.null_bitmap().into());
+        Ok(Arc::new(arrow_array::ListArray::new(
+            field.clone(),
+            offsets,
+            values,
+            nulls,
+        )))
+    }
+
+    #[inline]
     fn struct_to_arrow(
         &self,
         data_type: &arrow_schema::DataType,
@@ -331,7 +356,7 @@ pub trait ToArrow {
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
     }

@@ -68,8 +68,7 @@ impl Planner {
 
     pub(crate) fn plan_sys_table(&mut self, sys_table: BoundSystemTable) -> Result<PlanRef> {
         Ok(LogicalSysScan::create(
-            sys_table.sys_table_catalog.name().to_owned(),
-            Rc::new(sys_table.sys_table_catalog.table_desc()),
+            sys_table.sys_table_catalog,
             self.ctx(),
             Cardinality::unknown(), // TODO(card): cardinality of system table
         )
@@ -78,19 +77,7 @@ impl Planner {
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         let as_of = base_table.as_of.clone();
-        let table_cardinality = base_table.table_catalog.cardinality;
-        let scan = LogicalScan::create(
-            base_table.table_catalog.name().to_owned(),
-            base_table.table_catalog.clone(),
-            base_table
-                .table_indexes
-                .iter()
-                .map(|x| x.as_ref().clone().into())
-                .collect(),
-            self.ctx(),
-            as_of.clone(),
-            table_cardinality,
-        );
+        let scan = LogicalScan::from_base_table(base_table, self.ctx(), as_of.clone());
 
         match base_table.table_catalog.engine {
             Engine::Hummock => {
@@ -166,7 +153,7 @@ impl Planner {
                             .map(|(i, column)| (column.name().to_owned(), (i, column)))
                             .collect();
                         let exprs = scan
-                            .table_catalog()
+                            .table()
                             .column_schema()
                             .fields()
                             .iter()

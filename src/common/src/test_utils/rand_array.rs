@@ -24,10 +24,10 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue, VectorVal};
+use crate::array::{Array, ArrayBuilder, ArrayRef};
 use crate::types::{
-    DataType, Date, Decimal, Int256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
-    Timestamp, Timestamptz,
+    Date, Decimal, Int256, Interval, JsonbVal, NativeType, Scalar, Serial, Time, Timestamp,
+    Timestamptz,
 };
 
 pub trait RandValue {
@@ -139,29 +139,36 @@ impl RandValue for JsonbVal {
     }
 }
 
-impl RandValue for StructValue {
+#[cfg(test)]
+impl RandValue for crate::types::StructValue {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        StructValue::new(vec![])
+        crate::types::StructValue::new(vec![])
     }
 }
 
-impl RandValue for ListValue {
+#[cfg(test)]
+impl RandValue for crate::types::ListValue {
     fn rand_value<R: rand::Rng>(rand: &mut R) -> Self {
-        ListValue::from_iter([rand.random::<i16>()])
+        crate::types::ListValue::from_iter([rand.random::<i16>()])
     }
 }
 
-impl RandValue for VectorVal {
-    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        todo!("VECTOR_PLACEHOLDER")
+#[cfg(test)]
+impl RandValue for crate::types::VectorVal {
+    fn rand_value<R: rand::Rng>(rand: &mut R) -> Self {
+        Self::from_iter(
+            [(); Self::TEST_VECTOR_DIMENSION].map(|()| rand.random::<f32>().try_into().unwrap()),
+        )
     }
 }
 
-impl RandValue for MapValue {
+#[cfg(test)]
+impl RandValue for crate::types::MapValue {
     fn rand_value<R: Rng>(_rand: &mut R) -> Self {
+        use crate::types::DataType;
         // dummy value
-        MapValue::from_entries(ListValue::empty(&DataType::Struct(
-            MapType::struct_type_for_map(DataType::Varchar, DataType::Varchar),
+        crate::types::MapValue::from_entries(crate::types::ListValue::empty(&DataType::Struct(
+            crate::types::MapType::struct_type_for_map(DataType::Varchar, DataType::Varchar),
         )))
     }
 }
@@ -214,12 +221,9 @@ mod tests {
         macro_rules! gen_rand_array {
             ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
             $(
-                // todo!("VECTOR_PLACEHOLDER")
-                if stringify!($data_type) != "Vector"
-                {
-                    let array = seed_rand_array::<$array>(10, 1024, 0.5);
-                    assert_eq!(10, array.len());
-                }
+
+                let array = seed_rand_array::<$array>(10, 1024, 0.5);
+                assert_eq!(10, array.len());
             )*
         };
     }

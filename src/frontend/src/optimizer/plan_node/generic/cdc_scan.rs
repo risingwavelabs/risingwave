@@ -245,10 +245,6 @@ impl CdcScan {
         &self.cdc_table_desc.columns
     }
 
-    pub fn append_only(&self) -> bool {
-        false
-    }
-
     /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
         self.output_col_idx

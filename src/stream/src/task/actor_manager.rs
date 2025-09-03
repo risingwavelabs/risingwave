@@ -26,7 +26,6 @@ use risingwave_common::config::MetricLevel;
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -45,8 +44,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, UpstreamSinkUnionExecutor,
-    WrapperExecutor,
+    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, UpstreamFragmentInfo,
+    UpstreamSinkUnionExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -93,10 +92,14 @@ impl StreamActorManager {
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
 
+        let stream_kind = node.stream_kind();
+
         let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
+
         ExecutorInfo {
             schema,
             pk_indices,
+            stream_kind,
             identity,
             id: executor_id,
         }
@@ -254,37 +257,37 @@ impl StreamActorManager {
             identity: info.identity.clone().into(),
         };
 
-        let upstream_infos = merge_projects
-            .into_iter()
-            .map(|(merge_node, project_node)| {
-                let upstream_fragment_id = merge_node
-                    .get_node_body()
-                    .unwrap()
-                    .as_merge()
-                    .unwrap()
-                    .upstream_fragment_id;
-                let merge_schema: Schema =
-                    merge_node.get_fields().iter().map(Field::from).collect();
-                let project_exprs = project_node
-                    .get_node_body()
-                    .unwrap()
-                    .as_project()
-                    .unwrap()
-                    .get_select_list()
-                    .iter()
-                    .map(|e| build_non_strict_from_prost(e, eval_error_report.clone()))
-                    .try_collect()
-                    .unwrap();
-                (upstream_fragment_id, merge_schema, project_exprs)
-            })
-            .collect();
+        let mut initial_upstream_infos = Vec::with_capacity(merge_projects.len());
+        for (merge_node, project_node) in merge_projects {
+            let upstream_fragment_id = merge_node
+                .get_node_body()
+                .unwrap()
+                .as_merge()
+                .unwrap()
+                .upstream_fragment_id;
+            let project_exprs = project_node
+                .get_node_body()
+                .unwrap()
+                .as_project()
+                .unwrap()
+                .get_select_list();
+            let info = UpstreamFragmentInfo::new(
+                upstream_fragment_id,
+                &actor_context.initial_upstream_actors,
+                merge_node.get_fields(),
+                project_exprs,
+                eval_error_report.clone(),
+            )?;
+            initial_upstream_infos.push(info);
+        }
 
         let upstream_sink_union_executor = UpstreamSinkUnionExecutor::new(
             actor_context.clone(),
             local_barrier_manager.clone(),
             self.streaming_metrics.clone(),
             env.config().developer.chunk_size,
-            upstream_infos,
+            initial_upstream_infos,
+            eval_error_report,
         );
         let executor = (info, upstream_sink_union_executor).into();
         input.push(executor);

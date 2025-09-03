@@ -820,6 +820,22 @@ impl DatabaseCheckpointControl {
                 let (_, mut node) = self.command_ctx_queue.pop_first().expect("non-empty");
                 assert!(node.state.creating_jobs_to_wait.is_empty());
                 assert!(node.state.node_to_collect.is_empty());
+
+                // Process load_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
+                let load_finished_source_ids: Vec<_> = node
+                    .state
+                    .resps
+                    .iter()
+                    .flat_map(|resp| &resp.load_finished_source_ids)
+                    .cloned()
+                    .collect();
+                if !load_finished_source_ids.is_empty() {
+                    // Add load_finished_source_ids to the task for processing
+                    let task = task.get_or_insert_default();
+                    task.load_finished_source_ids
+                        .extend(load_finished_source_ids);
+                }
+
                 let mut finished_jobs = self.create_mview_tracker.apply_collected_command(
                     node.command_ctx.command.as_ref(),
                     &node.command_ctx.barrier_info,
@@ -847,10 +863,7 @@ impl DatabaseCheckpointControl {
                     .drain()
                     .for_each(|(job_id, resps)| {
                         node.state.resps.extend(resps);
-                        finished_jobs.push(TrackingJob::New(TrackingCommand {
-                            job_id,
-                            replace_stream_job: None,
-                        }));
+                        finished_jobs.push(TrackingJob::New(TrackingCommand { job_id }));
                     });
                 let task = task.get_or_insert_default();
                 node.command_ctx.collect_commit_epoch_info(

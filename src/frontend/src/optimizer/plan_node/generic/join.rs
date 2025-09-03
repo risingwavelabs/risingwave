@@ -23,8 +23,10 @@ use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::StreamPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata as _;
+use crate::optimizer::plan_node::stream::prelude::*;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, StreamKind};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// [`Join`] combines two relations according to some condition.
@@ -96,6 +98,21 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
 }
 
 impl Join<StreamPlanRef> {
+    pub fn stream_kind(&self) -> Result<StreamKind> {
+        let left_kind = reject_upsert_input!(self.left, "Join");
+        let right_kind = reject_upsert_input!(self.right, "Join");
+
+        // Inner join won't change the append-only behavior of the stream. The rest might.
+        if let JoinType::Inner | JoinType::AsofInner = self.join_type
+            && let StreamKind::AppendOnly = left_kind
+            && let StreamKind::AppendOnly = right_kind
+        {
+            Ok(StreamKind::AppendOnly)
+        } else {
+            Ok(StreamKind::Retract)
+        }
+    }
+
     /// Return stream hash join internal table catalog and degree table catalog.
     pub fn infer_internal_and_degree_table_catalog(
         input: StreamPlanRef,
