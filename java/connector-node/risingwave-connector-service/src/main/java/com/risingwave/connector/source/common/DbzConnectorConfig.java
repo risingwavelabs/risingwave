@@ -170,9 +170,10 @@ public class DbzConnectorConfig {
                 // if snapshot phase is finished and offset is specified, we will continue binlog
                 // reading from the given offset
                 if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    // 'snapshot.mode=recovery' must be configured if binlog offset is
-                    // specified. It only snapshots the schemas, not the data, and continue binlog
-                    // reading from the specified offset
+                    // 'snapshot.mode=no_data' is used when binlog offset is specified.
+                    // Since we use persistent schema history, we only need to snapshot schema when
+                    // no offset is passed, restore directly from schema history when offset is
+                    // available.
                     mysqlProps.setProperty("snapshot.mode", "no_data");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
