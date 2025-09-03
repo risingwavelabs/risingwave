@@ -1068,7 +1068,7 @@ impl DdlController {
         };
 
         let dist_key_indices = get_dist_key_indices().unwrap_or_else(|e| {
-            tracing::error!("Failed to get distribution key indices: {}", e);
+            tracing::error!("Failed to get distribution key indices: {}", e.as_report());
             table.distribution_key.iter().map(|i| *i as _).collect_vec()
         });
 
