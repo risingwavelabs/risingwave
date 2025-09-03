@@ -154,6 +154,7 @@ impl MonitorService for MonitorServiceImpl {
     }
 
     async fn get_profile_stats(
+        &self,
         _request: Request<GetProfileStatsRequest>,
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         Err(Status::unimplemented(
@@ -162,6 +163,7 @@ impl MonitorService for MonitorServiceImpl {
     }
 
     async fn get_channel_delta_stats(
+        &self,
         _request: Request<GetChannelDeltaStatsRequest>,
     ) -> Result<Response<GetChannelDeltaStatsResponse>, Status> {
         Err(Status::unimplemented(

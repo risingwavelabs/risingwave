@@ -12,10 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
+use anyhow::anyhow;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::await_tree::dump_cluster_await_tree;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
-use risingwave_pb::monitor_service::{self, StackTraceRequest, StackTraceResponse};
+use risingwave_pb::monitor_service::{
+    self, GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse, StackTraceRequest,
+    StackTraceResponse,
+};
 use tonic::{Request, Response, Status};
 
 /// The [`MonitorService`] implementation for meta node.
@@ -99,6 +105,8 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<monitor_service::GetChannelDeltaStatsRequest>,
     ) -> Result<Response<monitor_service::GetChannelDeltaStatsResponse>, Status> {
-        Err(Status::unimplemented("not implemented in meta node"))
+        Err(Status::unimplemented(
+            "get_channel_delta_stats is not implemented in meta node - use compute node instead",
+        ))
     }
 }
