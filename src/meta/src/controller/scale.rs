@@ -305,6 +305,16 @@ where
         .min(job.max_parallelism as usize) // limit max parallelism
         .min(vnode_count); // limit vnode count
 
+        println!(
+            "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {}",
+            job_id,
+            actual_parallelism,
+            job.parallelism,
+            total_parallelism,
+            job.max_parallelism,
+            vnode_count
+        );
+
         let assigner = AssignerBuilder::new(job_id).build();
 
         let actors = (0..actual_parallelism).collect_vec();

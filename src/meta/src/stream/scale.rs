@@ -47,7 +47,7 @@ use crate::model::{ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWi
 use crate::serving::{
     ServingVnodeMapping, to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
 };
-use crate::stream::{GlobalStreamManager, SourceManagerRef};
+use crate::stream::{GlobalStreamManager, SourceManagerRef, build_actor_id};
 use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -499,16 +499,29 @@ impl ScaleController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
-        let result = render_jobs(txn, jobs, workers, adaptive_parallelism_strategy).await?;
+        println!("render for {:#?}, workers {:#?}", jobs, workers);
+        let mut render_result =
+            render_jobs(txn, jobs, workers, adaptive_parallelism_strategy).await?;
 
-        let all_rendered_fragments: HashMap<_, _> = result
+        for (db, jobs) in &render_result {
+            println!("\tdb: {db}");
+            for (job, fragments) in jobs {
+                println!("\t\tjob: {job}");
+                for (fragment, fragment_info) in fragments {
+                    println!("\t\t\tfragment: {fragment:?}");
+                    for (actor, actor_info) in &fragment_info.actors {
+                        println!("\t\t\t\tactor: {actor:?}, {actor_info:?}");
+                    }
+                }
+            }
+        }
+
+        let fragment_ids = render_result
             .values()
             .flat_map(|jobs| jobs.values())
             .flatten()
-            .map(|(fragment_id, info)| (*fragment_id, info))
-            .collect();
-
-        let fragment_ids = all_rendered_fragments.keys().copied().collect_vec();
+            .map(|(fragment_id, _)| *fragment_id)
+            .collect_vec();
 
         let upstreams: Vec<(FragmentId, FragmentId, DispatcherType)> = FragmentRelation::find()
             .select_only()
@@ -588,9 +601,60 @@ impl ScaleController {
                 .collect()
         };
 
+        // HACK: The reschedule command currently cannot support direct actor migration.
+        // Therefore, when an actor migration is detected, we assign it a new actor_id,
+        // which is effectively equivalent to a "drop old actor, create new actor" operation.
+        // Since the new ID generation logic is consistent with the initial creation (based on a 0-index),
+        // vnode affinity is preserved. This logic does not affect the recovery process.
+        for (_, fragments) in render_result.values_mut().flatten() {
+            for (fragment_id, fragment_info) in fragments {
+                let prev_fragment: &SharedFragmentInfo =
+                    all_prev_fragments.get(fragment_id).unwrap();
+
+                let used_actor_ids: HashSet<_> = prev_fragment
+                    .actors
+                    .keys()
+                    .chain(fragment_info.actors.keys())
+                    .copied()
+                    .collect();
+
+                let mut available_ids = (0..)
+                    .map(|idx| build_actor_id(*fragment_id as u32, idx as usize))
+                    .filter(|id| !used_actor_ids.contains(id));
+
+                for (actor_id, prev_actor_info) in &prev_fragment.actors {
+                    if let Some(curr_actor_info) = fragment_info.actors.get(actor_id)
+                        && prev_actor_info.worker_id != curr_actor_info.worker_id
+                    {
+                        println!(
+                            "actor {} moved from {} to {}",
+                            actor_id, prev_actor_info.worker_id, curr_actor_info.worker_id
+                        );
+
+                        let new_actor_id = available_ids.next().unwrap();
+
+                        let actor_info = fragment_info.actors.remove(actor_id).unwrap();
+                        fragment_info.actors.insert(new_actor_id, actor_info);
+
+                        println!(
+                            "-> Re-mapped actor_id {} to new available id {}",
+                            actor_id, new_actor_id
+                        );
+                    }
+                }
+            }
+        }
+
+        let all_rendered_fragments: HashMap<_, _> = render_result
+            .values()
+            .flat_map(|jobs| jobs.values())
+            .flatten()
+            .map(|(fragment_id, info)| (*fragment_id, info))
+            .collect();
+
         let mut commands = HashMap::new();
 
-        for (database_id, jobs) in &result {
+        for (database_id, jobs) in &render_result {
             let mut all_fragment_actors = HashMap::new();
             let mut reschedules = HashMap::new();
             for (fragment_id, fragment_info) in jobs.values().flatten() {
@@ -698,7 +762,6 @@ impl ScaleController {
                             .push(dispatcher);
                     }
                 }
-                println!("aap {:#?}", all_actor_dispatchers);
 
                 let prev_fragment = all_prev_fragments.get(&{ *fragment_id }).unwrap();
 
@@ -844,6 +907,11 @@ impl GlobalStreamManager {
             tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
             return Ok(false);
         }
+
+        println!(
+            "trigger parallelism control for jobs: {:#?}, workers {:#?}",
+            job_ids, schedulable_workers
+        );
 
         let batch_size = match self.env.opts.parallelism_control_batch_size {
             0 => job_ids.len(),

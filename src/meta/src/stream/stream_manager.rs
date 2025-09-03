@@ -862,6 +862,8 @@ impl GlobalStreamManager {
         if !deferred {
             println!("before run command");
 
+            let _source_pause_guard = self.source_manager.pause_tick().await;
+
             for (database_id, command) in commands {
                 println!("run command for database_id: {:?}", database_id);
 

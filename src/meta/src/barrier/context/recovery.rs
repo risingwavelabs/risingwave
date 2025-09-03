@@ -110,6 +110,7 @@ impl GlobalBarrierWorkerContextImpl {
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>> {
+        println!("worker nodes {:#?}", worker_nodes);
         let database_id = database_id.map(|database_id| database_id.database_id as _);
         let all_actor_infos = self
             .metadata_manager

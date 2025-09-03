@@ -1032,8 +1032,10 @@ impl CatalogController {
         )
         .await?;
 
+        println!("calling table_fragments");
         let mut table_fragments = BTreeMap::new();
         for job in jobs {
+            println!("\tcalling table_fragments for job {}", job.job_id);
             let fragments = FragmentModel::find()
                 .filter(fragment::Column::JobId.eq(job.job_id))
                 .all(&inner.db)
@@ -1045,7 +1047,17 @@ impl CatalogController {
                 fragments
                     .into_iter()
                     .map(|fragment| {
+                        println!(
+                            "\t\tcalling table_fragments for job {} fragment {}",
+                            job.job_id, fragment.fragment_id
+                        );
+
                         let fragment_info = guard.get_fragment(fragment.fragment_id as _).unwrap();
+
+                        for (actor_id, actor) in &fragment_info.actors {
+                            println!("\t\t\tactor id {} worker id {}", actor_id, actor.worker_id);
+                        }
+
                         let actors = fragment_info
                             .actors
                             .iter()
