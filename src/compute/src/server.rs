@@ -208,9 +208,22 @@ pub async fn compute_node_serve(
 
     LicenseManager::get().refresh(system_params.license_key());
     // Store the state_store_url in a static OnceLock for later use in JNI crate
-    let _ = STATE_STORE_URL.set(state_store_url.to_owned());
+    // Check the return value and if the variable is set, assert that the value is the same.
+    if let Err(existing_url) = STATE_STORE_URL.set(state_store_url.to_owned()) {
+        assert_eq!(
+            existing_url, state_store_url,
+            "STATE_STORE_URL already set with different value"
+        );
+    }
 
-    let _ = DATA_DIRECTORY.set(data_directory.to_owned());
+    // Store the data_directory in a static OnceLock for later use in JNI crate
+    // To be extra safe, check the return value and if the variable is set, assert that the value is the same
+    if let Err(existing_dir) = DATA_DIRECTORY.set(data_directory.to_owned()) {
+        assert_eq!(
+            existing_dir, data_directory,
+            "DATA_DIRECTORY already set with different value"
+        );
+    }
 
     let state_store = StateStoreImpl::new(
         state_store_url,

@@ -19,7 +19,7 @@ use bytes::Bytes;
 use jni::objects::{JByteArray, JObject, JString};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
@@ -45,15 +45,10 @@ fn validate_dat_file_extension(path: &str) -> Result<(), String> {
 
 // schema history is internal state, all data is stored under the DATA_DIRECTORY directory.
 fn prepend_data_directory(path: &str) -> String {
-    let data_dir = DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or("");
-    if data_dir.is_empty() {
-        // In cloud environments, using empty data directory can cause data conflicts
-        // between different instances sharing the same bucket. We should ensure
-        // data_directory is properly set to avoid data overwrites.
-        panic!(
-            "DATA_DIRECTORY is not set. This is dangerous in cloud environments as it can cause data conflicts between multiple instances sharing the same bucket. Please ensure data_directory is properly configured."
-        );
-    }
+    let data_dir = DATA_DIRECTORY.get().map(|s| s.as_str()).expect(
+        "DATA_DIRECTORY is not set. This is dangerous in cloud environments as it can cause data conflicts between multiple instances sharing the same bucket. Please ensure data_directory is properly configured."
+    );
+
     if path.starts_with(data_dir) {
         path.to_owned()
     } else if data_dir.ends_with('/') || path.starts_with('/') {
@@ -70,7 +65,7 @@ async fn get_object_store() -> Arc<ObjectStoreImpl> {
         let hummock_url = STATE_STORE_URL.get().unwrap();
         let object_store = build_remote_object_store(
             hummock_url.strip_prefix("hummock+").unwrap_or("memory"),
-            Arc::new(ObjectStoreMetrics::unused()),
+            Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone()),
             "rw-cdc-schema-history",
             Arc::new(ObjectStoreConfig::default()),
         )
