@@ -1,0 +1,27 @@
+query II rowsort
+select * from t1;
+----
+1 11
+
+query ITI rowsort
+select * from t2;
+----
+3 a 13
+4 b 14
+
+query II rowsort
+select * from t3;
+----
+1 11
+3 13
+4 14
+5 15
+
+query I rowsort
+select * from t4;
+----
+1
+2
+3
+4
+5
