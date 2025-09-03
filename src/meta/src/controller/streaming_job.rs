@@ -1361,6 +1361,7 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
         let connector = source.with_properties.0.get_connector().unwrap();
+        let is_shared_source = source.is_shared();
 
         // Use check_source_allow_alter_on_fly_fields to validate allowed properties
         // let prop_keys: Vec<String> = alter_props
@@ -1387,16 +1388,16 @@ impl CatalogController {
             source_id,
             options_with_secret
         );
-        let expected = vec!["kinesis", "kafka"];
+        let expected = vec!["kinesis", "kafka", "datagen"];
         if expected.iter().all(|e| *e != connector) {
             bail!("expect {:?}, found {}", expected, connector);
         }
 
         let mut associate_table_id = None;
 
-        let mut definition_from_table = false;
+        let mut is_table_source = false;
         let definition = if let Some(table_id) = source.optional_associated_table_id {
-            definition_from_table = true;
+            is_table_source = true;
             tracing::debug!("Get definition from table.");
             let (table, _obj) = Table::find_by_id(table_id)
                 .find_also_related(Object)
@@ -1465,12 +1466,12 @@ impl CatalogController {
 
             match &mut stmt {
                 Statement::CreateSource { stmt } => {
-                    assert!(!definition_from_table);
+                    assert!(!is_table_source);
                     stmt.with_properties.0 =
                         format_with_option_secret_resolved(&txn, &options_with_secret).await?;
                 }
                 Statement::CreateTable { with_options, .. } => {
-                    assert!(definition_from_table);
+                    assert!(is_table_source);
                     *with_options =
                         format_with_option_secret_resolved(&txn, &options_with_secret).await?;
                     associate_table_id = source.optional_associated_table_id;
@@ -1544,12 +1545,14 @@ impl CatalogController {
             |node, found| {
                 if let PbNodeBody::Source(node) = node
                     && let Some(source_inner) = &mut node.source_inner
+                    && source_inner.source_id == source_id as u32
                 {
                     source_inner.with_properties = options_with_secret.as_plaintext().clone();
                     source_inner.secret_refs = options_with_secret.as_secret().clone();
                     *found = true;
                 }
             },
+            is_shared_source || is_table_source,
         )
         .await?;
 
@@ -2458,6 +2461,7 @@ async fn update_connector_props_fragments<F>(
     job_id: i32,
     expect_flag: FragmentTypeFlag,
     mut alter_stream_node_fn: F,
+    expect_fragment: bool,
 ) -> MetaResult<()>
 where
     F: FnMut(&mut PbNodeBody, &mut bool),
@@ -2469,13 +2473,12 @@ where
             fragment::Column::FragmentTypeMask,
             fragment::Column::StreamNode,
         ])
-        .filter(fragment::Column::JobId.eq(job_id))
+        .filter(fragment_type_mask_intersects(expect_flag as i32))
         .into_tuple()
         .all(txn)
         .await?;
     let fragments = fragments
         .into_iter()
-        .filter(|(_, fragment_type_mask, _)| *fragment_type_mask & expect_flag as i32 != 0)
         .filter_map(|(id, _, stream_node)| {
             let mut stream_node = stream_node.to_protobuf();
             let mut found = false;
@@ -2489,7 +2492,7 @@ where
             }
         })
         .collect_vec();
-    if fragments.is_empty() {
+    if fragments.is_empty() && expect_fragment {
         bail!(format!(
             "job {} (type: {:?}) should be used by at least one fragment",
             job_id, expect_flag
