@@ -46,6 +46,7 @@ use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
 use crate::common::table::test_utils::gen_pbtable;
+use crate::executor::error::ErrorKind;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::mview::RefreshProgressTable;
 use crate::executor::prelude::*;
@@ -607,9 +608,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             }
 
             // stage 2 - merging and deleting
-
             'stage_2: loop {
-                let refresh_args = self.refresh_args.as_mut().unwrap();
+                let refresh_args = self.refresh_args.as_mut().ok_or_else(|| {
+                    ErrorKind::Uncategorized(anyhow::anyhow!(
+                        "refresh_args is None but sort merge stage is triggered, actor_id={:?}, schema={:?}",
+                        self.actor_context.id,
+                        self.schema.fields(),
+                    ))
+                })?;
                 tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Starting table replacement operation");
 
                 debug_assert_eq!(
