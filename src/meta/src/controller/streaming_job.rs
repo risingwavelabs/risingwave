@@ -2064,32 +2064,6 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
         validate_sink_props(&sink, &props)?;
-
-        // Validate that props can be altered
-        match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-            Some(connector) => {
-                let connector_type = connector.to_lowercase();
-                let field_names: Vec<String> = props.keys().cloned().collect();
-                check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
-                    .map_err(|e| SinkError::Config(anyhow!(e)))?;
-
-                match_sink_name_str!(
-                    connector_type.as_str(),
-                    SinkType,
-                    {
-                        let mut new_props = sink.properties.0.clone();
-                        new_props.extend(props.clone());
-                        SinkType::validate_alter_config(&new_props)
-                    },
-                    |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
-                )?
-            }
-            None => {
-                return Err(
-                    SinkError::Config(anyhow!("connector not specified when alter sink")).into(),
-                );
-            }
-        };
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
             .map_err(|e| SinkError::Config(anyhow!(e)))?
@@ -2566,20 +2540,14 @@ fn validate_sink_props(sink: &sink::Model, props: &BTreeMap<String, String>) -> 
     match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
         Some(connector) => {
             let connector_type = connector.to_lowercase();
+            let field_names: Vec<String> = props.keys().cloned().collect();
+            check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
             match_sink_name_str!(
                 connector_type.as_str(),
                 SinkType,
                 {
-                    for (k, v) in props {
-                        if !SinkType::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
-                            return Err(SinkError::Config(anyhow!(
-                                "unsupported alter config: {}={}",
-                                k,
-                                v
-                            ))
-                            .into());
-                        }
-                    }
                     let mut new_props = sink.properties.0.clone();
                     new_props.extend(props.clone());
                     SinkType::validate_alter_config(&new_props)

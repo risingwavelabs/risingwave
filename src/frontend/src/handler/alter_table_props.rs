@@ -44,18 +44,18 @@ pub async fn handle_alter_table_props(
         sink_names.push(Ident::new_unchecked(sink_name));
         let reader = session.env().catalog_reader().read_guard();
         let (schema_name, real_table_name) =
-            Binder::resolve_schema_qualified_name(db_name, table_name)?;
+            Binder::resolve_schema_qualified_name(db_name, &table_name)?;
         let (_schema_name, real_sink_name) =
-            Binder::resolve_schema_qualified_name(db_name, ObjectName(sink_names))?;
+            Binder::resolve_schema_qualified_name(db_name, &ObjectName(sink_names))?;
         let (_schema_name, real_source_name) =
-            Binder::resolve_schema_qualified_name(db_name, ObjectName(source_names))?;
+            Binder::resolve_schema_qualified_name(db_name, &ObjectName(source_names))?;
         let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (sink, _schema_name) =
-            reader.get_sink_by_name(db_name, schema_path, &real_sink_name)?;
+            reader.get_sink_by_name(db_name, schema_path, &real_sink_name, false)?;
         let (source, _schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
         let (table, schema_name) =
-            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+            reader.get_table_by_name(db_name, schema_path, &real_table_name, false)?;
         if sink.target_table.is_some() {
             bail!("ALTER iceberg table config is not for sink into table")
         }

@@ -537,7 +537,8 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<AlterConnectorPropsRequest>,
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
-        let new_config = match AlterConnectorPropsObject::try_from(request.object_type) {
+        let secret_manager = LocalSecretManager::global();
+        let new_props_plaintext = match AlterConnectorPropsObject::try_from(request.object_type) {
             Ok(AlterConnectorPropsObject::Sink) => {
                 self.metadata_manager
                     .update_sink_props_by_sink_id(
@@ -555,32 +556,8 @@ impl StreamManagerService for StreamServiceImpl {
                     )
                     .await?
             }
-            _ => {
-                unimplemented!(
-                    "Unsupported object type for AlterConnectorProps: {:?}",
-                    request.object_type
-                );
-            }
-        };
 
-        let database_id = self
-            .metadata_manager
-            .catalog_controller
-            .get_object_database_id(request.object_id as ObjectId)
-            .await?;
-        let database_id = DatabaseId::new(database_id as _);
-
-        let secret_manager = LocalSecretManager::global();
-        let new_props_plaintext = match request.object_type() {
-            AlterConnectorPropsObject::Sink => {
-                self.metadata_manager
-                    .update_sink_props_by_sink_id(
-                        request.object_id as i32,
-                        request.changed_props.clone().into_iter().collect(),
-                    )
-                    .await?
-            }
-            AlterConnectorPropsObject::Source => {
+            Ok(AlterConnectorPropsObject::Source) => {
                 // alter source and table's associated source
                 if request.connector_conn_ref.is_some() {
                     return Err(Status::invalid_argument(
@@ -609,11 +586,21 @@ impl StreamManagerService for StreamServiceImpl {
                     .into_iter()
                     .collect()
             }
-            AlterConnectorPropsObject::Connection => {
-                todo!()
+
+            _ => {
+                unimplemented!(
+                    "Unsupported object type for AlterConnectorProps: {:?}",
+                    request.object_type
+                );
             }
-            AlterConnectorPropsObject::Unspecified => unreachable!(),
         };
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(request.object_id as ObjectId)
+            .await?;
+        let database_id = DatabaseId::new(database_id as _);
 
         let mut mutation = HashMap::default();
         mutation.insert(request.object_id, new_props_plaintext);
