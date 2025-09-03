@@ -74,7 +74,7 @@ steps:
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
     plugins:
-      #- *cargo-cache
+      - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 240
     retry: *auto-retry
@@ -83,7 +83,7 @@ steps:
     command: "ci/scripts/build-other.sh"
     key: "build-other"
     plugins:
-      #- *cargo-cache  # Cache enabled
+      - *cargo-cache  # Cache enabled
       - docker-compose#v5.5.0:
           <<: *docker-compose
           environment:
@@ -95,7 +95,7 @@ steps:
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
     plugins:
-      #- *cargo-cache
+      - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
     retry: *auto-retry
 
@@ -103,7 +103,7 @@ steps:
     command: "ci/scripts/docslt.sh"
     key: "docslt"
     plugins:
-      #- *cargo-cache
+      - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 120
     retry: *auto-retry
