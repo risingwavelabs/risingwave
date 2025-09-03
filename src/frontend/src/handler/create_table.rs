@@ -1782,13 +1782,7 @@ pub async fn create_iceberg_engine_table(
             .as_mut()
             .map(|x| x.with_properties.remove("enable_compaction"));
     } else {
-        sink_with.insert(
-            ENABLE_COMPACTION.to_owned(),
-            risingwave_common::license::Feature::IcebergCompaction
-                .check_available()
-                .is_ok()
-                .to_string(),
-        );
+        sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
     }
 
     if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
@@ -1836,13 +1830,7 @@ pub async fn create_iceberg_engine_table(
             }
         }
     } else {
-        sink_with.insert(
-            ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
-            risingwave_common::license::Feature::IcebergCompaction
-                .check_available()
-                .is_ok()
-                .to_string(),
-        );
+        sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
         true
     };
 
