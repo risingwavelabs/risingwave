@@ -36,13 +36,16 @@ statement ok
 create secret s_broker with ( backend = 'meta' ) as 'message_queue_sasl_1:19092';
 
 statement ok
+create secret s_username with ( backend = 'meta' ) as 'dev';
+
+statement ok
 create source non_shared_source_1 (x int) with (
     connector = 'kafka',
     properties.receive.message.max.bytes = secret s1,
     properties.bootstrap.server = secret s_broker,
     properties.security.protocol = 'SASL_PLAINTEXT',
     properties.sasl.mechanism = 'PLAIN',
-    properties.sasl.username = 'dev',
+    properties.sasl.username = secret s_username,
     properties.sasl.password = 'rw',
     topic = 'test_alter_non_shared_source'
 ) format plain encode json;
@@ -57,7 +60,7 @@ create source non_shared_source_2 (x int) with (
     properties.bootstrap.server = secret s_broker,
     properties.security.protocol = 'SASL_PLAINTEXT',
     properties.sasl.mechanism = 'PLAIN',
-    properties.sasl.username = 'dev',
+    properties.sasl.username = secret s_username,
     properties.sasl.password = 'rw',
     topic = 'test_alter_non_shared_source'
 ) format plain encode json;
@@ -75,6 +78,9 @@ select * from non_shared_source_1_mv order by x;
 
 statement ok
 alter secret s_broker with ( backend = 'meta' ) as 'message_queue_sasl_2:19093';
+
+statement ok
+alter secret s_username with ( backend = 'meta' ) as 'dev1';
 
 # alter source connector also triggers re-apply secret
 statement ok
