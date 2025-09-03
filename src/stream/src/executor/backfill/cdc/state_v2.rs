@@ -78,12 +78,14 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
                         Some(ScalarImpl::Jsonb(ref jsonb)) => {
                             serde_json::from_value(jsonb.clone().take()).unwrap()
                         }
+                        None => None,
                         _ => return Err(anyhow!("invalid backfill state: cdc_offset_low").into()),
                     };
                     let cdc_offset_high = match state[4] {
                         Some(ScalarImpl::Jsonb(ref jsonb)) => {
                             serde_json::from_value(jsonb.clone().take()).unwrap()
                         }
+                        None => None,
                         _ => return Err(anyhow!("invalid backfill state: cdc_offset_high").into()),
                     };
                     (cdc_offset_low, cdc_offset_high)
