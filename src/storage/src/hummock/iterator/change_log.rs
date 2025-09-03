@@ -714,25 +714,34 @@ mod tests {
         assert_eq!(mem_table_logs.len(), epoch_count);
         for start_epoch_idx in 0..epoch_count {
             for end_epoch_idx in start_epoch_idx..epoch_count {
-                let new_value_iter = MergeIterator::new(mem_table_logs.iter().map(
-                    |(epoch, new_value_memtable, _)| {
-                        MemTableHummockIterator::new(
-                            new_value_memtable,
-                            EpochWithGap::new_from_epoch(*epoch),
-                            table_id,
-                        )
-                    },
-                ));
-                let old_value_iter = MergeIterator::new(mem_table_logs.iter().map(
-                    |(epoch, _, old_value_memtable)| {
-                        MemTableHummockIterator::new(
-                            old_value_memtable,
-                            EpochWithGap::new_from_epoch(*epoch),
-                            table_id,
-                        )
-                    },
-                ));
                 let epoch_range = (logs[start_epoch_idx].0, logs[end_epoch_idx].0);
+                let (min_epoch, max_epoch) = epoch_range;
+
+                // Only include memtables whose epoch is within the current test range.
+                let new_value_iter = MergeIterator::new(
+                    mem_table_logs
+                        .iter()
+                        .filter(|(e, _, _)| *e >= min_epoch && *e <= max_epoch)
+                        .map(|(epoch, new_value_memtable, _)| {
+                            MemTableHummockIterator::new(
+                                new_value_memtable,
+                                EpochWithGap::new_from_epoch(*epoch),
+                                table_id,
+                            )
+                        }),
+                );
+                let old_value_iter = MergeIterator::new(
+                    mem_table_logs
+                        .iter()
+                        .filter(|(e, _, _)| *e >= min_epoch && *e <= max_epoch)
+                        .map(|(epoch, _, old_value_memtable)| {
+                            MemTableHummockIterator::new(
+                                old_value_memtable,
+                                EpochWithGap::new_from_epoch(*epoch),
+                                table_id,
+                            )
+                        }),
+                );
                 let mut change_log_iter = ChangeLogIteratorInner::new(
                     epoch_range,
                     (Unbounded, Unbounded),
