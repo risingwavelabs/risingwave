@@ -65,10 +65,11 @@ if [[ -n "$failed_logs" ]]; then
 
         echo "--- Running reducer on failing queries for seed $seed"
         ./target/debug/sqlsmith-reducer \
-          --input-file "$error_sql" \
-          --output-file "$shrunk_sql" \
-          --run-rw-cmd './risedev ci-kill && ./risedev ci-start ci-3cn-1fe'
-        echo "--- Reducer finished for seed $seed"
+            --input-file "$error_sql" \
+            --output-file "$shrunk_sql" \
+            --run-rw-cmd './risedev k && ./risedev ci-start ci-3cn-1fe' \
+            > "$LOGDIR/reducer-$seed.log" 2>&1
+        echo "--- Reducer finished for seed $seed (log: $LOGDIR/reducer-$seed.log)"
         echo "Reduced queries saved at $shrunk_sql"
     done
     exit 1
