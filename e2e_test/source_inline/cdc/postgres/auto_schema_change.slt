@@ -3,6 +3,7 @@ control substitution on
 # Test comprehensive PostgreSQL data types with auto schema change
 system ok
 psql -c "
+    DROP EXTENSION IF EXISTS citext CASCADE;
     DROP TABLE IF EXISTS t;
     CREATE EXTENSION IF NOT EXISTS citext;
     CREATE TYPE mood_enum AS ENUM ('happy', 'sad', 'angry');
