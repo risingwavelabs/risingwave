@@ -21,6 +21,7 @@ use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
+use thiserror_ext::AsReport;
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
 
@@ -133,7 +134,14 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
             let object_store = get_object_store().await;
             match object_store.read(&object_name, ..).await {
                 Ok(data) => data,
-                Err(_) => Bytes::new(),
+                Err(e) => {
+                    tracing::error!(
+                        "CDC Schema History: Failed to read schema history file {}: {}",
+                        object_name,
+                        e.as_report()
+                    );
+                    Bytes::new()
+                }
             }
         });
 
@@ -172,7 +180,10 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
             let mut file_names = Vec::new();
             let mut stream = match object_store.list(&dir, None, None).await {
                 Ok(s) => s,
-                Err(_) => return file_names,
+                Err(e) => {
+                    tracing::error!("CDC Schema History: Failed to list schema history files in directory {}: {}", dir, e.as_report());
+                    return file_names;
+                }
             };
             use futures::StreamExt;
             while let Some(obj) = stream.next().await {
@@ -197,7 +208,10 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
                             tracing::error!("Filtering out non-.dat file from list: {}", obj.key);
                         }
                     }
-                    Err(_) => continue,
+                    Err(e) => {
+                        tracing::error!("CDC Schema History: Failed to get object from list stream: {}", e.as_report());
+                        return file_names;
+                    }
                 }
             }
             file_names
@@ -231,27 +245,36 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
             let mut keys = Vec::new();
             let mut stream = match object_store.list(&dir, None, None).await {
                 Ok(s) => s,
-                Err(_) => return,
+                Err(e) => {
+                    tracing::error!("CDC Schema History: Failed to build list stream for schema history files in directory {}: {}", dir, e.as_report());
+                    return;
+                }
             };
             use futures::StreamExt;
             while let Some(obj) = stream.next().await {
-                if let Ok(obj) = obj {
-                    // Additional security: only delete files that pass validation
-                    // Remove the data directory prefix for validation
-                    let relative_path = obj
-                        .key
-                        .strip_prefix(DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or(""))
-                        .unwrap_or(&obj.key);
-                    let relative_path = if let Some(stripped) = relative_path.strip_prefix('/') {
-                        stripped
-                    } else {
-                        relative_path
-                    };
+                match obj {
+                    Ok(obj) => {
+                        // Additional security: only delete files that pass validation
+                        // Remove the data directory prefix for validation
+                        let relative_path = obj
+                            .key
+                            .strip_prefix(DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or(""))
+                            .unwrap_or(&obj.key);
+                        let relative_path = if let Some(stripped) = relative_path.strip_prefix('/') {
+                            stripped
+                        } else {
+                            relative_path
+                        };
 
-                    if validate_dat_file_extension(relative_path).is_ok() {
-                        keys.push(obj.key);
-                    } else {
-                        tracing::error!("Skipping deletion of non-.dat file: {}", obj.key);
+                        if validate_dat_file_extension(relative_path).is_ok() {
+                            keys.push(obj.key);
+                        } else {
+                            tracing::error!("Skipping deletion of non-.dat file: {}", obj.key);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("CDC Schema History: Failed to list object when deleting: {}", e.as_report());
+                        return;
                     }
                 }
             }
