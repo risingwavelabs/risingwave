@@ -32,13 +32,11 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
-use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink;
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
-use risingwave_connector::sink::trivial::BlackHoleSink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     Sink, enforce_secret_sink,
@@ -207,12 +205,10 @@ pub async fn gen_sink_plan(
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
             direct_sink_from_name = Some((from_name.clone(), is_auto_schema_change));
-            if is_auto_schema_change {
-                if sink_into_table_name.is_some() {
-                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                        "auto schema change not supported for sink-into-table".to_owned(),
-                    )));
-                }
+            if is_auto_schema_change && sink_into_table_name.is_some() {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "auto schema change not supported for sink-into-table".to_owned(),
+                )));
             }
             if resolved_with_options
                 .value_eq_ignore_case(SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, "true")
