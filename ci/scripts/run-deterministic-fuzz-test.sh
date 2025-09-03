@@ -48,7 +48,7 @@ risedev ci-start ci-3cn-1fe
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
 set +e
-seq 1 | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation --sqlsmith 10 --enable eowc ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
+seq 32 | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 set -e
 
 failed_logs=$(ls $LOGDIR/fuzzing-*.log 2>/dev/null || true)
