@@ -167,6 +167,7 @@ services:
     image: "${ACR_LOGIN_SERVER}/${ACR_REPOSITORY}:${BUILD_ENV_VERSION}"
     volumes:
       - ..:/risingwave
+    working_dir: /risingwave
     stop_grace_period: 30s
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
