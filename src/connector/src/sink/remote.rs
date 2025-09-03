@@ -37,7 +37,6 @@ use risingwave_jni_core::{
     JniReceiverType, JniSenderType, JniSinkWriterStreamRequest, call_static_method, gen_class_name,
 };
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
-use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
     Request as SinkRequest, StartSink,
 };
@@ -45,7 +44,7 @@ use risingwave_pb::connector_service::{
     PbSinkParam, SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata,
     SinkWriterStreamRequest, SinkWriterStreamResponse, TableSchema, ValidateSinkRequest,
     ValidateSinkResponse, sink_coordinator_stream_request, sink_coordinator_stream_response,
-    sink_metadata, sink_writer_stream_response,
+    sink_writer_stream_response,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
@@ -661,11 +660,13 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
         if is_checkpoint {
             // TODO: add metrics to measure commit time
             let rsp = self.stream_handle.commit(epoch).await?;
-            Ok(Some(rsp.metadata.unwrap_or_else(|| SinkMetadata {
-                metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
-                    metadata: vec![],
-                })),
-            })))
+            rsp.metadata
+                .ok_or_else(|| {
+                    SinkError::Remote(anyhow!(
+                        "get none metadata in commit response for coordinated sink writer"
+                    ))
+                })
+                .map(Some)
         } else {
             self.stream_handle.barrier(epoch).await?;
             Ok(None)

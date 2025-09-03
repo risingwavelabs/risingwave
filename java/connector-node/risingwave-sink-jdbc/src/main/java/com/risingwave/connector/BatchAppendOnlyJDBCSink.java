@@ -311,7 +311,15 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
                     .withCause(e)
                     .asRuntimeException();
         }
-        return Optional.empty();
+        // Return a mock SinkMetadata with one empty byte field
+        ConnectorServiceProto.SinkMetadata metadata =
+                ConnectorServiceProto.SinkMetadata.newBuilder()
+                        .setSerialized(
+                                ConnectorServiceProto.SinkMetadata.SerializedMetadata.newBuilder()
+                                        .setMetadata(com.google.protobuf.ByteString.EMPTY)
+                                        .build())
+                        .build();
+        return Optional.of(metadata);
     }
 
     @Override

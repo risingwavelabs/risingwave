@@ -6,7 +6,7 @@ create table t(id int, name string);
 statement error sink with auto schema change should have same pk as upstream table
 create sink s from t with (connector = 'blackhole', primary_key = 'id', auto.schema.change = 'true');
 
-statement error auto schema change not supported for kafka
+statement error kafka sink does not support schema change
 create sink s from t with (connector = 'kafka', auto.schema.change = 'true');
 
 statement error auto schema change not supported for CREATE SINK AS QUERY
