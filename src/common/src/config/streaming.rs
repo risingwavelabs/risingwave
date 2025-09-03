@@ -246,6 +246,7 @@ pub mod default {
 
     pub mod streaming {
         use tracing::info;
+
         use crate::config::AsyncStackTraceOption;
         use crate::util::env_var::env_var_is_true;
 
