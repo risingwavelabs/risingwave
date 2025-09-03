@@ -107,6 +107,19 @@ steps:
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 30
       retry: *auto-retry
+    - label: "end-to-end preload-memory test"
+      key: "e2e-preload-memory-test-release"
+      command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true ci/scripts/e2e-test-serial.sh -p ci-release -m ci-3streaming-2serving-3fe"
+      if: |
+        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-preload-memory-tests"
+      depends_on:
+        - "build"
+      plugins:
+        - docker-compose#v5.5.0: *docker-compose-standard
+        - ./ci/plugins/upload-failure-logs
+      timeout_in_minutes: 30
+      retry: *auto-retry
 
     - label: "slow end-to-end test ({{matrix.backend}} backend)"
       key: "slow-e2e-test-release"
@@ -396,6 +409,20 @@ steps:
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      # Only upload zipped files, otherwise the logs is too much.
+      - ./ci/plugins/upload-failure-logs-zipped
+    timeout_in_minutes: 60
+    parallelism: 4
+    retry: *auto-retry
+  - label: "preload-memory recovery test (madsim)"
+    key: "preload-memory-recovery-test-deterministic"
+    command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-preload-memory-tests"
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v5.5.0: *docker-compose

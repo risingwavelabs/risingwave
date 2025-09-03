@@ -245,6 +245,7 @@ pub mod default {
     pub use crate::config::default::developer;
 
     pub mod streaming {
+        use tracing::info;
         use crate::config::AsyncStackTraceOption;
         use crate::util::env_var::env_var_is_true;
 
@@ -267,7 +268,12 @@ pub mod default {
         }
 
         pub fn default_enable_mem_preload_state_table() -> bool {
-            env_var_is_true("DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE")
+            if env_var_is_true("DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE") {
+                info!("enabled mem_preload_state_table globally by env var");
+                true
+            } else {
+                false
+            }
         }
     }
 }

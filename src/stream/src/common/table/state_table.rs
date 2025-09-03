@@ -308,7 +308,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             .await?
             .into_iter()
             .collect();
-            info!(table_id = %self.table_id, vnode_count = vnode_bitmap.count_ones(), duration = ?start_time.elapsed(),"finished reloading all rows");
+            // avoid flooding e2e-test log
+            if !cfg!(debug_assertions) {
+                info!(table_id = %self.table_id, vnode_count = vnode_bitmap.count_ones(), duration = ?start_time.elapsed(),"finished reloading all rows");
+            }
         }
         Ok(())
     }
@@ -347,21 +350,19 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                         match direction {
                             WatermarkDirection::Ascending => {
                                 for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
-                                    if let Some(rows) = rows.get_mut(&vnode) {
-                                        // split_off returns everything after the given key, including the key.
-                                        *rows = rows.split_off(vnode_watermark.watermark());
-                                    }
+                                    let rows = rows.get_mut(&vnode).expect("covered vnode");
+                                    // split_off returns everything after the given key, including the key.
+                                    *rows = rows.split_off(vnode_watermark.watermark());
                                 }
                             }
                             WatermarkDirection::Descending => {
                                 // Turn Exclude(vnode_watermark.watermark()) into Include(next_key(vnode_watermark.watermark())).
                                 let split_off_key = next_key(vnode_watermark.watermark());
                                 for vnode in vnode_watermark.vnode_bitmap().iter_vnodes() {
-                                    if let Some(rows) = rows.get_mut(&vnode) {
-                                        // split_off away (Exclude(vnode_watermark.watermark())..) and keep
-                                        // (..Include(vnode_watermark.watermark()))
-                                        rows.split_off(split_off_key.as_slice());
-                                    }
+                                    let rows = rows.get_mut(&vnode).expect("covered vnode");
+                                    // split_off away (Exclude(vnode_watermark.watermark())..) and keep
+                                    // (..Include(vnode_watermark.watermark()))
+                                    rows.split_off(split_off_key.as_slice());
                                 }
                             }
                         }
@@ -958,7 +959,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     ) -> StreamExecutorResult<Option<OwnedRow>> {
         if let Some(rows) = &self.all_rows {
             let (vnode, key) = key_bytes.split_vnode();
-            return Ok(rows.get(&vnode).and_then(|rows| rows.get(key).cloned()));
+            return Ok(rows.get(&vnode).expect("covered vnode").get(key).cloned());
         }
         let read_options = ReadOptions {
             prefix_hint,
@@ -986,10 +987,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     ) -> StreamExecutorResult<bool> {
         if let Some(rows) = &self.all_rows {
             let (vnode, key) = key_bytes.split_vnode();
-            return Ok(rows
-                .get(&vnode)
-                .map(|rows| rows.contains_key(key))
-                .unwrap_or(false));
+            return Ok(rows.get(&vnode).expect("covered vnode").contains_key(key));
         }
         let read_options = ReadOptions {
             prefix_hint,
@@ -1134,8 +1132,8 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         let value_bytes = self.row_serde.serialize(&value).into();
         if let Some(rows) = &mut self.all_rows {
             let (vnode, key) = key.split_vnode_bytes();
-            rows.entry(vnode)
-                .or_default()
+            rows.get_mut(&vnode)
+                .expect("covered vnode")
                 .insert(key, value.into_owned_row());
         }
         self.state_store
@@ -1148,7 +1146,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         let value_bytes = self.row_serde.serialize(value).into();
         if let Some(rows) = &mut self.all_rows {
             let (vnode, key) = key.split_vnode();
-            rows.entry(vnode).or_default().remove(key);
+            rows.get_mut(&vnode).expect("covered vnode").remove(key);
         }
         self.state_store
             .delete(key, value_bytes)
@@ -1161,8 +1159,8 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         let old_value_bytes = self.row_serde.serialize(old_value).into();
         if let Some(rows) = &mut self.all_rows {
             let (vnode, key) = key_bytes.split_vnode_bytes();
-            rows.entry(vnode)
-                .or_default()
+            rows.get_mut(&vnode)
+                .expect("covered vnode")
                 .insert(key, new_value.into_owned_row());
         }
         self.state_store
@@ -1323,13 +1321,16 @@ where
     ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
     {
         if self.op_consistency_level != op_consistency_level {
-            info!(
-                ?new_epoch,
-                prev_op_consistency_level = ?self.op_consistency_level,
-                ?op_consistency_level,
-                table_id = self.table_id.table_id,
-                "switch to new op consistency level"
-            );
+            // avoid flooding e2e-test log
+            if !cfg!(debug_assertions) {
+                info!(
+                    ?new_epoch,
+                    prev_op_consistency_level = ?self.op_consistency_level,
+                    ?op_consistency_level,
+                    table_id = self.table_id.table_id,
+                    "switch to new op consistency level"
+                );
+            }
             self.commit_inner(new_epoch, Some(op_consistency_level))
                 .await
         } else {
@@ -1604,13 +1605,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         if let Some(rows) = &self.all_rows {
             return Ok(futures::future::Either::Left(futures::stream::iter(
                 rows.get(&vnode)
-                    .map(move |rows| {
-                        rows.range((start, end)).map(move |(key, value)| {
-                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
-                        })
-                    })
-                    .into_iter()
-                    .flatten(),
+                    .expect("covered vnode")
+                    .range((start, end))
+                    .map(move |(key, value)| Ok((K::from_vnode_bytes(vnode, key), value.clone()))),
             )));
         }
         let read_options = ReadOptions {
@@ -1640,13 +1637,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         if let Some(rows) = &self.all_rows {
             return Ok(futures::future::Either::Left(futures::stream::iter(
                 rows.get(&vnode)
-                    .map(move |rows| {
-                        rows.range((start, end)).rev().map(move |(key, value)| {
-                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
-                        })
-                    })
-                    .into_iter()
-                    .flatten(),
+                    .expect("covered vnode")
+                    .range((start, end))
+                    .rev()
+                    .map(move |(key, value)| Ok((K::from_vnode_bytes(vnode, key), value.clone()))),
             )));
         }
         let read_options = ReadOptions {
