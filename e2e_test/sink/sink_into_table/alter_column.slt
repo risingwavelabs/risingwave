@@ -218,7 +218,7 @@ recover;
 statement ok
 insert into t_alter_1 values (1, 'a'), (2, 'b'), (3, 'c');
 
-query IT rowsort
+query TI rowsort
 select * from m_alter_1;
 ----
 a 11
@@ -228,7 +228,7 @@ c 13
 statement ok
 alter table m_alter_1 add column v3 int default 1000;
 
-query ITI rowsort
+query TII rowsort
 select * from m_alter_1;
 ----
 a 11 1000
@@ -238,7 +238,7 @@ c 13 1000
 statement ok
 insert into t_alter_1 values (4, 'd'), (5, 'e');
 
-query ITI rowsort
+query TII rowsort
 select * from m_alter_1;
 ----
 a 11 1000
@@ -283,7 +283,7 @@ drop sink s_drop_1;
 statement ok
 alter table m_drop_1 drop column v2;
 
-query ITI rowsort
+query I rowsort
 select * from m_drop_1;
 ----
 1
@@ -293,7 +293,7 @@ select * from m_drop_1;
 statement ok
 alter table m_drop_1 add column v3 int default 1000;
 
-query ITI rowsort
+query II rowsort
 select * from m_drop_1;
 ----
 1 1000
@@ -306,7 +306,7 @@ create sink s_drop_1 into m_drop_1 (v1, v3) as select v1, v1 + 10 from t_drop_1;
 statement ok
 insert into t_drop_1 values (4, 'd'), (5, 'e');
 
-query ITI rowsort
+query II rowsort
 select * from m_drop_1;
 ----
 1 11
