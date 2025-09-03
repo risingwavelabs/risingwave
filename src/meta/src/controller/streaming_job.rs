@@ -2530,12 +2530,17 @@ where
             if found { Some((id, stream_node)) } else { None }
         })
         .collect_vec();
-    assert!(
-        !fragments.is_empty() && is_shared_source, /* shared source should be used by at least one fragment */
-        "job ids {:?} (type: {:?}) should be used by at least one fragment",
-        job_ids,
-        expect_flag
-    );
+    if is_shared_source || job_ids.len() > 1 {
+        // the first element is the source_id or associated table_id
+        // if the source is non-shared, there is no updated fragments
+        // job_ids.len() > 1 means the source is used by other streaming jobs, so there should be at least one fragment updated
+        assert!(
+            !fragments.is_empty(),
+            "job ids {:?} (type: {:?}) should be used by at least one fragment",
+            job_ids,
+            expect_flag
+        );
+    }
 
     for (id, stream_node) in fragments {
         fragment::ActiveModel {
