@@ -1113,7 +1113,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             _ => unreachable!("should only get memtable error"),
         };
         match *e {
-            MemTableError::InconsistentOperation { key, prev, new } => {
+            MemTableError::InconsistentOperation { key, prev, new, .. } => {
                 let (vnode, key) = deserialize_pk_with_vnode(&key, &self.pk_serde).unwrap();
                 panic!(
                     "mem-table operation inconsistent! table_id: {}, vnode: {}, key: {:?}, prev: {}, new: {}",
