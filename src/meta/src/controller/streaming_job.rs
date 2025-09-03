@@ -1857,6 +1857,18 @@ impl CatalogController {
         let connector = source.with_properties.0.get_connector().unwrap();
         let is_shared_source = source.is_shared();
 
+        let mut dep_source_job_ids: Vec<ObjectId> = Vec::new();
+        if !is_shared_source {
+            // mv using non-shared source holds a copy of source in their fragments
+            dep_source_job_ids = ObjectDependency::find()
+                .select_only()
+                .column(object_dependency::Column::UsedBy)
+                .filter(object_dependency::Column::Oid.eq(source_id))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+        }
+
         // Use check_source_allow_alter_on_fly_fields to validate allowed properties
         let prop_keys: Vec<String> = alter_props
             .keys()
@@ -2007,15 +2019,20 @@ impl CatalogController {
             active_table_model.update(&txn).await?;
         }
 
+        let to_check_job_ids = vec![if let Some(associate_table_id) = associate_table_id {
+            // if updating table with connector, the fragment_id is table id
+            associate_table_id
+        } else {
+            source_id
+        }]
+        .into_iter()
+        .chain(dep_source_job_ids.into_iter())
+        .collect_vec();
+
         // update fragments
         update_connector_props_fragments(
             &txn,
-            if let Some(associate_table_id) = associate_table_id {
-                // if updating table with connector, the fragment_id is table id
-                associate_table_id
-            } else {
-                source_id
-            },
+            to_check_job_ids,
             FragmentTypeFlag::Source,
             |node, found| {
                 if let PbNodeBody::Source(node) = node
@@ -2483,7 +2500,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
 
 async fn update_connector_props_fragments<F>(
     txn: &DatabaseTransaction,
-    job_id: i32,
+    job_ids: Vec<i32>,
     expect_flag: FragmentTypeFlag,
     mut alter_stream_node_fn: F,
     is_shared_source: bool,
@@ -2496,7 +2513,7 @@ where
         .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
         .filter(
             fragment::Column::JobId
-                .eq(job_id)
+                .is_in(job_ids.clone())
                 .and(FragmentTypeMask::intersects(expect_flag)),
         )
         .into_tuple()
@@ -2515,8 +2532,8 @@ where
         .collect_vec();
     assert!(
         !fragments.is_empty() && is_shared_source, /* shared source should be used by at least one fragment */
-        "job {} (type: {:?}) should be used by at least one fragment",
-        job_id,
+        "job ids {:?} (type: {:?}) should be used by at least one fragment",
+        job_ids,
         expect_flag
     );
 
