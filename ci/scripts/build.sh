@@ -58,6 +58,13 @@ echo "--- Check link info"
 check_link_info "$profile"
 
 echo "--- Upload artifacts"
+
+echo "PATH is: $PATH"
+command -v buildkite-agent || echo "buildkite-agent not in PATH"
+
+# Check artifacts exist
+ls -lh target/ci-dev || true
+
 echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && compress-and-upload-artifact ./{}-$profile"
 buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
 
