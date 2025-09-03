@@ -39,6 +39,10 @@ public class JDBCSinkFactory implements SinkFactory {
     public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
+        if ((config.getJdbcUrl().startsWith("jdbc:snowflake")
+                || config.getJdbcUrl().startsWith("jdbc:redshift"))) {
+            return new BatchAppendOnlyJDBCSink(config, tableSchema);
+        }
         return new JDBCSink(config, tableSchema);
     }
 

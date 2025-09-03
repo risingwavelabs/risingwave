@@ -86,29 +86,29 @@ pub struct S3Config {
 pub const S3_SINK: &str = "s3";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
-    pub fn new_s3_sink(config: &S3Config) -> Result<Operator> {
+    pub fn new_s3_sink(common: &S3Common) -> Result<Operator> {
         // Create s3 builder.
         let mut builder = S3::default()
-            .bucket(&config.common.bucket_name)
-            .region(&config.common.region_name);
+            .bucket(&common.bucket_name)
+            .region(&common.region_name);
 
-        if let Some(endpoint_url) = &config.common.endpoint_url {
+        if let Some(endpoint_url) = &common.endpoint_url {
             builder = builder.endpoint(endpoint_url);
         }
 
-        if let Some(access) = &config.common.access {
+        if let Some(access) = &common.access {
             builder = builder.access_key_id(access);
         }
 
-        if let Some(secret) = &config.common.secret {
+        if let Some(secret) = &common.secret {
             builder = builder.secret_access_key(secret);
         }
 
-        if let Some(assume_role) = &config.common.assume_role {
+        if let Some(assume_role) = &common.assume_role {
             builder = builder.role_arn(assume_role);
         }
         // Default behavior is disable loading config from environment.
-        if !config.common.enable_config_load() {
+        if !common.enable_config_load() {
             builder = builder.disable_config_load();
         }
 
@@ -150,7 +150,7 @@ impl OpendalSinkBackend for S3Sink {
     }
 
     fn new_operator(properties: S3Config) -> Result<Operator> {
-        FileSink::<S3Sink>::new_s3_sink(&properties)
+        FileSink::<S3Sink>::new_s3_sink(&properties.common)
     }
 
     fn get_path(properties: Self::Properties) -> String {
@@ -205,7 +205,7 @@ impl OpendalSinkBackend for SnowflakeSink {
     }
 
     fn new_operator(properties: S3Config) -> Result<Operator> {
-        FileSink::<SnowflakeSink>::new_s3_sink(&properties)
+        FileSink::<SnowflakeSink>::new_s3_sink(&properties.common)
     }
 
     fn get_path(properties: Self::Properties) -> String {
