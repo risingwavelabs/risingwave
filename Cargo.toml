@@ -149,7 +149,7 @@ criterion = { version = "0.5", features = ["async_futures"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
 deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
-foyer = { version = "0.19.0", features = ["serde", "tracing", "nightly"] }
+foyer = { version = "0.19.2", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.8", default-features = false, features = ["std"] }
 hashbrown = { version = "0.15", features = [
