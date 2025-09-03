@@ -126,7 +126,7 @@ steps:
       - docker-compose#v5.5.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-    - wait
+  - wait
 
   - label: "build"
     command: "ci/scripts/build.sh -p ci-dev"
