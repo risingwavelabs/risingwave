@@ -166,7 +166,7 @@ SELECT * FROM refresh_fs_t_mv;
 4 david
 
 
-sleep 2s
+sleep 5s
 
 # Test refresh without any external changes
 statement ok retry 3 backoff 5s
@@ -200,6 +200,8 @@ echo "1,alice_updated" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file
 system ok
 echo "2,bob_updated" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file2.csv
 
+sleep 5s
+
 statement ok
 REFRESH TABLE refresh_fs_t;
 
@@ -230,6 +232,8 @@ rm ./e2e_test/source_inline/refresh/refresh_table_tmp/file3.csv
 
 system ok
 rm ./e2e_test/source_inline/refresh/refresh_table_tmp/new_file.csv
+
+sleep 5s
 
 statement ok
 REFRESH TABLE refresh_fs_t;
@@ -268,6 +272,8 @@ echo "6,frank" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file6.csv
 system ok
 echo "6,frank_updated" >> ./e2e_test/source_inline/refresh/refresh_table_tmp/file6.csv
 
+sleep 5s
+
 statement ok
 REFRESH TABLE refresh_fs_t;
 
@@ -296,6 +302,8 @@ SELECT * FROM refresh_fs_t_on_conflict_ignore;
 system ok
 rm ./e2e_test/source_inline/refresh/refresh_table_tmp/*.csv
 
+sleep 5s
+
 statement ok
 REFRESH TABLE refresh_fs_t;
 
@@ -312,6 +320,8 @@ echo "7,grace" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new1.csv
 
 system ok
 echo "8,henry" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new2.csv
+
+sleep 5s
 
 statement ok
 REFRESH TABLE refresh_fs_t;
