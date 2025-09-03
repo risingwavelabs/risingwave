@@ -61,6 +61,50 @@ services:
           memory: 1G
     networks:
       - default
+  compactor-1:
+    <<: *image
+    command:
+      - compactor-node
+      - "--listen-addr"
+      - "0.0.0.0:6661"
+      - "--advertise-addr"
+      - "compactor-1:6661"
+      - "--prometheus-listener-addr"
+      - "0.0.0.0:1261"
+      - "--meta-address"
+      - "http://meta-node-0:5690"
+      - "--compactor-mode"
+      - "dedicated-iceberg"
+      - "--config-path"
+      - /risingwave.toml
+    expose:
+      - "6661"
+      - "1261"
+    ports: [ ]
+    depends_on:
+      - meta-node-0
+    volumes:
+      - "./risingwave.toml:/risingwave.toml"
+    environment:
+      RUST_BACKTRACE: "1"
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+    container_name: compactor-1
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/6661; exit $$?;'
+      interval: 1s
+      timeout: 5s
+      retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 8G
+    networks:
+      - default
 
   compute-node-0:
     <<: *image
@@ -99,9 +143,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 26G
+          memory: 8G
         reservations:
-          memory: 26G
+          memory: 8G
     networks:
       - default
 
