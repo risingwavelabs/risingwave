@@ -27,6 +27,7 @@ async fn main() {
                     let vector: [_; VECTOR_DIM] = match input.as_str() {
                         "first" => [1.0, 2.0, 3.0],
                         "second" => [4.0, 5.0, 6.0],
+                        "third" => [7.0, 8.0, 9.0],
                         "query" => [3.0, 2.0, 1.0],
                         _ => [0.0, 0.0, 0.0],
                     };

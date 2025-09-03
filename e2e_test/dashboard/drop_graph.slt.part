@@ -1,4 +1,10 @@
-# Drop materialized views in reverse dependency order (dependent MVs first, then base MVs)
+# Drop relations in reverse dependency order (dependent MVs first, then base MVs)
+statement ok
+drop sink s1;
+
+statement ok
+drop table t_dest;
+
 statement ok
 drop materialized view mv8;
 
