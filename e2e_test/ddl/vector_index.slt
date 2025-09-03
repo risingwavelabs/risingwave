@@ -10,6 +10,12 @@ drop table non_append_only_table;
 statement ok
 create table items (id int primary key, name string, embedding vector(3)) append only;
 
+statement ok
+insert into items values (1, 'name1', '[1,2,3]'), (2, 'name2', '[4,5,6]'), (3, 'name3', '[7,8,9]');
+
+statement ok
+flush;
+
 statement error Invalid input syntax: vector index cannot specify order
 create index i on items using flat (embedding desc) with (distance_type = 'inner_product');
 
@@ -30,6 +36,24 @@ create index i on items using flat (embedding) with (distance_type = 'invalid_di
 
 statement ok
 create index i on items using flat (embedding) include (name) with (distance_type = 'inner_product');
+
+statement ok
+drop index i;
+
+statement error invalid m value invalid: failed to parse invalid digit found in string
+create index i on items using hnsw (embedding) include (name) with (distance_type = 'inner_product', m = 'invalid');
+
+statement error invalid m value 0: should not be zero
+create index i on items using hnsw (embedding) include (name) with (distance_type = 'inner_product', m = '0');
+
+statement ok
+create index i on items using hnsw (embedding) include (name) with (distance_type = 'inner_product');
+
+statement ok
+drop index i;
+
+statement ok
+create index i on items using hnsw (embedding) include (name) with (distance_type = 'inner_product', m = 32, ef_construction = 40, max_level = 5);
 
 statement ok
 drop index i;

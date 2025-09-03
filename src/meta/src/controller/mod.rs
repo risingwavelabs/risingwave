@@ -234,7 +234,14 @@ impl From<ObjectModel<table::Model>> for PbTable {
             handle_pk_conflict_behavior: PbHandleConflictBehavior::from(
                 value.0.handle_pk_conflict_behavior,
             ) as _,
-            version_column_index: value.0.version_column_index.map(|x| x as u32),
+            version_column_indices: value
+                .0
+                .version_column_indices
+                .unwrap_or_default()
+                .0
+                .iter()
+                .map(|&idx| idx as u32)
+                .collect(),
             read_prefix_len_hint: value.0.read_prefix_len_hint as _,
             watermark_indices: value.0.watermark_indices.0,
             dist_key_in_pk: value.0.dist_key_in_pk.0,
