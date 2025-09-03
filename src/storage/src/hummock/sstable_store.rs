@@ -11,9 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
+use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -25,15 +28,18 @@ use foyer::{
     HybridCacheBuilder, HybridCacheEntry, HybridCacheProperties,
 };
 use futures::{StreamExt, future};
+use prost::Message;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::vector_index::VectorFileInfo;
+use risingwave_hummock_sdk::vector_index::{HnswGraphFileInfo, VectorFileInfo};
 use risingwave_hummock_sdk::{
-    HummockObjectId, HummockSstableObjectId, HummockVectorFileId, SST_OBJECT_SUFFIX,
+    HummockHnswGraphFileId, HummockObjectId, HummockRawObjectId, HummockSstableObjectId,
+    HummockVectorFileId, SST_OBJECT_SUFFIX,
 };
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
 };
+use risingwave_pb::hummock::PbHnswGraph;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
@@ -50,9 +56,68 @@ use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta}
 use crate::hummock::{BlockHolder, HummockError, HummockResult, RecentFilterTrait};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
+macro_rules! impl_vector_index_meta_file {
+    ($($type_name:ident),+) => {
+        pub enum HummockVectorIndexMetaFile {
+            $(
+                $type_name(Pin<Box<$type_name>>),
+            )+
+        }
+
+        $(
+            impl From<$type_name> for HummockVectorIndexMetaFile {
+                fn from(v: $type_name) -> Self {
+                    Self::$type_name(Box::pin(v))
+                }
+            }
+
+            unsafe impl Send for VectorMetaFileHolder<$type_name> {}
+
+            impl VectorMetaFileHolder<$type_name> {
+                fn try_from_entry(
+                    entry: CacheEntry<HummockRawObjectId, HummockVectorIndexMetaFile>,
+                    object_id: HummockRawObjectId
+                ) -> HummockResult<Self> {
+                    let HummockVectorIndexMetaFile::$type_name(file_meta) = &*entry else {
+                        return Err(HummockError::decode_error(format!(
+                            "expect {} for object {}",
+                            stringify!($type_name),
+                            object_id
+                        )));
+                    };
+                    let ptr = file_meta.as_ref().get_ref() as *const _;
+                    Ok(VectorMetaFileHolder {
+                        _cache_entry: entry,
+                        ptr,
+                    })
+                }
+            }
+        )+
+    };
+}
+
+impl_vector_index_meta_file!(VectorFileMeta, PbHnswGraph);
+
+pub struct VectorMetaFileHolder<T> {
+    _cache_entry: CacheEntry<HummockRawObjectId, HummockVectorIndexMetaFile>,
+    ptr: *const T,
+}
+
+impl<T> Deref for VectorMetaFileHolder<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        // #safety: VectorFileHolder is exposed only as immutable, and `VectorFileMeta` is pinned via box
+        unsafe { &*self.ptr }
+    }
+}
+
 pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
-pub type VectorFileHolder = CacheEntry<HummockVectorFileId, Box<VectorFileMeta>>;
+
 pub type VectorBlockHolder = CacheEntry<(HummockVectorFileId, usize), Box<VectorBlock>>;
+
+pub type VectorFileHolder = VectorMetaFileHolder<VectorFileMeta>;
+pub type HnswGraphFileHolder = VectorMetaFileHolder<PbHnswGraph>;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct SstableBlockIndex {
@@ -135,7 +200,7 @@ pub struct SstableStoreConfig {
     pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
     pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
 
-    pub vector_meta_cache: Cache<HummockVectorFileId, Box<VectorFileMeta>>,
+    pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
 }
 
@@ -145,7 +210,7 @@ pub struct SstableStore {
 
     meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
     block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
-    pub vector_meta_cache: Cache<HummockVectorFileId, Box<VectorFileMeta>>,
+    pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
 
     /// Recent filter for `(sst_obj_id, blk_idx)`.
@@ -509,8 +574,9 @@ impl SstableStore {
         &self,
         vector_file: &VectorFileInfo,
     ) -> HummockResult<VectorFileHolder> {
-        self.vector_meta_cache
-            .fetch(vector_file.object_id, || {
+        let entry = self
+            .vector_meta_cache
+            .fetch(vector_file.object_id.as_raw(), || {
                 let store = self.store.clone();
                 let path =
                     self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
@@ -522,11 +588,11 @@ impl SstableStore {
                         .map_err(foyer::Error::other)?;
                     let meta = VectorFileMeta::decode_footer(&encoded_footer)
                         .map_err(foyer::Error::other)?;
-                    Ok::<_, foyer::Error>(Box::new(meta))
+                    Ok::<_, foyer::Error>(meta.into())
                 }
             })
-            .await
-            .map_err(HummockError::foyer_error)
+            .await?;
+        VectorFileHolder::try_from_entry(entry, vector_file.object_id.as_raw())
     }
 
     pub async fn get_vector_block(
@@ -561,11 +627,41 @@ impl SstableStore {
         meta: VectorFileMeta,
         blocks: Vec<VectorBlock>,
     ) {
-        self.vector_meta_cache.insert(object_id, Box::new(meta));
+        self.vector_meta_cache
+            .insert(object_id.as_raw(), meta.into());
         for (idx, block) in blocks.into_iter().enumerate() {
             self.vector_block_cache
                 .insert((object_id, idx), Box::new(block));
         }
+    }
+
+    pub fn insert_hnsw_graph_cache(&self, object_id: HummockHnswGraphFileId, graph: PbHnswGraph) {
+        self.vector_meta_cache
+            .insert(object_id.as_raw(), graph.into());
+    }
+
+    pub async fn get_hnsw_graph(
+        &self,
+        graph_file: &HnswGraphFileInfo,
+    ) -> HummockResult<HnswGraphFileHolder> {
+        let entry = self
+            .vector_meta_cache
+            .fetch(graph_file.object_id.as_raw(), || {
+                let store = self.store.clone();
+                let graph_file_path =
+                    self.get_object_data_path(HummockObjectId::HnswGraphFile(graph_file.object_id));
+                async move {
+                    let encoded_graph = store
+                        .read(&graph_file_path, ..)
+                        .await
+                        .map_err(foyer::Error::other)?;
+                    let graph =
+                        PbHnswGraph::decode(encoded_graph.as_ref()).map_err(foyer::Error::other)?;
+                    Ok::<_, foyer::Error>(graph.into())
+                }
+            })
+            .await?;
+        HnswGraphFileHolder::try_from_entry(entry, graph_file.object_id.as_raw())
     }
 
     pub fn get_sst_data_path(&self, object_id: impl Into<HummockSstableObjectId>) -> String {

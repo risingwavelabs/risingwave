@@ -25,12 +25,13 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::recursive::{Recurse, tracker};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{
-    CreateType, PbFlatIndexConfig, PbIndex, PbIndexColumnProperties, PbStreamJobStatus,
-    PbVectorIndexInfo,
+    CreateType, PbFlatIndexConfig, PbHnswFlatIndexConfig, PbIndex, PbIndexColumnProperties,
+    PbStreamJobStatus, PbVectorIndexInfo,
 };
 use risingwave_pb::common::PbDistanceType;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::TableCatalog;
@@ -163,6 +164,42 @@ pub(crate) fn gen_create_index_plan(
             "flat" => Some(risingwave_pb::catalog::vector_index_info::PbConfig::Flat(
                 PbFlatIndexConfig {},
             )),
+            "hnsw" => {
+                let with_options = context.with_options();
+                let parse_non_zero_u32 = |key: &str, default| {
+                    with_options
+                        .get(key)
+                        .map(|v| {
+                            let v = v.parse::<u32>().map_err(|e| {
+                                ErrorCode::InvalidInputSyntax(format!(
+                                    "invalid {} value {}: failed to parse {}",
+                                    key,
+                                    v,
+                                    e.as_report()
+                                ))
+                            })?;
+                            if v == 0 {
+                                Err(ErrorCode::InvalidInputSyntax(format!(
+                                    "invalid {} value {}: should not be zero",
+                                    key, v
+                                )))
+                            } else {
+                                Ok(v)
+                            }
+                        })
+                        .transpose()
+                        .map(|v| v.unwrap_or(default))
+                };
+                Some(
+                    risingwave_pb::catalog::vector_index_info::PbConfig::HnswFlat(
+                        PbHnswFlatIndexConfig {
+                            m: parse_non_zero_u32("m", 16)?, /* default value borrowed from pg_vector */
+                            ef_construction: parse_non_zero_u32("ef_construction", 64)?, /* default value borrowed from pg_vector */
+                            max_level: parse_non_zero_u32("max_level", 10)?,
+                        },
+                    ),
+                )
+            }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "invalid index method {}",
