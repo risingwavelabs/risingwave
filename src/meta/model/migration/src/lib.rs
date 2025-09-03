@@ -48,7 +48,9 @@ mod m20250710_065220_sink_auto_refresh_schema;
 mod m20250722_155040_table_refreshable;
 mod m20250729_174630_add_vector_index_info;
 mod m20250810_000000_add_user_admin_field;
+mod m20250819_014448_add_version_column_indices_to_table;
 mod m20250820_120000_add_cdc_table_type;
+mod m20250821_081110_cdc_table_snapshot_splits_add_column;
 mod utils;
 
 pub struct Migrator;
@@ -135,7 +137,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20250722_155040_table_refreshable::Migration),
             Box::new(m20250729_174630_add_vector_index_info::Migration),
             Box::new(m20250810_000000_add_user_admin_field::Migration),
+            Box::new(m20250819_014448_add_version_column_indices_to_table::Migration),
             Box::new(m20250820_120000_add_cdc_table_type::Migration),
+            Box::new(m20250821_081110_cdc_table_snapshot_splits_add_column::Migration),
         ]
     }
 }

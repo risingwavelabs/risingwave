@@ -83,7 +83,7 @@ fn rewrite_table_definition(
         mut with_options,
         append_only,
         on_conflict,
-        with_version_column,
+        with_version_columns,
         query,
         engine,
         ..
@@ -142,7 +142,7 @@ fn rewrite_table_definition(
         source_watermarks: vec![], // no source, no watermark
         append_only,
         on_conflict,
-        with_version_column,
+        with_version_columns,
         query,
         cdc_table_info: None,
         include_column_options: vec![],

@@ -52,6 +52,8 @@ pub struct VectorIndexNearestExecutor<S: StateStore> {
     top_n: usize,
     measure: DistanceMeasurement,
     deserializer: BasicDeserializer,
+
+    hnsw_ef_search: usize,
 }
 
 pub struct VectorIndexNearestExecutorBuilder {}
@@ -114,6 +116,7 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
                     .unwrap()
                     .into(),
                 deserializer,
+                hnsw_ef_search: vector_index_nearest_node.hnsw_ef_search as usize,
             }))
         })
     }
@@ -145,6 +148,7 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             top_n,
             measure,
             deserializer,
+            hnsw_ef_search,
             ..
         } = *self;
 
@@ -156,6 +160,12 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             .await?;
 
         let deserializer = Arc::new(deserializer);
+        let sqrt_distance = match &self.measure {
+            DistanceMeasurement::L2Sqr => true,
+            DistanceMeasurement::L1
+            | DistanceMeasurement::Cosine
+            | DistanceMeasurement::InnerProduct => false,
+        };
 
         while let Some(chunk) = input.try_next().await? {
             let mut vector_info_columns_builder = ListArrayBuilder::with_type(
@@ -170,11 +180,20 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
                     let row_results: Vec<Result<StructValue>> = read_snapshot
                         .nearest(
                             vector.to_owned_scalar(),
-                            VectorNearestOptions { top_n, measure },
+                            VectorNearestOptions {
+                                top_n,
+                                measure,
+                                hnsw_ef_search,
+                            },
                             move |_vec, distance, value| {
                                 let mut values =
                                     Vec::with_capacity(deserializer.data_types().len() + 1);
                                 deserializer.deserialize_to(value, &mut values)?;
+                                let distance = if sqrt_distance {
+                                    distance.sqrt()
+                                } else {
+                                    distance
+                                };
                                 values.push(Some(ScalarImpl::Float64(distance.into())));
                                 Ok(StructValue::new(values))
                             },

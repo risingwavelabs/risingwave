@@ -1,0 +1,4 @@
+statement ok
+create function get_embedding(string) returns vector(3) language sql as $$
+select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, $1)::vector(3);
+$$;

@@ -40,7 +40,7 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
-use risingwave_pb::catalog::{PbCreateType, PbSink, PbTable};
+use risingwave_pb::catalog::{PbCreateType, PbTable};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -58,11 +58,11 @@ use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
+use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait, TransactionTrait,
+    JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
+    TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -70,11 +70,12 @@ use super::rename::IndexItemRewriter;
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
+use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_internal_tables_by_id, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_user_info_by_ids,
+    check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
+    get_fragment_actor_ids, get_internal_tables_by_id, get_table_columns,
+    grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -366,6 +367,10 @@ impl CatalogController {
         let job_id = job.id() as ObjectId;
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        // Ensure the job exists.
+        ensure_job_not_canceled(job_id, &txn).await?;
+
         let mut table_id_map = HashMap::new();
         for table in &mut incomplete_internal_tables {
             let table_id = Self::create_object(
@@ -400,25 +405,14 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
-        let need_notify = streaming_job.should_notify_creating();
-        let (sink, table) = match streaming_job {
-            StreamingJob::Sink(sink, _) => (Some(sink), None),
-            StreamingJob::Table(_, table, _) => (None, Some(table)),
-            StreamingJob::Index(_, _)
-            | StreamingJob::Source(_)
-            | StreamingJob::MaterializedView(_) => (None, None),
-        };
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id().table_id as _,
             || stream_job_fragments.fragments.values(),
             &stream_job_fragments.actor_status,
             &stream_job_fragments.actor_splits,
             &stream_job_fragments.downstreams,
-            need_notify,
-            streaming_job.definition(),
             for_replace,
-            sink,
-            table,
+            Some(streaming_job),
         )
         .await
     }
@@ -427,7 +421,6 @@ impl CatalogController {
     // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
     // making them the source of truth and performing a full replacement for those in the meta store?
     /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
-    #[expect(clippy::too_many_arguments)]
     #[await_tree::instrument("prepare_streaming_job_for_{}", if for_replace { "replace" } else { "create" }
     )]
     pub async fn prepare_streaming_job<'a, I: Iterator<Item = &'a crate::model::Fragment> + 'a>(
@@ -437,11 +430,8 @@ impl CatalogController {
         actor_status: &BTreeMap<crate::model::ActorId, PbActorStatus>,
         actor_splits: &HashMap<crate::model::ActorId, Vec<SplitImpl>>,
         downstreams: &FragmentDownstreamRelation,
-        need_notify: bool,
-        definition: String,
         for_replace: bool,
-        sink: Option<&PbSink>,
-        table: Option<&PbTable>,
+        creating_streaming_job: Option<&'a StreamingJob>,
     ) -> MetaResult<()> {
         let fragment_actors = Self::extract_fragment_and_actors_from_fragments(
             job_id,
@@ -451,8 +441,16 @@ impl CatalogController {
         )?;
         let inner = self.inner.write().await;
 
-        let mut objects_to_notify = if need_notify { Some(vec![]) } else { None };
+        let need_notify = creating_streaming_job
+            .map(|job| job.should_notify_creating())
+            .unwrap_or(false);
+        let definition = creating_streaming_job.map(|job| job.definition());
+
+        let mut objects_to_notify = vec![];
         let txn = inner.db.begin().await?;
+
+        // Ensure the job exists.
+        ensure_job_not_canceled(job_id, &txn).await?;
 
         // Add fragments.
         let (fragments, actors): (Vec<_>, Vec<_>) = fragment_actors.into_iter().unzip();
@@ -487,13 +485,13 @@ impl CatalogController {
                     .update(&txn)
                     .await?;
 
-                    if let Some(objects) = &mut objects_to_notify {
+                    if need_notify {
                         let mut table = table.clone();
                         // In production, definition was replaced but still needed for notification.
                         if cfg!(not(debug_assertions)) && table.id == job_id as u32 {
-                            table.definition = definition.clone();
+                            table.definition = definition.clone().unwrap();
                         }
-                        objects.push(PbObject {
+                        objects_to_notify.push(PbObject {
                             object_info: Some(PbObjectInfo::Table(table)),
                         });
                     }
@@ -501,12 +499,21 @@ impl CatalogController {
             }
         }
 
-        if let Some(objects) = &mut objects_to_notify
-            && let Some(sink) = sink
-        {
-            objects.push(PbObject {
-                object_info: Some(PbObjectInfo::Sink(sink.clone())),
-            })
+        // Add streaming job objects to notification
+        if need_notify {
+            match creating_streaming_job.unwrap() {
+                StreamingJob::Sink(sink, _) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Sink(sink.clone())),
+                    });
+                }
+                StreamingJob::Index(index, _) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Index(index.clone())),
+                    });
+                }
+                _ => {}
+            }
         }
 
         insert_fragment_relations(&txn, downstreams).await?;
@@ -521,7 +528,7 @@ impl CatalogController {
 
         if !for_replace {
             // Update dml fragment id.
-            if let Some(table) = table {
+            if let Some(StreamingJob::Table(_, table, _)) = creating_streaming_job {
                 Table::update(table::ActiveModel {
                     table_id: Set(table.id as _),
                     dml_fragment_id: Set(table.dml_fragment_id.map(|id| id as _)),
@@ -534,11 +541,17 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        if let Some(objects) = objects_to_notify
-            && !objects.is_empty()
-        {
-            self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
-                .await;
+        // FIXME: there's a gap between the catalog creation and notification, which may lead to
+        // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
+        // need to either forward the notification or filter catalogs without any fragments in the metastore.
+        if !objects_to_notify.is_empty() {
+            self.notify_frontend(
+                Operation::Add,
+                Info::ObjectGroup(PbObjectGroup {
+                    objects: objects_to_notify,
+                }),
+            )
+            .await;
         }
 
         Ok(())
@@ -588,12 +601,16 @@ impl CatalogController {
         // Get the notification info if the job is a materialized view or created in the background.
         let mut objs = vec![];
         let table_obj = Table::find_by_id(job_id).one(&txn).await?;
-        let need_notify = if let Some(table) = &table_obj {
-            // If the job is a materialized view, we need to notify the frontend.
-            table.table_type == TableType::MaterializedView
-        } else {
-            streaming_job.is_some_and(|job| job.create_type == CreateType::Background)
-        };
+
+        let mut need_notify =
+            streaming_job.is_some_and(|job| job.create_type == CreateType::Background);
+        if !need_notify {
+            // If the job is not created in the background, we only need to notify the frontend if the job is a materialized view.
+            if let Some(table) = &table_obj {
+                need_notify = table.table_type == TableType::MaterializedView;
+            }
+        }
+
         if need_notify {
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
@@ -2125,23 +2142,20 @@ impl CatalogController {
         };
         active_sink.update(&txn).await?;
 
-        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
             .select_only()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::FragmentTypeMask,
-                fragment::Column::StreamNode,
-            ])
-            .filter(fragment::Column::JobId.eq(sink_id))
+            .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+            .filter(
+                fragment::Column::JobId
+                    .eq(sink_id)
+                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Sink)),
+            )
             .into_tuple()
             .all(&txn)
             .await?;
         let fragments = fragments
             .into_iter()
-            .filter(|(_, fragment_type_mask, _)| {
-                FragmentTypeMask::from(*fragment_type_mask).contains(FragmentTypeFlag::Sink)
-            })
-            .filter_map(|(id, _, stream_node)| {
+            .filter_map(|(id, stream_node)| {
                 let mut stream_node = stream_node.to_protobuf();
                 let mut found = false;
                 visit_stream_node_mut(&mut stream_node, |node| {
@@ -2384,9 +2398,9 @@ impl CatalogController {
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
-            .filter(fragment_type_mask_intersects(FragmentTypeFlag::raw_flag(
+            .filter(FragmentTypeMask::intersects_any(
                 FragmentTypeFlag::rate_limit_fragments(),
-            ) as _))
+            ))
             .into_tuple()
             .all(&txn)
             .await?;
@@ -2448,16 +2462,6 @@ impl CatalogController {
     }
 }
 
-fn bitflag_intersects(column: SimpleExpr, value: i32) -> SimpleExpr {
-    column
-        .binary(BinOper::Custom("&"), value)
-        .binary(BinOper::NotEqual, 0)
-}
-
-fn fragment_type_mask_intersects(value: i32) -> SimpleExpr {
-    bitflag_intersects(fragment::Column::FragmentTypeMask.into_simple_expr(), value)
-}
-
 pub struct SinkIntoTableContext {
     /// For creating sink into table, this is `Some`, otherwise `None`.
     pub creating_sink_id: Option<SinkId>,
@@ -2484,21 +2488,20 @@ async fn update_connector_props_fragments<F>(
 where
     F: FnMut(&mut PbNodeBody, &mut bool),
 {
-    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+    let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
         .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::FragmentTypeMask,
-            fragment::Column::StreamNode,
-        ])
-        .filter(fragment::Column::JobId.eq(job_id))
+        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+        .filter(
+            fragment::Column::JobId
+                .eq(job_id)
+                .and(FragmentTypeMask::intersects(expect_flag)),
+        )
         .into_tuple()
         .all(txn)
         .await?;
     let fragments = fragments
         .into_iter()
-        .filter(|(_, fragment_type_mask, _)| *fragment_type_mask & expect_flag as i32 != 0)
-        .filter_map(|(id, _, stream_node)| {
+        .filter_map(|(id, stream_node)| {
             let mut stream_node = stream_node.to_protobuf();
             let mut found = false;
             visit_stream_node_mut(&mut stream_node, |node| {

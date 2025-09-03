@@ -370,6 +370,20 @@ where
     Ok(())
 }
 
+pub async fn ensure_job_not_canceled<C>(job_id: ObjectId, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Object::find_by_id(job_id).count(db).await?;
+    if count == 0 {
+        return Err(MetaError::cancelled(format!(
+            "job {} might be cancelled manually or by recovery",
+            job_id
+        )));
+    }
+    Ok(())
+}
+
 /// `ensure_user_id` ensures the existence of target user in the cluster.
 pub async fn ensure_user_id<C>(user_id: UserId, db: &C) -> MetaResult<()>
 where
