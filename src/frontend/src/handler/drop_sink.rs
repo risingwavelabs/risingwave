@@ -87,6 +87,10 @@ pub async fn handle_drop_sink(
 
             let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
             for sink in fetch_incoming_sinks(&session, &table_catalog)? {
+                if sink.id == sink_id {
+                    // Skip the sink being dropped.
+                    continue;
+                }
                 hijack_merger_for_target_table(
                     &mut graph,
                     &columns_without_rw_timestamp,
