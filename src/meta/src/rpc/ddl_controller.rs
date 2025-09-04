@@ -944,6 +944,12 @@ impl DdlController {
                     continue;
                 };
 
+                if let Some(creating_sink) = creating_sink_table_fragments
+                    && creating_sink.stream_job_id.table_id == sink_id
+                {
+                    continue;
+                }
+
                 let sink_table_fragments = mgr
                     .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink_id))
                     .await?;

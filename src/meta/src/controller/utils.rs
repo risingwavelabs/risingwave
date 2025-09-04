@@ -2065,11 +2065,7 @@ pub async fn rename_relation_refer(
         let incoming_sinks: Vec<SinkId> = Sink::find()
             .select_only()
             .column(sink::Column::SinkId)
-            .filter(
-                sink::Column::TargetTable
-                    .is_not_null()
-                    .and(sink::Column::TargetTable.eq(object_id)),
-            )
+            .filter(sink::Column::TargetTable.eq(object_id))
             .into_tuple()
             .all(txn)
             .await?;
