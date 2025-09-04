@@ -735,8 +735,8 @@ impl MetadataManager {
         alter_iceberg_table_props: Option<
             risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
         >,
-    ) -> MetaResult<HashMap<String, String>> {
-        let new_props = self
+    ) -> MetaResult<(HashMap<String, String>,u32)> {
+        let (new_props,sink_id) = self
             .catalog_controller
             .update_iceberg_table_props_by_table_id(
                 table_id.table_id as _,
@@ -744,7 +744,7 @@ impl MetadataManager {
                 alter_iceberg_table_props,
             )
             .await?;
-        Ok(new_props)
+        Ok((new_props,sink_id))
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(

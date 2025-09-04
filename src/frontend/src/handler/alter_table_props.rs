@@ -20,10 +20,28 @@ use super::alter_table_column::fetch_table_catalog_for_alter;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
+use crate::handler::alter_source_props::handle_alter_table_connector_props;
 use crate::utils::resolve_connection_ref_and_secret_ref;
 use crate::{Binder, WithOptions};
 
 pub async fn handle_alter_table_props(
+    handler_args: HandlerArgs,
+    table_name: ObjectName,
+    changed_props: Vec<SqlOption>,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    let original_table = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    match original_table.engine() {
+        risingwave_common::catalog::Engine::Hummock => {
+            handle_alter_table_connector_props(handler_args, table_name, changed_props).await
+        }
+        risingwave_common::catalog::Engine::Iceberg => {
+            handle_alter_iceberg_table_props(handler_args, table_name, changed_props).await
+        }
+    }
+}
+
+pub async fn handle_alter_iceberg_table_props(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     changed_props: Vec<SqlOption>,

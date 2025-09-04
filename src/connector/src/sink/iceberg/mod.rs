@@ -599,7 +599,7 @@ impl Sink for IcebergSink {
                     "Alter config compaction_interval set to {} seconds",
                     compaction_interval
                 );
-            }
+          }
         }
 
         Ok(())

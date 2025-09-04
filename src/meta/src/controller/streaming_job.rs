@@ -2087,53 +2087,6 @@ impl CatalogController {
         active_sink.update(&txn).await?;
 
         update_sink_fragment_props(&txn, sink_id, new_config).await?;
-        // =======
-        //         let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
-        //             .select_only()
-        //             .columns([
-        //                 fragment::Column::FragmentId,
-        //                 fragment::Column::FragmentTypeMask,
-        //                 fragment::Column::StreamNode,
-        //             ])
-        //             .filter(fragment::Column::JobId.eq(sink_id))
-        //             .into_tuple()
-        //             .all(&txn)
-        //             .await?;
-        //         let fragments = fragments
-        //             .into_iter()
-        //             .filter(|(_, fragment_type_mask, _)| {
-        //                 FragmentTypeMask::from(*fragment_type_mask).contains(FragmentTypeFlag::Sink)
-        //             })
-        //             .filter_map(|(id, _, stream_node)| {
-        //                 let mut stream_node = stream_node.to_protobuf();
-        //                 let mut found = false;
-        //                 visit_stream_node_mut(&mut stream_node, |node| {
-        //                     if let PbNodeBody::Sink(node) = node
-        //                         && let Some(sink_desc) = &mut node.sink_desc
-        //                         && sink_desc.id == sink_id as u32
-        //                     {
-        //                         sink_desc.properties = new_config.clone();
-        //                         found = true;
-        //                     }
-        //                 });
-        //                 if found { Some((id, stream_node)) } else { None }
-        //             })
-        //             .collect_vec();
-        //         assert!(
-        //             !fragments.is_empty(),
-        //             "sink id should be used by at least one fragment"
-        //         );
-        //         for (id, stream_node) in fragments {
-        //             fragment::ActiveModel {
-        //                 fragment_id: Set(id),
-        //                 stream_node: Set(StreamNode::from(&stream_node)),
-        //                 ..Default::default()
-        //             }
-        //             .update(&txn)
-        //             .await?;
-        //         }
-
-        // >>>>>>> main
         let (sink, obj) = Sink::find_by_id(sink_id)
             .find_also_related(Object)
             .one(&txn)
@@ -2163,7 +2116,7 @@ impl CatalogController {
         alter_iceberg_table_props: Option<
             risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
         >,
-    ) -> MetaResult<HashMap<String, String>> {
+    ) -> MetaResult<(HashMap<String, String>,u32)> {
         let risingwave_pb::meta::alter_connector_props_request::PbExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds { sink_id, source_id }) = alter_iceberg_table_props.
             ok_or_else(|| MetaError::invalid_parameter("alter_iceberg_table_props is required"))?;
         let inner = self.inner.read().await;
@@ -2267,7 +2220,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok(props.into_iter().collect())
+        Ok((props.into_iter().collect(), sink_id as u32))
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(

@@ -538,14 +538,14 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
         let secret_manager = LocalSecretManager::global();
-        let new_props_plaintext = match AlterConnectorPropsObject::try_from(request.object_type) {
+        let (new_props_plaintext, object_id) = match AlterConnectorPropsObject::try_from(request.object_type) {
             Ok(AlterConnectorPropsObject::Sink) => {
-                self.metadata_manager
+                (self.metadata_manager
                     .update_sink_props_by_sink_id(
                         request.object_id as i32,
                         request.changed_props.clone().into_iter().collect(),
                     )
-                    .await?
+                    .await?, request.object_id)
             }
             Ok(AlterConnectorPropsObject::IcebergTable) => {
                 self.metadata_manager
@@ -580,11 +580,11 @@ impl StreamManagerService for StreamServiceImpl {
                     .await?;
 
                 let (options, secret_refs) = options_with_secret.into_parts();
-                secret_manager
+                (secret_manager
                     .fill_secrets(options, secret_refs)
                     .map_err(MetaError::from)?
                     .into_iter()
-                    .collect()
+                    .collect(), request.object_id)
             }
 
             _ => {
@@ -598,12 +598,12 @@ impl StreamManagerService for StreamServiceImpl {
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(request.object_id as ObjectId)
+            .get_object_database_id(object_id as ObjectId)
             .await?;
         let database_id = DatabaseId::new(database_id as _);
 
         let mut mutation = HashMap::default();
-        mutation.insert(request.object_id, new_props_plaintext);
+        mutation.insert(object_id, new_props_plaintext);
 
         let _i = self
             .barrier_scheduler

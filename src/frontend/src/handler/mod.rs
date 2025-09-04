@@ -868,13 +868,7 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::AlterConnectorProps { alter_props } => {
-                // If exists a associated source, it should be of the same name.
-                crate::handler::alter_source_props::handle_alter_table_connector_props(
-                    handler_args,
-                    name,
-                    alter_props,
-                )
-                .await
+                alter_table_props::handle_alter_table_props(handler_args, name, alter_props).await
             }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }
