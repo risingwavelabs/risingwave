@@ -34,6 +34,7 @@ join rw_relations r1 on d.objid = r1.id
 join rw_relations r2 on d.refobjid = r2.id;
 ----
 idx1  t1
+mv1 idx1
 mv1   s1
 mv1   t1
 mv2   mv1
