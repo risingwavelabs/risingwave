@@ -1421,7 +1421,14 @@ impl ToStream for LogicalAgg {
             }
         }
         let eowc = ctx.emit_on_window_close();
-        let stream_input = self.input().to_stream(ctx)?;
+        let input = if let Some(better_plan) =
+            self.input().try_better_locality(&self.group_key().to_vec())
+        {
+            better_plan
+        } else {
+            self.input()
+        };
+        let stream_input = input.to_stream(ctx)?;
 
         // Use Dedup operator, if possible.
         if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()

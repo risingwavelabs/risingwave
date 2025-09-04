@@ -18,7 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, Schema};
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
@@ -669,5 +669,35 @@ impl ToStream for LogicalScan {
                 ColIndexMapping::identity(self.schema().len()),
             )),
         }
+    }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+        let order_types = [
+            OrderType::ascending_nulls_first(),
+            OrderType::ascending_nulls_last(),
+            OrderType::descending_nulls_first(),
+            OrderType::descending_nulls_last(),
+        ];
+
+        for order_type_combo in columns
+            .iter()
+            .map(|&col| order_types.iter().map(move |ot| ColumnOrder::new(col, *ot)))
+            .multi_cartesian_product()
+        {
+            let required_order = Order {
+                column_orders: order_type_combo,
+            };
+
+            let order_satisfied_index = self.indexes_satisfy_order(&required_order);
+            for index in order_satisfied_index {
+                if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
+                    return Some(index_scan.into());
+                }
+            }
+        }
+        None
     }
 }

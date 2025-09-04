@@ -891,7 +891,16 @@ impl LogicalJoin {
     ) -> Result<(StreamPlanRef, StreamPlanRef)> {
         use super::stream::prelude::*;
 
-        let mut right = self.right().to_stream_with_dist_required(
+        let lhs_join_key_idx = self.eq_indexes().into_iter().map(|(l, _)| l).collect_vec();
+        let rhs_join_key_idx = self.eq_indexes().into_iter().map(|(_, r)| r).collect_vec();
+
+        let logical_right =
+            if let Some(better_plan) = self.right().try_better_locality(&rhs_join_key_idx) {
+                better_plan
+            } else {
+                self.right()
+            };
+        let mut right = logical_right.to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
             ctx,
         )?;
@@ -902,19 +911,22 @@ impl LogicalJoin {
         let l2r =
             predicate.l2r_eq_columns_mapping(logical_left.schema().len(), right.schema().len());
 
+        let logical_left =
+            if let Some(better_plan) = self.left().try_better_locality(&lhs_join_key_idx) {
+                better_plan
+            } else {
+                self.left()
+            };
         let mut left;
         let right_dist = right.distribution();
         match right_dist {
             Distribution::HashShard(_) => {
                 let left_dist = r2l
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
-                left = self
-                    .core
-                    .left
-                    .to_stream_with_dist_required(&left_dist, ctx)?;
+                left = logical_left.to_stream_with_dist_required(&left_dist, ctx)?;
             }
             Distribution::UpstreamHashShard(_, _) => {
-                left = self.core.left.to_stream_with_dist_required(
+                left = logical_left.to_stream_with_dist_required(
                     &RequiredDist::shard_by_key(
                         self.left().schema().len(),
                         &predicate.left_eq_indexes(),

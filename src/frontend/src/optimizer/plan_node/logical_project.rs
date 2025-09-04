@@ -390,6 +390,21 @@ impl ToStream for LogicalProject {
         let out_col_change = ColIndexMapping::new(map, proj.base.schema().len());
         Ok((proj.into(), out_col_change))
     }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+        let input_columns: Vec<usize> = columns
+            .iter()
+            .filter_map(|&col| self.o2i_col_mapping().try_map(col))
+            .collect();
+        if input_columns.len() != columns.len() {
+            return None;
+        }
+        let new_input = self.input().try_better_locality(&input_columns)?;
+        Some(self.clone_with_input(new_input).into())
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,113 @@
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    create index idx_bc on t(b, c desc);
+    select count(*) from t group by b;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    create index idx_bc on t(b, c desc);
+    select count(*) from t group by a;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    create index idx_bc on t(b, c desc);
+    select count(*) from t group by c;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    create index idx_bc on t(b, c desc);
+    select count(*) from t group by b, c;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    create index idx_bc on t(b, c desc);
+    select count(*) from t group by c, b;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    create index idx_bc on t(b, c desc);
+    select RANK() OVER (PARTITION BY a ORDER BY b) as rank from t;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    create index idx_bc on t(b, c desc);
+    select RANK() OVER (PARTITION BY b ORDER BY c) as rank from t;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    create index idx_bc on t(b, c desc);
+    select RANK() OVER (PARTITION BY c ORDER BY b) as rank from t;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    create index idx_bc on t(b, c desc);
+    select RANK() OVER (PARTITION BY b ORDER BY a) as rank from t;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.a1 = t2.a2;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.b1 = t2.b2;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.b1 = t2.b2 and t1.c1 = t2.c2;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.c1 = t2.c2 and t1.b1 = t2.b2;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.b1 = t2.b2 and t1.c1 = t2.c2;
+  expected_outputs:
+    - stream_plan
