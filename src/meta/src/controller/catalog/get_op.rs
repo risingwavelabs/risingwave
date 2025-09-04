@@ -146,7 +146,11 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let sink_objs = Sink::find()
             .find_also_related(Object)
-            .filter(sink::Column::TargetTable.eq(table_id))
+            .filter(
+                sink::Column::TargetTable
+                    .is_not_null()
+                    .and(sink::Column::TargetTable.eq(table_id)),
+            )
             .all(&inner.db)
             .await?;
         Ok(sink_objs
