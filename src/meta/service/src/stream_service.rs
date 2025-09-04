@@ -538,62 +538,67 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
         let secret_manager = LocalSecretManager::global();
-        let (new_props_plaintext, object_id) = match AlterConnectorPropsObject::try_from(request.object_type) {
-            Ok(AlterConnectorPropsObject::Sink) => {
-                (self.metadata_manager
-                    .update_sink_props_by_sink_id(
-                        request.object_id as i32,
-                        request.changed_props.clone().into_iter().collect(),
-                    )
-                    .await?, request.object_id)
-            }
-            Ok(AlterConnectorPropsObject::IcebergTable) => {
-                self.metadata_manager
-                    .update_iceberg_table_props_by_table_id(
-                        TableId::from(request.object_id),
-                        request.changed_props.clone().into_iter().collect(),
-                        request.extra_options,
-                    )
-                    .await?
-            }
-
-            Ok(AlterConnectorPropsObject::Source) => {
-                // alter source and table's associated source
-                if request.connector_conn_ref.is_some() {
-                    return Err(Status::invalid_argument(
-                        "alter connector_conn_ref is not supported",
-                    ));
+        let (new_props_plaintext, object_id) =
+            match AlterConnectorPropsObject::try_from(request.object_type) {
+                Ok(AlterConnectorPropsObject::Sink) => (
+                    self.metadata_manager
+                        .update_sink_props_by_sink_id(
+                            request.object_id as i32,
+                            request.changed_props.clone().into_iter().collect(),
+                        )
+                        .await?,
+                    request.object_id,
+                ),
+                Ok(AlterConnectorPropsObject::IcebergTable) => {
+                    self.metadata_manager
+                        .update_iceberg_table_props_by_table_id(
+                            TableId::from(request.object_id),
+                            request.changed_props.clone().into_iter().collect(),
+                            request.extra_options,
+                        )
+                        .await?
                 }
-                let options_with_secret = self
-                    .metadata_manager
-                    .catalog_controller
-                    .update_source_props_by_source_id(
-                        request.object_id as SourceId,
-                        request.changed_props.clone().into_iter().collect(),
-                        request.changed_secret_refs.clone().into_iter().collect(),
+
+                Ok(AlterConnectorPropsObject::Source) => {
+                    // alter source and table's associated source
+                    if request.connector_conn_ref.is_some() {
+                        return Err(Status::invalid_argument(
+                            "alter connector_conn_ref is not supported",
+                        ));
+                    }
+                    let options_with_secret = self
+                        .metadata_manager
+                        .catalog_controller
+                        .update_source_props_by_source_id(
+                            request.object_id as SourceId,
+                            request.changed_props.clone().into_iter().collect(),
+                            request.changed_secret_refs.clone().into_iter().collect(),
+                        )
+                        .await?;
+
+                    self.stream_manager
+                        .source_manager
+                        .validate_source_once(request.object_id, options_with_secret.clone())
+                        .await?;
+
+                    let (options, secret_refs) = options_with_secret.into_parts();
+                    (
+                        secret_manager
+                            .fill_secrets(options, secret_refs)
+                            .map_err(MetaError::from)?
+                            .into_iter()
+                            .collect(),
+                        request.object_id,
                     )
-                    .await?;
+                }
 
-                self.stream_manager
-                    .source_manager
-                    .validate_source_once(request.object_id, options_with_secret.clone())
-                    .await?;
-
-                let (options, secret_refs) = options_with_secret.into_parts();
-                (secret_manager
-                    .fill_secrets(options, secret_refs)
-                    .map_err(MetaError::from)?
-                    .into_iter()
-                    .collect(), request.object_id)
-            }
-
-            _ => {
-                unimplemented!(
-                    "Unsupported object type for AlterConnectorProps: {:?}",
-                    request.object_type
-                );
-            }
-        };
+                _ => {
+                    unimplemented!(
+                        "Unsupported object type for AlterConnectorProps: {:?}",
+                        request.object_type
+                    );
+                }
+            };
 
         let database_id = self
             .metadata_manager
