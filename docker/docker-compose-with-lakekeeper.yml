@@ -487,7 +487,7 @@ services:
       sh -c '
         echo "Waiting for Lakekeeper to be ready..."
         sleep 5
-        
+
         # Bootstrap Lakekeeper
         echo "Bootstrapping Lakekeeper..."
         for attempt in 1 2 3 4 5; do
@@ -496,9 +496,9 @@ services:
             -d "{\"accept-terms-of-use\": true, \"is-operator\": true}" \
             http://lakekeeper:8181/management/v1/bootstrap \
             -o /tmp/bootstrap.json)
-          
+
           http_code=$${response##*[^0-9]}
-          
+
           if [ "$$http_code" = "200" ] || [ "$$http_code" = "201" ]; then
             echo "✓ Successfully bootstrapped Lakekeeper!"
             break
@@ -520,7 +520,7 @@ services:
             sleep $$((2 ** attempt))
           fi
         done
-        
+
         # Create default warehouse
         echo "Creating default warehouse..."
         sleep 2
@@ -548,9 +548,9 @@ services:
             }" \
             http://lakekeeper:8181/management/v1/warehouse \
             -o /tmp/warehouse.json)
-          
+
           http_code=$${response##*[^0-9]}
-          
+
           if [ "$$http_code" = "200" ] || [ "$$http_code" = "201" ]; then
             echo "✓ Successfully created default warehouse!"
             break
@@ -572,7 +572,7 @@ services:
             sleep $$((2 ** attempt))
           fi
         done
-        
+
         echo "🎉 Lakekeeper setup completed successfully!"
         echo "Lakekeeper is ready with warehouse: risingwave-warehouse"
       '
