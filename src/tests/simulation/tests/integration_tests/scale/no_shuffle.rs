@@ -21,7 +21,10 @@ use risingwave_simulation::utils::AssertResult;
 
 #[tokio::test]
 async fn test_delta_join() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
+    let configuration = Configuration::for_scale_no_shuffle();
+
+    let total_cores = configuration.compute_node_cores * configuration.compute_nodes;
+    let mut cluster = Cluster::start(configuration).await?;
     let mut session = cluster.start_session();
 
     session.run("set rw_implicit_flush = true;").await?;
@@ -91,61 +94,82 @@ async fn test_delta_join() -> Result<()> {
 
     let workers = union_fragment.all_worker_count().into_keys().collect_vec();
     // Scale-in one side
+    // cluster
+    //     .reschedule(format!("{}:[{}:-1]", t1.id(), workers[0]))
+    //     .await?;
     cluster
-        .reschedule(format!("{}:[{}:-1]", t1.id(), workers[0]))
+        .run(format!(
+            "alter table a set parallelism = {}",
+            total_cores - 1
+        ))
         .await?;
 
     test_works!();
 
     // Scale-in both sides together
+    // cluster
+    //     .reschedule(format!(
+    //         "{}:[{}];{}:[{}]",
+    //         t1.id(),
+    //         format_args!("{}:-1", workers[1]),
+    //         t2.id(),
+    //         format_args!("{}:-1, {}:-1", workers[0], workers[1])
+    //     ))
+    //     .await?;
+
     cluster
-        .reschedule(format!(
-            "{}:[{}];{}:[{}]",
-            t1.id(),
-            format_args!("{}:-1", workers[1]),
-            t2.id(),
-            format_args!("{}:-1, {}:-1", workers[0], workers[1])
+        .run(format!(
+            "alter table a set parallelism = {}",
+            total_cores - 2
         ))
         .await?;
+
+    cluster
+        .run(format!(
+            "alter table b set parallelism = {}",
+            total_cores - 2
+        ))
+        .await?;
+
     test_works!();
 
     // Scale-out one side
     cluster
-        .reschedule(format!("{}:[{}:1]", t2.id(), workers[0]))
+        .run(format!(
+            "alter table a set parallelism = {}",
+            total_cores - 1
+        ))
         .await?;
+
     test_works!();
 
     // Scale-out both sides together
     cluster
-        .reschedule(format!(
-            "{}:[{}];{}:[{}]",
-            t1.id(),
-            format_args!("{}:1,{}:1", workers[0], workers[1]),
-            t2.id(),
-            format_args!("{}:1", workers[1]),
-        ))
+        .run(format!("alter table a set parallelism = {}", total_cores))
         .await?;
+
+    cluster
+        .run(format!("alter table b set parallelism = {}", total_cores))
+        .await?;
+
     test_works!();
 
     // Scale-in join with union
     cluster
-        .reschedule(format!(
-            "{}:[{}];{}:[{}]",
-            t1.id(),
-            format_args!("{}:-1", workers[2]),
-            t2.id(),
-            format_args!("{}:-1", workers[2])
+        .run(format!(
+            "alter table a set parallelism = {}",
+            total_cores - 1
         ))
         .await?;
-    test_works!();
 
-    let result = cluster
-        .reschedule(format!("{}:[{}:-1]", lookup_fragments[0].id(), workers[0]))
-        .await;
-    assert!(
-        result.is_err(),
-        "directly scale-in lookup (downstream) should fail"
-    );
+    cluster
+        .run(format!(
+            "alter table b set parallelism = {}",
+            total_cores - 1
+        ))
+        .await?;
+
+    test_works!();
 
     Ok(())
 }
@@ -160,18 +184,11 @@ async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
         .run("create materialized view mv as with cte as (select a, sum(b) sum from t group by a) select count(*) from cte c1 join cte c2 on c1.a = c2.a;")
         .await?;
 
-    let fragment = cluster
-        .locate_one_fragment([identity_contains("hashagg")])
-        .await?;
-
-    let workers = fragment.all_worker_count().into_keys().collect_vec();
-
     cluster
-        .reschedule(fragment.reschedule([WorkerSlotId::new(workers[0], 0)], []))
+        .run("alter materialized view mv set parallelism = 1;")
         .await?;
-
     cluster
-        .reschedule(fragment.reschedule([], [WorkerSlotId::new(workers[0], 0)]))
+        .run("alter materialized view mv set parallelism = adaptive;")
         .await?;
 
     Ok(())

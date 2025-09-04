@@ -474,8 +474,6 @@ impl ScaleController {
 
         txn.commit().await?;
 
-        println!("command {:#?}", command);
-
         Ok(command)
     }
 
@@ -783,6 +781,8 @@ impl ScaleController {
 
             commands.insert(DatabaseId::new(*database_id as u32), command);
         }
+
+        println!("commands {:#?}", commands);
 
         Ok(commands)
     }

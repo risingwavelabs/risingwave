@@ -548,7 +548,7 @@ struct ActorGraphBuildState {
     fragment_actors: HashMap<GlobalFragmentId, Vec<GlobalActorId>>,
 
     /// The next local actor id to use.
-    next_local_id: u32,
+    next_local_id: HashMap<GlobalFragmentId, u32>,
 
     /// The global actor id generator.
     actor_id_gen: GlobalActorIdGen,
@@ -560,15 +560,16 @@ impl ActorGraphBuildState {
         Self {
             inner: Default::default(),
             fragment_actors: Default::default(),
-            next_local_id: 0,
+            next_local_id: Default::default(),
             actor_id_gen,
         }
     }
 
     /// Get the next global actor id.
     fn next_actor_id(&mut self, fragment_id: GlobalFragmentId) -> GlobalActorId {
-        let local_id = self.next_local_id;
-        self.next_local_id += 1;
+        let local_id_ref = self.next_local_id.entry(fragment_id).or_insert(0);
+        let local_id = *local_id_ref;
+        *local_id_ref += 1;
 
         GlobalActorId::from(build_actor_id(
             fragment_id.as_global_id(),
@@ -579,7 +580,10 @@ impl ActorGraphBuildState {
     /// Finish the build and return the inner state.
     fn finish(self) -> ActorGraphBuildStateInner {
         // Assert that all the actors are built.
-        assert_eq!(self.actor_id_gen.len(), self.next_local_id);
+        assert_eq!(
+            self.actor_id_gen.len(),
+            self.next_local_id.into_values().sum::<u32>()
+        );
 
         self.inner
     }
