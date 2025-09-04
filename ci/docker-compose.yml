@@ -144,7 +144,6 @@ services:
       - mongodb-setup
       - mongo_data_generator
       - nats-server
-      - vault-server
       - message_queue_sasl_1
       - message_queue_sasl_2
     volumes:
