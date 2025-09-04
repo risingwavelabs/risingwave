@@ -436,72 +436,62 @@ pub(crate) async fn insert_graph<M: MeasureDistanceBuilder>(
 ) -> HummockResult<HnswStats> {
     {
         let mut stats = HnswStats::default();
+        let mut visited = VecSet::new(graph.nodes.len());
         let entrypoint_index = graph.entrypoint();
         let measure = M::new(vec);
         let mut entrypoints = BoundedNearest::new(1);
+
         entrypoints.insert(
             measure.measure(vector_store.get_vector(entrypoint_index).await?.vec_ref()),
             || (entrypoint_index, ()),
         );
-        let mut visited = VecSet::new(graph.nodes.len());
+        stats.distances_computed += 1;
 
         // Walk from entrypoint's top level down to (node_top + 1), inclusive.
-        let entry_top = graph.nodes[entrypoint_index].num_levels().saturating_sub(1);
-        let node_top = node.num_levels().saturating_sub(1);
-        if entry_top > node_top {
-            for level_idx in ((node_top + 1)..=entry_top).rev() {
-                visited.reset();
-                entrypoints = search_layer(
-                    vector_store,
-                    &*graph,
-                    &measure,
-                    |_, _, _| (),
-                    entrypoints,
-                    level_idx,
-                    1,
-                    None,
-                    &mut stats,
-                    &mut visited,
-                )
-                .await?;
+        let entry_top_level_idx = graph.nodes[entrypoint_index].num_levels() - 1;
+        let node_top_level_idx = node.num_levels() - 1;
+
+        for level_idx in ((node_top_level_idx + 1)..=entry_top_level_idx).rev() {
+            entrypoints = search_layer(
+                vector_store,
+                &*graph,
+                &measure,
+                |_, _, _| (),
+                entrypoints,
+                level_idx,
+                1,
+                &mut stats,
+                &mut visited,
+            )
+            .await?;
+        }
+
+        // Connect from min(entry_top, node_top) down to ground (0).
+        let start_level_idx = min(entry_top_level_idx, node_top_level_idx);
+        for level_idx in (0..=start_level_idx).rev() {
+            entrypoints = search_layer(
+                vector_store,
+                &*graph,
+                &measure,
+                |_, _, _| (),
+                entrypoints,
+                level_idx,
+                ef_construction,
+                &mut stats,
+                &mut visited,
+            )
+            .await?;
+            let level_neighbour = &mut node.level_neighbours[level_idx];
+            for (neighbour_distance, &(neighbour_index, _)) in &entrypoints {
+                level_neighbour.insert(neighbour_distance, || neighbour_index);
             }
         }
-        {
-            // Connect from min(entry_top, node_top) down to ground (0).
-            let entry_top = graph.nodes[entrypoint_index].num_levels().saturating_sub(1);
-            let node_top = node.num_levels().saturating_sub(1);
-            let start_idx = min(entry_top, node_top);
-            for level_idx in (0..=start_idx).rev() {
-                visited.reset();
-                entrypoints = search_layer(
-                    vector_store,
-                    &*graph,
-                    &measure,
-                    |_, _, _| (),
-                    entrypoints,
-                    level_idx,
-                    ef_construction,
-                    None,
-                    &mut stats,
-                    &mut visited,
-                )
-                .await?;
-                let level_neighbour = &mut node.level_neighbours[level_idx];
-                for (neighbour_distance, &(neighbour_index, _)) in &entrypoints {
-                    level_neighbour.insert(neighbour_distance, || neighbour_index);
-                }
-            }
-        }
+
         let vector_index = graph.nodes.len();
         for (level_index, level) in node.level_neighbours.iter().enumerate() {
             for (neighbour_distance, &neighbour_index) in level {
-                if let Some(nb_lvl) = graph.nodes[neighbour_index]
-                    .level_neighbours
-                    .get_mut(level_index)
-                {
-                    nb_lvl.insert(neighbour_distance, || vector_index);
-                }
-                // else: neighbour shouldn't appear here, but skip gracefully.
+                graph.nodes[neighbour_index].level_neighbours[level_index]
+                    .insert(neighbour_distance, || vector_index);
             }
         }
         if graph.nodes[entrypoint_index].num_levels() < node.num_levels() {
@@ -521,10 +511,16 @@ pub async fn nearest<O: Send, M: MeasureDistanceBuilder>(
     top_n: usize,
 ) -> HummockResult<(Vec<O>, HnswStats)> {
     {
+        // Fast path: if no exploration breadth or no results requested, do nothing.
+        // Returns empty results and zeroed stats.
+        let mut stats = HnswStats::default();
+        if ef_search == 0 || top_n == 0 {
+            return Ok((Vec::new(), stats));
+        }
+
         let entrypoint_index = graph.entrypoint();
         let measure = M::new(vec);
         let mut entrypoints = BoundedNearest::new(1);
-        let mut stats = HnswStats::default();
         let entrypoint_vector = vector_store.get_vector(entrypoint_index).await?;
         let entrypoint_distance = measure.measure(entrypoint_vector.vec_ref());
         entrypoints.insert(entrypoint_distance, || {
@@ -538,12 +534,9 @@ pub async fn nearest<O: Send, M: MeasureDistanceBuilder>(
             )
         });
         stats.distances_computed += 1;
-        let entry_top = graph.node_num_levels(entrypoint_index).saturating_sub(1);
+        let entry_top_level_idx = graph.node_num_levels(entrypoint_index) - 1;
         let mut visited = VecSet::new(graph.len());
-        let mut measured = VecSet::new(graph.len());
-        measured.set(entrypoint_index);
-        for level_idx in (1..=entry_top).rev() {
-            visited.reset();
+        for level_idx in (1..=entry_top_level_idx).rev() {
             entrypoints = search_layer(
                 vector_store,
                 graph,
@@ -552,13 +545,11 @@ pub async fn nearest<O: Send, M: MeasureDistanceBuilder>(
                 entrypoints,
                 level_idx, // level index
                 1,
-                Some(&mut measured),
                 &mut stats,
                 &mut visited,
             )
             .await?;
         }
-        visited.reset();
         entrypoints = search_layer(
             vector_store,
             graph,
@@ -567,7 +558,6 @@ pub async fn nearest<O: Send, M: MeasureDistanceBuilder>(
             entrypoints,
             0,
             ef_search,
-            Some(&mut measured),
             &mut stats,
             &mut visited,
         )
@@ -587,7 +577,6 @@ async fn search_layer<O: Send>(
     entrypoints: BoundedNearest<(usize, O)>,
     level_index: usize,
     ef: usize,
-    mut measured: Option<&mut VecSet>,
     stats: &mut HnswStats,
     visited: &mut VecSet,
 ) -> HummockResult<BoundedNearest<(usize, O)>> {
@@ -598,10 +587,6 @@ async fn search_layer<O: Send>(
     {
         visited.reset();
 
-        // If ef == 0, there's nothing to explore. Return an empty result set.
-        if ef == 0 {
-            return Ok(BoundedNearest::new(0));
-        }
         let mut candidates = MinDistanceHeap::with_capacity(ef);
         for (distance, &(idx, _)) in &entrypoints {
             visited.set(idx);
@@ -610,11 +595,9 @@ async fn search_layer<O: Send>(
         let mut nearest = entrypoints;
         nearest.resize(ef);
 
-        let exact_mode = ef >= graph.len();
-
         while let Some((c_distance, c_index)) = candidates.pop() {
             let (f_distance, _) = nearest.furthest().expect("non-empty");
-            if !exact_mode && c_distance > f_distance {
+            if c_distance > f_distance {
                 // early break here when even the nearest node in `candidates` is further than the
                 // furthest node in the `nearest` set, because no node in `candidates` can be added to `nearest`
                 break;
@@ -628,25 +611,9 @@ async fn search_layer<O: Send>(
                 let vector = vector_store.get_vector(neighbour_index).await?;
                 let info = vector.info();
 
-                // Count a distance computation only once per query, even if we revisit the same
-                // node on another HNSW layer.
-                let first_time = if let Some(m) = &mut measured {
-                    if m.is_set(neighbour_index) {
-                        false
-                    } else {
-                        m.set(neighbour_index);
-                        true
-                    }
-                } else {
-                    // Construction path
-                    true
-                };
-
                 let distance = measure.measure(vector.vec_ref());
 
-                if first_time {
-                    stats.distances_computed += 1;
-                }
+                stats.distances_computed += 1;
 
                 let mut added = false;
                 let added = &mut added;
@@ -959,10 +926,10 @@ mod tests {
             // Peek current entrypoint's top level index.
             let g = hnsw.graph.as_ref().unwrap();
             let entry_idx = g.entrypoint();
-            let entry_top = g.node_num_levels(entry_idx).saturating_sub(1);
+            let entry_top_level_idx = g.node_num_levels(entry_idx) - 1;
 
             // We need at least 2 upper layers to make the assertion interesting.
-            if entry_top < 2 {
+            if entry_top_level_idx < 2 {
                 continue; // try next seed
             }
 
@@ -976,16 +943,18 @@ mod tests {
             // After insertion, read the new node's level count (it’s at the tail).
             let g = hnsw.graph.as_ref().unwrap();
             let new_idx = g.len() - 1;
-            let node_top = g.node_num_levels(new_idx).saturating_sub(1);
+            let node_top_level_idx = g.node_num_levels(new_idx) - 1;
 
             // If the new node's top level > entry_top, HNSW would promote it to entrypoint.
             // That changes the descent semantics; skip such seeds to keep the assertion crisp.
-            if node_top > entry_top {
+            if node_top_level_idx > entry_top_level_idx {
                 continue;
             }
 
             // What the algorithm *should* have visited on the first descent:
-            let expected: Vec<usize> = ((node_top + 1)..=entry_top).rev().collect();
+            let expected: Vec<usize> = ((node_top_level_idx + 1)..=entry_top_level_idx)
+                .rev()
+                .collect();
 
             // Extract the actual visited levels (recorded at the start of search_layer).
             let visited = hooks::take_levels();
@@ -994,13 +963,13 @@ mod tests {
 
             assert_eq!(
                 upper, expected,
-                "seed={seed}, entry_top={entry_top}, node_top={node_top}"
+                "seed={seed}, entry_top_level_idx={entry_top_level_idx}, node_top_level_idx={node_top_level_idx}"
             );
             return Ok(()); // success on this seed
         }
 
         panic!(
-            "could not find a suitable seed (entry_top>=2 and node_top<=entry_top) within the search window"
+            "could not find a suitable seed (entry_top_level_idx>=2 and node_top<=entry_top_level_idx) within the search window"
         );
     }
 
@@ -1044,7 +1013,7 @@ mod tests {
         // Extract only upper-layer visits (>= 1). Ground layer (0) is handled later and isn't part of this loop.
         let upper: Vec<usize> = visited.into_iter().filter(|&l| l >= 1).collect();
 
-        // With entry_top = 2, we expect visits at levels [2, 1] in that order.
+        // With entry_top_level_idx = 2, we expect visits at levels [2, 1] in that order.
         assert_eq!(
             upper,
             vec![2, 1],
