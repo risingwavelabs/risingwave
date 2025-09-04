@@ -31,6 +31,7 @@ use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatab
 use thiserror_ext::AsReport;
 use tracing::{debug, warn};
 
+use crate::barrier::cdc_progress::CdcTableBackfillTrackerRef;
 use crate::barrier::checkpoint::creating_job::{CompleteJobType, CreatingStreamingJobControl};
 use crate::barrier::checkpoint::recovery::{
     DatabaseRecoveringState, DatabaseStatusAction, EnterInitializing, EnterRunning,
@@ -230,6 +231,7 @@ impl CheckpointControl {
                         let new_database = DatabaseCheckpointControl::new(
                             database_id,
                             self.env.shared_actor_infos().clone(),
+                            self.env.cdc_table_backfill_tracker(),
                         );
                         control_stream_manager.add_partial_graph(database_id, None);
                         entry
@@ -540,12 +542,17 @@ pub(crate) struct DatabaseCheckpointControl {
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
 
     create_mview_tracker: CreateMviewProgressTracker,
+    cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
 
     metrics: DatabaseCheckpointControlMetrics,
 }
 
 impl DatabaseCheckpointControl {
-    fn new(database_id: DatabaseId, shared_actor_infos: SharedActorInfos) -> Self {
+    fn new(
+        database_id: DatabaseId,
+        shared_actor_infos: SharedActorInfos,
+        cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
+    ) -> Self {
         Self {
             database_id,
             state: BarrierWorkerState::new(database_id, shared_actor_infos),
@@ -554,6 +561,7 @@ impl DatabaseCheckpointControl {
             committed_epoch: None,
             creating_streaming_job_controls: Default::default(),
             create_mview_tracker: Default::default(),
+            cdc_table_backfill_tracker,
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
@@ -564,6 +572,7 @@ impl DatabaseCheckpointControl {
         state: BarrierWorkerState,
         committed_epoch: u64,
         creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
+        cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
     ) -> Self {
         Self {
             database_id,
@@ -573,6 +582,7 @@ impl DatabaseCheckpointControl {
             committed_epoch: Some(committed_epoch),
             creating_streaming_job_controls,
             create_mview_tracker,
+            cdc_table_backfill_tracker,
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
@@ -842,6 +852,9 @@ impl DatabaseCheckpointControl {
                     &node.state.resps,
                     hummock_version_stats,
                 );
+                let finished_cdc_backfill = self
+                    .cdc_table_backfill_tracker
+                    .apply_collected_command(&node.state.resps);
                 if !node.command_ctx.barrier_info.kind.is_checkpoint() {
                     assert!(finished_jobs.is_empty());
                     node.notifiers.into_iter().for_each(|notifier| {
@@ -873,6 +886,8 @@ impl DatabaseCheckpointControl {
                 );
                 self.completing_barrier = Some(node.command_ctx.barrier_info.prev_epoch());
                 task.finished_jobs.extend(finished_jobs);
+                task.finished_cdc_table_backfill
+                    .extend(finished_cdc_backfill);
                 task.notifiers.extend(node.notifiers);
                 task.epoch_infos
                     .try_insert(
