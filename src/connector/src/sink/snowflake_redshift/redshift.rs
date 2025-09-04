@@ -609,10 +609,9 @@ impl RedshiftSinkCommitter {
             tokio::select! {
                 _ = shutdown_receiver.recv() => break,
                 _ = merge_timer.tick(), if merge_into_sql.is_some() => {
-                    if let Some(sql) = &merge_into_sql {
-                        if let Err(e) = client.execute_sql_sync(sql.clone()).await {
+                    if let Some(sql) = &merge_into_sql && let Err(e) = client.execute_sql_sync(sql.clone()).await {
                             tracing::warn!("Failed to execute periodic query for table {}: {}", config.table, e);
-                        }
+                        
                     }
                 },
                 _ = copy_timer.tick(), if need_copy_into => {
