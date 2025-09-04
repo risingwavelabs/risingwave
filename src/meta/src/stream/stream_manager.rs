@@ -25,10 +25,7 @@ use risingwave_common::catalog::{DatabaseId, Field, TableId};
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
-use risingwave_pb::meta::object::PbObjectInfo;
-use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
 use risingwave_pb::meta::table_fragments::ActorStatus;
-use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
@@ -696,7 +693,7 @@ impl GlobalStreamManager {
             || !streaming_job_ids.is_empty()
             || !state_table_ids.is_empty()
         {
-            let res = self
+            let _ = self
                 .barrier_scheduler
                 .run_command(
                     database_id,
@@ -717,36 +714,7 @@ impl GlobalStreamManager {
                 .inspect_err(|err| {
                     tracing::error!(error = ?err.as_report(), "failed to run drop command");
                 });
-            if res.is_ok() {
-                self.post_dropping_streaming_jobs(state_table_ids).await;
-            }
         }
-    }
-
-    async fn post_dropping_streaming_jobs(
-        &self,
-        state_table_ids: Vec<risingwave_meta_model::TableId>,
-    ) {
-        let tables = self
-            .metadata_manager
-            .catalog_controller
-            .complete_dropped_tables(state_table_ids.into_iter())
-            .await;
-        let objects = tables
-            .into_iter()
-            .map(|t| PbObject {
-                object_info: Some(PbObjectInfo::Table(t)),
-            })
-            .collect();
-        let group = PbInfo::ObjectGroup(PbObjectGroup { objects });
-        self.env
-            .notification_manager()
-            .notify_hummock(Operation::Delete, group.clone())
-            .await;
-        self.env
-            .notification_manager()
-            .notify_compactor(Operation::Delete, group)
-            .await;
     }
 
     /// Cancel streaming jobs and return the canceled table ids.

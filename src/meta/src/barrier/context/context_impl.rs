@@ -18,6 +18,9 @@ use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::object::PbObjectInfo;
+use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
+use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -207,6 +210,32 @@ impl CommandContext {
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
+                let tables = barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .complete_dropped_tables(
+                        unregistered_state_table_ids
+                            .iter()
+                            .map(|id| id.table_id as _),
+                    )
+                    .await;
+                let objects = tables
+                    .into_iter()
+                    .map(|t| PbObject {
+                        object_info: Some(PbObjectInfo::Table(t)),
+                    })
+                    .collect();
+                let group = PbInfo::ObjectGroup(PbObjectGroup { objects });
+                barrier_manager_context
+                    .env
+                    .notification_manager()
+                    .notify_hummock(Operation::Delete, group.clone())
+                    .await;
+                barrier_manager_context
+                    .env
+                    .notification_manager()
+                    .notify_compactor(Operation::Delete, group)
+                    .await;
             }
             Command::ConnectorPropsChange(obj_id_map_props) => {
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
