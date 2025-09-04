@@ -123,6 +123,22 @@ steps:
     parallelism: 4
     retry: *auto-retry
 
+  - label: "slow end-to-end test"
+    key: "slow-e2e-test"
+    command: "ci/scripts/slow-e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-slow-e2e-tests"
+      || build.env("CI_STEPS") =~ /(^|,)slow-e2e-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 12
+    retry: *auto-retry
+    
   - label: "meta backup test"
     key: "e2e-meta-backup-test"
     command: "ci/scripts/run-meta-backup-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
