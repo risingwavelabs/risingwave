@@ -44,8 +44,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, UpstreamFragmentInfo,
-    UpstreamSinkUnionExecutor, WrapperExecutor,
+    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -68,12 +67,6 @@ pub(crate) struct StreamActorManager {
 
     /// Runtime for the streaming actors.
     pub(super) runtime: BackgroundShutdownRuntime,
-}
-
-struct SinkIntoTableUnion<'a> {
-    prefix_nodes: Vec<&'a stream_plan::StreamNode>,
-    merge_projects: Vec<(&'a stream_plan::StreamNode, &'a stream_plan::StreamNode)>,
-    union_node: &'a stream_plan::StreamNode,
 }
 
 impl StreamActorManager {
@@ -213,157 +206,6 @@ impl StreamActorManager {
         }
     }
 
-    #[expect(clippy::too_many_arguments)]
-    async fn create_sink_into_table_union(
-        &self,
-        fragment_id: FragmentId,
-        union_node: &stream_plan::StreamNode,
-        env: StreamEnvironment,
-        store: impl StateStore,
-        actor_context: &ActorContextRef,
-        vnode_bitmap: Option<Bitmap>,
-        has_stateful: bool,
-        subtasks: &mut Vec<SubtaskHandle>,
-        local_barrier_manager: &LocalBarrierManager,
-        prefix_nodes: Vec<&stream_plan::StreamNode>,
-        merge_projects: Vec<(&stream_plan::StreamNode, &stream_plan::StreamNode)>,
-    ) -> StreamResult<Executor> {
-        let mut input = Vec::with_capacity(union_node.get_input().len());
-
-        for input_stream_node in prefix_nodes {
-            input.push(
-                self.create_nodes_inner(
-                    fragment_id,
-                    input_stream_node,
-                    env.clone(),
-                    store.clone(),
-                    actor_context,
-                    vnode_bitmap.clone(),
-                    has_stateful,
-                    subtasks,
-                    local_barrier_manager,
-                )
-                .await?,
-            );
-        }
-
-        // Use the first MergeNode to fill in the info of the new node.
-        let first_merge = merge_projects.first().unwrap().0;
-        let executor_id = Self::get_executor_id(actor_context, first_merge);
-        let mut info = Self::get_executor_info(first_merge, executor_id);
-        info.identity = format!("UpstreamSinkUnion {:X}", executor_id);
-        let eval_error_report = ActorEvalErrorReport {
-            actor_context: actor_context.clone(),
-            identity: info.identity.clone().into(),
-        };
-
-        let mut initial_upstream_infos = Vec::with_capacity(merge_projects.len());
-        for (merge_node, project_node) in merge_projects {
-            let upstream_fragment_id = merge_node
-                .get_node_body()
-                .unwrap()
-                .as_merge()
-                .unwrap()
-                .upstream_fragment_id;
-            let project_exprs = project_node
-                .get_node_body()
-                .unwrap()
-                .as_project()
-                .unwrap()
-                .get_select_list();
-            let info = UpstreamFragmentInfo::new(
-                upstream_fragment_id,
-                &actor_context.initial_upstream_actors,
-                merge_node.get_fields(),
-                project_exprs,
-                eval_error_report.clone(),
-            )?;
-            initial_upstream_infos.push(info);
-        }
-
-        let upstream_sink_union_executor = UpstreamSinkUnionExecutor::new(
-            actor_context.clone(),
-            local_barrier_manager.clone(),
-            self.streaming_metrics.clone(),
-            env.config().developer.chunk_size,
-            initial_upstream_infos,
-            eval_error_report,
-        );
-        let executor = (info, upstream_sink_union_executor).into();
-        input.push(executor);
-
-        self.generate_executor_from_inputs(
-            fragment_id,
-            union_node,
-            env,
-            store,
-            actor_context,
-            vnode_bitmap,
-            has_stateful,
-            subtasks,
-            local_barrier_manager,
-            input,
-        )
-        .await
-    }
-
-    fn as_sink_into_table_union(node: &StreamNode) -> Option<SinkIntoTableUnion<'_>> {
-        let NodeBody::Union(_) = node.get_node_body().unwrap() else {
-            return None;
-        };
-
-        let mut merge_projects = Vec::new();
-        let mut remaining_nodes = Vec::new();
-
-        let mut rev_iter = node.get_input().iter().rev();
-        for union_input in rev_iter.by_ref() {
-            let mut is_sink_into = false;
-            if let NodeBody::Project(project) = union_input.get_node_body().unwrap() {
-                let project_input = union_input.get_input().first().unwrap();
-                // Check project conditions
-                let project_check = project.get_watermark_input_cols().is_empty()
-                    && project.get_watermark_output_cols().is_empty()
-                    && project.get_nondecreasing_exprs().is_empty()
-                    && !project.noop_update_hint;
-                if project_check
-                    && let NodeBody::Merge(merge) = project_input.get_node_body().unwrap()
-                {
-                    let merge_check = merge.upstream_dispatcher_type()
-                        == risingwave_pb::stream_plan::DispatcherType::Hash;
-                    if merge_check {
-                        is_sink_into = true;
-                        tracing::debug!(
-                            "replace sink into table union, merge: {:?}, project: {:?}",
-                            merge,
-                            project
-                        );
-                        merge_projects.push((project_input, union_input));
-                    }
-                }
-            }
-            if !is_sink_into {
-                remaining_nodes.push(union_input);
-                break;
-            }
-        }
-
-        if merge_projects.is_empty() {
-            return None;
-        }
-
-        remaining_nodes.extend(rev_iter);
-
-        merge_projects.reverse();
-        remaining_nodes.reverse();
-
-        // complete StreamNode structure is needed here, to provide some necessary fields.
-        Some(SinkIntoTableUnion {
-            prefix_nodes: remaining_nodes,
-            merge_projects,
-            union_node: node,
-        })
-    }
-
     /// Create a chain(tree) of nodes, with given `store`.
     #[expect(clippy::too_many_arguments)]
     #[async_recursion]
@@ -394,29 +236,6 @@ impl StreamActorManager {
                 )
                 .await
             });
-        }
-
-        if let Some(SinkIntoTableUnion {
-            prefix_nodes: remaining_nodes,
-            merge_projects,
-            union_node,
-        }) = Self::as_sink_into_table_union(node)
-        {
-            return self
-                .create_sink_into_table_union(
-                    fragment_id,
-                    union_node,
-                    env,
-                    store,
-                    actor_context,
-                    vnode_bitmap,
-                    has_stateful,
-                    subtasks,
-                    local_barrier_manager,
-                    remaining_nodes,
-                    merge_projects,
-                )
-                .await;
         }
 
         // The "stateful" here means that the executor may issue read operations to the state store

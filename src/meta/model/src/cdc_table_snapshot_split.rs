@@ -27,6 +27,7 @@ pub struct Model {
     pub split_id: i64,
     pub left: Vec<u8>,
     pub right: Vec<u8>,
+    pub is_backfill_finished: i16,
 }
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
