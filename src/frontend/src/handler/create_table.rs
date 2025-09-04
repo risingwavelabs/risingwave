@@ -1763,8 +1763,6 @@ pub async fn create_iceberg_engine_table(
     if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
         match enable_compaction.to_lowercase().as_str() {
             "true" => {
-                risingwave_common::license::Feature::IcebergCompaction.check_available()?;
-
                 sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
             }
             "false" => {
@@ -1784,13 +1782,7 @@ pub async fn create_iceberg_engine_table(
             .as_mut()
             .map(|x| x.with_properties.remove("enable_compaction"));
     } else {
-        sink_with.insert(
-            ENABLE_COMPACTION.to_owned(),
-            risingwave_common::license::Feature::IcebergCompaction
-                .check_available()
-                .is_ok()
-                .to_string(),
-        );
+        sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
     }
 
     if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
@@ -1822,7 +1814,6 @@ pub async fn create_iceberg_engine_table(
             .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
         match enable_snapshot_expiration.to_lowercase().as_str() {
             "true" => {
-                risingwave_common::license::Feature::IcebergCompaction.check_available()?;
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
                 true
             }
@@ -1839,13 +1830,7 @@ pub async fn create_iceberg_engine_table(
             }
         }
     } else {
-        sink_with.insert(
-            ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
-            risingwave_common::license::Feature::IcebergCompaction
-                .check_available()
-                .is_ok()
-                .to_string(),
-        );
+        sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
         true
     };
 
@@ -1920,8 +1905,6 @@ pub async fn create_iceberg_engine_table(
             }
 
             ICEBERG_WRITE_MODE_COPY_ON_WRITE => {
-                risingwave_common::license::Feature::IcebergCompaction.check_available()?;
-
                 if table.append_only {
                     return Err(ErrorCode::NotSupported(
                         "COPY ON WRITE is not supported for append-only iceberg table".to_owned(),
