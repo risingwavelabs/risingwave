@@ -1026,7 +1026,7 @@ impl DdlController {
             .map(|(idx, _)| idx as _)
             .collect_vec();
 
-        let dist_key_indices: MetaResult<Vec<u32>> = try {
+        let dist_key_indices: anyhow::Result<Vec<u32>> = try {
             let sink_columns = if !sink.original_target_columns.is_empty() {
                 sink.original_target_columns.clone()
             } else {
@@ -1036,12 +1036,12 @@ impl DdlController {
                 .into_iter()
                 .enumerate()
                 .map(|(idx, col)| {
-                    let column_desc = col.column_desc.ok_or_else(|| {
-                        MetaError::from(anyhow::anyhow!("sink column_desc is None"))
-                    })?;
+                    let column_desc = col
+                        .column_desc
+                        .ok_or_else(|| anyhow::anyhow!("sink column_desc is None"))?;
                     Ok((column_desc.column_id, idx as u32))
                 })
-                .collect::<MetaResult<HashMap<_, _>>>()?;
+                .collect::<anyhow::Result<HashMap<_, _>>>()?;
             table
                 .distribution_key
                 .iter()
@@ -1049,28 +1049,22 @@ impl DdlController {
                     let column_desc = table.columns[*dist_idx as usize]
                         .column_desc
                         .as_ref()
-                        .ok_or_else(|| {
-                            MetaError::from(anyhow::anyhow!("table column_desc is None"))
-                        })?;
+                        .ok_or_else(|| anyhow::anyhow!("table column_desc is None"))?;
                     let sink_idx =
                         sink_idx_by_col_id
                             .get(&column_desc.column_id)
                             .ok_or_else(|| {
-                                MetaError::from(anyhow::anyhow!(
+                                anyhow::anyhow!(
                                     "column id {} not found in sink",
                                     column_desc.column_id
-                                ))
+                                )
                             })?;
                     Ok(*sink_idx)
                 })
-                .collect::<MetaResult<Vec<_>>>()?
+                .collect::<anyhow::Result<Vec<_>>>()?
         };
-        let dist_key_indices = dist_key_indices.map_err(|e| {
-            MetaError::from(anyhow::anyhow!(
-                "Failed to get distribution key indices: {}",
-                e.as_report()
-            ))
-        })?;
+        let dist_key_indices =
+            dist_key_indices.map_err(|e| e.context("failed to get distribution key indices"))?;
 
         let sink_fragment_downstreams = replace_table_ctx
             .upstream_fragment_downstreams
