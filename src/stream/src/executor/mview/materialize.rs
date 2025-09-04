@@ -46,7 +46,6 @@ use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
 use crate::common::table::test_utils::gen_pbtable;
-use crate::executor::error::ErrorKind;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::mview::RefreshProgressTable;
 use crate::executor::prelude::*;
@@ -609,13 +608,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
             // stage 2 - merging and deleting
             'stage_2: loop {
-                let refresh_args = self.refresh_args.as_mut().ok_or_else(|| {
-                    ErrorKind::Uncategorized(anyhow::anyhow!(
-                        "refresh_args is None but sort merge stage is triggered, actor_id={:?}, schema={:?}",
-                        self.actor_context.id,
-                        self.schema.fields(),
-                    ))
-                })?;
+                // if the upstream is finished, it is still possible to go into 'stage_2 loop
+                let Some(refresh_args) = self.refresh_args.as_mut() else {
+                    tracing::info!(actor_id = %self.actor_context.id, "actor is not refreshing, skipping sort merge stage");
+                    break 'stage_2;
+                };
                 tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Starting table replacement operation");
 
                 debug_assert_eq!(
@@ -769,8 +766,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             }
 
             // stage2 cleanup
-            {
-                let refresh_args = self.refresh_args.as_mut().unwrap();
+            'stage2_cleanup: {
+                let Some(refresh_args) = self.refresh_args.as_mut() else {
+                    break 'stage2_cleanup;
+                };
+                tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Starting stage2 cleanup");
 
                 // wait for barrier
                 #[for_await]
@@ -869,13 +869,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         }
                     }
                 }
+                tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Finished stage2 cleanup, table refresh finished");
             }
-            tracing::info!("Materialize refresh finished!");
 
             // Clean up progress table after successful refresh completion
             if let Some(ref mut refresh_args) = self.refresh_args {
                 refresh_args.progress_table.clear_all_progress()?;
-                tracing::info!("Cleared refresh progress table after successful completion");
+                tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Cleared refresh progress table after successful completion");
             }
 
             // stage 2 finished, go back to stage 1
