@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::PbOverWindowNode;
 use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Executor, OverWindowExecutor, OverWindowExecutorArgs};
 use crate::task::ExecutorParams;
@@ -58,8 +58,10 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
                 .vnode_bitmap
                 .expect("vnodes not set for EOWC over window"),
         ));
-        let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, store, vnodes).await;
+        let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
         let exec = OverWindowExecutor::new(OverWindowExecutorArgs {
             actor_ctx: params.actor_context,
 
