@@ -923,7 +923,7 @@ impl DdlController {
                 &mut replace_table_ctx,
                 stream_job_fragments.inner.union_fragment_for_table(),
                 None,
-            );
+            )?;
         }
 
         let [table_catalog]: [_; 1] = mgr
@@ -960,7 +960,7 @@ impl DdlController {
                     &mut replace_table_ctx,
                     stream_job_fragments.inner.union_fragment_for_table(),
                     Some(&sink.unique_identity()),
-                );
+                )?;
             }
         }
 
@@ -1017,7 +1017,7 @@ impl DdlController {
         replace_table_ctx: &mut ReplaceStreamJobContext,
         union_fragment: &mut Fragment,
         unique_identity: Option<&str>,
-    ) {
+    ) -> MetaResult<()> {
         let sink_fields = sink_fragment.nodes.fields.clone();
 
         let output_indices = sink_fields
@@ -1026,7 +1026,7 @@ impl DdlController {
             .map(|(idx, _)| idx as _)
             .collect_vec();
 
-        let get_dist_key_indices = || -> MetaResult<Vec<u32>> {
+        let dist_key_indices: MetaResult<Vec<u32>> = try {
             let sink_columns = if !sink.original_target_columns.is_empty() {
                 sink.original_target_columns.clone()
             } else {
@@ -1042,7 +1042,7 @@ impl DdlController {
                     Ok((column_desc.column_id, idx as u32))
                 })
                 .collect::<MetaResult<HashMap<_, _>>>()?;
-            let dist_key_indices = table
+            table
                 .distribution_key
                 .iter()
                 .map(|dist_idx| {
@@ -1063,14 +1063,14 @@ impl DdlController {
                             })?;
                     Ok(*sink_idx)
                 })
-                .collect::<MetaResult<Vec<_>>>()?;
-            Ok(dist_key_indices)
+                .collect::<MetaResult<Vec<_>>>()?
         };
-
-        let dist_key_indices = get_dist_key_indices().unwrap_or_else(|e| {
-            tracing::error!("Failed to get distribution key indices: {}", e.as_report());
-            table.distribution_key.iter().map(|i| *i as _).collect_vec()
-        });
+        let dist_key_indices = dist_key_indices.map_err(|e| {
+            MetaError::from(anyhow::anyhow!(
+                "Failed to get distribution key indices: {}",
+                e.as_report()
+            ))
+        })?;
 
         let sink_fragment_downstreams = replace_table_ctx
             .upstream_fragment_downstreams
@@ -1143,6 +1143,8 @@ impl DdlController {
                 });
             }
         }
+
+        Ok(())
     }
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
@@ -1852,7 +1854,7 @@ impl DdlController {
                         &mut ctx,
                         stream_job_fragments.inner.union_fragment_for_table(),
                         Some(&sink.unique_identity()),
-                    );
+                    )?;
 
                     if sink.original_target_columns.is_empty() {
                         updated_sink_catalogs.push(sink.id as _);
