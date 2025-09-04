@@ -17,14 +17,14 @@ anchors:
             - "v1-cache-{{ id }}-"
           backend: s3
           s3:
-            bucket: "${AWS_CARGO_CACHE_BUCKET}" 
-            endpoint: "${AWS_ENDPOINT_URL}"  
-            region: "${AWS_DEFAULT_REGION}" 
+            bucket: "${AWS_CARGO_CACHE_BUCKET}"
+            endpoint: "${AWS_ENDPOINT_URL}"
+            region: "${AWS_DEFAULT_REGION}"
             args: "--no-progress"
           paths:
             - ".cargo/registry/index"
             - ".cargo/registry/cache"
-            - ".cargo/git"  
+            - ".cargo/git"
     # we need to override args, so didn't include image here in the anchor
     - docker-compose: &docker-compose
         run: rw-build-env
@@ -138,7 +138,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 12
     retry: *auto-retry
-    
+
   - label: "meta backup test"
     key: "e2e-meta-backup-test"
     command: "ci/scripts/run-meta-backup-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"

@@ -60,13 +60,7 @@ steps:
     if: |
       build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - GITHUB_TOKEN
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 15
     retry: *auto-retry
 
@@ -138,9 +132,6 @@ steps:
         - "build-other"
         - "docslt"
       plugins:
-        - seek-oss/aws-sm#v2.3.2:
-            env:
-              BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
         - docker-compose#v5.5.0: *docker-compose-standard
         - test-collector#v1.0.0:
             files: "*-junit.xml"
@@ -234,13 +225,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
     plugins:
       - ./ci/plugins/swapfile
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            CODECOV_TOKEN: my-codecov-token
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - CODECOV_TOKEN
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 25
     retry: *auto-retry
 
@@ -356,13 +341,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - GITHUB_TOKEN
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 60
     parallelism: 4
@@ -377,13 +356,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - GITHUB_TOKEN
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 60
     parallelism: 4
@@ -468,13 +441,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - S3_SOURCE_TEST_CONF
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
@@ -488,13 +455,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - S3_SOURCE_TEST_CONF
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
@@ -508,13 +469,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - S3_SOURCE_TEST_CONF
+      - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
@@ -530,15 +485,7 @@ steps:
       - build
       - build-other
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            ASTRA_STREAMING_TEST_TOKEN: astra_streaming_test_token
-            STREAMNATIVE_CLOUD_TEST_CONF: streamnative_cloud_test_conf
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - ASTRA_STREAMING_TEST_TOKEN
-          - STREAMNATIVE_CLOUD_TEST_CONF
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 20
     retry: *auto-retry
 
@@ -564,15 +511,7 @@ steps:
       - "BUILDKITE_BUILD_NUMBER=$BUILDKITE_BUILD_NUMBER ci/scripts/upload-micro-bench-results.sh"
     depends_on: "run-micro-benchmarks"
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            BUILDKITE_TOKEN: buildkite_token
-            GITHUB_TOKEN: github-token
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - BUILDKITE_TOKEN
-          - GITHUB_TOKEN
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 5
 
   # Backwards compatibility tests
@@ -594,14 +533,6 @@ steps:
       - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
-        # Test the 4 latest versions against the latest main.
-        # e.g.
-        # 1: 2.0.0
-        # 2: 1.1.1
-        # 3: 1.0.1
-        # 4: 1.0.0
-        # It is ordered by the full version number, rather than minor / major version.
-        # We can change to just be on major version in the future.
         version_offset:
           - "1"
           - "2"
@@ -909,15 +840,11 @@ steps:
     if: |
       build.pull_request.labels includes "ci/run-release-dry-run" || build.env("CI_STEPS") =~ /(^|,)release-dry-run(,|$$)/
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: release-env-x86
           environment:
           - BINARY_NAME
-          - GITHUB_TOKEN
           - BUILDKITE_TAG
           - BUILDKITE_SOURCE
     timeout_in_minutes: 60
@@ -925,106 +852,23 @@ steps:
 
   - label: "release amd64"
     command: "ci/scripts/release.sh"
-    if: build.tag != null
+    if: build.tag != null && build.pull_request == false
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: release-env-x86
           environment:
           - BINARY_NAME
-          - GITHUB_TOKEN
           - BUILDKITE_TAG
           - BUILDKITE_SOURCE
     timeout_in_minutes: 90
     retry: *auto-retry
 
-  - label: "release aarch64 (dry-run)"
-    command: "SKIP_RELEASE=1 ci/scripts/release.sh"
-    if: |
-      build.pull_request.labels includes "ci/run-release-dry-run" || build.env("CI_STEPS") =~ /(^|,)release-dry-run(,|$$)/
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: release-env-arm
-          environment:
-          - BINARY_NAME
-          - GITHUB_TOKEN
-          - BUILDKITE_TAG
-          - BUILDKITE_SOURCE
-    agents:
-      queue: "linux-arm64"
-    timeout_in_minutes: 60
-    retry: *auto-retry
-
-  - label: "release aarch64"
-    command: "ci/scripts/release.sh"
-    if: build.tag != null
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: release-env-arm
-          environment:
-          - BINARY_NAME
-          - GITHUB_TOKEN
-          - BUILDKITE_TAG
-          - BUILDKITE_SOURCE
-    agents:
-      queue: "linux-arm64"
-    timeout_in_minutes: 60
-    retry: *auto-retry
-
   - label: "release docker image: amd64"
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
-    if: build.tag != null
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
-            GITHUB_TOKEN: github-token
+    if: build.tag != null && build.pull_request == false
     timeout_in_minutes: 60
-    retry: *auto-retry
-
-  - label: "docker-build-push: aarch64"
-    command: "ci/scripts/docker.sh"
-    key: "build-aarch64"
-    if: build.tag != null
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
-            GITHUB_TOKEN: github-token
-    timeout_in_minutes: 60
-    agents:
-      queue: "linux-arm64"
-    retry: *auto-retry
-
-  - label: "multi arch image create push"
-    command: "ci/scripts/multi-arch-docker.sh"
-    if: build.tag != null
-    depends_on:
-      - "build-amd64"
-      - "build-aarch64"
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
-    timeout_in_minutes: 10
     retry: *auto-retry
 
   # Notification test.
@@ -1063,13 +907,7 @@ steps:
   - label: "upload coverage reports"
     command: "ci/scripts/upload-coverage.sh"
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            CODECOV_TOKEN: my-codecov-token
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - CODECOV_TOKEN
+      - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 10
     retry: *auto-retry
     soft_fail: true
