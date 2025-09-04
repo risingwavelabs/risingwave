@@ -35,7 +35,7 @@ use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_pb::catalog::PbTable;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::{StateTable, StateTablePostCommit};
+use crate::common::table::state_table::{StateTable, StateTableBuilder, StateTablePostCommit};
 use crate::executor::StreamExecutorResult;
 
 pub struct SourceStateTableHandler<S: StateStore> {
@@ -48,7 +48,13 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     /// Refer to `infer_internal_table_catalog` in `src/frontend/src/optimizer/plan_node/generic/source.rs` for more details.
     pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
         Self {
-            state_table: StateTable::from_table_catalog(table_catalog, store, None).await,
+            // Note: should not enable `preload_all_rows` for `StateTable` of source
+            // because it uses storage to synchronize different parallelisms, which is a special
+            // access pattern that in-mem state table has not supported yet.
+            state_table: StateTableBuilder::new(table_catalog, store, None)
+                .forbid_preload_all_rows()
+                .build()
+                .await,
         }
     }
 
@@ -59,7 +65,13 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
         Self {
-            state_table: StateTable::from_table_catalog(table_catalog, store, vnodes).await,
+            // Note: should not enable `preload_all_rows` for `StateTable` of source
+            // because it uses storage to synchronize different parallelisms, which is a special
+            // access pattern that in-mem state table has not supported yet.
+            state_table: StateTableBuilder::new(table_catalog, store, vnodes)
+                .forbid_preload_all_rows()
+                .build()
+                .await,
         }
     }
 
