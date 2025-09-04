@@ -536,24 +536,20 @@ impl StreamMaterialize {
         }
 
         // Add metadata columns
-        columns.push(ColumnCatalog {
-            column_desc: risingwave_common::catalog::ColumnDesc::named(
-                "is_completed",
-                col_index.into(),
-                DataType::Boolean,
-            ),
-            is_hidden: false,
-        });
-        col_index += 1;
-
-        columns.push(ColumnCatalog {
-            column_desc: risingwave_common::catalog::ColumnDesc::named(
-                "processed_rows",
-                col_index.into(),
-                DataType::Int64,
-            ),
-            is_hidden: false,
-        });
+        for (name, data_type) in [
+            ("is_completed", DataType::Boolean),
+            ("processed_rows", DataType::Int64),
+        ] {
+            columns.push(ColumnCatalog {
+                column_desc: risingwave_common::catalog::ColumnDesc::named(
+                    name,
+                    col_index.into(),
+                    data_type,
+                ),
+                is_hidden: false,
+            });
+            col_index += 1;
+        }
 
         let mut builder = TableCatalogBuilder::default();
 
@@ -665,35 +661,25 @@ impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        tracing::info!(
+        tracing::debug!(
             table_name = %self.table().name(),
             refreshable = %self.table().refreshable,
             has_staging_table = %self.staging_table.is_some(),
             has_progress_table = %self.refresh_progress_table.is_some(),
-            staging_table_name = ?self.staging_table.as_ref().map(|t| &t.name),
-            progress_table_name = ?self.refresh_progress_table.as_ref().map(|t| &t.name),
+            staging_table_name = ?self.staging_table.as_ref().map(|t| (&t.id, &t.name)),
+            progress_table_name = ?self.refresh_progress_table.as_ref().map(|t| (&t.id, &t.name)),
             "Converting StreamMaterialize to protobuf"
         );
 
-        let staging_table_prost = self.staging_table.clone().map(|t| {
-            let prost = t.with_id(state.gen_table_id_wrapped()).to_prost();
-            tracing::info!(
-                staging_table_id = %prost.id,
-                staging_table_name = %prost.name,
-                "Staging table converted to protobuf"
-            );
-            prost
-        });
+        let staging_table_prost = self
+            .staging_table
+            .clone()
+            .map(|t| t.with_id(state.gen_table_id_wrapped()).to_prost());
 
-        let refresh_progress_table_prost = self.refresh_progress_table.clone().map(|t| {
-            let prost = t.with_id(state.gen_table_id_wrapped()).to_prost();
-            tracing::info!(
-                progress_table_id = %prost.id,
-                progress_table_name = %prost.name,
-                "Refresh progress table converted to protobuf"
-            );
-            prost
-        });
+        let refresh_progress_table_prost = self
+            .refresh_progress_table
+            .clone()
+            .map(|t| t.with_id(state.gen_table_id_wrapped()).to_prost());
 
         PbNodeBody::Materialize(Box::new(MaterializeNode {
             // Do not fill `table` and `table_id` here to avoid duplication. It will be filled by

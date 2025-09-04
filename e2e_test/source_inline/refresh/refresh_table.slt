@@ -87,6 +87,9 @@ CREATE TABLE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
 
 
 statement ok
+create materialized view refresh_fs_t_mv as select * from refresh_fs_t;
+
+statement ok
 CREATE TABLE refresh_fs_t_on_conflict_ignore (id int PRIMARY KEY, name varchar)
 ON CONFLICT IGNORE
 WITH (
@@ -114,6 +117,15 @@ SELECT * FROM refresh_fs_t;
 1 alice
 2 bob
 
+
+# should keep consistent with upstream table
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice
+2 bob
+
+
 # ----
 # Test 2: Add new files and refresh (INSERT scenario)
 system ok
@@ -131,7 +143,7 @@ SELECT * FROM refresh_fs_t;
 1 alice
 2 bob
 
-statement ok
+statement ok retry 3 backoff 5s
 REFRESH TABLE refresh_fs_t;
 
 sleep 2s
@@ -143,6 +155,18 @@ SELECT * FROM refresh_fs_t;
 2 bob
 3 charlie
 4 david
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice
+2 bob
+3 charlie
+4 david
+
+
+sleep 5s
 
 # Test refresh without any external changes
 statement ok retry 3 backoff 5s
@@ -158,6 +182,16 @@ SELECT * FROM refresh_fs_t;
 3 charlie
 4 david
 
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice
+2 bob
+3 charlie
+4 david
+
+
 # ----
 # Test 3: Modify existing file content (UPDATE scenario)
 system ok
@@ -166,12 +200,12 @@ echo "1,alice_updated" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file
 system ok
 echo "2,bob_updated" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file2.csv
 
+sleep 5s
+
 statement ok
 REFRESH TABLE refresh_fs_t;
 
 sleep 2s
-
-
 
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
@@ -181,6 +215,16 @@ SELECT * FROM refresh_fs_t;
 3 charlie
 4 david
 
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice_updated
+2 bob_updated
+3 charlie
+4 david
+
+
 # ----
 # Test 4: Remove files (DELETE scenario)
 system ok
@@ -189,18 +233,26 @@ rm ./e2e_test/source_inline/refresh/refresh_table_tmp/file3.csv
 system ok
 rm ./e2e_test/source_inline/refresh/refresh_table_tmp/new_file.csv
 
+sleep 5s
+
 statement ok
 REFRESH TABLE refresh_fs_t;
 
 sleep 2s
-
-
 
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
 ----
 1 alice_updated
 2 bob_updated
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice_updated
+2 bob_updated
+
 
 # ----
 # Test 5: Mixed operations - add, update, delete simultaneously
@@ -220,6 +272,8 @@ echo "6,frank" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file6.csv
 system ok
 echo "6,frank_updated" >> ./e2e_test/source_inline/refresh/refresh_table_tmp/file6.csv
 
+sleep 5s
+
 statement ok
 REFRESH TABLE refresh_fs_t;
 
@@ -228,14 +282,13 @@ REFRESH TABLE refresh_fs_t_on_conflict_ignore;
 
 sleep 2s
 
-
-
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
 ----
 1 alice_final
 5 eve
 6 frank_updated
+
 
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t_on_conflict_ignore;
@@ -248,6 +301,8 @@ SELECT * FROM refresh_fs_t_on_conflict_ignore;
 # Test 6: Empty directory (all files deleted)
 system ok
 rm ./e2e_test/source_inline/refresh/refresh_table_tmp/*.csv
+
+sleep 5s
 
 statement ok
 REFRESH TABLE refresh_fs_t;
@@ -266,6 +321,8 @@ echo "7,grace" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new1.csv
 system ok
 echo "8,henry" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new2.csv
 
+sleep 5s
+
 statement ok
 REFRESH TABLE refresh_fs_t;
 
@@ -279,10 +336,17 @@ SELECT * FROM refresh_fs_t;
 8 henry
 
 
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+7 grace
+8 henry
+
+
 # ----
 # Cleanup
 statement ok
-DROP TABLE refresh_fs_t;
+DROP TABLE refresh_fs_t cascade;
 
 statement ok
 DROP TABLE refresh_fs_t_on_conflict_ignore;

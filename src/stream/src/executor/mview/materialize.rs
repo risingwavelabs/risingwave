@@ -595,6 +595,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             .set(b_epoch.curr as i64);
 
                         if goto_stage2 {
+                            debug_assert!(self.refresh_args.is_some());
                             break 'stage1;
                         } else {
                             continue;
@@ -606,9 +607,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             }
 
             // stage 2 - merging and deleting
-
             'stage_2: loop {
-                let refresh_args = self.refresh_args.as_mut().unwrap();
+                // if the upstream is finished, it is still possible to go into 'stage_2 loop
+                let Some(refresh_args) = self.refresh_args.as_mut() else {
+                    tracing::info!(actor_id = %self.actor_context.id, "actor is not refreshing, skipping sort merge stage");
+                    break 'stage_2;
+                };
                 tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Starting table replacement operation");
 
                 debug_assert_eq!(
@@ -638,6 +642,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     );
 
                     // Prefer to select input stream to handle barriers promptly
+                    // Rebuild the merge stream each time processing a barrier
                     let mut merge_stream =
                         select_with_strategy(left_input, right_merge_sort, |_: &mut ()| {
                             stream::PollNext::Left
@@ -677,9 +682,19 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                 // Process collected rows for deletion
                 tracing::trace!(?rows_to_delete, "on_load_finish: rows to delete");
-                for row in rows_to_delete {
+                // let to_delete_chunk = StreamChunk::from_rows(rows, data_types)
+                for row in &rows_to_delete {
                     self.state_table.delete(row);
-                    // TODO: yield streamchunk to downstream
+                }
+                if !rows_to_delete.is_empty() {
+                    let to_delete_chunk = StreamChunk::from_rows(
+                        &rows_to_delete
+                            .iter()
+                            .map(|row| (Op::Delete, row))
+                            .collect_vec(),
+                        &self.schema.data_types(),
+                    );
+                    yield Message::Chunk(to_delete_chunk);
                 }
 
                 if merge_complete {
@@ -751,8 +766,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             }
 
             // stage2 cleanup
-            {
-                let refresh_args = self.refresh_args.as_mut().unwrap();
+            'stage2_cleanup: {
+                let Some(refresh_args) = self.refresh_args.as_mut() else {
+                    break 'stage2_cleanup;
+                };
+                tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Starting stage2 cleanup");
 
                 // wait for barrier
                 #[for_await]
@@ -851,13 +869,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         }
                     }
                 }
+                tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Finished stage2 cleanup, table refresh finished");
             }
-            tracing::info!("Materialize refresh finished!");
 
             // Clean up progress table after successful refresh completion
             if let Some(ref mut refresh_args) = self.refresh_args {
                 refresh_args.progress_table.clear_all_progress()?;
-                tracing::info!("Cleared refresh progress table after successful completion");
+                tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Cleared refresh progress table after successful completion");
             }
 
             // stage 2 finished, go back to stage 1
@@ -876,21 +894,27 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         for vnode in main_table.vnodes().clone().iter_vnodes() {
             let mut processed_rows = 0;
             // Check if this VNode has already been completed (for fault tolerance)
-            if let Some(current_entry) = progress_table.get_progress(vnode) {
-                // Skip already completed VNodes during recovery
-                if current_entry.is_completed {
-                    tracing::debug!(
-                        vnode = vnode.to_index(),
-                        "Skipping already completed VNode during recovery"
-                    );
-                    continue;
-                }
-                processed_rows += current_entry.processed_rows;
+            let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) =
+                if let Some(current_entry) = progress_table.get_progress(vnode) {
+                    // Skip already completed VNodes during recovery
+                    if current_entry.is_completed {
+                        tracing::debug!(
+                            vnode = vnode.to_index(),
+                            "Skipping already completed VNode during recovery"
+                        );
+                        continue;
+                    }
+                    processed_rows += current_entry.processed_rows;
+                    tracing::debug!(vnode = vnode.to_index(), "Started merging VNode");
 
-                tracing::debug!(vnode = vnode.to_index(), "Started merging VNode");
-            }
-
-            let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
+                    if let Some(current_state) = &current_entry.current_pos {
+                        (Bound::Excluded(current_state.clone()), Bound::Unbounded)
+                    } else {
+                        (Bound::Unbounded, Bound::Unbounded)
+                    }
+                } else {
+                    (Bound::Unbounded, Bound::Unbounded)
+                };
 
             let iter_main = main_table
                 .iter_keyed_row_with_vnode(
@@ -919,7 +943,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 let main_key = main_kv.key();
 
                 // Advance staging iterator until we find a key >= main_key
-                // TODO: update refresh progress here!
                 let mut should_delete = false;
                 while let Some(staging_kv) = &staging_item {
                     let staging_key = staging_kv.key();
