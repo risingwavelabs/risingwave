@@ -933,9 +933,7 @@ impl DdlController {
             .expect("Target table should exist in sink into table");
 
         {
-            let catalogs = mgr
-                .get_sink_catalog_by_ids(&table_catalog.incoming_sinks)
-                .await?;
+            let catalogs = mgr.get_table_incoming_sinks(table_catalog.id).await?;
 
             for sink in catalogs {
                 let sink_id = sink.id;
@@ -1547,8 +1545,6 @@ impl DdlController {
                             streaming_job,
                             replace_upstream,
                             SinkIntoTableContext {
-                                creating_sink_id: None,
-                                dropping_sink_id: Some(sink_id),
                                 updated_sink_catalogs: vec![],
                             },
                             None, // no source is dropped when dropping sink into table
@@ -1825,7 +1821,7 @@ impl DdlController {
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
                 let catalogs = self
                     .metadata_manager
-                    .get_sink_catalog_by_ids(&table.incoming_sinks)
+                    .get_table_incoming_sinks(table.id)
                     .await?;
 
                 for sink in catalogs {
@@ -1898,8 +1894,6 @@ impl DdlController {
                         streaming_job,
                         replace_upstream,
                         SinkIntoTableContext {
-                            creating_sink_id: None,
-                            dropping_sink_id: None,
                             updated_sink_catalogs,
                         },
                         drop_table_connector_ctx.as_ref(),

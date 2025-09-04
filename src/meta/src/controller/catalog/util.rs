@@ -346,42 +346,21 @@ impl CatalogController {
 
         let all_fragment_ids: HashSet<_> = all_fragment_ids.into_iter().collect();
 
-        let table_sink_ids: Vec<ObjectId> = Sink::find()
+        let all_sink_into_tables: Vec<(SinkId, Option<TableId>)> = Sink::find()
             .select_only()
-            .column(sink::Column::SinkId)
+            .columns(vec![sink::Column::SinkId, sink::Column::TargetTable])
             .filter(sink::Column::TargetTable.is_not_null())
             .into_tuple()
             .all(txn)
             .await?;
 
-        let all_table_with_incoming_sinks: Vec<(ObjectId, I32Array)> = Table::find()
-            .select_only()
-            .columns(vec![table::Column::TableId, table::Column::IncomingSinks])
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        let table_incoming_sinks_to_update = all_table_with_incoming_sinks
-            .into_iter()
-            .filter(|(_, incoming_sinks)| {
-                let inner_ref = incoming_sinks.inner_ref();
-                !inner_ref.is_empty()
-                    && inner_ref
-                        .iter()
-                        .any(|sink_id| !table_sink_ids.contains(sink_id))
-            })
-            .collect_vec();
-
-        let new_table_incoming_sinks = table_incoming_sinks_to_update
-            .into_iter()
-            .map(|(table_id, incoming_sinks)| {
-                let new_incoming_sinks = incoming_sinks
-                    .into_inner()
-                    .extract_if(.., |id| table_sink_ids.contains(id))
-                    .collect_vec();
-                (table_id, I32Array::from(new_incoming_sinks))
-            })
-            .collect_vec();
+        let mut new_table_incoming_sinks: HashMap<TableId, Vec<SinkId>> = HashMap::new();
+        for (sink_id, target_table_id) in all_sink_into_tables {
+            new_table_incoming_sinks
+                .entry(target_table_id.expect("filter by non null"))
+                .or_default()
+                .push(sink_id);
+        }
 
         // no need to update, returning
         if new_table_incoming_sinks.is_empty() {
@@ -393,7 +372,7 @@ impl CatalogController {
             tracing::info!("cleaning dirty table sink downstream table {}", table_id);
             Table::update(table::ActiveModel {
                 table_id: Set(table_id as _),
-                incoming_sinks: Set(new_incoming_sinks),
+                incoming_sinks: Set(new_incoming_sinks.into()),
                 ..Default::default()
             })
             .exec(txn)
