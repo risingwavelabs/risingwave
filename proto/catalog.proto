@@ -496,10 +496,12 @@ message Table {
   // in the streaming plan, it only applies to append-only tables.
   optional uint32 retention_seconds = 37;
 
-  // This field specifies the index of the column set in the "with version
+  // deprecated, use "version_column_indices" instead.
+  reserved "version_column_index";
+  // This field specifies the indices of the columns set in the "with version
   // column" within all the columns. It is used for filtering during "on
-  // conflict" operations.
-  optional uint32 version_column_index = 38;
+  // conflict" operations. Multiple columns will be compared lexicographically.
+  repeated uint32 version_column_indices = 38 [packed = false];
 
   // The unique identifier of the upstream table if it is a CDC table.
   // It will be used in auto schema change to get the Table which mapped to the
