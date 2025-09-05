@@ -61,6 +61,7 @@ impl HnswFlatIndexWriter {
         let graph_builder = if let Some(graph_file) = &index.graph_file {
             Some(HnswGraphBuilder::from_protobuf(
                 &*sstable_store.get_hnsw_graph(graph_file).await?,
+                index.config.m as _,
             ))
         } else {
             None
