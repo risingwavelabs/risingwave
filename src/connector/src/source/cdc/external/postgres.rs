@@ -232,6 +232,7 @@ impl PostgresExternalTableReader {
         rw_schema: Schema,
         pk_indices: Vec<usize>,
         schema_table_name: SchemaTableName,
+        table_id: u32,
     ) -> ConnectorResult<Self> {
         tracing::info!(
             ?rw_schema,
@@ -247,6 +248,11 @@ impl PostgresExternalTableReader {
             &config.database,
             &config.ssl_mode,
             &config.ssl_root_cert,
+            format!(
+                "RisingWave-Postgres-Reader-{}-{}-{}",
+                table_id, schema_table_name.schema_name, schema_table_name.table_name
+            )
+            .as_str(),
         )
         .await?;
 
@@ -1183,6 +1189,7 @@ mod tests {
             rw_schema,
             vec![0, 1],
             schema_table_name.clone(),
+            233,
         )
         .await
         .unwrap();

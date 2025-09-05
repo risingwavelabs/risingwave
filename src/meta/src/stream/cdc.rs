@@ -93,6 +93,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
             table_schema,
             table_pk_indices,
             schema_table_name,
+            table_id,
         )
         .await?;
     let stream = reader.get_parallel_cdc_splits(split_options);
