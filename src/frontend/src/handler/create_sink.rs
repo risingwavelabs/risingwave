@@ -61,7 +61,6 @@ use super::create_mv::get_column_names;
 use super::create_source::{SqlColumnStrategy, UPSTREAM_SOURCE_KEY};
 use super::util::gen_query_from_table_name;
 use crate::binder::{Binder, Relation};
-use crate::catalog::SinkId;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
@@ -360,7 +359,7 @@ pub async fn gen_sink_plan(
     let target_table_catalog = stmt
         .into_table_name
         .as_ref()
-        .map(|table_name| fetch_table_catalog_for_alter(session, table_name))
+        .map(|table_name| fetch_table_catalog_for_alter(session, table_name).map(|t| t.0))
         .transpose()?;
 
     if let Some(target_table_catalog) = &target_table_catalog {
@@ -612,17 +611,12 @@ pub async fn handle_create_sink(
     if let Some(table_catalog) = target_table_catalog {
         use crate::handler::alter_table_column::hijack_merger_for_target_table;
 
-        let (mut graph, mut table, source, target_job_type) =
+        let (mut graph, table, source, target_job_type) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
         sink.original_target_columns = table.columns.clone();
 
-        table
-            .incoming_sinks
-            .clone_from(&table_catalog.incoming_sinks);
-
-        let incoming_sink_ids: HashSet<_> = table_catalog.incoming_sinks.iter().copied().collect();
-        let incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
+        let incoming_sinks = fetch_incoming_sinks(&session, &table_catalog)?;
 
         let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
         for existing_sink in incoming_sinks {
@@ -676,19 +670,22 @@ pub async fn handle_create_sink(
 
 pub fn fetch_incoming_sinks(
     session: &Arc<SessionImpl>,
-    incoming_sink_ids: &HashSet<SinkId>,
+    table: &TableCatalog,
 ) -> Result<Vec<Arc<SinkCatalog>>> {
     let reader = session.env().catalog_reader().read_guard();
-    let mut sinks = Vec::with_capacity(incoming_sink_ids.len());
-    let db_name = &session.database();
-    for schema in reader.iter_schemas(db_name)? {
-        for sink in schema.iter_sink() {
-            if incoming_sink_ids.contains(&sink.id.sink_id) {
-                sinks.push(sink.clone());
-            }
-        }
+    let schema = reader.get_schema_by_id(&table.database_id, &table.schema_id)?;
+    let Some(incoming_sinks) = schema.table_incoming_sinks(table.id) else {
+        return Ok(vec![]);
+    };
+    let mut sinks = vec![];
+    for sink_id in incoming_sinks {
+        sinks.push(
+            schema
+                .get_sink_by_id(sink_id)
+                .expect("should exist")
+                .clone(),
+        );
     }
-
     Ok(sinks)
 }
 

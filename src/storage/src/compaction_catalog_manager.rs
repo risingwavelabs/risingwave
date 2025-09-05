@@ -668,7 +668,8 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
             description: None,
-            incoming_sinks: vec![],
+            #[expect(deprecated)]
+            incoming_sinks: Default::default(),
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             cdc_table_id: None,
