@@ -443,7 +443,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
     plugins:
       - *cargo-cache
-      - ./ci/plugins/swapfile
+      #- ./ci/plugins/swapfile
       - docker-compose#v5.5.0:
           <<: *docker-compose
     timeout_in_minutes: 30
@@ -703,7 +703,7 @@ steps:
       - "build"
       - "build-simulation"
     plugins:
-      - ./ci/plugins/swapfile
+      #- ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
@@ -715,7 +715,7 @@ steps:
     depends_on:
       - "build-simulation"
     plugins:
-      - ./ci/plugins/swapfile
+      #- ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
