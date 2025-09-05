@@ -27,6 +27,7 @@ use crate::expr::{
     assert_input_ref,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::StreamPlanRef;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
@@ -308,8 +309,21 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
             })
             .collect::<Option<Vec<_>>>()
     }
+}
 
+impl Project<StreamPlanRef> {
+    /// Returns whether the `Project` is likely to produce noop updates. If so, the executor will
+    /// eliminate them to avoid emitting unnecessary changes.
     pub(crate) fn likely_produces_noop_updates(&self) -> bool {
+        // 1. `NOW()` is often truncated to a granularity such as day, week, or month, which
+        //    seldom changes. Eliminate noop updates can reduce unnecessary changes.
+        if self.input.as_stream_now().is_some() {
+            return true;
+        }
+
+        // 2. If the `Project` contains jsonb access, it's very likely that the query is extracting
+        //    some fields from a jsonb payload column. In this case, a change from the input jsonb
+        //    payload may not change the output of the `Project`.
         struct HasJsonbAccess {
             has: bool,
         }

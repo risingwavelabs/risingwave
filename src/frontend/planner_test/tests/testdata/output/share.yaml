@@ -319,7 +319,7 @@
         │     │         └─StreamRowIdGen { row_id_index: 10 }
         │     │           └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
         │     └─StreamExchange { dist: Broadcast }
-        │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:01':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+        │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:01':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
         │         └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard(id) }
           └─StreamFilter { predicate: (initial_bid = 2:Int32) }
