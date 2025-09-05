@@ -80,7 +80,7 @@ impl TopNToVectorSearchRule {
         };
         let (call, distance_type) = match call.func_type() {
             ExprType::L1Distance => (call, PbDistanceType::L1),
-            ExprType::L2Distance => (call, PbDistanceType::L2),
+            ExprType::L2Distance => (call, PbDistanceType::L2Sqr),
             ExprType::CosineDistance => (call, PbDistanceType::Cosine),
             ExprType::Neg => {
                 let [neg_input] = call.inputs() else {

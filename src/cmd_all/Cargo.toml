@@ -49,6 +49,7 @@ risingwave_connector = { workspace = true }
 risingwave_ctl = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
+risingwave_jni_core = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
 shell-words = "1.1.0"

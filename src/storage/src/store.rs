@@ -27,6 +27,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::{
@@ -41,7 +42,7 @@ use risingwave_pb::hummock::PbVnodeWatermark;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
-pub(crate) use crate::vector::{DistanceMeasurement, OnNearestItem, Vector};
+pub(crate) use crate::vector::{OnNearestItem, Vector};
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
@@ -433,6 +434,7 @@ pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
 pub struct VectorNearestOptions {
     pub top_n: usize,
     pub measure: DistanceMeasurement,
+    pub hnsw_ef_search: usize,
 }
 
 pub trait OnNearestItemFn<O> = OnNearestItem<O> + Send + Sync + 'static;

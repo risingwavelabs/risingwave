@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::PbEowcOverWindowNode;
 use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTableBuilder, StateTableOpConsistencyLevel};
 use crate::error::StreamResult;
 use crate::executor::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs, Executor};
 use crate::task::ExecutorParams;
@@ -51,9 +51,11 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
                 .vnode_bitmap
                 .expect("vnodes not set for EOWC over window"),
         ));
-        let state_table =
-            StateTable::from_table_catalog_inconsistent_op(node.get_state_table()?, store, vnodes)
-                .await;
+        let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
         let exec = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
             actor_ctx: params.actor_context,
 
