@@ -279,7 +279,7 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
@@ -291,6 +291,8 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+    // callback function to report CDC auto schema change fail events
+    pub report_cdc_auto_schema_change_fail: Option<Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>>,
 }
 
 impl SourceContext {
@@ -305,6 +307,7 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+        report_cdc_auto_schema_change_fail: Option<Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>>,
     ) -> Self {
         Self {
             actor_id,
@@ -315,6 +318,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+            report_cdc_auto_schema_change_fail,
         }
     }
 
@@ -333,7 +337,38 @@ impl SourceContext {
             },
             ConnectorProperties::default(),
             None,
+            None,
         )
+    }
+
+    /// Report CDC auto schema change fail event
+    pub fn report_cdc_auto_schema_change_fail(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        if let Some(ref callback) = self.report_cdc_auto_schema_change_fail {
+            callback(table_id, table_name, cdc_table_id, upstream_ddl, fail_info);
+        }
+    }
+}
+
+impl std::fmt::Debug for SourceContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceContext")
+            .field("actor_id", &self.actor_id)
+            .field("source_id", &self.source_id)
+            .field("fragment_id", &self.fragment_id)
+            .field("source_name", &self.source_name)
+            .field("metrics", &self.metrics)
+            .field("source_ctrl_opts", &self.source_ctrl_opts)
+            .field("connector_props", &self.connector_props)
+            .field("schema_change_tx", &self.schema_change_tx)
+            .field("report_cdc_auto_schema_change_fail", &self.report_cdc_auto_schema_change_fail.is_some())
+            .finish()
     }
 }
 

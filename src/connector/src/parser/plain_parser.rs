@@ -137,7 +137,25 @@ impl PlainParser {
                     ) {
                         Ok(schema_change) => Ok(ParseResult::SchemaChange(schema_change)),
                         Err(err) => {
-                            println!("解析 schema change 失败: {:?}", err);
+                            
+                            // Report CDC auto schema change fail event
+                            let fail_info = match &err {
+                                crate::parser::AccessError::UnsupportedType { ty } => {
+                                    format!("Unsupported postgres type: {:?}", ty)
+                                }
+                                _ => {
+                                    format!("Failed to parse schema change: {:?}", err)
+                                }
+                            };
+                            
+                            self.source_ctx.report_cdc_auto_schema_change_fail(
+                                self.source_ctx.source_id.table_id,
+                                self.source_ctx.source_name.clone(),
+                                "".to_string(), // cdc_table_id is not available in this context
+                                "".to_string(), // upstream_ddl is not available in this context
+                                fail_info,
+                            );
+                            
                             Err(err)?
                         }
                     };
