@@ -142,6 +142,19 @@ impl CatalogController {
             .collect())
     }
 
+    pub async fn get_table_incoming_sinks(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
+        let inner = self.inner.read().await;
+        let sink_objs = Sink::find()
+            .find_also_related(Object)
+            .filter(sink::Column::TargetTable.eq(table_id))
+            .all(&inner.db)
+            .await?;
+        Ok(sink_objs
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect())
+    }
+
     pub async fn get_sink_by_ids(&self, sink_ids: Vec<SinkId>) -> MetaResult<Vec<PbSink>> {
         let inner = self.inner.read().await;
         let sink_objs = Sink::find()

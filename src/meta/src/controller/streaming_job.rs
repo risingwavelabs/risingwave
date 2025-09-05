@@ -790,13 +790,10 @@ impl CatalogController {
         let objects = if let Some(plan) = &replace_plan {
             insert_fragment_relations(&txn, &plan.upstream_fragment_downstreams).await?;
 
-            let incoming_sink_id = job_id;
             let (objects, _) = Self::finish_replace_streaming_job_inner(
                 plan.tmp_id as _,
                 plan.replace_upstream.clone(),
                 SinkIntoTableContext {
-                    creating_sink_id: Some(incoming_sink_id),
-                    dropping_sink_id: None,
                     updated_sink_catalogs: vec![],
                 },
                 &txn,
@@ -1195,8 +1192,6 @@ impl CatalogController {
         tmp_id: ObjectId,
         replace_upstream: FragmentReplaceUpstream,
         SinkIntoTableContext {
-            creating_sink_id,
-            dropping_sink_id,
             updated_sink_catalogs,
         }: SinkIntoTableContext,
         txn: &DatabaseTransaction,
@@ -1246,11 +1241,6 @@ impl CatalogController {
                 }
                 // Update the table catalog with the new one. (column catalog is also updated here)
                 let mut table = table::ActiveModel::from(table);
-                let mut incoming_sinks = table.incoming_sinks.as_ref().inner_ref().clone();
-                if let Some(sink_id) = creating_sink_id {
-                    debug_assert!(!incoming_sinks.contains(&{ sink_id }));
-                    incoming_sinks.push(sink_id as _);
-                }
                 if let Some(drop_table_connector_ctx) = drop_table_connector_ctx
                     && drop_table_connector_ctx.to_change_streaming_job_id == original_job_id
                 {
@@ -1258,15 +1248,6 @@ impl CatalogController {
                     table.optional_associated_source_id = Set(None);
                 }
 
-                if let Some(sink_id) = dropping_sink_id {
-                    let _drained = incoming_sinks
-                        .extract_if(.., |id| *id == sink_id)
-                        .collect_vec();
-                    // TODO(august): re-enable this assertion after refactoring sink into table
-                    // debug_assert_eq!(drained, vec![sink_id]);
-                }
-
-                table.incoming_sinks = Set(incoming_sinks.into());
                 table.update(txn).await?;
             }
             StreamingJob::Source(source) => {
@@ -2500,10 +2481,6 @@ impl CatalogController {
 }
 
 pub struct SinkIntoTableContext {
-    /// For creating sink into table, this is `Some`, otherwise `None`.
-    pub creating_sink_id: Option<SinkId>,
-    /// For dropping sink into table, this is `Some`, otherwise `None`.
-    pub dropping_sink_id: Option<SinkId>,
     /// For alter table (e.g., add column), this is the list of existing sink ids
     /// otherwise empty.
     pub updated_sink_catalogs: Vec<SinkId>,

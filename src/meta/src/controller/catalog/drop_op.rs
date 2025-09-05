@@ -94,19 +94,14 @@ impl CatalogController {
 
         // TODO: record dependency info in object_dependency table for sink into table.
         // Special handling for 'sink into table'.
-        let removed_incoming_sinks: Vec<I32Array> = Table::find()
+        let incoming_sink_ids: Vec<SinkId> = Sink::find()
             .select_only()
-            .column(table::Column::IncomingSinks)
-            .filter(table::Column::TableId.is_in(removed_object_ids.clone()))
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::TargetTable.is_in(removed_object_ids.clone()))
             .into_tuple()
             .all(&txn)
             .await?;
-        if !removed_incoming_sinks.is_empty() {
-            let incoming_sink_ids = removed_incoming_sinks
-                .into_iter()
-                .flat_map(|arr| arr.into_inner().into_iter())
-                .collect_vec();
-
+        if !incoming_sink_ids.is_empty() {
             if self.env.opts.protect_drop_table_with_incoming_sink {
                 let sink_names: Vec<String> = Sink::find()
                     .select_only()
