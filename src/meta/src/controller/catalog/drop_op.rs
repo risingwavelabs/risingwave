@@ -69,6 +69,9 @@ impl CatalogController {
                         indexes.iter().all(|obj| obj.obj_type == ObjectType::Index),
                         "only index could be dropped in restrict mode"
                     );
+                    for idx in &indexes {
+                        check_object_refer_for_drop(idx.obj_type, idx.oid, &txn).await?;
+                    }
                     indexes
                 }
                 object_type @ (ObjectType::Source | ObjectType::Sink) => {
