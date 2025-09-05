@@ -452,6 +452,13 @@ IcebergConfig:
   - name: s3.secret.key
     field_type: String
     required: false
+  - name: s3.ssl.verify
+    field_type: bool
+    comments: |-
+      Enable SSL certificate verification for S3 connections.
+      Set to false to disable SSL cetificate verification
+    required: false
+    default: Default::default
   - name: gcs.credential
     field_type: String
     required: false
