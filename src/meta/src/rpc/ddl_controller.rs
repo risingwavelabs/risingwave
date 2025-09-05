@@ -1806,7 +1806,6 @@ impl DdlController {
             let upstream_sink_info = build_upstream_sink_info(
                 sink,
                 sink_fragment.fragment_id as _,
-                &sink_fragment.nodes,
                 target_table,
                 mview_fragment_id,
             )?;
@@ -2267,15 +2266,9 @@ async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> Met
 pub fn build_upstream_sink_info(
     sink: &PbSink,
     sink_fragment_id: FragmentId,
-    sink_root_node: &PbStreamNode,
     target_table: &PbTable,
     target_fragment_id: FragmentId,
 ) -> MetaResult<UpstreamSinkInfo> {
-    let sink_output_fields = sink_root_node.get_fields();
-    let output_indices = (0..sink_output_fields.len())
-        .map(|i| i as u32)
-        .collect_vec();
-
     let sink_columns = if !sink.original_target_columns.is_empty() {
         sink.original_target_columns.clone()
     } else {
@@ -2285,31 +2278,36 @@ pub fn build_upstream_sink_info(
         // This value of sink will be filled on the meta.
         target_table.columns.clone()
     };
+
+    let sink_output_fields = sink_columns
+        .iter()
+        .map(|col| Field::from(col.column_desc.as_ref().unwrap()).to_prost())
+        .collect_vec();
+    let output_indices = (0..sink_output_fields.len())
+        .map(|i| i as u32)
+        .collect_vec();
+
     let dist_key_indices: anyhow::Result<Vec<u32>> = try {
         let sink_idx_by_col_id = sink_columns
             .iter()
             .enumerate()
             .map(|(idx, col)| {
-                let column_desc = col
-                    .column_desc
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("sink column_desc is None"))?;
-                Ok((column_desc.column_id, idx as u32))
+                let column_id = col.column_desc.as_ref().unwrap().column_id;
+                (column_id, idx as u32)
             })
-            .collect::<anyhow::Result<HashMap<_, _>>>()?;
+            .collect::<HashMap<_, _>>();
         target_table
             .distribution_key
             .iter()
             .map(|dist_idx| {
-                let column_desc = target_table.columns[*dist_idx as usize]
+                let column_id = target_table.columns[*dist_idx as usize]
                     .column_desc
                     .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("table column_desc is None"))?;
+                    .unwrap()
+                    .column_id;
                 let sink_idx = sink_idx_by_col_id
-                    .get(&column_desc.column_id)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("column id {} not found in sink", column_desc.column_id)
-                    })?;
+                    .get(&column_id)
+                    .ok_or_else(|| anyhow::anyhow!("column id {} not found in sink", column_id))?;
                 Ok(*sink_idx)
             })
             .collect::<anyhow::Result<Vec<_>>>()?

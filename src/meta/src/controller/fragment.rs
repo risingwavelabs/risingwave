@@ -23,6 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
@@ -71,7 +72,7 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, get_sink_fragment_node_by_id, resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings, get_sink_fragment_by_ids, resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
@@ -1787,14 +1788,17 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
+        let sink_ids = incoming_sinks.iter().map(|s| s.id as SinkId).collect_vec();
+        let sink_fragment_ids = get_sink_fragment_by_ids(&txn, sink_ids).await?;
+
         let mut upstream_sink_infos = Vec::with_capacity(incoming_sinks.len());
-        for pb_sink in incoming_sinks {
-            let (sink_fragment_id, sink_node) =
-                get_sink_fragment_node_by_id(&txn, pb_sink.id as _).await?;
+        for (pb_sink, sink_fragment_id) in incoming_sinks
+            .iter()
+            .zip_eq_debug(sink_fragment_ids.into_iter())
+        {
             let upstream_info = build_upstream_sink_info(
-                &pb_sink,
+                pb_sink,
                 sink_fragment_id,
-                &sink_node,
                 target_table,
                 target_fragment_id,
             )?;

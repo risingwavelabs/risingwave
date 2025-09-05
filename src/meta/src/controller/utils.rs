@@ -52,9 +52,7 @@ use risingwave_pb::meta::{
 };
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
-use risingwave_pb::stream_plan::{
-    PbDispatchOutputMapping, PbDispatcher, PbDispatcherType, PbStreamNode,
-};
+use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
 use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject as PbGrantObject};
 use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
 use risingwave_sqlparser::ast::Statement as SqlStatement;
@@ -1754,7 +1752,8 @@ where
                 .entry(source_id as _)
                 .or_default()
                 .insert(fragment_id);
-        } else if FragmentTypeMask::from(mask).contains(FragmentTypeFlag::Sink) {
+        }
+        if FragmentTypeMask::from(mask).contains(FragmentTypeFlag::Sink) {
             sink_fragment_ids.insert(fragment_id);
         }
     }
@@ -2208,39 +2207,36 @@ where
     Ok(source_target_fragments)
 }
 
-pub async fn get_sink_fragment_node_by_id<C>(
+pub async fn get_sink_fragment_by_ids<C>(
     txn: &C,
-    sink_id: SinkId,
-) -> MetaResult<(FragmentId, PbStreamNode)>
+    sink_ids: Vec<SinkId>,
+) -> MetaResult<Vec<FragmentId>>
 where
     C: ConnectionTrait,
 {
-    let sink_fragment: Vec<(FragmentId, StreamNode)> = Fragment::find()
+    let sink_num = sink_ids.len();
+    let sink_fragment_ids: Vec<FragmentId> = Fragment::find()
         .select_only()
-        .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+        .column(fragment::Column::FragmentId)
         .filter(
             fragment::Column::JobId
-                .eq(sink_id)
+                .is_in(sink_ids)
                 .and(FragmentTypeMask::intersects(FragmentTypeFlag::Sink)),
         )
         .into_tuple()
         .all(txn)
         .await?;
 
-    if sink_fragment.len() != 1 {
+    if sink_fragment_ids.len() != sink_num {
         return Err(anyhow::anyhow!(
-            "expected exactly one sink fragment for sink {}, found {}",
-            sink_id,
-            sink_fragment.len()
+            "expected exactly one sink fragment for each sink, but got {} fragments for {} sinks",
+            sink_fragment_ids.len(),
+            sink_num
         )
         .into());
     }
 
-    Ok(sink_fragment
-        .into_iter()
-        .next()
-        .map(|(id, node)| (id, node.to_protobuf()))
-        .unwrap())
+    Ok(sink_fragment_ids)
 }
 
 pub fn build_select_node_list(
