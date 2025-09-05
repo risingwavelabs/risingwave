@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::marker::PhantomData;
 
 use faiss::index::hnsw::Hnsw;
@@ -33,13 +33,13 @@ pub struct HnswBuilderOptions {
     pub max_level: usize,
 }
 
-impl HnswBuilderOptions {
-    fn level_m(&self, level: usize) -> usize {
-        // borrowed from pg_vector
-        // double the number of connections in ground level
-        if level == 0 { 2 * self.m } else { self.m }
-    }
+pub fn level_m(m: usize, level: usize) -> usize {
+    // borrowed from pg_vector
+    // double the number of connections in ground level
+    if level == 0 { 2 * m } else { m }
+}
 
+impl HnswBuilderOptions {
     fn m_l(&self) -> f32 {
         1.0 / (self.m as f32).ln()
     }
@@ -57,7 +57,8 @@ fn gen_level(options: &HnswBuilderOptions, rng: &mut impl Rng) -> usize {
 pub(crate) fn new_node(options: &HnswBuilderOptions, rng: &mut impl Rng) -> VectorHnswNode {
     let level = gen_level(options, rng);
     let mut level_neighbours = Vec::with_capacity(level);
-    level_neighbours.extend((0..=level).map(|level| BoundedNearest::new(options.level_m(level))));
+    level_neighbours
+        .extend((0..=level).map(|level| BoundedNearest::new(level_m(options.m, level))));
     VectorHnswNode { level_neighbours }
 }
 
@@ -237,7 +238,7 @@ impl HnswGraphBuilder {
         }
     }
 
-    pub fn from_protobuf(pb: &PbHnswGraph) -> Self {
+    pub fn from_protobuf(pb: &PbHnswGraph, m: usize) -> Self {
         let entrypoint = pb.entrypoint_id as usize;
         let nodes = pb
             .nodes
@@ -246,8 +247,10 @@ impl HnswGraphBuilder {
                 let level_neighbours = node
                     .levels
                     .iter()
-                    .map(|level| {
-                        let mut nearest = BoundedNearest::new(level.neighbors.len());
+                    .enumerate()
+                    .map(|(level_idx, level)| {
+                        let level_m = level_m(m, level_idx);
+                        let mut nearest = BoundedNearest::new(level_m);
                         for neighbor in &level.neighbors {
                             nearest.insert(neighbor.distance, || neighbor.vector_id as _);
                         }
@@ -354,7 +357,7 @@ impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<InMemoryVectorStore, HnswGra
             let mut level_neighbors = Vec::with_capacity(level_count);
             for level in 0..level_count {
                 let neighbors = faiss_hnsw.neighbors_raw(node, level);
-                let mut nearest_neighbors = BoundedNearest::new(neighbors.len());
+                let mut nearest_neighbors = BoundedNearest::new(max(neighbors.len(), 1));
                 for &neighbor in neighbors {
                     nearest_neighbors.insert(
                         M::distance(

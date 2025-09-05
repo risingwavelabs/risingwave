@@ -334,6 +334,11 @@ impl StructValue {
         }
     }
 
+    /// Returns an empty struct.
+    pub fn empty() -> Self {
+        Self::new(vec![])
+    }
+
     pub fn fields(&self) -> &[Datum] {
         &self.fields
     }
