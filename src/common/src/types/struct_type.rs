@@ -179,10 +179,10 @@ impl StructType {
     pub fn ids(&self) -> Option<impl ExactSizeIterator<Item = ColumnId> + '_> {
         if self.is_empty() {
             Some(Either::Left(empty()))
-        } else if let Some(field_ids) = &self.0.field_ids {
-            Some(Either::Right(field_ids.iter().copied()))
         } else {
-            None
+            (self.0.field_ids.as_ref())
+                .map(|field_ids| field_ids.iter().copied())
+                .map(Either::Right)
         }
     }
 
