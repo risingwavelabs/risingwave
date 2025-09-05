@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::bail;
+use thiserror_ext::AsReport;
 
 use super::unified::json::{TimeHandling, TimestampHandling, TimestamptzHandling};
 use super::unified::kv_event::KvEvent;
@@ -166,8 +167,10 @@ impl PlainParser {
                                     }
                                 }
                                 _ => {
-                                    let fail_info =
-                                        format!("Failed to parse schema change: {:?}", err);
+                                    let fail_info = format!(
+                                        "Failed to parse schema change: {:?}",
+                                        err.as_report()
+                                    );
                                     (fail_info, "".to_owned(), "".to_owned())
                                 }
                             };
