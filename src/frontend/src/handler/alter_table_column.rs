@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -20,10 +19,8 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     AlterColumnOperation, AlterTableOperation, ColumnOption, ObjectName, Statement,
 };
@@ -36,8 +33,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr, ExprImpl, InputRef};
-use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
+use crate::expr::ExprImpl;
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog};
 
@@ -101,7 +97,7 @@ pub async fn get_replace_table_plan(
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
 
-    let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
+    let (graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         old_catalog,
@@ -112,82 +108,11 @@ pub async fn get_replace_table_plan(
     )
     .await?;
 
-    let target_columns = (table.columns.iter())
-        .filter(|col| !col.is_rw_timestamp_column())
-        .cloned()
-        .collect_vec();
-
-    for sink in fetch_incoming_sinks(session, old_catalog)? {
-        hijack_merger_for_target_table(
-            &mut graph,
-            &target_columns,
-            &sink,
-            Some(&sink.unique_identity()),
-        )?;
-    }
-
     // Set some fields ourselves so that the meta service does not need to maintain them.
     let mut table = table;
     table.vnode_count = VnodeCount::set(old_catalog.vnode_count());
 
     Ok((source, table, graph, job_type))
-}
-
-pub(crate) fn hijack_merger_for_target_table(
-    graph: &mut StreamFragmentGraph,
-    target_columns: &[ColumnCatalog],
-    sink: &SinkCatalog,
-    uniq_identify: Option<&str>,
-) -> Result<()> {
-    let mut sink_columns = sink.original_target_columns.clone();
-    if sink_columns.is_empty() {
-        // This is due to the fact that the value did not exist in earlier versions,
-        // which means no schema changes such as `ADD/DROP COLUMN` have been made to the table.
-        // Therefore the columns of the table at this point are `original_target_columns`.
-        // This value of sink will be filled on the meta.
-        sink_columns = target_columns.to_vec();
-    }
-
-    let mut exprs = Vec::with_capacity(target_columns.len());
-    let sink_idx_by_col_id = sink_columns
-        .iter()
-        .enumerate()
-        .map(|(idx, col)| (col.column_id(), idx))
-        .collect::<HashMap<_, _>>();
-    let default_column_exprs = TableCatalog::default_column_exprs(target_columns);
-    for (target_idx, target_col) in target_columns.iter().enumerate() {
-        if let Some(idx) = sink_idx_by_col_id.get(&target_col.column_id()) {
-            assert_eq!(
-                target_col.data_type(),
-                sink_columns[*idx].data_type(),
-                "data type mismatch for column {}: {} vs {}",
-                target_col.name(),
-                target_col.data_type(),
-                sink_columns[*idx].data_type()
-            );
-            // If the sink has the corresponding column id, use the sink's data.
-            exprs.push(ExprImpl::InputRef(Box::new(InputRef {
-                data_type: target_col.data_type().clone(),
-                index: *idx,
-            })));
-        } else {
-            // If the sink does not have the corresponding column, use a default value.
-            exprs.push(default_column_exprs[target_idx].clone());
-        }
-    }
-
-    let pb_project = PbNodeBody::Project(Box::new(ProjectNode {
-        select_list: exprs.iter().map(|expr| expr.to_expr_proto()).collect(),
-        ..Default::default()
-    }));
-
-    for fragment in graph.fragments.values_mut() {
-        if let Some(node) = &mut fragment.node {
-            insert_merger_to_union_with_project(node, &pb_project, uniq_identify);
-        }
-    }
-
-    Ok(())
 }
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or

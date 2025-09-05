@@ -40,6 +40,7 @@ use risingwave_meta_model::{
     streaming_job, table,
 };
 use risingwave_meta_model_migration::{Alias, ExprTrait, SelectStatement, SimpleExpr};
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
@@ -70,14 +71,15 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings, get_sink_fragment_node_by_id, resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
-use crate::stream::{SplitAssignment, build_actor_split_impls};
+use crate::rpc::ddl_controller::build_upstream_sink_info;
+use crate::stream::{SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
 use crate::{MetaError, MetaResult};
 
 /// Some information of running (inflight) actors.
@@ -1773,6 +1775,61 @@ impl CatalogController {
             .ok()
             .flatten()
             .map(|(_, count)| count as usize))
+    }
+
+    pub async fn get_all_upstream_sink_infos(
+        &self,
+        target_table: &PbTable,
+        target_fragment_id: FragmentId,
+    ) -> MetaResult<Vec<UpstreamSinkInfo>> {
+        let incoming_sinks = self.get_table_incoming_sinks(target_table.id as _).await?;
+
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let mut upstream_sink_infos = Vec::with_capacity(incoming_sinks.len());
+        for pb_sink in incoming_sinks {
+            let (sink_fragment_id, sink_node) =
+                get_sink_fragment_node_by_id(&txn, pb_sink.id as _).await?;
+            let upstream_info = build_upstream_sink_info(
+                &pb_sink,
+                sink_fragment_id,
+                &sink_node,
+                target_table,
+                target_fragment_id,
+            )?;
+            upstream_sink_infos.push(upstream_info);
+        }
+
+        Ok(upstream_sink_infos)
+    }
+
+    pub async fn get_mview_fragment_by_id(&self, table_id: TableId) -> MetaResult<FragmentId> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let mview_fragment: Vec<FragmentId> = FragmentModel::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(
+                fragment::Column::JobId
+                    .eq(table_id)
+                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Mview)),
+            )
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        if mview_fragment.len() != 1 {
+            return Err(anyhow::anyhow!(
+                "expected exactly one mview fragment for table {}, found {}",
+                table_id,
+                mview_fragment.len()
+            )
+            .into());
+        }
+
+        Ok(mview_fragment.into_iter().next().unwrap())
     }
 }
 

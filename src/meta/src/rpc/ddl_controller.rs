@@ -30,10 +30,8 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node, visit_stream_node_body, visit_stream_node_cont_mut,
-};
-use risingwave_common::{bail, bail_not_implemented, must_match};
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::source::cdc::CdcScanOptions;
@@ -43,11 +41,11 @@ use risingwave_connector::source::{
 use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
-    ConnectionId, DatabaseId, DispatcherType, FunctionId, IndexId, ObjectId, SchemaId, SecretId,
-    SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId, WorkerId,
+    ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
+    SchemaId, SecretId, SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId, WorkerId,
 };
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, PbSink, Schema, Secret, Sink, Source,
+    Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
     Subscription, Table, View,
 };
 use risingwave_pb::common::PbActorLocation;
@@ -60,7 +58,7 @@ use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
+    PbDispatchOutputMapping, PbStreamFragmentGraph, PbStreamNode, PbUpstreamSinkInfo,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
@@ -75,6 +73,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
+use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -91,8 +90,9 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
-    SourceManagerRef, StreamFragmentGraph, check_sink_fragments_support_refresh_schema,
-    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    SourceManagerRef, StreamFragmentGraph, UpstreamSinkInfo,
+    check_sink_fragments_support_refresh_schema, create_source_worker,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -162,7 +162,6 @@ pub enum DdlCommand {
     CreateStreamingJob {
         stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>, // specific resource group
         if_not_exists: bool,
@@ -170,7 +169,6 @@ pub enum DdlCommand {
     DropStreamingJob {
         job_id: StreamingJobId,
         drop_mode: DropMode,
-        target_replace_info: Option<ReplaceStreamJobInfo>,
     },
     AlterName(alter_name_request::Object, String),
     AlterSwapRename(alter_swap_rename_request::Object),
@@ -403,7 +401,6 @@ impl DdlController {
                 DdlCommand::CreateStreamingJob {
                     stream_job,
                     fragment_graph,
-                    affected_table_replace_info,
                     dependencies,
                     specific_resource_group,
                     if_not_exists,
@@ -411,20 +408,14 @@ impl DdlController {
                     ctrl.create_streaming_job(
                         stream_job,
                         fragment_graph,
-                        affected_table_replace_info,
                         dependencies,
                         specific_resource_group,
                         if_not_exists,
                     )
                     .await
                 }
-                DdlCommand::DropStreamingJob {
-                    job_id,
-                    drop_mode,
-                    target_replace_info,
-                } => {
-                    ctrl.drop_streaming_job(job_id, drop_mode, target_replace_info)
-                        .await
+                DdlCommand::DropStreamingJob { job_id, drop_mode } => {
+                    ctrl.drop_streaming_job(job_id, drop_mode).await
                 }
                 DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
                     streaming_job,
@@ -529,13 +520,8 @@ impl DdlController {
     }
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
-        self.drop_object(
-            ObjectType::Database,
-            database_id as _,
-            DropMode::Cascade,
-            None,
-        )
-        .await
+        self.drop_object(ObjectType::Database, database_id as _, DropMode::Cascade)
+            .await
     }
 
     async fn create_schema(&self, schema: Schema) -> MetaResult<NotificationVersion> {
@@ -550,7 +536,7 @@ impl DdlController {
         schema_id: SchemaId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Schema, schema_id as _, drop_mode, None)
+        self.drop_object(ObjectType::Schema, schema_id as _, drop_mode)
             .await
     }
 
@@ -576,7 +562,7 @@ impl DdlController {
         source_id: SourceId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Source, source_id as _, drop_mode, None)
+        self.drop_object(ObjectType::Source, source_id as _, drop_mode)
             .await
     }
 
@@ -601,7 +587,7 @@ impl DdlController {
         function_id: FunctionId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Function, function_id as _, drop_mode, None)
+        self.drop_object(ObjectType::Function, function_id as _, drop_mode)
             .await
     }
 
@@ -621,7 +607,7 @@ impl DdlController {
         view_id: ViewId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::View, view_id as _, drop_mode, None)
+        self.drop_object(ObjectType::View, view_id as _, drop_mode)
             .await
     }
 
@@ -638,7 +624,7 @@ impl DdlController {
         connection_id: ConnectionId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Connection, connection_id as _, drop_mode, None)
+        self.drop_object(ObjectType::Connection, connection_id as _, drop_mode)
             .await
     }
 
@@ -697,7 +683,7 @@ impl DdlController {
     }
 
     async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Secret, secret_id as _, DropMode::Restrict, None)
+        self.drop_object(ObjectType::Secret, secret_id as _, DropMode::Restrict)
             .await
     }
 
@@ -892,259 +878,6 @@ impl DdlController {
         }
     }
 
-    // Here we modify the union node of the downstream table by the TableFragments of the to-be-created sink upstream.
-    // The merge in the union has already been set up in the frontend and will be filled with specific upstream actors in this function.
-    // Meanwhile, the Dispatcher corresponding to the upstream of the merge will also be added to the replace table context here.
-    pub(crate) async fn inject_replace_table_job_for_table_sink(
-        &self,
-        tmp_id: u32,
-        mgr: &MetadataManager,
-        stream_ctx: StreamContext,
-        sink: Option<&Sink>,
-        creating_sink_table_fragments: Option<&StreamJobFragments>,
-        dropping_sink_id: Option<SinkId>,
-        streaming_job: &StreamingJob,
-        fragment_graph: StreamFragmentGraph,
-    ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragmentsToCreate)> {
-        let (mut replace_table_ctx, mut stream_job_fragments) = self
-            .build_replace_job(stream_ctx, streaming_job, fragment_graph, tmp_id as _, None)
-            .await?;
-
-        let target_table = streaming_job.table().unwrap();
-
-        if let Some(creating_sink_table_fragments) = creating_sink_table_fragments {
-            let sink_fragment = creating_sink_table_fragments.sink_fragment().unwrap();
-            let sink = sink.expect("sink not found");
-            Self::inject_replace_table_plan_for_sink(
-                sink.id,
-                sink,
-                &sink_fragment,
-                target_table,
-                &mut replace_table_ctx,
-                stream_job_fragments.inner.union_fragment_for_table(),
-                None,
-            )?;
-        }
-
-        let [table_catalog]: [_; 1] = mgr
-            .get_table_catalog_by_ids(vec![target_table.id])
-            .await?
-            .try_into()
-            .expect("Target table should exist in sink into table");
-
-        {
-            let catalogs = mgr.get_table_incoming_sinks(table_catalog.id).await?;
-
-            for sink in catalogs {
-                let sink_id = sink.id;
-
-                if let Some(dropping_sink_id) = dropping_sink_id
-                    && sink_id == (dropping_sink_id as u32)
-                {
-                    continue;
-                };
-
-                if let Some(creating_sink) = creating_sink_table_fragments
-                    && creating_sink.stream_job_id.table_id == sink_id
-                {
-                    continue;
-                }
-
-                let sink_table_fragments = mgr
-                    .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink_id))
-                    .await?;
-
-                let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
-
-                Self::inject_replace_table_plan_for_sink(
-                    sink_id,
-                    &sink,
-                    &sink_fragment,
-                    target_table,
-                    &mut replace_table_ctx,
-                    stream_job_fragments.inner.union_fragment_for_table(),
-                    Some(&sink.unique_identity()),
-                )?;
-            }
-        }
-
-        // check if the union fragment is fully assigned.
-        for fragment in stream_job_fragments.fragments.values() {
-            {
-                {
-                    visit_stream_node_body(&fragment.nodes, |node| {
-                        if let NodeBody::Merge(merge_node) = node {
-                            let upstream_fragment_id = merge_node.upstream_fragment_id;
-                            if let Some(external_upstream_fragment_downstreams) = replace_table_ctx
-                                .upstream_fragment_downstreams
-                                .get(&upstream_fragment_id)
-                            {
-                                let mut upstream_fragment_downstreams =
-                                    external_upstream_fragment_downstreams.iter().filter(
-                                        |downstream| {
-                                            downstream.downstream_fragment_id
-                                                == fragment.fragment_id
-                                        },
-                                    );
-                                assert!(
-                                    upstream_fragment_downstreams.next().is_some(),
-                                    "All the mergers for the union should have been fully assigned beforehand."
-                                );
-                            } else {
-                                let mut upstream_fragment_downstreams = stream_job_fragments
-                                    .downstreams
-                                    .get(&upstream_fragment_id)
-                                    .into_iter()
-                                    .flatten()
-                                    .filter(|downstream| {
-                                        downstream.downstream_fragment_id == fragment.fragment_id
-                                    });
-                                assert!(
-                                    upstream_fragment_downstreams.next().is_some(),
-                                    "All the mergers for the union should have been fully assigned beforehand."
-                                );
-                            }
-                        }
-                    });
-                }
-            }
-        }
-
-        Ok((replace_table_ctx, stream_job_fragments))
-    }
-
-    pub(crate) fn inject_replace_table_plan_for_sink(
-        sink_id: u32,
-        sink: &PbSink,
-        sink_fragment: &Fragment,
-        table: &Table,
-        replace_table_ctx: &mut ReplaceStreamJobContext,
-        union_fragment: &mut Fragment,
-        unique_identity: Option<&str>,
-    ) -> MetaResult<()> {
-        let sink_fields = sink_fragment.nodes.fields.clone();
-
-        let output_indices = sink_fields
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| idx as _)
-            .collect_vec();
-
-        let dist_key_indices: anyhow::Result<Vec<u32>> = try {
-            let sink_columns = if !sink.original_target_columns.is_empty() {
-                sink.original_target_columns.clone()
-            } else {
-                table.columns.clone()
-            };
-            let sink_idx_by_col_id = sink_columns
-                .into_iter()
-                .enumerate()
-                .map(|(idx, col)| {
-                    let column_desc = col
-                        .column_desc
-                        .ok_or_else(|| anyhow::anyhow!("sink column_desc is None"))?;
-                    Ok((column_desc.column_id, idx as u32))
-                })
-                .collect::<anyhow::Result<HashMap<_, _>>>()?;
-            table
-                .distribution_key
-                .iter()
-                .map(|dist_idx| {
-                    let column_desc = table.columns[*dist_idx as usize]
-                        .column_desc
-                        .as_ref()
-                        .ok_or_else(|| anyhow::anyhow!("table column_desc is None"))?;
-                    let sink_idx =
-                        sink_idx_by_col_id
-                            .get(&column_desc.column_id)
-                            .ok_or_else(|| {
-                                anyhow::anyhow!(
-                                    "column id {} not found in sink",
-                                    column_desc.column_id
-                                )
-                            })?;
-                    Ok(*sink_idx)
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?
-        };
-        let dist_key_indices =
-            dist_key_indices.map_err(|e| e.context("failed to get distribution key indices"))?;
-
-        let sink_fragment_downstreams = replace_table_ctx
-            .upstream_fragment_downstreams
-            .entry(sink_fragment.fragment_id)
-            .or_default();
-
-        {
-            sink_fragment_downstreams.push(DownstreamFragmentRelation {
-                downstream_fragment_id: union_fragment.fragment_id,
-                dispatcher_type: DispatcherType::Hash,
-                dist_key_indices,
-                output_mapping: PbDispatchOutputMapping::simple(output_indices),
-            });
-        }
-
-        let upstream_fragment_id = sink_fragment.fragment_id;
-
-        let mut max_operator_id = 0;
-
-        visit_stream_node(&union_fragment.nodes, |node| {
-            max_operator_id = max_operator_id.max(node.operator_id);
-        });
-
-        {
-            {
-                visit_stream_node_cont_mut(&mut union_fragment.nodes, |node| {
-                    if let Some(NodeBody::Union(_)) = &mut node.node_body {
-                        for input_project_node in &mut node.input {
-                            if let Some(NodeBody::Project(_)) = &mut input_project_node.node_body {
-                                let merge_stream_node =
-                                    input_project_node.input.iter_mut().exactly_one().unwrap();
-
-                                // we need to align nodes here
-                                if input_project_node.identity.as_str()
-                                    != unique_identity
-                                        .unwrap_or(PbSink::UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK)
-                                {
-                                    continue;
-                                }
-
-                                if let Some(NodeBody::Merge(merge_node)) =
-                                    &mut merge_stream_node.node_body
-                                {
-                                    {
-                                        merge_stream_node.identity =
-                                            format!("MergeExecutor(from sink {})", sink_id);
-                                        merge_stream_node.operator_id = max_operator_id + 1;
-
-                                        input_project_node.identity =
-                                            format!("ProjectExecutor(from sink {})", sink_id);
-                                        input_project_node.operator_id = max_operator_id + 2;
-                                    }
-
-                                    **merge_node = {
-                                        MergeNode {
-                                            upstream_fragment_id,
-                                            upstream_dispatcher_type: PbDispatcherType::Hash as _,
-                                            ..Default::default()
-                                        }
-                                    };
-
-                                    merge_stream_node.fields = sink_fields.to_vec();
-
-                                    return false;
-                                }
-                            }
-                        }
-                    }
-                    true
-                });
-            }
-        }
-
-        Ok(())
-    }
-
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
     #[await_tree::instrument(boxed, "create_streaming_job({streaming_job})")]
@@ -1152,7 +885,6 @@ impl DdlController {
         &self,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
         if_not_exists: bool,
@@ -1219,7 +951,6 @@ impl DdlController {
                 ctx,
                 streaming_job,
                 fragment_graph,
-                affected_table_replace_info,
                 specific_resource_group,
                 permit,
             )
@@ -1264,7 +995,6 @@ impl DdlController {
         ctx: StreamContext,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         specific_resource_group: Option<String>,
         permit: OwnedSemaphorePermit,
     ) -> MetaResult<NotificationVersion> {
@@ -1284,49 +1014,10 @@ impl DdlController {
             .await?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
-        let affected_table_replace_info = match affected_table_replace_info {
-            Some(replace_table_info) => {
-                assert!(
-                    specific_resource_group.is_none(),
-                    "specific_resource_group is not supported for replace table (alter column or sink into table)"
-                );
-
-                let ReplaceStreamJobInfo {
-                    mut streaming_job,
-                    fragment_graph,
-                    ..
-                } = replace_table_info;
-
-                // Ensure the max parallelism unchanged before replacing table.
-                let original_max_parallelism = self
-                    .metadata_manager
-                    .get_job_max_parallelism(streaming_job.id().into())
-                    .await?;
-                let fragment_graph = PbStreamFragmentGraph {
-                    max_parallelism: original_max_parallelism as _,
-                    ..fragment_graph
-                };
-
-                let fragment_graph =
-                    StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
-                streaming_job.set_info_from_graph(&fragment_graph);
-                let streaming_job = streaming_job;
-
-                Some((streaming_job, fragment_graph))
-            }
-            None => None,
-        };
-
         // create fragment and actor catalogs.
         tracing::debug!(id = streaming_job.id(), "building streaming job");
         let (ctx, stream_job_fragments) = self
-            .build_stream_job(
-                ctx,
-                streaming_job,
-                fragment_graph,
-                affected_table_replace_info,
-                specific_resource_group,
-            )
+            .build_stream_job(ctx, streaming_job, fragment_graph, specific_resource_group)
             .await?;
 
         let streaming_job = &ctx.streaming_job;
@@ -1357,7 +1048,7 @@ impl DdlController {
                     attr,
                 );
             }
-            StreamingJob::Sink(sink, _) => {
+            StreamingJob::Sink(sink) => {
                 if sink.auto_refresh_schema_from_table.is_some() {
                     check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?
                 }
@@ -1460,118 +1151,12 @@ impl DdlController {
         object_type: ObjectType,
         object_id: ObjectId,
         drop_mode: DropMode,
-        target_replace_info: Option<ReplaceStreamJobInfo>,
     ) -> MetaResult<NotificationVersion> {
-        let (release_ctx, mut version) = self
+        let (release_ctx, version) = self
             .metadata_manager
             .catalog_controller
             .drop_object(object_type, object_id, drop_mode)
             .await?;
-
-        if let Some(replace_table_info) = target_replace_info {
-            let stream_ctx =
-                StreamContext::from_protobuf(replace_table_info.fragment_graph.get_ctx().unwrap());
-
-            let ReplaceStreamJobInfo {
-                mut streaming_job,
-                fragment_graph,
-                ..
-            } = replace_table_info;
-
-            let sink_id = if let ObjectType::Sink = object_type {
-                object_id as _
-            } else {
-                panic!("additional replace table event only occurs when dropping sink into table")
-            };
-
-            // Ensure the max parallelism unchanged before replacing table.
-            let original_max_parallelism = self
-                .metadata_manager
-                .get_job_max_parallelism(streaming_job.id().into())
-                .await?;
-            let fragment_graph = PbStreamFragmentGraph {
-                max_parallelism: original_max_parallelism as _,
-                ..fragment_graph
-            };
-
-            let fragment_graph =
-                StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
-            streaming_job.set_info_from_graph(&fragment_graph);
-            let streaming_job = streaming_job;
-
-            streaming_job.table().expect("should be table job");
-
-            tracing::debug!(id = streaming_job.id(), "replacing table for dropped sink");
-            let tmp_id = self
-                .metadata_manager
-                .catalog_controller
-                .create_job_catalog_for_replace(
-                    &streaming_job,
-                    Some(&stream_ctx),
-                    fragment_graph.specified_parallelism().as_ref(),
-                    Some(fragment_graph.max_parallelism()),
-                )
-                .await? as u32;
-
-            let (ctx, stream_job_fragments) = self
-                .inject_replace_table_job_for_table_sink(
-                    tmp_id,
-                    &self.metadata_manager,
-                    stream_ctx,
-                    None,
-                    None,
-                    Some(sink_id),
-                    &streaming_job,
-                    fragment_graph,
-                )
-                .await?;
-
-            let result: MetaResult<_> = try {
-                let replace_upstream = ctx.replace_upstream.clone();
-
-                self.metadata_manager
-                    .catalog_controller
-                    .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true)
-                    .await?;
-
-                self.stream_manager
-                    .replace_stream_job(stream_job_fragments, ctx)
-                    .await?;
-
-                replace_upstream
-            };
-
-            version = match result {
-                Ok(replace_upstream) => {
-                    let version = self
-                        .metadata_manager
-                        .catalog_controller
-                        .finish_replace_streaming_job(
-                            tmp_id as _,
-                            streaming_job,
-                            replace_upstream,
-                            SinkIntoTableContext {
-                                updated_sink_catalogs: vec![],
-                            },
-                            None, // no source is dropped when dropping sink into table
-                            None, // no auto refresh schema sink when dropping sink into table
-                        )
-                        .await?;
-                    Ok(version)
-                }
-                Err(err) => {
-                    tracing::error!(id = object_id, error = ?err.as_report(), "failed to replace table");
-                    let _ = self.metadata_manager
-                        .catalog_controller
-                        .try_abort_replacing_streaming_job(tmp_id as _, None)
-                        .await
-                        .inspect_err(|err| {
-                            tracing::error!(id = object_id, error = ?err.as_report(), "failed to abort replacing table");
-                        });
-                    Err(err)
-                }
-            }?;
-        }
 
         let ReleaseContext {
             database_id,
@@ -1582,6 +1167,7 @@ impl DdlController {
             removed_source_fragments,
             removed_actors,
             removed_fragments,
+            removed_sink_fragment_by_targets,
         } = release_ctx;
 
         let _guard = self.source_manager.pause_tick().await;
@@ -1592,6 +1178,12 @@ impl DdlController {
                 removed_streaming_job_ids,
                 removed_state_table_ids,
                 removed_fragments.iter().map(|id| *id as _).collect(),
+                removed_sink_fragment_by_targets
+                    .into_iter()
+                    .map(|(target, sinks)| {
+                        (target as _, sinks.into_iter().map(|id| id as _).collect())
+                    })
+                    .collect(),
             )
             .await;
 
@@ -1744,14 +1336,14 @@ impl DdlController {
                         })
                         .collect();
 
-                    let streaming_job = StreamingJob::Sink(sink, None);
+                    let streaming_job = StreamingJob::Sink(sink);
 
                     let tmp_sink_id = self
                         .metadata_manager
                         .catalog_controller
                         .create_job_catalog_for_replace(&streaming_job, None, None, None)
                         .await?;
-                    let StreamingJob::Sink(sink, _) = streaming_job else {
+                    let StreamingJob::Sink(sink) = streaming_job else {
                         unreachable!()
                     };
 
@@ -1823,37 +1415,24 @@ impl DdlController {
                         .collect()
                 });
 
-            // Handle sinks that sink into the table.
+            // Handle table that has incoming sinks.
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
-                let catalogs = self
+                let union_fragment = stream_job_fragments.inner.union_fragment_for_table();
+                let upstream_infos = self
                     .metadata_manager
-                    .get_table_incoming_sinks(table.id)
+                    .catalog_controller
+                    .get_all_upstream_sink_infos(table, union_fragment.fragment_id as _)
                     .await?;
+                refill_upstream_sink_union_in_table(&mut union_fragment.nodes, &upstream_infos);
 
-                for sink in catalogs {
-                    let sink_id = &sink.id;
-
-                    let sink_table_fragments = self
-                        .metadata_manager
-                        .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(
-                            *sink_id,
-                        ))
-                        .await?;
-
-                    let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
-
-                    Self::inject_replace_table_plan_for_sink(
-                        *sink_id,
-                        &sink,
-                        &sink_fragment,
-                        table,
-                        &mut ctx,
-                        stream_job_fragments.inner.union_fragment_for_table(),
-                        Some(&sink.unique_identity()),
-                    )?;
-
-                    if sink.original_target_columns.is_empty() {
-                        updated_sink_catalogs.push(sink.id as _);
+                for upstream_info in &upstream_infos {
+                    let upstream_fragment_id = upstream_info.sink_fragment_id;
+                    ctx.upstream_fragment_downstreams
+                        .entry(upstream_fragment_id)
+                        .or_default()
+                        .push(upstream_info.new_sink_downstream.clone());
+                    if upstream_info.sink_original_target_columns.is_empty() {
+                        updated_sink_catalogs.push(upstream_info.sink_id);
                     }
                 }
             }
@@ -1934,7 +1513,6 @@ impl DdlController {
         &self,
         job_id: StreamingJobId,
         drop_mode: DropMode,
-        target_replace_info: Option<ReplaceStreamJobInfo>,
     ) -> MetaResult<NotificationVersion> {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
@@ -1945,16 +1523,40 @@ impl DdlController {
             StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
         };
 
-        let version = self
-            .drop_object(object_type, object_id, drop_mode, target_replace_info)
+        let job_status = self
+            .metadata_manager
+            .catalog_controller
+            .get_streaming_job_status(job_id.id())
             .await?;
-        #[cfg(not(madsim))]
-        if let StreamingJobId::Sink(sink_id) = job_id {
-            // delete system table for exactly once iceberg sink
-            // todo(wcy-fdu): optimize the logic to be Iceberg unique.
-            let db = self.env.meta_store_ref().conn.clone();
-            clean_all_rows_by_sink_id(&db, sink_id).await?;
-        }
+        let version = match job_status {
+            JobStatus::Initial => {
+                unreachable!(
+                    "Job with Initial status should not notify frontend and therefore should not arrive here"
+                );
+            }
+            JobStatus::Creating => {
+                let canceled_jobs = self
+                    .stream_manager
+                    .cancel_streaming_jobs(vec![(job_id.id() as u32).into()])
+                    .await;
+                if canceled_jobs.is_empty() {
+                    tracing::warn!(job_id = job_id.id(), "failed to cancel streaming job");
+                }
+                IGNORED_NOTIFICATION_VERSION
+            }
+            JobStatus::Created => {
+                let version = self.drop_object(object_type, object_id, drop_mode).await?;
+                #[cfg(not(madsim))]
+                if let StreamingJobId::Sink(sink_id) = job_id {
+                    // delete system table for exactly once iceberg sink
+                    // todo(wcy-fdu): optimize the logic to be Iceberg unique.
+                    let db = self.env.meta_store_ref().conn.clone();
+                    clean_all_rows_by_sink_id(&db, sink_id).await?;
+                }
+                version
+            }
+        };
+
         Ok(version)
     }
 
@@ -2035,7 +1637,6 @@ impl DdlController {
         stream_ctx: StreamContext,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraph,
-        affected_table_replace_info: Option<(StreamingJob, StreamFragmentGraph)>,
         specific_resource_group: Option<String>,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
@@ -2087,7 +1688,7 @@ impl DdlController {
         if snapshot_backfill_info.is_some() {
             match stream_job {
                 StreamingJob::MaterializedView(_)
-                | StreamingJob::Sink(_, _)
+                | StreamingJob::Sink(_)
                 | StreamingJob::Index(_, _) => {}
                 StreamingJob::Table(_, _, _) | StreamingJob::Source(_) => {
                     return Err(
@@ -2184,53 +1785,34 @@ impl DdlController {
             stream_job.set_table_vnode_count(mview_fragment.vnode_count());
         }
 
-        let replace_table_job_info = match affected_table_replace_info {
-            Some((table_stream_job, fragment_graph)) => {
-                if snapshot_backfill_info.is_some() {
-                    return Err(anyhow!(
-                        "snapshot backfill should not have replace table info: {table_stream_job:?}"
-                    )
-                    .into());
-                }
-                let StreamingJob::Sink(sink, target_table) = &mut stream_job else {
-                    bail!("additional replace table event only occurs when sinking into table");
-                };
-
-                table_stream_job.table().expect("should be table job");
-                let tmp_id = self
-                    .metadata_manager
-                    .catalog_controller
-                    .create_job_catalog_for_replace(
-                        &table_stream_job,
-                        Some(&stream_ctx),
-                        fragment_graph.specified_parallelism().as_ref(),
-                        Some(fragment_graph.max_parallelism()),
-                    )
-                    .await? as u32;
-
-                let (context, table_fragments) = self
-                    .inject_replace_table_job_for_table_sink(
-                        tmp_id,
-                        &self.metadata_manager,
-                        stream_ctx,
-                        Some(sink),
-                        Some(&stream_job_fragments),
-                        None,
-                        &table_stream_job,
-                        fragment_graph,
-                    )
-                    .await?;
-                // When sinking into table occurs, some variables of the target table may be modified,
-                // such as `fragment_id` being altered by `prepare_replace_table`.
-                // At this point, it’s necessary to update the table info carried with the sink.
-                must_match!(&table_stream_job, StreamingJob::Table(source, table, _) => {
-                    // The StreamingJob in ReplaceTableInfo must be StreamingJob::Table
-                    *target_table = Some((table.clone(), source.clone()));
-                });
-
-                Some((table_stream_job, context, table_fragments))
-            }
-            None => None,
+        let new_upstream_sink = if let StreamingJob::Sink(sink) = &stream_job
+            && let Ok(table_id) = sink.get_target_table()
+        {
+            let tables = self
+                .metadata_manager
+                .get_table_catalog_by_ids(&[*table_id as _])
+                .await?;
+            let target_table = tables
+                .first()
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", *table_id))?;
+            let sink_fragment = stream_job_fragments
+                .sink_fragment()
+                .ok_or_else(|| anyhow::anyhow!("sink fragment not found for sink {}", sink.id))?;
+            let mview_fragment_id = self
+                .metadata_manager
+                .catalog_controller
+                .get_mview_fragment_by_id(*table_id as _)
+                .await?;
+            let upstream_sink_info = build_upstream_sink_info(
+                sink,
+                sink_fragment.fragment_id as _,
+                &sink_fragment.nodes,
+                target_table,
+                mview_fragment_id,
+            )?;
+            Some(upstream_sink_info)
+        } else {
+            None
         };
 
         let ctx = CreateStreamingJobContext {
@@ -2243,7 +1825,7 @@ impl DdlController {
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),
             streaming_job: stream_job,
-            replace_table_job_info,
+            new_upstream_sink,
             option: CreateStreamingJobOption {},
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
@@ -2334,7 +1916,7 @@ impl DdlController {
             // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?
             let old_internal_tables = self
                 .metadata_manager
-                .get_table_catalog_by_ids(old_internal_table_ids)
+                .get_table_catalog_by_ids(&old_internal_table_ids)
                 .await?;
             fragment_graph.fit_internal_tables_trivial(old_internal_tables)?;
         }
@@ -2680,4 +2262,97 @@ async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> Met
             Err(e.into())
         }
     }
+}
+
+pub fn build_upstream_sink_info(
+    sink: &PbSink,
+    sink_fragment_id: FragmentId,
+    sink_root_node: &PbStreamNode,
+    target_table: &PbTable,
+    target_fragment_id: FragmentId,
+) -> MetaResult<UpstreamSinkInfo> {
+    let sink_output_fields = sink_root_node.get_fields();
+    let output_indices = (0..sink_output_fields.len())
+        .map(|i| i as u32)
+        .collect_vec();
+
+    let sink_columns = if !sink.original_target_columns.is_empty() {
+        sink.original_target_columns.clone()
+    } else {
+        // This is due to the fact that the value did not exist in earlier versions,
+        // which means no schema changes such as `ADD/DROP COLUMN` have been made to the table.
+        // Therefore the columns of the table at this point are `original_target_columns`.
+        // This value of sink will be filled on the meta.
+        target_table.columns.clone()
+    };
+    let dist_key_indices: anyhow::Result<Vec<u32>> = try {
+        let sink_idx_by_col_id = sink_columns
+            .iter()
+            .enumerate()
+            .map(|(idx, col)| {
+                let column_desc = col
+                    .column_desc
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("sink column_desc is None"))?;
+                Ok((column_desc.column_id, idx as u32))
+            })
+            .collect::<anyhow::Result<HashMap<_, _>>>()?;
+        target_table
+            .distribution_key
+            .iter()
+            .map(|dist_idx| {
+                let column_desc = target_table.columns[*dist_idx as usize]
+                    .column_desc
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("table column_desc is None"))?;
+                let sink_idx = sink_idx_by_col_id
+                    .get(&column_desc.column_id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("column id {} not found in sink", column_desc.column_id)
+                    })?;
+                Ok(*sink_idx)
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?
+    };
+    let dist_key_indices =
+        dist_key_indices.map_err(|e| e.context("failed to get distribution key indices"))?;
+    let downstream_fragment_id = target_fragment_id as _;
+    let new_downstream_relation = DownstreamFragmentRelation {
+        downstream_fragment_id,
+        dispatcher_type: DispatcherType::Hash,
+        dist_key_indices,
+        output_mapping: PbDispatchOutputMapping::simple(output_indices),
+    };
+    let current_target_columns = target_table.get_columns();
+    let project_exprs = build_select_node_list(&sink_columns, current_target_columns)?;
+    Ok(UpstreamSinkInfo {
+        sink_id: sink.id as _,
+        sink_fragment_id: sink_fragment_id as _,
+        sink_output_fields: sink_output_fields.clone(),
+        sink_original_target_columns: sink.get_original_target_columns().clone(),
+        project_exprs,
+        new_sink_downstream: new_downstream_relation,
+    })
+}
+
+pub fn refill_upstream_sink_union_in_table(
+    union_fragment_root: &mut PbStreamNode,
+    upstream_sink_infos: &Vec<UpstreamSinkInfo>,
+) {
+    visit_stream_node_cont_mut(union_fragment_root, |node| {
+        if let Some(NodeBody::UpstreamSinkUnion(upstream_sink_union)) = &mut node.node_body {
+            let init_upstreams = upstream_sink_infos
+                .iter()
+                .map(|info| PbUpstreamSinkInfo {
+                    upstream_fragment_id: info.sink_fragment_id,
+                    sink_output_schema: info.sink_output_fields.clone(),
+                    project_exprs: info.project_exprs.clone(),
+                })
+                .collect();
+            upstream_sink_union.init_upstreams = init_upstreams;
+            false
+        } else {
+            true
+        }
+    });
 }
