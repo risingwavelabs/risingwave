@@ -91,7 +91,14 @@
     └─StreamProject { exprs: [rank, idx_bc.t._row_id, idx_bc.b] }
       └─StreamOverWindow { window_functions: [rank() OVER(PARTITION BY idx_bc.b ORDER BY idx_bc.a ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─StreamTableScan { table: idx_bc, columns: [idx_bc.a, idx_bc.b, idx_bc.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_bc.t._row_id], pk: [b, c, t._row_id], dist: UpstreamHashShard(idx_bc.b) }
-- sql: "create table t1 (a1 int, b1 int, c1 int);\ncreate index idx_a1 on t1(a1);\ncreate index idx_b1c1 on t1(b1, c1 desc);    \ncreate table t2 (a2 int, b2 int, c2 int);\ncreate index idx_a2 on t2(a2);\ncreate index idx_b2c2 on t2(b2, c2 desc);\nselect * from t1 join t2 on t1.a1 = t2.a2;\n"
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.a1 = t2.a2;
   stream_plan: |-
     StreamMaterialize { columns: [a1, b1, c1, a2, b2, c2, idx_a1.t1._row_id(hidden), idx_a2.t2._row_id(hidden)], stream_key: [idx_a1.t1._row_id, idx_a2.t2._row_id, a1], pk_columns: [idx_a1.t1._row_id, idx_a2.t2._row_id, a1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(idx_a1.a1, idx_a1.t1._row_id, idx_a2.t2._row_id) }
@@ -100,7 +107,14 @@
         │ └─StreamTableScan { table: idx_a1, columns: [idx_a1.a1, idx_a1.b1, idx_a1.c1, idx_a1.t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_a1.t1._row_id], pk: [a1, t1._row_id], dist: UpstreamHashShard(idx_a1.a1) }
         └─StreamExchange { dist: HashShard(idx_a2.a2) }
           └─StreamTableScan { table: idx_a2, columns: [idx_a2.a2, idx_a2.b2, idx_a2.c2, idx_a2.t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_a2.t2._row_id], pk: [a2, t2._row_id], dist: UpstreamHashShard(idx_a2.a2) }
-- sql: "create table t1 (a1 int, b1 int, c1 int);\ncreate index idx_a1 on t1(a1);\ncreate index idx_b1c1 on t1(b1, c1 desc);    \ncreate table t2 (a2 int, b2 int, c2 int);\ncreate index idx_a2 on t2(a2);\ncreate index idx_b2c2 on t2(b2, c2 desc);\nselect * from t1 join t2 on t1.b1 = t2.b2;\n"
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.b1 = t2.b2;
   stream_plan: |-
     StreamMaterialize { columns: [a1, b1, c1, a2, b2, c2, idx_b1c1.t1._row_id(hidden), idx_b2c2.t2._row_id(hidden)], stream_key: [idx_b1c1.t1._row_id, idx_b2c2.t2._row_id, b1], pk_columns: [idx_b1c1.t1._row_id, idx_b2c2.t2._row_id, b1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(idx_b1c1.b1, idx_b1c1.t1._row_id, idx_b2c2.t2._row_id) }
@@ -109,7 +123,14 @@
         │ └─StreamTableScan { table: idx_b1c1, columns: [idx_b1c1.a1, idx_b1c1.b1, idx_b1c1.c1, idx_b1c1.t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_b1c1.t1._row_id], pk: [b1, c1, t1._row_id], dist: UpstreamHashShard(idx_b1c1.b1) }
         └─StreamExchange { dist: HashShard(idx_b2c2.b2) }
           └─StreamTableScan { table: idx_b2c2, columns: [idx_b2c2.a2, idx_b2c2.b2, idx_b2c2.c2, idx_b2c2.t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_b2c2.t2._row_id], pk: [b2, c2, t2._row_id], dist: UpstreamHashShard(idx_b2c2.b2) }
-- sql: "create table t1 (a1 int, b1 int, c1 int);\ncreate index idx_a1 on t1(a1);\ncreate index idx_b1c1 on t1(b1, c1 desc);    \ncreate table t2 (a2 int, b2 int, c2 int);\ncreate index idx_a2 on t2(a2);\ncreate index idx_b2c2 on t2(b2, c2 desc);\nselect * from t1 join t2 on t1.b1 = t2.b2 and t1.c1 = t2.c2;\n"
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.b1 = t2.b2 and t1.c1 = t2.c2;
   stream_plan: |-
     StreamMaterialize { columns: [a1, b1, c1, a2, b2, c2, idx_b1c1.t1._row_id(hidden), idx_b2c2.t2._row_id(hidden)], stream_key: [idx_b1c1.t1._row_id, idx_b2c2.t2._row_id, b1, c1], pk_columns: [idx_b1c1.t1._row_id, idx_b2c2.t2._row_id, b1, c1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(idx_b1c1.b1, idx_b1c1.c1, idx_b1c1.t1._row_id, idx_b2c2.t2._row_id) }
@@ -118,7 +139,14 @@
         │ └─StreamTableScan { table: idx_b1c1, columns: [idx_b1c1.a1, idx_b1c1.b1, idx_b1c1.c1, idx_b1c1.t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_b1c1.t1._row_id], pk: [b1, c1, t1._row_id], dist: UpstreamHashShard(idx_b1c1.b1) }
         └─StreamExchange { dist: HashShard(idx_b2c2.b2, idx_b2c2.c2) }
           └─StreamTableScan { table: idx_b2c2, columns: [idx_b2c2.a2, idx_b2c2.b2, idx_b2c2.c2, idx_b2c2.t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_b2c2.t2._row_id], pk: [b2, c2, t2._row_id], dist: UpstreamHashShard(idx_b2c2.b2) }
-- sql: "create table t1 (a1 int, b1 int, c1 int);\ncreate index idx_a1 on t1(a1);\ncreate index idx_b1c1 on t1(b1, c1 desc);    \ncreate table t2 (a2 int, b2 int, c2 int);\ncreate index idx_a2 on t2(a2);\ncreate index idx_b2c2 on t2(b2, c2 desc);\nselect * from t1 join t2 on t1.c1 = t2.c2 and t1.b1 = t2.b2;\n"
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.c1 = t2.c2 and t1.b1 = t2.b2;
   stream_plan: |-
     StreamMaterialize { columns: [a1, b1, c1, a2, b2, c2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, c1, b1], pk_columns: [t1._row_id, t2._row_id, c1, b1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1.b1, t1.c1, t1._row_id, t2._row_id) }
@@ -127,7 +155,14 @@
         │ └─StreamTableScan { table: t1, columns: [t1.a1, t1.b1, t1.c1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.b2, t2.c2) }
           └─StreamTableScan { table: t2, columns: [t2.a2, t2.b2, t2.c2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
-- sql: "create table t1 (a1 int, b1 int, c1 int);\ncreate index idx_a1 on t1(a1);\ncreate index idx_b1c1 on t1(b1, c1 desc);    \ncreate table t2 (a2 int, b2 int, c2 int);\ncreate index idx_a2 on t2(a2);\ncreate index idx_b2c2 on t2(b2, c2 desc);\nselect * from t1 join t2 on t1.b1 = t2.b2 and t1.c1 = t2.c2;\n"
+- sql: |
+    create table t1 (a1 int, b1 int, c1 int);
+    create index idx_a1 on t1(a1);
+    create index idx_b1c1 on t1(b1, c1 desc);
+    create table t2 (a2 int, b2 int, c2 int);
+    create index idx_a2 on t2(a2);
+    create index idx_b2c2 on t2(b2, c2 desc);
+    select * from t1 join t2 on t1.b1 = t2.b2 and t1.c1 = t2.c2;
   stream_plan: |-
     StreamMaterialize { columns: [a1, b1, c1, a2, b2, c2, idx_b1c1.t1._row_id(hidden), idx_b2c2.t2._row_id(hidden)], stream_key: [idx_b1c1.t1._row_id, idx_b2c2.t2._row_id, b1, c1], pk_columns: [idx_b1c1.t1._row_id, idx_b2c2.t2._row_id, b1, c1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(idx_b1c1.b1, idx_b1c1.c1, idx_b1c1.t1._row_id, idx_b2c2.t2._row_id) }
