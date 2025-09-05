@@ -1064,9 +1064,7 @@ impl DdlService for DdlServiceImpl {
                                     new_columns = ?new_columns,
                                     "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported");
 
-                    let fail_info = format!(
-                        "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported"
-                    );
+                    let fail_info = "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported".to_owned();
                     add_auto_schema_change_fail_event_log(
                         &self.meta_metrics,
                         table.id,

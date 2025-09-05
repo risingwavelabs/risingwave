@@ -92,42 +92,44 @@ impl StreamReaderBuilder {
         };
 
         // Create callback function for reporting CDC auto schema change fail events
-        let report_cdc_auto_schema_change_fail = if let Some(ref meta_client) = self.actor_ctx.meta_client {
-            let meta_client = meta_client.clone();
-            let source_id = self.source_id;
-            let source_name = self.source_name.clone();
-            Some(Arc::new(move |table_id: u32, table_name: String, cdc_table_id: String, upstream_ddl: String, fail_info: String| {
-                println!("这里report_cdc_auto_schema_change_fail: {:?}", fail_info);
-                println!("这里cdc_table_id: {:?}", cdc_table_id);
-                println!("这里upstream_ddl: {:?}", upstream_ddl);
-                println!("这里fail_info: {:?}", fail_info);
-                println!("这里table_name: {:?}", table_name);
-                println!("这里table_id: {:?}", table_id);
+        let report_cdc_auto_schema_change_fail =
+            if let Some(ref meta_client) = self.actor_ctx.meta_client {
                 let meta_client = meta_client.clone();
-                let source_id = source_id;
-                let source_name = source_name.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = meta_client
-                        .add_cdc_auto_schema_change_fail_event(
-                            source_id.table_id,
-                            source_name,
-                            cdc_table_id,
-                            upstream_ddl,
-                            fail_info,
-                        )
-                        .await
-                    {
-                        tracing::warn!(
-                            error = %e.as_report(),
-                            source_id = source_id.table_id,
-                            "Failed to add CDC auto schema change fail event to event log."
-                        );
-                    }
-                });
-            }) as Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>)
-        } else {
-            None
-        };
+                let source_id = self.source_id;
+                Some(Arc::new(
+                    move |table_id: u32,
+                          table_name: String,
+                          cdc_table_id: String,
+                          upstream_ddl: String,
+                          fail_info: String| {
+                        let meta_client = meta_client.clone();
+                        let source_id = source_id;
+                        tokio::spawn(async move {
+                            if let Err(e) = meta_client
+                                .add_cdc_auto_schema_change_fail_event(
+                                    table_id,
+                                    table_name,
+                                    cdc_table_id,
+                                    upstream_ddl,
+                                    fail_info,
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    error = %e.as_report(),
+                                    source_id = source_id.table_id,
+                                    "Failed to add CDC auto schema change fail event to event log."
+                                );
+                            }
+                        });
+                    },
+                )
+                    as Arc<
+                        dyn Fn(u32, String, String, String, String) + Send + Sync,
+                    >)
+            } else {
+                None
+            };
 
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,

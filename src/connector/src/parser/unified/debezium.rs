@@ -213,6 +213,10 @@ pub fn parse_schema_change(
             };
             let id = jsonb_access_field!(jsonb, "id", string);
             let ty = jsonb_access_field!(jsonb, "type", string);
+            // Try to extract table name from the JSON data
+            let table_name = jsonb_access_field!(jsonb, "id", string)
+                .trim_matches('"')
+                .to_owned();
             let ddl_type: TableChangeType = ty.as_str().into();
             if matches!(ddl_type, TableChangeType::Create | TableChangeType::Drop) {
                 tracing::debug!("skip table schema change for create/drop command");
@@ -241,10 +245,14 @@ pub fn parse_schema_change(
                                         tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
                                         AccessError::UnsupportedType {
                                             ty: type_name.clone(),
+                                            table_name: Some(table_name.clone()),
                                         }
                                     })?,
                                     None => {
-                                        return Err(AccessError::UnsupportedType { ty: type_name });
+                                        return Err(AccessError::UnsupportedType {
+                                            ty: type_name,
+                                            table_name: Some(table_name.clone()),
+                                        });
                                     }
                                 }
                             }
@@ -256,10 +264,14 @@ pub fn parse_schema_change(
                                     tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
                                     AccessError::UnsupportedType {
                                         ty: type_name.clone(),
+                                        table_name: Some(table_name.clone()),
                                     }
                                 })?,
                                 None => {
-                                    Err(AccessError::UnsupportedType { ty: type_name })?
+                                    Err(AccessError::UnsupportedType {
+                                        ty: type_name,
+                                        table_name: Some(table_name.clone()),
+                                    })?
                                 }
                             }
                         }

@@ -34,7 +34,10 @@ pub enum AccessError {
         value: String,
     },
     #[error("Unsupported data type `{ty}`")]
-    UnsupportedType { ty: String },
+    UnsupportedType {
+        ty: String,
+        table_name: Option<String>,
+    },
 
     #[error("Unsupported additional column `{name}`")]
     UnsupportedAdditionalColumn { name: String },

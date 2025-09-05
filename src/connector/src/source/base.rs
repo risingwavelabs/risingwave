@@ -65,6 +65,10 @@ pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub const WEBHOOK_CONNECTOR: &str = "webhook";
 
+/// Callback function type for reporting CDC auto schema change fail events
+/// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
+type CdcAutoSchemaChangeFailCallback =
+    Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>;
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
     fn try_from_btreemap(
@@ -292,7 +296,7 @@ pub struct SourceContext {
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
     // callback function to report CDC auto schema change fail events
-    pub report_cdc_auto_schema_change_fail: Option<Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>>,
+    pub report_cdc_auto_schema_change_fail: Option<CdcAutoSchemaChangeFailCallback>,
 }
 
 impl SourceContext {
@@ -307,7 +311,7 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
-        report_cdc_auto_schema_change_fail: Option<Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>>,
+        report_cdc_auto_schema_change_fail: Option<CdcAutoSchemaChangeFailCallback>,
     ) -> Self {
         Self {
             actor_id,
@@ -342,6 +346,7 @@ impl SourceContext {
     }
 
     /// Report CDC auto schema change fail event
+    /// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
     pub fn report_cdc_auto_schema_change_fail(
         &self,
         table_id: u32,
@@ -367,7 +372,10 @@ impl std::fmt::Debug for SourceContext {
             .field("source_ctrl_opts", &self.source_ctrl_opts)
             .field("connector_props", &self.connector_props)
             .field("schema_change_tx", &self.schema_change_tx)
-            .field("report_cdc_auto_schema_change_fail", &self.report_cdc_auto_schema_change_fail.is_some())
+            .field(
+                "report_cdc_auto_schema_change_fail",
+                &self.report_cdc_auto_schema_change_fail.is_some(),
+            )
             .finish()
     }
 }
