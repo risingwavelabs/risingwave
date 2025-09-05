@@ -59,8 +59,9 @@ public class MySqlDialect implements JdbcDialect {
     @Override
     public Optional<String> getUpsertStatement(
             SchemaTableName schemaTableName,
-            List<String> fieldNames,
+            TableSchema tableSchema,
             List<String> uniqueKeyFields) {
+        List<String> fieldNames = List.of(tableSchema.getColumnNames());
         String updateClause =
                 fieldNames.stream()
                         .map(f -> quoteIdentifier(f) + "=VALUES(" + quoteIdentifier(f) + ")")

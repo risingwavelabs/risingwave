@@ -24,8 +24,10 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_pb::catalog::table::{
-    OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
+    CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
+    PbTableVersion,
 };
 use risingwave_pb::catalog::{
     PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
@@ -143,7 +145,7 @@ pub struct TableCatalog {
     /// `No Check`.
     pub conflict_behavior: ConflictBehavior,
 
-    pub version_column_index: Option<usize>,
+    pub version_column_indices: Vec<usize>,
 
     pub read_prefix_len_hint: usize,
 
@@ -205,6 +207,8 @@ pub struct TableCatalog {
     pub refreshable: bool,
 
     pub vector_index_info: Option<PbVectorIndexInfo>,
+
+    pub cdc_table_type: Option<ExternalCdcTableType>,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -219,6 +223,7 @@ pub enum TableType {
     /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
     /// An index has both a `TableCatalog` and an `IndexCatalog`.
     Index,
+    VectorIndex,
     /// Internal tables for executors.
     Internal,
 }
@@ -237,6 +242,7 @@ impl TableType {
             PbTableType::MaterializedView => Self::MaterializedView,
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
+            PbTableType::VectorIndex => Self::VectorIndex,
             PbTableType::Unspecified => unreachable!(),
         }
     }
@@ -246,6 +252,7 @@ impl TableType {
             Self::Table => PbTableType::Table,
             Self::MaterializedView => PbTableType::MaterializedView,
             Self::Index => PbTableType::Index,
+            Self::VectorIndex => PbTableType::VectorIndex,
             Self::Internal => PbTableType::Internal,
         }
     }
@@ -396,7 +403,7 @@ impl TableCatalog {
             TableType::MaterializedView => {
                 "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
             }
-            TableType::Index => "Use `DROP INDEX` to drop an index.",
+            TableType::Index | TableType::VectorIndex => "Use `DROP INDEX` to drop an index.",
             TableType::Table => "Use `DROP TABLE` to drop a table.",
             TableType::Internal => "Internal tables cannot be dropped.",
         };
@@ -572,7 +579,11 @@ impl TableCatalog {
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
-            version_column_index: self.version_column_index.map(|value| value as u32),
+            version_column_indices: self
+                .version_column_indices
+                .iter()
+                .map(|&idx| idx as u32)
+                .collect(),
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
@@ -592,6 +603,10 @@ impl TableCatalog {
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
+            cdc_table_type: self
+                .cdc_table_type
+                .clone()
+                .map(|t| PbCdcTableType::from(t) as i32),
         }
     }
 
@@ -741,7 +756,11 @@ impl From<PbTable> for TableCatalog {
         let mut col_index: HashMap<i32, usize> = HashMap::new();
 
         let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
-        let version_column_index = tb.version_column_index.map(|value| value as usize);
+        let version_column_indices: Vec<usize> = tb
+            .version_column_indices
+            .iter()
+            .map(|&idx| idx as usize)
+            .collect();
         let mut columns: Vec<ColumnCatalog> =
             tb.columns.into_iter().map(ColumnCatalog::from).collect();
         if columns.iter().all(|c| !c.is_rw_timestamp_column()) {
@@ -789,7 +808,7 @@ impl From<PbTable> for TableCatalog {
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
@@ -814,8 +833,13 @@ impl From<PbTable> for TableCatalog {
             job_id: tb.job_id.map(TableId::from),
             engine,
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
+
             refreshable: tb.refreshable,
             vector_index_info: tb.vector_index_info,
+            cdc_table_type: tb
+                .cdc_table_type
+                .and_then(|t| PbCdcTableType::try_from(t).ok())
+                .map(ExternalCdcTableType::from),
         }
     }
 }
@@ -900,15 +924,17 @@ mod tests {
             incoming_sinks: vec![],
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
-            version_column_index: None,
+            version_column_indices: Vec::new(),
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
             clean_watermark_index_in_pk: None,
+
             refreshable: false,
             vector_index_info: None,
+            cdc_table_type: None,
         }
         .into();
 
@@ -970,15 +996,17 @@ mod tests {
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
-                version_column_index: None,
+                version_column_indices: Vec::new(),
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
                 webhook_info: None,
                 job_id: None,
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
+
                 refreshable: false,
                 vector_index_info: None,
+                cdc_table_type: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost()));

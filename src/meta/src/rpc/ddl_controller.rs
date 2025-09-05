@@ -23,7 +23,9 @@ use anyhow::{Context, anyhow};
 use await_tree::{InstrumentAwait, span};
 use either::Either;
 use itertools::Itertools;
-use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog, ColumnId, FragmentTypeFlag};
+use risingwave_common::catalog::{
+    AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag,
+};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
@@ -154,7 +156,7 @@ pub enum DdlCommand {
     CreateNonSharedSource(Source),
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
-    DropFunction(FunctionId),
+    DropFunction(FunctionId, DropMode),
     CreateView(View, HashSet<ObjectId>),
     DropView(ViewId, DropMode),
     CreateStreamingJob {
@@ -199,7 +201,7 @@ impl DdlCommand {
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
             DdlCommand::DropSource(id, _) => Right(*id),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
-            DdlCommand::DropFunction(id) => Right(*id),
+            DdlCommand::DropFunction(id, _) => Right(*id),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
             DdlCommand::DropView(id, _) => Right(*id),
             DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
@@ -227,7 +229,7 @@ impl DdlCommand {
             DdlCommand::DropDatabase(_)
             | DdlCommand::DropSchema(_, _)
             | DdlCommand::DropSource(_, _)
-            | DdlCommand::DropFunction(_)
+            | DdlCommand::DropFunction(_, _)
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
             | DdlCommand::DropConnection(_, _)
@@ -389,7 +391,9 @@ impl DdlController {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
-                DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
+                DdlCommand::DropFunction(function_id, drop_mode) => {
+                    ctrl.drop_function(function_id, drop_mode).await
+                }
                 DdlCommand::CreateView(view, dependencies) => {
                     ctrl.create_view(view, dependencies).await
                 }
@@ -592,14 +596,13 @@ impl DdlController {
             .await
     }
 
-    async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
-        self.drop_object(
-            ObjectType::Function,
-            function_id as _,
-            DropMode::Restrict,
-            None,
-        )
-        .await
+    async fn drop_function(
+        &self,
+        function_id: FunctionId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        self.drop_object(ObjectType::Function, function_id as _, drop_mode, None)
+            .await
     }
 
     async fn create_view(
@@ -914,12 +917,13 @@ impl DdlController {
             let sink = sink.expect("sink not found");
             Self::inject_replace_table_plan_for_sink(
                 sink.id,
+                sink,
                 &sink_fragment,
                 target_table,
                 &mut replace_table_ctx,
                 stream_job_fragments.inner.union_fragment_for_table(),
                 None,
-            );
+            )?;
         }
 
         let [table_catalog]: [_; 1] = mgr
@@ -950,12 +954,13 @@ impl DdlController {
 
                 Self::inject_replace_table_plan_for_sink(
                     sink_id,
+                    &sink,
                     &sink_fragment,
                     target_table,
                     &mut replace_table_ctx,
                     stream_job_fragments.inner.union_fragment_for_table(),
                     Some(&sink.unique_identity()),
-                );
+                )?;
             }
         }
 
@@ -1006,12 +1011,13 @@ impl DdlController {
 
     pub(crate) fn inject_replace_table_plan_for_sink(
         sink_id: u32,
+        sink: &PbSink,
         sink_fragment: &Fragment,
         table: &Table,
         replace_table_ctx: &mut ReplaceStreamJobContext,
         union_fragment: &mut Fragment,
         unique_identity: Option<&str>,
-    ) {
+    ) -> MetaResult<()> {
         let sink_fields = sink_fragment.nodes.fields.clone();
 
         let output_indices = sink_fields
@@ -1020,7 +1026,45 @@ impl DdlController {
             .map(|(idx, _)| idx as _)
             .collect_vec();
 
-        let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
+        let dist_key_indices: anyhow::Result<Vec<u32>> = try {
+            let sink_columns = if !sink.original_target_columns.is_empty() {
+                sink.original_target_columns.clone()
+            } else {
+                table.columns.clone()
+            };
+            let sink_idx_by_col_id = sink_columns
+                .into_iter()
+                .enumerate()
+                .map(|(idx, col)| {
+                    let column_desc = col
+                        .column_desc
+                        .ok_or_else(|| anyhow::anyhow!("sink column_desc is None"))?;
+                    Ok((column_desc.column_id, idx as u32))
+                })
+                .collect::<anyhow::Result<HashMap<_, _>>>()?;
+            table
+                .distribution_key
+                .iter()
+                .map(|dist_idx| {
+                    let column_desc = table.columns[*dist_idx as usize]
+                        .column_desc
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("table column_desc is None"))?;
+                    let sink_idx =
+                        sink_idx_by_col_id
+                            .get(&column_desc.column_id)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "column id {} not found in sink",
+                                    column_desc.column_id
+                                )
+                            })?;
+                    Ok(*sink_idx)
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?
+        };
+        let dist_key_indices =
+            dist_key_indices.map_err(|e| e.context("failed to get distribution key indices"))?;
 
         let sink_fragment_downstreams = replace_table_ctx
             .upstream_fragment_downstreams
@@ -1031,7 +1075,7 @@ impl DdlController {
             sink_fragment_downstreams.push(DownstreamFragmentRelation {
                 downstream_fragment_id: union_fragment.fragment_id,
                 dispatcher_type: DispatcherType::Hash,
-                dist_key_indices: dist_key_indices.clone(),
+                dist_key_indices,
                 output_mapping: PbDispatchOutputMapping::simple(output_indices),
             });
         }
@@ -1093,6 +1137,8 @@ impl DdlController {
                 });
             }
         }
+
+        Ok(())
     }
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
@@ -1359,19 +1405,16 @@ impl DdlController {
 
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
-        match (streaming_job.create_type(), &streaming_job) {
-            // TODO(August): Unify background sink into table's creation path with MV below.
-            (CreateType::Unspecified, _)
-            | (CreateType::Foreground, _)
-            | (CreateType::Background, StreamingJob::Sink(_, Some(_))) => {
+        match streaming_job.create_type() {
+            CreateType::Unspecified | CreateType::Foreground => {
                 let version = self
                     .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
                     .await?;
                 Ok(version)
             }
-            (CreateType::Background, _) => {
-                let await_tree_key = format!("Background DDL Worker ({})", streaming_job.id());
+            CreateType::Background => {
+                let await_tree_key = format!("Background DDL Worker ({})", stream_job_id);
                 let await_tree_span =
                     span!("{:?}({})", streaming_job.job_type(), streaming_job.name());
 
@@ -1667,7 +1710,7 @@ impl DdlController {
                     }
                     let original_sink_fragment =
                         sink_job_fragments.fragments.into_values().next().unwrap();
-                    let (new_sink_fragment, new_sink_columns, new_log_store_table) =
+                    let (new_sink_fragment, new_schema, new_log_store_table) =
                         rewrite_refresh_schema_sink_fragment(
                             &original_sink_fragment,
                             &sink,
@@ -1714,7 +1757,11 @@ impl DdlController {
                         tmp_sink_id,
                         original_sink: sink,
                         original_fragment: original_sink_fragment,
-                        new_columns: new_sink_columns,
+                        new_schema,
+                        newly_add_fields: newly_added_columns
+                            .iter()
+                            .map(|col| Field::from(&col.column_desc))
+                            .collect(),
                         new_fragment: new_sink_fragment,
                         new_log_store_table,
                         actor_status,
@@ -1765,7 +1812,7 @@ impl DdlController {
                         .map(|sink| FinishAutoRefreshSchemaSinkContext {
                             tmp_sink_id: sink.tmp_sink_id,
                             original_sink_id: sink.original_sink.id as _,
-                            columns: sink.new_columns.clone(),
+                            columns: sink.new_schema.clone(),
                             new_log_store_table: sink
                                 .new_log_store_table
                                 .as_ref()
@@ -1795,12 +1842,13 @@ impl DdlController {
 
                     Self::inject_replace_table_plan_for_sink(
                         *sink_id,
+                        &sink,
                         &sink_fragment,
                         table,
                         &mut ctx,
                         stream_job_fragments.inner.union_fragment_for_table(),
                         Some(&sink.unique_identity()),
-                    );
+                    )?;
 
                     if sink.original_target_columns.is_empty() {
                         updated_sink_catalogs.push(sink.id as _);
@@ -1822,10 +1870,7 @@ impl DdlController {
                             &sink.actor_status,
                             &empty_actor_splits,
                             &empty_downstreams,
-                            false,
-                            sink.original_sink.definition.clone(),
                             true,
-                            Some(&sink.original_sink),
                             None,
                         )
                         .await?;

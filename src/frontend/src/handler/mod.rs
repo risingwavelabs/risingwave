@@ -382,7 +382,7 @@ pub async fn handle(
             source_watermarks,
             append_only,
             on_conflict,
-            with_version_column,
+            with_version_columns,
             cdc_table_info,
             include_column_options,
             webhook_info,
@@ -403,7 +403,10 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
-                    with_version_column.map(|x| x.real_value()),
+                    with_version_columns
+                        .iter()
+                        .map(|col| col.real_value())
+                        .collect(),
                     engine,
                 )
                 .await;
@@ -420,7 +423,10 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
-                with_version_column.map(|x| x.real_value()),
+                with_version_columns
+                    .iter()
+                    .map(|col| col.real_value())
+                    .collect(),
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
@@ -652,11 +658,13 @@ pub async fn handle(
         Statement::CreateIndex {
             name,
             table_name,
+            method,
             columns,
             include,
             distributed_by,
             unique,
             if_not_exists,
+            with_properties: _,
         } => {
             if unique {
                 bail_not_implemented!("create unique index");
@@ -667,6 +675,7 @@ pub async fn handle(
                 if_not_exists,
                 name,
                 table_name,
+                method,
                 columns.to_vec(),
                 include,
                 distributed_by,
@@ -1286,7 +1295,9 @@ pub async fn handle(
         Statement::Deallocate { name, prepare } => {
             prepared_statement::handle_deallocate(name, prepare).await
         }
-        Statement::Vacuum { object_name } => vacuum::handle_vacuum(handler_args, object_name).await,
+        Statement::Vacuum { object_name, full } => {
+            vacuum::handle_vacuum(handler_args, object_name, full).await
+        }
         Statement::Refresh { table_name } => {
             refresh::handle_refresh(handler_args, table_name).await
         }

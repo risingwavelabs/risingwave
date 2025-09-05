@@ -11,9 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::num::NonZeroU32;
 use std::ops::DerefMut;
 use std::sync::Arc;
+
+use risingwave_pb::catalog::PbVectorIndexInfo;
 
 pub mod plan_node;
 
@@ -80,7 +83,8 @@ use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker, PlanTreeNode, Stream,
-    StreamExchange, StreamPlanRef, StreamUnion, ToStream, VisitExprsRecursive,
+    StreamExchange, StreamPlanRef, StreamUnion, StreamVectorIndexWrite, ToStream,
+    VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
@@ -691,7 +695,7 @@ impl LogicalPlanRoot {
             definition,
             append_only,
             on_conflict,
-            with_version_column,
+            with_version_columns,
             webhook_info,
             engine,
         }: CreateTableProps,
@@ -785,10 +789,10 @@ impl LogicalPlanRoot {
             }
         }
 
-        let version_column_index = if let Some(version_column) = with_version_column {
-            find_version_column_index(&columns, version_column)?
+        let version_column_indices = if !with_version_columns.is_empty() {
+            find_version_column_indices(&columns, with_version_columns)?
         } else {
-            None
+            vec![]
         };
 
         let with_external_source = source_catalog.is_some();
@@ -892,7 +896,7 @@ impl LogicalPlanRoot {
         let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;
 
         if let ConflictBehavior::IgnoreConflict = conflict_behavior
-            && version_column_index.is_some()
+            && !version_column_indices.is_empty()
         {
             Err(ErrorCode::InvalidParameterValue(
                 "The with version column syntax cannot be used with the ignore behavior of on conflict".to_owned(),
@@ -941,7 +945,7 @@ impl LogicalPlanRoot {
             columns,
             definition,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             pk_column_indices,
             row_id_index,
             version,
@@ -996,6 +1000,30 @@ impl LogicalPlanRoot {
             TableType::Index,
             cardinality,
             retention_seconds,
+        )
+    }
+
+    pub fn gen_vector_index_plan(
+        self,
+        index_name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        definition: String,
+        retention_seconds: Option<NonZeroU32>,
+        vector_index_info: PbVectorIndexInfo,
+    ) -> Result<StreamVectorIndexWrite> {
+        let cardinality = self.compute_cardinality();
+        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
+
+        StreamVectorIndexWrite::create(
+            stream_plan,
+            index_name,
+            database_id,
+            schema_id,
+            definition,
+            cardinality,
+            retention_seconds,
+            vector_index_info,
         )
     }
 
@@ -1112,28 +1140,41 @@ impl<P: PlanPhase> PlanRoot<P> {
     }
 }
 
-fn find_version_column_index(
+fn find_version_column_indices(
     column_catalog: &Vec<ColumnCatalog>,
-    version_column_name: String,
-) -> Result<Option<usize>> {
-    for (index, column) in column_catalog.iter().enumerate() {
-        if column.column_desc.name == version_column_name {
-            if let &DataType::Jsonb
-            | &DataType::List(_)
-            | &DataType::Struct(_)
-            | &DataType::Bytea
-            | &DataType::Boolean = column.data_type()
-            {
-                Err(ErrorCode::InvalidParameterValue(
-                    "The specified version column data type is invalid.".to_owned(),
-                ))?
+    version_column_names: Vec<String>,
+) -> Result<Vec<usize>> {
+    let mut indices = Vec::new();
+    for version_column_name in version_column_names {
+        let mut found = false;
+        for (index, column) in column_catalog.iter().enumerate() {
+            if column.column_desc.name == version_column_name {
+                if let &DataType::Jsonb
+                | &DataType::List(_)
+                | &DataType::Struct(_)
+                | &DataType::Bytea
+                | &DataType::Boolean = column.data_type()
+                {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Version column {} must be of a comparable data type",
+                        version_column_name
+                    ))
+                    .into());
+                }
+                indices.push(index);
+                found = true;
+                break;
             }
-            return Ok(Some(index));
+        }
+        if !found {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Version column {} not found",
+                version_column_name
+            ))
+            .into());
         }
     }
-    Err(ErrorCode::InvalidParameterValue(
-        "The specified version column name is not in the current columns.".to_owned(),
-    ))?
+    Ok(indices)
 }
 
 fn const_eval_exprs<C: ConventionMarker>(plan: PlanRef<C>) -> Result<PlanRef<C>> {
@@ -1219,6 +1260,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -
 fn require_additional_exchange_on_root_in_local_mode(plan: BatchPlanRef) -> bool {
     fn is_user_table(plan: &BatchPlanRef) -> bool {
         plan.node_type() == BatchPlanNodeType::BatchSeqScan
+            || plan.node_type() == BatchPlanNodeType::BatchVectorSearch
     }
 
     fn is_source(plan: &BatchPlanRef) -> bool {

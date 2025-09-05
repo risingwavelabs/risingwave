@@ -26,8 +26,9 @@ use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     AlterDatabaseParam, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId,
-    PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME, TableId,
+    DEFAULT_SUPER_USER_FOR_ADMIN, DEFAULT_SUPER_USER_FOR_ADMIN_ID, DEFAULT_SUPER_USER_ID,
+    FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
@@ -55,6 +56,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -585,7 +587,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
+    async fn drop_function(&self, _function_id: FunctionId, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
@@ -932,6 +934,7 @@ impl UserInfoWriter for MockUserInfoWriter {
             UpdateField::CreateUser => user_info.can_create_user = update_user.can_create_user,
             UpdateField::AuthInfo => user_info.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => user_info.name.clone_from(&update_user.name),
+            UpdateField::Admin => user_info.is_admin = update_user.is_admin,
             UpdateField::Unspecified => unreachable!(),
         });
         lock.update_user(update_user);
@@ -1004,6 +1007,16 @@ impl MockUserInfoWriter {
             can_create_db: true,
             can_create_user: true,
             can_login: true,
+            ..Default::default()
+        });
+        user_info.write().create_user(UserInfo {
+            id: DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+            name: DEFAULT_SUPER_USER_FOR_ADMIN.to_owned(),
+            is_super: true,
+            can_create_db: true,
+            can_create_user: true,
+            can_login: true,
+            is_admin: true,
             ..Default::default()
         });
         Self {
@@ -1171,6 +1184,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
+    async fn list_cdc_progress(&self) -> RpcResult<HashMap<u32, PbCdcProgress>> {
+        Ok(HashMap::default())
+    }
+
     async fn get_meta_store_endpoint(&self) -> RpcResult<String> {
         unimplemented!()
     }
@@ -1216,6 +1233,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<u64> {
         Ok(1)
+    }
+
+    async fn expire_iceberg_table_snapshots(&self, _sink_id: SinkId) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {

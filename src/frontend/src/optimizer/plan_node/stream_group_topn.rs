@@ -21,6 +21,7 @@ use super::utils::{Distill, plan_node_name, watermark_pretty};
 use super::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
 };
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::{MonotonicityMap, Order};
@@ -36,9 +37,11 @@ pub struct StreamGroupTopN {
 }
 
 impl StreamGroupTopN {
-    pub fn new(core: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Self {
+    pub fn new(core: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Result<Self> {
         assert!(!core.group_key.is_empty());
         assert!(core.limit_attr.limit() > 0);
+        reject_upsert_input!(core.input);
+
         let input = &core.input;
 
         // FIXME(rc): Actually only watermark messages on the first group-by column are propagated
@@ -68,17 +71,18 @@ impl StreamGroupTopN {
             Some(stream_key),
             core.functional_dependency(),
             input.distribution().clone(),
-            StreamKind::Retract, // TODO(kind): reject upsert input
+            StreamKind::Retract,
             // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
             false,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
-        StreamGroupTopN {
+
+        Ok(StreamGroupTopN {
             base,
             core,
             vnode_col_idx,
-        }
+        })
     }
 
     pub fn limit_attr(&self) -> TopNLimit {
@@ -152,7 +156,7 @@ impl PlanTreeNodeUnary<Stream> for StreamGroupTopN {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core, self.vnode_col_idx)
+        Self::new(core, self.vnode_col_idx).unwrap()
     }
 }
 

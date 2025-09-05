@@ -24,7 +24,7 @@ use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::{HashJoinNode, JoinEncodingType as JoinEncodingTypeProto};
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTableBuilder};
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, CpuEncoding, JoinType, MemoryEncoding};
@@ -123,16 +123,24 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
 
-        let state_table_l =
-            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone())).await;
+        let state_table_l = StateTableBuilder::new(table_l, store.clone(), Some(vnodes.clone()))
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
         let degree_state_table_l =
-            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()))
+            StateTableBuilder::new(degree_table_l, store.clone(), Some(vnodes.clone()))
+                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .build()
                 .await;
 
-        let state_table_r =
-            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone())).await;
-        let degree_state_table_r =
-            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
+        let state_table_r = StateTableBuilder::new(table_r, store.clone(), Some(vnodes.clone()))
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
+        let degree_state_table_r = StateTableBuilder::new(degree_table_r, store, Some(vnodes))
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
 
         let join_encoding_type = node
             .get_join_encoding_type()

@@ -26,7 +26,9 @@ use risingwave_meta_model::{
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::table::{PbEngine, PbOptionalAssociatedSourceId, PbTableType};
+use risingwave_pb::catalog::table::{
+    CdcTableType as PbCdcTableType, PbEngine, PbOptionalAssociatedSourceId, PbTableType,
+};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
@@ -232,7 +234,14 @@ impl From<ObjectModel<table::Model>> for PbTable {
             handle_pk_conflict_behavior: PbHandleConflictBehavior::from(
                 value.0.handle_pk_conflict_behavior,
             ) as _,
-            version_column_index: value.0.version_column_index.map(|x| x as u32),
+            version_column_indices: value
+                .0
+                .version_column_indices
+                .unwrap_or_default()
+                .0
+                .iter()
+                .map(|&idx| idx as u32)
+                .collect(),
             read_prefix_len_hint: value.0.read_prefix_len_hint as _,
             watermark_indices: value.0.watermark_indices.0,
             dist_key_in_pk: value.0.dist_key_in_pk.0,
@@ -268,6 +277,10 @@ impl From<ObjectModel<table::Model>> for PbTable {
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
             refreshable: value.0.refreshable,
             vector_index_info: value.0.vector_index_info.map(|index| index.to_protobuf()),
+            cdc_table_type: value
+                .0
+                .cdc_table_type
+                .map(|cdc_type| PbCdcTableType::from(cdc_type) as i32),
         }
     }
 }
@@ -410,6 +423,7 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             stream_job_status: PbStreamJobStatus::Created as _,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            create_type: risingwave_pb::catalog::CreateType::Foreground.into(), /* Default for existing indexes */
         }
     }
 }
@@ -476,6 +490,10 @@ impl From<ObjectModel<function::Model>> for PbFunction {
                 .options
                 .as_ref()
                 .and_then(|o| o.0.get("batch").map(|v| v == "true")),
+            created_at_epoch: Some(
+                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+            ),
+            created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }
 }

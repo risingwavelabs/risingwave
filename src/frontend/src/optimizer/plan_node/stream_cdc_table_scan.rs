@@ -18,7 +18,7 @@ use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::PbStreamNode;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
@@ -46,7 +46,7 @@ impl StreamCdcTableScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            StreamKind::Retract, // TODO(kind): could this be upsert?
+            StreamKind::Retract,
             false,
             core.watermark_columns(),
             core.columns_monotonicity(),
@@ -62,9 +62,14 @@ impl StreamCdcTableScan {
         &self.core
     }
 
-    /// Build catalog for cdc backfill state
+    /// Build catalog for cdc backfill state.
+    ///
+    /// For non-parallelized cdc backfill:
     /// Right now we only persist whether the backfill is finished and the corresponding cdc offset
     /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
+    ///
+    /// For parallelized cdc backfill:
+    /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -78,6 +83,8 @@ impl StreamCdcTableScan {
             catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
             // `row_count` column, the number of rows read from snapshot
             catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+            catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset_low"));
+            catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset_high"));
             catalog_builder
                 .build(vec![], 1)
                 .with_id(state.gen_table_id_wrapped())
@@ -198,7 +205,7 @@ impl StreamCdcTableScan {
                 },
             ],
             stream_key: vec![], // not used
-            append_only: true,
+            stream_kind: PbStreamKind::AppendOnly as _,
             identity: "StreamCdcFilter".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::CdcFilter(Box::new(CdcFilterNode {
@@ -226,7 +233,7 @@ impl StreamCdcTableScan {
             operator_id: exchange_operator_id.0 as _,
             input: vec![filter_stream_node],
             stream_key: vec![], // not used
-            append_only: true,
+            stream_kind: PbStreamKind::AppendOnly as _,
             identity: "Exchange".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::Exchange(Box::new(ExchangeNode {
@@ -282,7 +289,7 @@ impl StreamCdcTableScan {
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
-            append_only: self.append_only(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
         })
     }
 

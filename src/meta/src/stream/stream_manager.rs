@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, span};
@@ -22,13 +21,11 @@ use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, Field, TableId};
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
-use risingwave_pb::meta::object::PbObjectInfo;
-use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
 use risingwave_pb::meta::table_fragments::ActorStatus;
-use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
@@ -54,7 +51,7 @@ use crate::model::{
     FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::cdc::{
-    assign_cdc_table_snapshot_splits, assign_cdc_table_snapshot_splits_for_replace_table,
+    assign_cdc_table_snapshot_splits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -172,6 +169,11 @@ impl CreatingStreamingJobInfo {
         }
         (receivers, recovered_job_ids)
     }
+
+    async fn check_job_exists(&self, job_id: TableId) -> bool {
+        let jobs = self.streaming_jobs.lock().await;
+        jobs.contains_key(&job_id)
+    }
 }
 
 type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
@@ -181,7 +183,8 @@ pub struct AutoRefreshSchemaSinkContext {
     pub tmp_sink_id: ObjectId,
     pub original_sink: PbSink,
     pub original_fragment: Fragment,
-    pub new_columns: Vec<PbColumnCatalog>,
+    pub new_schema: Vec<PbColumnCatalog>,
+    pub newly_add_fields: Vec<Field>,
     pub new_fragment: Fragment,
     pub new_log_store_table: Option<PbTable>,
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
@@ -470,13 +473,12 @@ impl GlobalStreamManager {
                 .source_manager
                 .allocate_splits(&stream_job_fragments)
                 .await?;
-            let cdc_table_snapshot_split_assignment =
-                assign_cdc_table_snapshot_splits_for_replace_table(
-                    context.old_fragments.stream_job_id.table_id,
-                    &stream_job_fragments.inner,
-                    self.env.meta_store_ref(),
-                )
-                .await?;
+            let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+                context.old_fragments.stream_job_id.table_id,
+                &stream_job_fragments.inner,
+                self.env.meta_store_ref(),
+            )
+            .await?;
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -511,10 +513,39 @@ impl GlobalStreamManager {
         );
 
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
-            iter::once(stream_job_fragments.deref()),
+            stream_job_fragments.stream_job_id.table_id,
+            &stream_job_fragments,
             self.env.meta_store_ref(),
         )
         .await?;
+        let cdc_table_snapshot_split_assignment = if !cdc_table_snapshot_split_assignment.is_empty()
+        {
+            self.env.cdc_table_backfill_tracker.track_new_job(
+                stream_job_fragments.stream_job_id.table_id,
+                cdc_table_snapshot_split_assignment
+                    .values()
+                    .map(|s| u64::try_from(s.len()).unwrap())
+                    .sum(),
+            );
+            self.env
+                .cdc_table_backfill_tracker
+                .add_fragment_table_mapping(
+                    stream_job_fragments
+                        .fragments
+                        .values()
+                        .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
+                        .map(|f| f.fragment_id),
+                    stream_job_fragments.stream_job_id.table_id,
+                );
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                cdc_table_snapshot_split_assignment,
+                self.env
+                    .cdc_table_backfill_tracker
+                    .next_generation(iter::once(stream_job_fragments.stream_job_id.table_id)),
+            )
+        } else {
+            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+        };
 
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
@@ -594,13 +625,12 @@ impl GlobalStreamManager {
             init_split_assignment
         );
 
-        let cdc_table_snapshot_split_assignment =
-            assign_cdc_table_snapshot_splits_for_replace_table(
-                old_fragments.stream_job_id.table_id,
-                &new_fragments.inner,
-                self.env.meta_store_ref(),
-            )
-            .await?;
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+            old_fragments.stream_job_id.table_id,
+            &new_fragments.inner,
+            self.env.meta_store_ref(),
+        )
+        .await?;
 
         self.barrier_scheduler
             .run_command(
@@ -642,11 +672,28 @@ impl GlobalStreamManager {
         state_table_ids: Vec<risingwave_meta_model::TableId>,
         fragment_ids: HashSet<FragmentId>,
     ) {
+        // TODO(august): This is a workaround for canceling SITT via drop, remove it after refactoring SITT.
+        for &job_id in &streaming_job_ids {
+            if self
+                .creating_job_info
+                .check_job_exists(TableId::new(job_id as _))
+                .await
+            {
+                tracing::info!(
+                    ?job_id,
+                    "streaming job is creating, cancel it with drop directly"
+                );
+                self.metadata_manager
+                    .notify_cancelled(database_id, job_id)
+                    .await;
+            }
+        }
+
         if !removed_actors.is_empty()
             || !streaming_job_ids.is_empty()
             || !state_table_ids.is_empty()
         {
-            let res = self
+            let _ = self
                 .barrier_scheduler
                 .run_command(
                     database_id,
@@ -667,36 +714,7 @@ impl GlobalStreamManager {
                 .inspect_err(|err| {
                     tracing::error!(error = ?err.as_report(), "failed to run drop command");
                 });
-            if res.is_ok() {
-                self.post_dropping_streaming_jobs(state_table_ids).await;
-            }
         }
-    }
-
-    async fn post_dropping_streaming_jobs(
-        &self,
-        state_table_ids: Vec<risingwave_meta_model::TableId>,
-    ) {
-        let tables = self
-            .metadata_manager
-            .catalog_controller
-            .complete_dropped_tables(state_table_ids.into_iter())
-            .await;
-        let objects = tables
-            .into_iter()
-            .map(|t| PbObject {
-                object_info: Some(PbObjectInfo::Table(t)),
-            })
-            .collect();
-        let group = PbInfo::ObjectGroup(PbObjectGroup { objects });
-        self.env
-            .notification_manager()
-            .notify_hummock(Operation::Delete, group.clone())
-            .await;
-        self.env
-            .notification_manager()
-            .notify_compactor(Operation::Delete, group)
-            .await;
     }
 
     /// Cancel streaming jobs and return the canceled table ids.

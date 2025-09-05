@@ -14,7 +14,9 @@
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbEngine, PbTableType};
+use risingwave_pb::catalog::table::{
+    CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
+};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable, PbVectorIndexInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
@@ -39,6 +41,8 @@ pub enum TableType {
     Index,
     #[sea_orm(string_value = "INTERNAL")]
     Internal,
+    #[sea_orm(string_value = "VECTOR_INDEX")]
+    VectorIndex,
 }
 
 impl From<TableType> for PbTableType {
@@ -48,6 +52,7 @@ impl From<TableType> for PbTableType {
             TableType::MaterializedView => Self::MaterializedView,
             TableType::Index => Self::Index,
             TableType::Internal => Self::Internal,
+            TableType::VectorIndex => Self::VectorIndex,
         }
     }
 }
@@ -59,6 +64,7 @@ impl From<PbTableType> for TableType {
             PbTableType::MaterializedView => Self::MaterializedView,
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
+            PbTableType::VectorIndex => Self::VectorIndex,
             PbTableType::Unspecified => unreachable!("Unspecified table type"),
         }
     }
@@ -130,6 +136,49 @@ impl From<PbEngine> for Engine {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum CdcTableType {
+    #[sea_orm(string_value = "UNSPECIFIED")]
+    Unspecified,
+    #[sea_orm(string_value = "POSTGRES")]
+    Postgres,
+    #[sea_orm(string_value = "MYSQL")]
+    Mysql,
+    #[sea_orm(string_value = "SQLSERVER")]
+    Sqlserver,
+    #[sea_orm(string_value = "MONGO")]
+    Mongo,
+    #[sea_orm(string_value = "CITUS")]
+    Citus,
+}
+
+impl From<CdcTableType> for PbCdcTableType {
+    fn from(cdc_table_type: CdcTableType) -> Self {
+        match cdc_table_type {
+            CdcTableType::Postgres => Self::Postgres,
+            CdcTableType::Mysql => Self::Mysql,
+            CdcTableType::Sqlserver => Self::Sqlserver,
+            CdcTableType::Mongo => Self::Mongo,
+            CdcTableType::Citus => Self::Citus,
+            CdcTableType::Unspecified => Self::Unspecified,
+        }
+    }
+}
+
+impl From<PbCdcTableType> for CdcTableType {
+    fn from(cdc_table_type: PbCdcTableType) -> Self {
+        match cdc_table_type {
+            PbCdcTableType::Postgres => Self::Postgres,
+            PbCdcTableType::Mysql => Self::Mysql,
+            PbCdcTableType::Sqlserver => Self::Sqlserver,
+            PbCdcTableType::Mongo => Self::Mongo,
+            PbCdcTableType::Citus => Self::Citus,
+            PbCdcTableType::Unspecified => Self::Unspecified,
+        }
+    }
+}
+
 crate::derive_from_blob!(VectorIndexInfo, PbVectorIndexInfo);
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
@@ -152,7 +201,7 @@ pub struct Model {
     pub value_indices: I32Array,
     pub definition: String,
     pub handle_pk_conflict_behavior: HandleConflictBehavior,
-    pub version_column_index: Option<i32>,
+    pub version_column_indices: Option<I32Array>,
     pub read_prefix_len_hint: i32,
     pub watermark_indices: I32Array,
     pub dist_key_in_pk: I32Array,
@@ -170,6 +219,7 @@ pub struct Model {
     pub clean_watermark_index_in_pk: Option<i32>,
     pub refreshable: bool,
     pub vector_index_info: Option<VectorIndexInfo>,
+    pub cdc_table_type: Option<CdcTableType>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -288,7 +338,14 @@ impl From<PbTable> for ActiveModel {
             value_indices: Set(pb_table.value_indices.into()),
             definition: Set(pb_table.definition),
             handle_pk_conflict_behavior: Set(handle_pk_conflict_behavior.into()),
-            version_column_index: Set(pb_table.version_column_index.map(|x| x as i32)),
+            version_column_indices: Set(Some(
+                pb_table
+                    .version_column_indices
+                    .iter()
+                    .map(|x| *x as i32)
+                    .collect::<Vec<_>>()
+                    .into(),
+            )),
             read_prefix_len_hint: Set(pb_table.read_prefix_len_hint as _),
             watermark_indices: Set(pb_table.watermark_indices.into()),
             dist_key_in_pk: Set(pb_table.dist_key_in_pk.into()),
@@ -311,6 +368,16 @@ impl From<PbTable> for ActiveModel {
                 .vector_index_info
                 .as_ref()
                 .map(VectorIndexInfo::from)),
+            cdc_table_type: Set(pb_table.cdc_table_type.map(|cdc_table_type| {
+                match cdc_table_type {
+                    0 => CdcTableType::Postgres, // Map Unspecified to Postgres as default
+                    1 => CdcTableType::Postgres,
+                    2 => CdcTableType::Mysql,
+                    3 => CdcTableType::Sqlserver,
+                    4 => CdcTableType::Mongo,
+                    _ => panic!("Invalid CDC table type: {cdc_table_type}"),
+                }
+            })),
         }
     }
 }

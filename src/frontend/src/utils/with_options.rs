@@ -506,20 +506,23 @@ impl TryFrom<&Statement> for WithOptions {
                     CreateConnectionStatement {
                         with_properties, ..
                     },
-            } => Self::try_from(with_properties.0.as_slice()),
-            Statement::CreateSource {
+            }
+            | Statement::CreateSource {
                 stmt:
                     CreateSourceStatement {
                         with_properties, ..
                     },
                 ..
-            } => Self::try_from(with_properties.0.as_slice()),
-            Statement::CreateSubscription {
+            }
+            | Statement::CreateSubscription {
                 stmt:
                     CreateSubscriptionStatement {
                         with_properties, ..
                     },
                 ..
+            }
+            | Statement::CreateIndex {
+                with_properties, ..
             } => Self::try_from(with_properties.0.as_slice()),
             Statement::CreateTable { with_options, .. } => Self::try_from(with_options.as_slice()),
 

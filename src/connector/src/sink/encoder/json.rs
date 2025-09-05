@@ -312,6 +312,17 @@ fn datum_to_json_object(
             }
             json!(vec)
         }
+        (DataType::Vector(_), ScalarRefImpl::Vector(vector)) => {
+            let elems = vector.as_raw_slice();
+            let mut vec = Vec::with_capacity(elems.len());
+            for v in elems {
+                let value = serde_json::Number::from_f64(*v as _)
+                    .map(Value::Number)
+                    .unwrap_or(Value::Null);
+                vec.push(value);
+            }
+            json!(vec)
+        }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
             match config.custom_json_type {
                 CustomJsonType::Doris(_) => {
@@ -399,12 +410,12 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
         DataType::Interval => "string",
         DataType::Struct(_) => "struct",
         DataType::List(_) => "array",
+        DataType::Vector(_) => "array",
         DataType::Bytea => "bytes",
         DataType::Jsonb => "string",
         DataType::Serial => "string",
         DataType::Int256 => "string",
         DataType::Map(_) => "map",
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
     }
 }
 

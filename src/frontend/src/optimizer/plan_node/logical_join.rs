@@ -322,6 +322,21 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         logical_join: generic::Join<BatchPlanRef>,
     ) -> Result<Option<BatchLookupJoin>> {
+        let logical_scan: &LogicalScan =
+            if let Some(logical_scan) = self.core.right.as_logical_scan() {
+                logical_scan
+            } else {
+                return Ok(None);
+            };
+        Self::gen_batch_lookup_join(logical_scan, predicate, logical_join, self.is_asof_join())
+    }
+
+    pub fn gen_batch_lookup_join(
+        logical_scan: &LogicalScan,
+        predicate: EqJoinPredicate,
+        logical_join: generic::Join<BatchPlanRef>,
+        is_as_of: bool,
+    ) -> Result<Option<BatchLookupJoin>> {
         match logical_join.join_type {
             JoinType::Inner
             | JoinType::LeftOuter
@@ -332,13 +347,6 @@ impl LogicalJoin {
             _ => return Ok(None),
         };
 
-        let right = self.right();
-        // Lookup Join only supports basic tables on the join's right side.
-        let logical_scan: &LogicalScan = if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan
-        } else {
-            return Ok(None);
-        };
         let table = logical_scan.table();
         let output_column_ids = logical_scan.output_column_ids();
 
@@ -459,8 +467,7 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        let asof_desc = self
-            .is_asof_join()
+        let asof_desc = is_as_of
             .then(|| {
                 Self::get_inequality_desc_from_predicate(
                     predicate.other_cond().clone(),
@@ -956,7 +963,7 @@ impl LogicalJoin {
         // session variable `streaming_force_filter_inside_join` as it can save unnecessary
         // materialization of rows only to be filtered later.
 
-        let stream_hash_join = StreamHashJoin::new(core.clone(), predicate.clone());
+        let stream_hash_join = StreamHashJoin::new(core.clone(), predicate.clone())?;
 
         let force_filter_inside_join = self
             .base
@@ -982,7 +989,7 @@ impl LogicalJoin {
                 self.right().schema().len(),
             );
             core.on = eq_cond.eq_cond();
-            let hash_join = StreamHashJoin::new(core, eq_cond).into();
+            let hash_join = StreamHashJoin::new(core, eq_cond)?.into();
             let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
@@ -1243,11 +1250,7 @@ impl LogicalJoin {
 
         let new_predicate = new_predicate.retain_prefix_eq_key(lookup_prefix_len);
 
-        Ok(StreamTemporalJoin::new(
-            new_logical_join,
-            new_predicate,
-            false,
-        ))
+        StreamTemporalJoin::new(new_logical_join, new_predicate, false)
     }
 
     fn to_stream_nested_loop_temporal_join(
@@ -1300,7 +1303,7 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate, true).into())
+        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate, true)?.into())
     }
 
     fn to_stream_dynamic_filter(
@@ -1373,7 +1376,7 @@ impl LogicalJoin {
         );
 
         let core = DynamicFilter::new(comparator, left_ref.index, left, right);
-        let plan = StreamDynamicFilter::new(core).into();
+        let plan = StreamDynamicFilter::new(core)?.into();
         // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
         if self
             .output_indices()
@@ -1435,7 +1438,7 @@ impl LogicalJoin {
         let inequality_desc =
             Self::get_inequality_desc_from_predicate(predicate.other_cond().clone(), left_len)?;
 
-        Ok(StreamAsOfJoin::new(core, predicate, inequality_desc).into())
+        Ok(StreamAsOfJoin::new(core, predicate, inequality_desc)?.into())
     }
 
     /// Convert the logical join to a Hash join.

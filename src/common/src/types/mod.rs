@@ -63,7 +63,7 @@ mod num256;
 mod ops;
 mod ordered;
 mod ordered_float;
-mod postgres_type;
+pub mod postgres_type;
 mod scalar_impl;
 mod sentinel;
 mod serial;
@@ -103,6 +103,16 @@ pub type F32 = ordered_float::OrderedFloat<f32>;
 
 /// A 64-bit floating point type with total order.
 pub type F64 = ordered_float::OrderedFloat<f64>;
+
+pub const DEBEZIUM_UNAVAILABLE_VALUE: &str = "__debezium_unavailable_value";
+
+// Pre-built JSON value for Debezium unavailable value to avoid rebuilding it every time
+pub static DEBEZIUM_UNAVAILABLE_JSON: std::sync::LazyLock<JsonbVal> =
+    std::sync::LazyLock::new(|| {
+        let mut builder = jsonbb::Builder::default();
+        builder.add_string(DEBEZIUM_UNAVAILABLE_VALUE);
+        JsonbVal(builder.finish())
+    });
 
 /// The set of datatypes that are supported in RisingWave.
 ///
@@ -260,6 +270,13 @@ impl From<&PbDataType> for DataType {
                 } else {
                     StructType::new(field_names.into_iter().zip_eq_fast(fields))
                 };
+                // `field_ids` is used for nested-schema evolution. Cases when `field_ids` is empty:
+                //
+                // 1. The data type is not associated with a table column, so we don't need to set it.
+                // 2. The column is created before nested-schema evolution is supported, thus is using
+                //    the old serialization format and does not have field ids.
+                // 3. This is an empty struct, which is always considered alterable, and setting ids
+                //    is a no-op.
                 if !field_ids.is_empty() {
                     struct_type = struct_type.with_ids(field_ids);
                 }
@@ -367,6 +384,7 @@ pub mod data_types {
                 | DataType::Jsonb
                 | DataType::Serial
                 | DataType::Int256
+                | DataType::Vector(_)
         };
     }
     pub use _simple_data_types as simple;
@@ -384,13 +402,14 @@ pub mod data_types {
     fn _simple_composite_data_types_exhausted(dt: DataType) {
         match dt {
             simple!() => {}
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             composite!() => {}
         }
     }
 }
 
 impl DataType {
+    /// Same as pgvector; unsure how it was chosen there
+    /// <https://github.com/pgvector/pgvector/blob/v0.8.0/README.md#vector-type>
     pub const VEC_MAX_SIZE: usize = 16000;
 
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
@@ -603,8 +622,6 @@ impl DataType {
     pub fn can_alter(&self) -> Option<bool> {
         match self {
             data_types::simple!() => None,
-            DataType::Vector(_) => None,
-
             DataType::Struct(struct_type) => {
                 // As long as we meet a struct type, we can check its `ids` field to determine if
                 // it can be altered.
@@ -1042,8 +1059,7 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
-            DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
+            DataType::Vector(_) | DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
         };
@@ -1183,7 +1199,7 @@ impl ScalarRefImpl<'_> {
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
             Self::Map(v) => v.memcmp_serialize(ser)?,
-            Self::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            Self::Vector(v) => v.memcmp_serialize(ser)?,
         };
         Ok(())
     }
@@ -1239,7 +1255,9 @@ impl ScalarImpl {
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
             Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
-            Ty::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            Ty::Vector(dimension) => {
+                VectorVal::memcmp_deserialize(*dimension, de)?.to_scalar_value()
+            }
         })
     }
 
@@ -1417,11 +1435,17 @@ mod tests {
                     ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
                 ),
+                DataTypeName::Vector => (
+                    ScalarImpl::Vector(VectorVal::from_iter(
+                        (0..VectorVal::TEST_VECTOR_DIMENSION)
+                            .map(|i| ((i + 1) as f32).try_into().unwrap()),
+                    )),
+                    DataType::Vector(VectorVal::TEST_VECTOR_DIMENSION),
+                ),
                 DataTypeName::Map => {
                     // map is not hashable
                     continue;
                 }
-                DataTypeName::Vector => continue, // todo!("VECTOR_PLACEHOLDER"),
             };
 
             test(Some(scalar), data_type.clone());

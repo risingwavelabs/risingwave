@@ -434,9 +434,6 @@ impl CatalogController {
             filter_condition
         };
 
-        // Find `Creating` background streaming job of sink into table, they need to be cleaned up.
-        // TODO(August): remove it when background sink into table is unified.
-
         let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
@@ -993,18 +990,48 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_indexes` return all `CREATED` indexes.
+    /// `list_indexes` return all `CREATED` and `BACKGROUND` indexes.
     async fn list_indexes(&self) -> MetaResult<Vec<PbIndex>> {
         let index_objs = Index::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
+            )
             .all(&self.db)
             .await?;
 
+        let creating_indexes: HashSet<_> = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Creating)
+                    .and(
+                        streaming_job::Column::JobId
+                            .is_in(index_objs.iter().map(|(index, _)| index.index_id)),
+                    ),
+            )
+            .into_tuple::<IndexId>()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+
         Ok(index_objs
             .into_iter()
-            .map(|(index, obj)| ObjectModel(index, obj.unwrap()).into())
+            .map(|(index, obj)| {
+                let is_creating = creating_indexes.contains(&index.index_id);
+                let mut pb_index: PbIndex = ObjectModel(index, obj.unwrap()).into();
+                pb_index.stream_job_status = if is_creating {
+                    PbStreamJobStatus::Creating.into()
+                } else {
+                    PbStreamJobStatus::Created.into()
+                };
+                pb_index
+            })
             .collect())
     }
 
@@ -1088,6 +1115,16 @@ impl CatalogControllerInner {
                 .flat_map(|(_, txs)| txs.into_iter())
             {
                 let _ = tx.send(Err(err.clone()));
+            }
+        }
+    }
+
+    pub(crate) fn notify_cancelled(&mut self, database_id: DatabaseId, id: ObjectId) {
+        if let Some(creating_tables) = self.creating_table_finish_notifier.get_mut(&database_id)
+            && let Some(tx_list) = creating_tables.remove(&id)
+        {
+            for tx in tx_list {
+                let _ = tx.send(Err("Cancelled".to_owned()));
             }
         }
     }

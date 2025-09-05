@@ -403,6 +403,20 @@ message SortOverWindowNode {
 
 message MaxOneRowNode {}
 
+message VectorIndexNearestNode {
+  // The table_id of the vector index to search.
+  uint32 table_id = 2;
+  // The columns of the vector index info.
+  repeated plan_common.ColumnDesc info_column_desc = 3;
+  uint32 vector_column_idx = 4;
+  // The number of nearest neighbors to return.
+  uint32 top_n = 5;
+  // The distance metric to use for the search.
+  common.DistanceType distance_type = 6;
+  // The ef_search used to query hnsw index
+  uint32 hnsw_ef_search = 7;
+}
+
 message PlanNode {
   repeated PlanNode children = 1;
   reserved 22;
@@ -443,6 +457,7 @@ message PlanNode {
     MySqlQueryNode mysql_query = 41;
     GcsFileScanNode gcs_file_scan = 42;
     AzblobFileScanNode azblob_file_scan = 43;
+    VectorIndexNearestNode vector_index_nearest = 44;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;
