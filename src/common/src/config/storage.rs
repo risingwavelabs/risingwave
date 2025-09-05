@@ -412,8 +412,8 @@ pub struct FileCacheConfig {
     /// - Modifying this configuration will invalidate all existing file cache data.
     ///
     /// Default: 16 `KiB`
-    #[serde(default = "default::file_cache::blob_index_size")]
-    pub blob_index_size: usize,
+    #[serde(default = "default::file_cache::blob_index_size_kb")]
+    pub blob_index_size_kb: usize,
 
     /// Recover mode.
     ///
@@ -1124,8 +1124,8 @@ pub mod default {
             0.1
         }
 
-        pub fn blob_index_size() -> usize {
-            16 * 1024 // 16 KiB
+        pub fn blob_index_size_kb() -> usize {
+            16
         }
 
         pub fn recover_mode() -> RecoverMode {
