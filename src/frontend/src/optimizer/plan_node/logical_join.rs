@@ -1249,7 +1249,18 @@ impl LogicalJoin {
             RequiredDist::hash_shard(&left_dist_key)
         };
 
-        let left = self.left().to_stream(ctx)?;
+        let lhs_join_key_idx = predicate
+            .eq_indexes()
+            .into_iter()
+            .map(|(l, _)| l)
+            .collect_vec();
+        let logical_left =
+            if let Some(better_plan) = self.left().try_better_locality(&lhs_join_key_idx) {
+                better_plan
+            } else {
+                self.left()
+            };
+        let left = logical_left.to_stream(ctx)?;
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.stream_enforce(left);
 

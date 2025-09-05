@@ -111,3 +111,12 @@
     select * from t1 join t2 on t1.b1 = t2.b2 and t1.c1 = t2.c2;
   expected_outputs:
     - stream_plan
+- name: index selection for temporal join for both sides.
+  sql: |
+    create table stream(id1 int, a1 int, b1 int);
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx1 on stream (a1, b1);
+    create index idx2 on version (a2, b2);
+    select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  expected_outputs:
+    - stream_plan

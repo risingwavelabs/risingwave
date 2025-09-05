@@ -171,3 +171,18 @@
         │ └─StreamTableScan { table: idx_b1c1, columns: [idx_b1c1.a1, idx_b1c1.b1, idx_b1c1.c1, idx_b1c1.t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_b1c1.t1._row_id], pk: [b1, c1, t1._row_id], dist: UpstreamHashShard(idx_b1c1.b1) }
         └─StreamExchange { dist: HashShard(idx_b2c2.b2, idx_b2c2.c2) }
           └─StreamTableScan { table: idx_b2c2, columns: [idx_b2c2.a2, idx_b2c2.b2, idx_b2c2.c2, idx_b2c2.t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_b2c2.t2._row_id], pk: [b2, c2, t2._row_id], dist: UpstreamHashShard(idx_b2c2.b2) }
+- name: index selection for temporal join for both sides.
+  sql: |
+    create table stream(id1 int, a1 int, b1 int);
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx1 on stream (a1, b1);
+    create index idx2 on version (a2, b2);
+    select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  stream_plan: |-
+    StreamMaterialize { columns: [id1, a1, id2, a2, idx1.stream._row_id(hidden), idx1.b1(hidden)], stream_key: [idx1.stream._row_id, id2, a1, idx1.b1], pk_columns: [idx1.stream._row_id, id2, a1, idx1.b1], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(idx1.a1, idx2.id2, idx1.stream._row_id, idx1.b1) }
+      └─StreamTemporalJoin { type: LeftOuter, append_only: false, predicate: idx1.a1 = idx2.a2 AND idx1.b1 = idx2.b2, nested_loop: false, output: [idx1.id1, idx1.a1, idx2.id2, idx2.a2, idx1.stream._row_id, idx1.b1] }
+        ├─StreamExchange { dist: HashShard(idx1.a1) }
+        │ └─StreamTableScan { table: idx1, columns: [idx1.id1, idx1.a1, idx1.b1, idx1.stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx1.stream._row_id], pk: [a1, b1, stream._row_id], dist: UpstreamHashShard(idx1.a1) }
+        └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2) }
+          └─StreamTableScan { table: idx2, columns: [idx2.id2, idx2.a2, idx2.b2], stream_scan_type: UpstreamOnly, stream_key: [idx2.id2], pk: [a2, b2, id2], dist: UpstreamHashShard(idx2.a2) }
