@@ -47,7 +47,7 @@ use crate::model::{ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWi
 use crate::serving::{
     ServingVnodeMapping, to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
 };
-use crate::stream::{GlobalStreamManager, SourceManagerRef, build_actor_id};
+use crate::stream::{GlobalStreamManager, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -497,9 +497,11 @@ impl ScaleController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let id_gen = self.env.id_gen_manager();
+
         println!("render for {:#?}, workers {:#?}", jobs, workers);
-        let mut render_result =
-            render_jobs(txn, jobs, workers, adaptive_parallelism_strategy).await?;
+        let render_result =
+            render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy).await?;
 
         for (db, jobs) in &render_result {
             println!("\tdb: {db}");
@@ -599,49 +601,54 @@ impl ScaleController {
                 .collect()
         };
 
-        // HACK: The reschedule command currently cannot support direct actor migration.
-        // Therefore, when an actor migration is detected, we assign it a new actor_id,
-        // which is effectively equivalent to a "drop old actor, create new actor" operation.
-        // Since the new ID generation logic is consistent with the initial creation (based on a 0-index),
-        // vnode affinity is preserved. This logic does not affect the recovery process.
-        for (_, fragments) in render_result.values_mut().flatten() {
-            for (fragment_id, fragment_info) in fragments {
-                let prev_fragment: &SharedFragmentInfo =
-                    all_prev_fragments.get(fragment_id).unwrap();
-
-                let used_actor_ids: HashSet<_> = prev_fragment
-                    .actors
-                    .keys()
-                    .chain(fragment_info.actors.keys())
-                    .copied()
-                    .collect();
-
-                let mut available_ids = (0..)
-                    .map(|idx| build_actor_id(*fragment_id as u32, idx as usize))
-                    .filter(|id| !used_actor_ids.contains(id));
-
-                for (actor_id, prev_actor_info) in &prev_fragment.actors {
-                    if let Some(curr_actor_info) = fragment_info.actors.get(actor_id)
-                        && prev_actor_info.worker_id != curr_actor_info.worker_id
-                    {
-                        println!(
-                            "actor {} moved from {} to {}",
-                            actor_id, prev_actor_info.worker_id, curr_actor_info.worker_id
-                        );
-
-                        let new_actor_id = available_ids.next().unwrap();
-
-                        let actor_info = fragment_info.actors.remove(actor_id).unwrap();
-                        fragment_info.actors.insert(new_actor_id, actor_info);
-
-                        println!(
-                            "-> Re-mapped actor_id {} to new available id {}",
-                            actor_id, new_actor_id
-                        );
-                    }
-                }
-            }
-        }
+        // // HACK: The reschedule command currently cannot support direct actor migration.
+        // // Therefore, when an actor migration is detected, we assign it a new actor_id,
+        // // which is effectively equivalent to a "drop old actor, create new actor" operation.
+        // // Since the new ID generation logic is consistent with the initial creation (based on a 0-index),
+        // // vnode affinity is preserved. This logic does not affect the recovery process.
+        // for (_, fragments) in render_result.values_mut().flatten() {
+        //     for (fragment_id, fragment_info) in fragments {
+        //         println!("processing fragment {}", fragment_id);
+        //         let prev_fragment: &SharedFragmentInfo =
+        //             all_prev_fragments.get(fragment_id).unwrap();
+        //
+        //         let used_actor_ids: HashSet<_> = prev_fragment
+        //             .actors
+        //             .keys()
+        //             .chain(fragment_info.actors.keys())
+        //             .copied()
+        //             .collect();
+        //
+        //         println!("\tfrag {} used_actor_ids: {:?}", fragment_id, used_actor_ids);
+        //
+        //         let mut available_ids = (0..)
+        //             .map(|idx| build_actor_id(*fragment_id as u32, idx as usize))
+        //             .filter(|id| !used_actor_ids.contains(id));
+        //
+        //         for (actor_id, prev_actor_info) in &prev_fragment.actors {
+        //             if let Some(curr_actor_info) = fragment_info.actors.get(actor_id)
+        //                 && prev_actor_info.worker_id != curr_actor_info.worker_id
+        //             {
+        //                 println!(
+        //                     "actor {} moved from {} to {}",
+        //                     actor_id, prev_actor_info.worker_id, curr_actor_info.worker_id
+        //                 );
+        //
+        //                 let new_actor_id = available_ids.next().unwrap();
+        //
+        //                 let actor_info = fragment_info.actors.remove(actor_id).unwrap();
+        //                 fragment_info.actors.insert(new_actor_id, actor_info);
+        //
+        //                 println!(
+        //                     "-> Re-mapped actor_id {} to new available id {}",
+        //                     actor_id, new_actor_id
+        //                 );
+        //             } else {
+        //                 println!("fragment {} actor {} not moved {}", fragment_id, actor_id, prev_actor_info.worker_id);
+        //             }
+        //         }
+        //     }
+        // }
 
         let all_rendered_fragments: HashMap<_, _> = render_result
             .values()

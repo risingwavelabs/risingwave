@@ -77,10 +77,14 @@ impl MergeExecutorBuilder {
         };
 
         let upstreams = if always_single_input {
-            MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().expect(&format!(
-                "self {} {} upstream {}, actors {:#?}",
-                actor_context.id, actor_context.fragment_id, upstream_fragment_id, x
-            )))
+            MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap_or_else(
+                |_| {
+                    panic!(
+                        "self {} {} upstream {}, actors {:#?}",
+                        actor_context.id, actor_context.fragment_id, upstream_fragment_id, x
+                    )
+                },
+            ))
         } else {
             MergeExecutorUpstream::Merge(MergeExecutor::new_select_receiver(
                 inputs,

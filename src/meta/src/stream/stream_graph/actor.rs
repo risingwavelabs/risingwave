@@ -37,7 +37,6 @@ use crate::model::{
     Fragment, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle,
     FragmentReplaceUpstream, StreamActor,
 };
-use crate::stream::build_actor_id;
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, DownstreamExternalEdgeId, EdgeId, EitherFragment,
     StreamFragmentEdge,
@@ -548,7 +547,7 @@ struct ActorGraphBuildState {
     fragment_actors: HashMap<GlobalFragmentId, Vec<GlobalActorId>>,
 
     /// The next local actor id to use.
-    next_local_id: HashMap<GlobalFragmentId, u32>,
+    next_local_id: u32,
 
     /// The global actor id generator.
     actor_id_gen: GlobalActorIdGen,
@@ -560,30 +559,23 @@ impl ActorGraphBuildState {
         Self {
             inner: Default::default(),
             fragment_actors: Default::default(),
-            next_local_id: Default::default(),
+            next_local_id: 0,
             actor_id_gen,
         }
     }
 
     /// Get the next global actor id.
-    fn next_actor_id(&mut self, fragment_id: GlobalFragmentId) -> GlobalActorId {
-        let local_id_ref = self.next_local_id.entry(fragment_id).or_insert(0);
-        let local_id = *local_id_ref;
-        *local_id_ref += 1;
+    fn next_actor_id(&mut self) -> GlobalActorId {
+        let local_id = self.next_local_id;
+        self.next_local_id += 1;
 
-        GlobalActorId::from(build_actor_id(
-            fragment_id.as_global_id(),
-            local_id as usize,
-        ))
+        self.actor_id_gen.to_global_id(local_id)
     }
 
     /// Finish the build and return the inner state.
     fn finish(self) -> ActorGraphBuildStateInner {
         // Assert that all the actors are built.
-        assert_eq!(
-            self.actor_id_gen.len(),
-            self.next_local_id.into_values().sum::<u32>()
-        );
+        assert_eq!(self.actor_id_gen.len(), self.next_local_id);
 
         self.inner
     }
@@ -963,11 +955,13 @@ impl ActorGraphBuilder {
                 distribution
                     .actors()
                     .map(|alignment_id| {
-                        let actor_id = state.next_actor_id(fragment_id);
+                        let actor_id = state.next_actor_id();
                         let vnode_bitmap = bitmaps
                             .as_ref()
                             .map(|m: &HashMap<ActorAlignmentId, Bitmap>| &m[&alignment_id])
                             .cloned();
+
+                        println!("actor_id {:?}, fragment {:?}", actor_id, fragment_id);
 
                         state
                             .inner

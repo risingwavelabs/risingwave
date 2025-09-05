@@ -1396,12 +1396,15 @@ impl CatalogController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let id_gen = self.env.id_gen_manager();
+
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
         println!("111");
         let database_fragment_infos = load_fragment_info(
             &txn,
+            id_gen,
             database_id,
             worker_nodes,
             adaptive_parallelism_strategy,

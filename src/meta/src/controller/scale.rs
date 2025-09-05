@@ -37,9 +37,10 @@ use sea_orm::{
 
 use crate::MetaResult;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::id::{IdCategory, IdGeneratorManagerRef};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor};
-use crate::stream::{AssignerBuilder, build_actor_id};
+use crate::stream::AssignerBuilder;
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
     txn: &C,
@@ -104,6 +105,7 @@ where
 
 pub async fn load_fragment_info<C>(
     txn: &C,
+    id_gen: &IdGeneratorManagerRef,
     database_id: Option<DatabaseId>,
     worker_nodes: &ActiveStreamingWorkerNodes,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
@@ -146,7 +148,14 @@ where
 
     println!("before render");
 
-    render_jobs(txn, jobs, available_workers, adaptive_parallelism_strategy).await
+    render_jobs(
+        txn,
+        id_gen,
+        jobs,
+        available_workers,
+        adaptive_parallelism_strategy,
+    )
+    .await
 }
 
 #[derive(Debug)]
@@ -163,6 +172,7 @@ pub struct WorkerInfo {
 
 pub async fn render_jobs<C>(
     txn: &C,
+    id_gen: &IdGeneratorManagerRef,
     job_ids: HashSet<ObjectId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
@@ -333,6 +343,9 @@ where
                 ..
             } = fragment_map.remove(&fragment_id).unwrap();
 
+            let actor_id_base =
+                id_gen.generate_interval::<{ IdCategory::Actor }>(actors.len() as u64) as u32;
+
             let actors: HashMap<ActorId, InflightActorInfo> = assignment
                 .iter()
                 .flat_map(|(worker_id, actors)| {
@@ -346,7 +359,7 @@ where
                         DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
                     };
 
-                    let actor_id = build_actor_id(fragment_id as u32, actor_idx);
+                    let actor_id = actor_id_base + actor_idx as u32;
                     (
                         actor_id,
                         InflightActorInfo {
