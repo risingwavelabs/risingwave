@@ -612,8 +612,8 @@ impl ToStream for LogicalScan {
             {
                 return Err(ErrorCode::NotSupported(
                     "We currently do not support cross database scan in upstream only mode."
-                        .to_string(),
-                    "Please ensure the source table is in the same database.".to_string(),
+                        .to_owned(),
+                    "Please ensure the source table is in the same database.".to_owned(),
                 )
                 .into());
             }
