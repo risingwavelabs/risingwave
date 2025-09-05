@@ -170,7 +170,7 @@ impl StreamVectorIndexWrite {
             value_indices,
             definition,
             conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint,
             version: None,
             watermark_columns,
@@ -194,6 +194,7 @@ impl StreamVectorIndexWrite {
             clean_watermark_index_in_pk: None,
             refreshable: false,
             vector_index_info: Some(vector_index_info),
+            cdc_table_type: None,
         })
     }
 

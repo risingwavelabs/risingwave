@@ -195,7 +195,7 @@ impl TableCatalogBuilder {
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
             conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
@@ -221,6 +221,7 @@ impl TableCatalogBuilder {
             clean_watermark_index_in_pk: None, // TODO: fill this field
             refreshable: false,                // Internal tables are not refreshable
             vector_index_info: None,
+            cdc_table_type: None,
         }
     }
 

@@ -30,6 +30,7 @@ use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingPar
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
+use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -645,6 +646,29 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
 
         Ok(Response::new(SetSyncLogStoreAlignedResponse {}))
+    }
+
+    async fn list_cdc_progress(
+        &self,
+        _request: Request<ListCdcProgressRequest>,
+    ) -> Result<Response<ListCdcProgressResponse>, Status> {
+        let cdc_progress = self
+            .env
+            .cdc_table_backfill_tracker()
+            .list_cdc_progress()
+            .into_iter()
+            .map(|(job_id, p)| {
+                (
+                    job_id,
+                    PbCdcProgress {
+                        split_total_count: p.split_total_count,
+                        split_backfilled_count: p.split_backfilled_count,
+                        split_completed_count: p.split_completed_count,
+                    },
+                )
+            })
+            .collect();
+        Ok(Response::new(ListCdcProgressResponse { cdc_progress }))
     }
 }
 

@@ -165,7 +165,7 @@ fn test_simple_schema() -> anyhow::Result<()> {
             Borrowed(Utf8("test address"))
             Borrowed(Utf8("test city"))
             Owned(Int64(456))
-            Owned(Float32(OrderedFloat(1.2345)))
+            Owned(Float32(1.2345))
             Borrowed(Utf8("2021-01-01"))"#]],
     );
 
@@ -610,8 +610,8 @@ fn test_all_types() -> anyhow::Result<()> {
                 map_enum_field: Map(Int32,Varchar),
             ]"#]],
         expect![[r#"
-            Owned(Float64(OrderedFloat(1.2345)))
-            Owned(Float32(OrderedFloat(1.2345)))
+            Owned(Float64(1.2345))
+            Owned(Float32(1.2345))
             Owned(Int32(42))
             Owned(Int64(1234567890))
             Owned(Int64(98765))

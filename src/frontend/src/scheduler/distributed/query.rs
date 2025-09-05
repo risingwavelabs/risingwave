@@ -582,7 +582,7 @@ pub(crate) mod tests {
             value_indices: vec![0, 1, 2],
             definition: "".to_owned(),
             conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint: 0,
             version: None,
             watermark_columns: FixedBitSet::with_capacity(3),
@@ -604,6 +604,7 @@ pub(crate) mod tests {
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
             vector_index_info: None,
+            cdc_table_type: None,
         };
         let batch_plan_node = LogicalScan::create(table_catalog.into(), ctx, None)
             .to_batch()

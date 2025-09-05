@@ -86,6 +86,7 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::hosted_iceberg_catalog_service_client::HostedIcebergCatalogServiceClient;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -868,9 +869,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_function(&self, function_id: FunctionId) -> Result<WaitVersion> {
+    pub async fn drop_function(
+        &self,
+        function_id: FunctionId,
+        cascade: bool,
+    ) -> Result<WaitVersion> {
         let request = DropFunctionRequest {
             function_id: function_id.0,
+            cascade,
         };
         let resp = self.inner.drop_function(request).await?;
         Ok(resp
@@ -1754,6 +1760,12 @@ impl MetaClient {
         Ok(resp.rate_limits)
     }
 
+    pub async fn list_cdc_progress(&self) -> Result<HashMap<u32, PbCdcProgress>> {
+        let request = ListCdcProgressRequest {};
+        let resp = self.inner.list_cdc_progress(request).await?;
+        Ok(resp.cdc_progress)
+    }
+
     pub async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         let request = ListIcebergTablesRequest {};
         let resp = self.inner.list_iceberg_tables(request).await?;
@@ -2373,6 +2385,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
+            ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }

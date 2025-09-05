@@ -379,6 +379,17 @@ message AlterConnectorPropsRequest {
 
 message AlterConnectorPropsResponse {}
 
+message ListCdcProgressRequest {}
+
+message ListCdcProgressResponse {
+  message CdcProgress {
+    uint64 split_total_count = 1;
+    uint64 split_backfilled_count = 2;
+    uint64 split_completed_count = 3;
+  }
+  map<uint32, CdcProgress> cdc_progress = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -398,6 +409,7 @@ service StreamManagerService {
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
   rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
+  rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
 }
 
 // Below for cluster service.
@@ -936,10 +948,8 @@ message RelationIdInfos {
 }
 
 message FragmentToRelationMap {
-  /// fragment_id -> relation_id of all in-bound fragments e.g. the ones with StreamScan
-  map<uint32, uint32> in_map = 1;
-  /// fragment_id -> relation_id of all out-bound fragments e.g. the ones with MaterializeExecutor
-  map<uint32, uint32> out_map = 2;
+  /// fragment_id -> relation_id mapping for all fragments
+  map<uint32, uint32> fragment_to_relation_map = 1;
 }
 
 message ActorCountPerParallelism {

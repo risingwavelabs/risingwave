@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::WatermarkFilterNode;
 use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTableBuilder, StateTableOpConsistencyLevel};
 use crate::executor::WatermarkFilterExecutor;
 
 pub struct WatermarkFilterBuilder;
@@ -59,8 +59,11 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         let global_watermark_table =
             BatchTable::new_partial(store.clone(), column_ids, Some(other_vnodes), &desc);
 
-        let table =
-            StateTable::from_table_catalog_inconsistent_op(&table, store, Some(vnodes)).await;
+        let table = StateTableBuilder::new(&table, store, Some(vnodes))
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .build()
+            .await;
 
         let exec = WatermarkFilterExecutor::new(
             params.actor_context,
