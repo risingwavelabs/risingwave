@@ -624,8 +624,8 @@ impl DataType {
             data_types::simple!() => None,
             DataType::Struct(struct_type) => {
                 // As long as we meet a struct type, we can check its `ids` field to determine if
-                // it can be altered. Empty struct is always considered alterable.
-                let struct_can_alter = struct_type.is_empty() || struct_type.has_ids();
+                // it can be altered.
+                let struct_can_alter = struct_type.has_ids();
                 // In debug build, we assert that once a struct type does (or does not) have ids,
                 // all its composite fields should have the same property.
                 if cfg!(debug_assertions) {

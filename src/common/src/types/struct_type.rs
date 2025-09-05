@@ -105,7 +105,8 @@ impl StructType {
 
     /// Attaches given field ids to the struct type.
     ///
-    /// Note that for empty struct, this method is a no-op.
+    /// Note that for empty struct, this method is a no-op, as [`StructType::ids`] will always
+    /// return `Some(<empty>)` for empty struct.
     pub fn with_ids(self, ids: impl IntoIterator<Item = ColumnId>) -> Self {
         let ids: Box<[ColumnId]> = ids.into_iter().collect();
 
@@ -115,7 +116,7 @@ impl StructType {
             "ids should not contain placeholder value"
         );
 
-        // Do not set the field ids to `Some(<empty>)` to avoid confusion.
+        // No-op for empty struct.
         if self.is_empty() {
             return self;
         }
@@ -125,11 +126,11 @@ impl StructType {
         Self(Arc::new(inner))
     }
 
-    /// Whether the struct type has field ids.
+    /// Whether the struct type has field ids. An empty struct is considered to have ids.
     ///
     /// Note that this does not recursively check whether composite fields have ids.
     pub fn has_ids(&self) -> bool {
-        self.0.field_ids.is_some()
+        self.is_empty() || self.0.field_ids.is_some()
     }
 
     /// Whether the fields are unnamed.
@@ -174,7 +175,7 @@ impl StructType {
     /// Gets an iterator over the field ids.
     ///
     /// Returns `None` if they are not present. See documentation on the field `field_ids`
-    /// for the cases.
+    /// for the cases. For empty struct, this returns `Some(<empty>)`.
     pub fn ids(&self) -> Option<impl ExactSizeIterator<Item = ColumnId> + '_> {
         if self.is_empty() {
             Some(Either::Left(empty()))
