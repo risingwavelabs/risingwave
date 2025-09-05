@@ -136,7 +136,10 @@ impl PlainParser {
                         &self.source_ctx.connector_props,
                     ) {
                         Ok(schema_change) => Ok(ParseResult::SchemaChange(schema_change)),
-                        Err(err) => Err(err)?,
+                        Err(err) => {
+                            println!("解析 schema change 失败: {:?}", err);
+                            Err(err)?
+                        }
                     };
                 }
                 CdcMessageType::Unspecified => {

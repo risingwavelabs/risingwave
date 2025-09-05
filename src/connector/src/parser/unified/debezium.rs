@@ -244,6 +244,7 @@ pub fn parse_schema_change(
                                         }
                                     })?,
                                     None => {
+                                        println!("不支持的postgres类型: {:?}", type_name);
                                         Err(AccessError::UnsupportedType { ty: type_name.clone() })?
                                     }
                                 }

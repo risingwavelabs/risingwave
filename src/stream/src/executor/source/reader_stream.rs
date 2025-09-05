@@ -55,6 +55,8 @@ impl StreamReaderBuilder {
             mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
         let schema_change_tx = if self.is_auto_schema_change_enable {
             let meta_client = self.actor_ctx.meta_client.clone();
+            let source_id = self.source_id;
+            let source_name = self.source_name.clone();
             // spawn a task to handle schema change event from source parser
             let _join_handle = tokio::task::spawn(async move {
                 while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
@@ -78,6 +80,29 @@ impl StreamReaderBuilder {
                                 tracing::error!(
                                     target: "auto_schema_change",
                                     error = %e.as_report(), "schema change error");
+                                println!("这里schema change error: {:?}", e.as_report());
+                                // Convert error to string before using in async context
+                                let error_msg = e.as_report().to_string();
+
+                                // Report CDC auto schema change fail event for each table change
+                                for table_change in &schema_change.table_changes {
+                                    if let Err(report_err) = meta_client
+                                        .add_cdc_auto_schema_change_fail_event(
+                                            source_id.table_id,
+                                            source_name.clone(),
+                                            table_change.cdc_table_id.clone(),
+                                            table_change.upstream_ddl.clone(),
+                                            error_msg.clone(),
+                                        )
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            error = %report_err.as_report(),
+                                            "Failed to report CDC auto schema change fail event"
+                                        );
+                                    }
+                                }
+
                                 finish_tx.send(()).unwrap();
                             }
                         }

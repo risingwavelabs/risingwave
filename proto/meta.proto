@@ -913,6 +913,7 @@ message AddEventLogRequest {
   oneof event {
     EventLog.EventWorkerNodePanic worker_node_panic = 1;
     EventLog.EventSinkFail sink_fail = 2;
+    EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 3;
   }
 }
 
