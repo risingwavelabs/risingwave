@@ -12,6 +12,6 @@ async-std = { version = "1", features = ["attributes", "tokio1"] }
 easy-ext = "1"
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

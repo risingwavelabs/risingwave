@@ -25,7 +25,7 @@ risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_stream = { workspace = true }
 sea-orm  = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_yaml = "0.9"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
