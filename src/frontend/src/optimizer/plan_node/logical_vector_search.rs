@@ -365,6 +365,12 @@ impl ToBatch for LogicalVectorSearch {
     fn to_batch(&self) -> crate::error::Result<BatchPlanRef> {
         if let Some((scan, vector_expr, vector_column_expr)) = self.as_vector_table_scan()
             && !scan.vector_indexes().is_empty()
+            && self
+                .core
+                .ctx()
+                .session_ctx()
+                .config()
+                .enable_index_selection()
         {
             for index in scan.vector_indexes() {
                 if !Self::is_matched_vector_column_expr(

@@ -286,26 +286,35 @@ impl LogicalJoin {
             result_plan = Some(lookup_join);
         }
 
-        let indexes = logical_scan.table_indexes();
-        for index in indexes {
-            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                let index_scan: PlanRef = index_scan.into();
-                let that = self.clone_with_left_right(self.left(), index_scan.clone());
-                let mut new_batch_join = batch_join.clone();
-                new_batch_join.right = index_scan.to_batch().expect("index scan failed to batch");
+        if self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .enable_index_selection()
+        {
+            let indexes = logical_scan.table_indexes();
+            for index in indexes {
+                if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                    let index_scan: PlanRef = index_scan.into();
+                    let that = self.clone_with_left_right(self.left(), index_scan.clone());
+                    let mut new_batch_join = batch_join.clone();
+                    new_batch_join.right =
+                        index_scan.to_batch().expect("index scan failed to batch");
 
-                // Lookup covered index.
-                if let Some(lookup_join) =
-                    that.to_batch_lookup_join(predicate.clone(), new_batch_join)?
-                {
-                    match &result_plan {
-                        None => result_plan = Some(lookup_join),
-                        Some(prev_lookup_join) => {
-                            // Prefer to choose lookup join with longer lookup prefix len.
-                            if prev_lookup_join.lookup_prefix_len()
-                                < lookup_join.lookup_prefix_len()
-                            {
-                                result_plan = Some(lookup_join)
+                    // Lookup covered index.
+                    if let Some(lookup_join) =
+                        that.to_batch_lookup_join(predicate.clone(), new_batch_join)?
+                    {
+                        match &result_plan {
+                            None => result_plan = Some(lookup_join),
+                            Some(prev_lookup_join) => {
+                                // Prefer to choose lookup join with longer lookup prefix len.
+                                if prev_lookup_join.lookup_prefix_len()
+                                    < lookup_join.lookup_prefix_len()
+                                {
+                                    result_plan = Some(lookup_join)
+                                }
                             }
                         }
                     }
@@ -1050,21 +1059,30 @@ impl LogicalJoin {
         {
             return result_plan.map(|x| x.into());
         }
-        let indexes = logical_scan.table_indexes();
-        for index in indexes {
-            // Use index table
-            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                let index_scan: PlanRef = index_scan.into();
-                let that = self.clone_with_left_right(self.left(), index_scan.clone());
-                if let Ok(temporal_join) = that.to_stream_temporal_join(predicate.clone(), ctx) {
-                    match &result_plan {
-                        Err(_) => result_plan = Ok(temporal_join),
-                        Ok(prev_temporal_join) => {
-                            // Prefer to the temporal join with a longer lookup prefix len.
-                            if prev_temporal_join.eq_join_predicate().eq_indexes().len()
-                                < temporal_join.eq_join_predicate().eq_indexes().len()
-                            {
-                                result_plan = Ok(temporal_join)
+        if self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .enable_index_selection()
+        {
+            let indexes = logical_scan.table_indexes();
+            for index in indexes {
+                // Use index table
+                if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                    let index_scan: PlanRef = index_scan.into();
+                    let that = self.clone_with_left_right(self.left(), index_scan.clone());
+                    if let Ok(temporal_join) = that.to_stream_temporal_join(predicate.clone(), ctx)
+                    {
+                        match &result_plan {
+                            Err(_) => result_plan = Ok(temporal_join),
+                            Ok(prev_temporal_join) => {
+                                // Prefer to the temporal join with a longer lookup prefix len.
+                                if prev_temporal_join.eq_join_predicate().eq_indexes().len()
+                                    < temporal_join.eq_join_predicate().eq_indexes().len()
+                                {
+                                    result_plan = Ok(temporal_join)
+                                }
                             }
                         }
                     }

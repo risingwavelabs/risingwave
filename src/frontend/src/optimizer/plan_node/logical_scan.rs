@@ -578,7 +578,14 @@ impl ToBatch for LogicalScan {
     ) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new = self.clone_with_predicate(self.predicate().clone());
 
-        if !new.table_indexes().is_empty() {
+        if !new.table_indexes().is_empty()
+            && self
+                .base
+                .ctx()
+                .session_ctx()
+                .config()
+                .enable_index_selection()
+        {
             let index_selection_rule = IndexSelectionRule::create();
             if let ApplyResult::Ok(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
@@ -672,6 +679,15 @@ impl ToStream for LogicalScan {
     }
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if !self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .enable_index_selection()
+        {
+            return None;
+        }
         if columns.is_empty() {
             return None;
         }
