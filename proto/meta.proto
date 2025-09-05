@@ -844,6 +844,7 @@ message EventLog {
     string table_name = 2;
     string cdc_table_id = 3;
     string upstream_ddl = 4;
+    string fail_info = 5;
   }
   message EventSinkFail {
     uint32 sink_id = 1;
