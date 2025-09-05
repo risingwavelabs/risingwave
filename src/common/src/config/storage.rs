@@ -409,7 +409,7 @@ pub struct FileCacheConfig {
     /// NOTE:
     ///
     /// - The size will be aligned up to a multiplier of 4K.
-    /// - Modifying this configuraion will invalidate all existing file cache data.
+    /// - Modifying this configuration will invalidate all existing file cache data.
     ///
     /// Default: 16 `KiB`
     #[serde(default = "default::file_cache::blob_index_size")]
