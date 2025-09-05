@@ -33,3 +33,8 @@ DROP MATERIALIZED VIEW mv6;
 
 statement ok
 DROP TABLE t6;
+
+system ok
+./clickhouse client --host=clickhouse-server --port=9000 --password='default' --query="select version();"
+----
+123
