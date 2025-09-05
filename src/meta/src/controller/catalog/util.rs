@@ -346,37 +346,27 @@ impl CatalogController {
 
         let all_fragment_ids: HashSet<_> = all_fragment_ids.into_iter().collect();
 
-        let all_sink_into_tables: Vec<(SinkId, Option<TableId>)> = Sink::find()
+        let all_sink_into_tables: Vec<Option<TableId>> = Sink::find()
             .select_only()
-            .columns(vec![sink::Column::SinkId, sink::Column::TargetTable])
+            .column(sink::Column::TargetTable)
             .filter(sink::Column::TargetTable.is_not_null())
             .into_tuple()
             .all(txn)
             .await?;
 
-        let mut new_table_incoming_sinks: HashMap<TableId, Vec<SinkId>> = HashMap::new();
-        for (sink_id, target_table_id) in all_sink_into_tables {
-            new_table_incoming_sinks
-                .entry(target_table_id.expect("filter by non null"))
-                .or_default()
-                .push(sink_id);
+        let mut table_with_incoming_sinks: HashSet<TableId> = HashSet::new();
+        for target_table_id in all_sink_into_tables {
+            table_with_incoming_sinks.insert(target_table_id.expect("filter by non null"));
         }
 
         // no need to update, returning
-        if new_table_incoming_sinks.is_empty() {
+        if table_with_incoming_sinks.is_empty() {
             return Ok(vec![]);
         }
 
         let mut updated_table_ids = vec![];
-        for (table_id, new_incoming_sinks) in new_table_incoming_sinks {
+        for table_id in table_with_incoming_sinks {
             tracing::info!("cleaning dirty table sink downstream table {}", table_id);
-            Table::update(table::ActiveModel {
-                table_id: Set(table_id as _),
-                incoming_sinks: Set(new_incoming_sinks.into()),
-                ..Default::default()
-            })
-            .exec(txn)
-            .await?;
             updated_table_ids.push(table_id);
 
             let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()

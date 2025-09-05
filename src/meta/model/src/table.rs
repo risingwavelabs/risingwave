@@ -211,8 +211,6 @@ pub struct Model {
     pub description: Option<String>,
     pub version: Option<TableVersion>,
     pub retention_seconds: Option<i32>,
-    #[deprecated]
-    pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
     pub vnode_count: i32,
     pub webhook_info: Option<WebhookSourceInfo>,
@@ -356,7 +354,6 @@ impl From<PbTable> for ActiveModel {
             description: Set(pb_table.description),
             version: Set(pb_table.version.as_ref().map(|v| v.into())),
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
-            incoming_sinks: Set(I32Array::default()),
             cdc_table_id: Set(pb_table.cdc_table_id),
             vnode_count,
             webhook_info: Set(pb_table.webhook_info.as_ref().map(WebhookSourceInfo::from)),
