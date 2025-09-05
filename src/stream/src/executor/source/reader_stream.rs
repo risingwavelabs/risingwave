@@ -20,8 +20,8 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxSourceChunkStream, ConnectorState, CreateSplitReaderResult, SourceContext, SourceCtrlOpts,
-    SplitMetaData, StreamChunkWithState,
+    BoxSourceChunkStream, CdcAutoSchemaChangeFailCallback, ConnectorState, CreateSplitReaderResult,
+    SourceContext, SourceCtrlOpts, SplitMetaData, StreamChunkWithState,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
@@ -96,7 +96,7 @@ impl StreamReaderBuilder {
             if let Some(ref meta_client) = self.actor_ctx.meta_client {
                 let meta_client = meta_client.clone();
                 let source_id = self.source_id;
-                Some(Arc::new(
+                Some(CdcAutoSchemaChangeFailCallback::new(
                     move |table_id: u32,
                           table_name: String,
                           cdc_table_id: String,
@@ -123,10 +123,7 @@ impl StreamReaderBuilder {
                             }
                         });
                     },
-                )
-                    as Arc<
-                        dyn Fn(u32, String, String, String, String) + Send + Sync,
-                    >)
+                ))
             } else {
                 None
             };

@@ -65,10 +65,38 @@ pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub const WEBHOOK_CONNECTOR: &str = "webhook";
 
-/// Callback function type for reporting CDC auto schema change fail events
+/// Callback wrapper for reporting CDC auto schema change fail events
 /// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
-type CdcAutoSchemaChangeFailCallback =
-    Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>;
+#[derive(Clone)]
+pub struct CdcAutoSchemaChangeFailCallback(
+    Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>,
+);
+
+impl CdcAutoSchemaChangeFailCallback {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(u32, String, String, String, String) + Send + Sync + 'static,
+    {
+        Self(Arc::new(f))
+    }
+
+    pub fn call(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        self.0(table_id, table_name, cdc_table_id, upstream_ddl, fail_info);
+    }
+}
+
+impl std::fmt::Debug for CdcAutoSchemaChangeFailCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CdcAutoSchemaChangeFailCallback")
+    }
+}
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
     fn try_from_btreemap(
@@ -283,7 +311,7 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
@@ -355,28 +383,17 @@ impl SourceContext {
         upstream_ddl: String,
         fail_info: String,
     ) {
-        if let Some(ref callback) = self.report_cdc_auto_schema_change_fail {
-            callback(table_id, table_name, cdc_table_id, upstream_ddl, fail_info);
+        if let Some(ref cdc_auto_schema_change_fail_callback) =
+            self.report_cdc_auto_schema_change_fail
+        {
+            cdc_auto_schema_change_fail_callback.call(
+                table_id,
+                table_name,
+                cdc_table_id,
+                upstream_ddl,
+                fail_info,
+            );
         }
-    }
-}
-
-impl std::fmt::Debug for SourceContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SourceContext")
-            .field("actor_id", &self.actor_id)
-            .field("source_id", &self.source_id)
-            .field("fragment_id", &self.fragment_id)
-            .field("source_name", &self.source_name)
-            .field("metrics", &self.metrics)
-            .field("source_ctrl_opts", &self.source_ctrl_opts)
-            .field("connector_props", &self.connector_props)
-            .field("schema_change_tx", &self.schema_change_tx)
-            .field(
-                "report_cdc_auto_schema_change_fail",
-                &self.report_cdc_auto_schema_change_fail.is_some(),
-            )
-            .finish()
     }
 }
 
