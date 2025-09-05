@@ -395,13 +395,10 @@ impl ToStream for LogicalProject {
         if columns.is_empty() {
             return None;
         }
-        let input_columns: Vec<usize> = columns
+        let input_columns = columns
             .iter()
-            .filter_map(|&col| self.o2i_col_mapping().try_map(col))
-            .collect();
-        if input_columns.len() != columns.len() {
-            return None;
-        }
+            .map(|&col| self.o2i_col_mapping().try_map(col))
+            .collect::<Option<Vec<usize>>>()?;
         let new_input = self.input().try_better_locality(&input_columns)?;
         Some(self.clone_with_input(new_input).into())
     }

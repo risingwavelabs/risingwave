@@ -675,16 +675,13 @@ impl ToStream for LogicalScan {
         if columns.is_empty() {
             return None;
         }
-        let order_types = [
-            OrderType::ascending_nulls_first(),
-            OrderType::ascending_nulls_last(),
-            OrderType::descending_nulls_first(),
-            OrderType::descending_nulls_last(),
-        ];
-
         for order_type_combo in columns
             .iter()
-            .map(|&col| order_types.iter().map(move |ot| ColumnOrder::new(col, *ot)))
+            .map(|&col| {
+                OrderType::all()
+                    .into_iter()
+                    .map(move |ot| ColumnOrder::new(col, ot))
+            })
             .multi_cartesian_product()
         {
             let required_order = Order {
