@@ -25,11 +25,10 @@ use risingwave_pb::connector_service::SinkMetadata;
 use tracing::{info, warn};
 
 use super::{
-    LogSinker, SinkCoordinationRpcClientEnum, SinkError, SinkLogReader, SinkWriterMetrics,
-    SinkWriterParam,
+    LogSinker, SinkCoordinationRpcClientEnum, SinkLogReader, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::sink::writer::SinkWriter;
-use crate::sink::{LogStoreReadItem, Result, SinkParam, TruncateOffset};
+use crate::sink::{LogStoreReadItem, Result, SinkError, SinkParam, TruncateOffset};
 
 pub struct CoordinatedLogSinker<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> {
     writer: W,

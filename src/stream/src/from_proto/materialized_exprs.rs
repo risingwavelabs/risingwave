@@ -18,7 +18,7 @@ use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::MaterializedExprsNode;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::project::{MaterializedExprsArgs, MaterializedExprsExecutor};
 
 pub struct MaterializedExprsExecutorBuilder;
@@ -40,8 +40,10 @@ impl ExecutorBuilder for MaterializedExprsExecutorBuilder {
             .try_collect()?;
 
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, store, vnodes).await;
+        let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
 
         let exec = MaterializedExprsExecutor::new(MaterializedExprsArgs {
             actor_ctx: params.actor_context,

@@ -24,7 +24,7 @@ use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::TableDistribution;
 use risingwave_storage::table::batch_table::BatchTable;
-use risingwave_stream::common::table::state_table::StateTable;
+use risingwave_stream::common::table::state_table::{StateTable, StateTableBuilder};
 
 use crate::CtlContext;
 use crate::common::HummockServiceOpts;
@@ -55,7 +55,7 @@ pub fn print_table_catalog(table: &TableCatalog) {
 
 // TODO: shall we work on `TableDesc` instead?
 pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
-    StateTable::from_table_catalog(
+    StateTableBuilder::new(
         &table.to_internal_table_prost(),
         hummock,
         Some(
@@ -65,6 +65,8 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
                 .clone(),
         ),
     )
+    .forbid_preload_all_rows()
+    .build()
     .await
 }
 

@@ -31,7 +31,7 @@ statement ok
 create table t1 (id int primary key, name string, g int  as id + 1);
 
 statement error auto schema change not supported for sink-into-table
-create sink s into t1 from t with (connector = 'blackhole', auto.schema.change = 'true');
+create sink s into t1 from t with (auto.schema.change = 'true');
 
 statement error auto schema change not supported for table with non-hidden generated column or sys column
 create sink s from t1 with (connector = 'blackhole', auto.schema.change = 'true');
