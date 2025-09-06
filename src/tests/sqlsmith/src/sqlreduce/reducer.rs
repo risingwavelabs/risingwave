@@ -34,14 +34,14 @@ use crate::sqlreduce::passes::remove::{
 use crate::sqlreduce::passes::replace::{NullReplace, ScalarReplace};
 use crate::sqlreduce::passes::{Strategy, Transform};
 
-pub struct Reducer<'a> {
+pub struct Reducer {
     transforms: Vec<Box<dyn Transform>>,
-    checker: Checker<'a>,
+    checker: Checker,
     strategy: Strategy,
 }
 
-impl<'a> Reducer<'a> {
-    pub fn new(checker: Checker<'a>, strategy: Strategy) -> Self {
+impl Reducer {
+    pub fn new(checker: Checker, strategy: Strategy) -> Self {
         let transforms: Vec<Box<dyn Transform>> = vec![
             Box::new(ScalarReplace),
             Box::new(NullReplace),
@@ -122,6 +122,7 @@ impl<'a> Reducer<'a> {
             reduced_sqls.push_str(";\n");
         }
         reduced_sqls.push_str(&reduced_sql);
+        reduced_sqls.push_str(";\n");
 
         // Drop the schema after the reduction is complete.
         self.checker.drop_schema().await;
@@ -144,7 +145,7 @@ impl<'a> Reducer<'a> {
     ///
     /// # Returns
     /// - A reduced SQL string (still failing) that is minimized w.r.t the current passes.
-    async fn reduce_until_fixed_point(&self, sql: &str) -> String {
+    async fn reduce_until_fixed_point(&mut self, sql: &str) -> String {
         let mut global_fixed_point = false;
         let mut ast = parse_sql(sql)[0].clone();
         let mut iteration = 0;

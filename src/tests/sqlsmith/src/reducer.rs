@@ -38,7 +38,8 @@ pub async fn shrink_file(
     input_file_path: &str,
     output_file_path: &str,
     strategy: Strategy,
-    client: &Client,
+    client: Client,
+    restore_cmd: &str,
 ) -> Result<()> {
     // read failed sql
     let file_contents = read_file_contents(input_file_path)?;
@@ -47,7 +48,7 @@ pub async fn shrink_file(
     let reduced_sql = shrink_statements(&file_contents)?;
 
     // shrink the reduced sql
-    let reduced_sql = shrink(&reduced_sql, strategy, client).await?;
+    let reduced_sql = shrink(&reduced_sql, strategy, client, restore_cmd).await?;
 
     // write reduced sql
     let mut file = create_file(output_file_path).unwrap();
@@ -106,10 +107,15 @@ fn shrink_statements(sql: &str) -> Result<String> {
     Ok(sql)
 }
 
-async fn shrink(sql: &str, strategy: Strategy, client: &Client) -> Result<String> {
+async fn shrink(
+    sql: &str,
+    strategy: Strategy,
+    client: Client,
+    restore_cmd: &str,
+) -> Result<String> {
     let sql_statements = parse_sql(sql);
     let proceeding_stmts = sql_statements.split_last().unwrap().1.to_vec();
-    let checker = Checker::new(client, proceeding_stmts);
+    let checker = Checker::new(client, proceeding_stmts, restore_cmd.to_owned());
     let mut reducer = Reducer::new(checker, strategy);
 
     let reduced_sql = reducer.reduce(sql).await?;
