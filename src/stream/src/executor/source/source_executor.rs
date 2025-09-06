@@ -182,7 +182,6 @@ impl<S: StateStore> SourceExecutor<S> {
             info!("auto schema change is disabled in config");
             None
         };
-
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.source_id,
@@ -195,6 +194,7 @@ impl<S: StateStore> SourceExecutor<S> {
             },
             source_desc.source.config.clone(),
             schema_change_tx,
+            None,
         );
 
         (column_ids, source_ctx)

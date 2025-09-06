@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::bail;
+use thiserror_ext::AsReport;
 
 use super::unified::json::{TimeHandling, TimestampHandling, TimestamptzHandling};
 use super::unified::kv_event::KvEvent;
@@ -136,7 +137,53 @@ impl PlainParser {
                         &self.source_ctx.connector_props,
                     ) {
                         Ok(schema_change) => Ok(ParseResult::SchemaChange(schema_change)),
-                        Err(err) => Err(err)?,
+                        Err(err) => {
+                            // Report CDC auto schema change fail event
+                            let (fail_info, table_name, cdc_table_id) = match &err {
+                                crate::parser::AccessError::UnsupportedType {
+                                    ty,
+                                    table_name,
+                                    ..
+                                } => {
+                                    if let Some(table_name) = table_name {
+                                        // Parse table_name format: "schema"."table" -> schema.table
+                                        let clean_table_name =
+                                            table_name.trim_matches('"').replace("\".\"", ".");
+                                        let fail_info = format!(
+                                            "Unsupported postgres type '{}' in table '{}'",
+                                            ty, clean_table_name
+                                        );
+                                        // Build cdc_table_id: source_name.schema.table_name
+                                        let cdc_table_id = format!(
+                                            "{}.{}",
+                                            self.source_ctx.source_name, clean_table_name
+                                        );
+
+                                        (fail_info, clean_table_name, cdc_table_id)
+                                    } else {
+                                        let fail_info =
+                                            format!("Unsupported postgres type: {:?}", ty);
+                                        (fail_info, "".to_owned(), "".to_owned())
+                                    }
+                                }
+                                _ => {
+                                    let fail_info = format!(
+                                        "Failed to parse schema change: {:?}",
+                                        err.as_report()
+                                    );
+                                    (fail_info, "".to_owned(), "".to_owned())
+                                }
+                            };
+                            self.source_ctx.report_cdc_auto_schema_change_fail(
+                                self.source_ctx.source_id.table_id,
+                                table_name,
+                                cdc_table_id,
+                                "".to_owned(), // upstream_ddl is not available in this context
+                                fail_info,
+                            );
+
+                            Err(err)?
+                        }
                     };
                 }
                 CdcMessageType::Unspecified => {

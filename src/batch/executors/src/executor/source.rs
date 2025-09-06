@@ -154,6 +154,7 @@ impl SourceExecutor {
             },
             ConnectorProperties::default(),
             None,
+            None, // No callback for batch executor
         ));
         let (stream, _) = self
             .source

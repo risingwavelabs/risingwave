@@ -65,6 +65,38 @@ pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub const WEBHOOK_CONNECTOR: &str = "webhook";
 
+/// Callback wrapper for reporting CDC auto schema change fail events
+/// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
+#[derive(Clone)]
+pub struct CdcAutoSchemaChangeFailCallback(
+    Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>,
+);
+
+impl CdcAutoSchemaChangeFailCallback {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(u32, String, String, String, String) + Send + Sync + 'static,
+    {
+        Self(Arc::new(f))
+    }
+
+    pub fn call(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        self.0(table_id, table_name, cdc_table_id, upstream_ddl, fail_info);
+    }
+}
+
+impl std::fmt::Debug for CdcAutoSchemaChangeFailCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CdcAutoSchemaChangeFailCallback")
+    }
+}
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
     fn try_from_btreemap(
@@ -279,7 +311,7 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
@@ -291,6 +323,8 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+    // callback function to report CDC auto schema change fail events
+    pub report_cdc_auto_schema_change_fail: Option<CdcAutoSchemaChangeFailCallback>,
 }
 
 impl SourceContext {
@@ -305,6 +339,7 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+        report_cdc_auto_schema_change_fail: Option<CdcAutoSchemaChangeFailCallback>,
     ) -> Self {
         Self {
             actor_id,
@@ -315,6 +350,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+            report_cdc_auto_schema_change_fail,
         }
     }
 
@@ -333,7 +369,31 @@ impl SourceContext {
             },
             ConnectorProperties::default(),
             None,
+            None,
         )
+    }
+
+    /// Report CDC auto schema change fail event
+    /// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
+    pub fn report_cdc_auto_schema_change_fail(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        if let Some(ref cdc_auto_schema_change_fail_callback) =
+            self.report_cdc_auto_schema_change_fail
+        {
+            cdc_auto_schema_change_fail_callback.call(
+                table_id,
+                table_name,
+                cdc_table_id,
+                upstream_ddl,
+                fail_info,
+            );
+        }
     }
 }
 

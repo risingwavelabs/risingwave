@@ -20,8 +20,8 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxSourceChunkStream, ConnectorState, CreateSplitReaderResult, SourceContext, SourceCtrlOpts,
-    SplitMetaData, StreamChunkWithState,
+    BoxSourceChunkStream, CdcAutoSchemaChangeFailCallback, ConnectorState, CreateSplitReaderResult,
+    SourceContext, SourceCtrlOpts, SplitMetaData, StreamChunkWithState,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
@@ -78,6 +78,7 @@ impl StreamReaderBuilder {
                                 tracing::error!(
                                     target: "auto_schema_change",
                                     error = %e.as_report(), "schema change error");
+
                                 finish_tx.send(()).unwrap();
                             }
                         }
@@ -89,6 +90,43 @@ impl StreamReaderBuilder {
             info!("auto schema change is disabled in config");
             None
         };
+
+        // Create callback function for reporting CDC auto schema change fail events
+        let report_cdc_auto_schema_change_fail =
+            if let Some(ref meta_client) = self.actor_ctx.meta_client {
+                let meta_client = meta_client.clone();
+                let source_id = self.source_id;
+                Some(CdcAutoSchemaChangeFailCallback::new(
+                    move |table_id: u32,
+                          table_name: String,
+                          cdc_table_id: String,
+                          upstream_ddl: String,
+                          fail_info: String| {
+                        let meta_client = meta_client.clone();
+                        let source_id = source_id;
+                        tokio::spawn(async move {
+                            if let Err(e) = meta_client
+                                .add_cdc_auto_schema_change_fail_event(
+                                    table_id,
+                                    table_name,
+                                    cdc_table_id,
+                                    upstream_ddl,
+                                    fail_info,
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    error = %e.as_report(),
+                                    source_id = source_id.table_id,
+                                    "Failed to add CDC auto schema change fail event to event log."
+                                );
+                            }
+                        });
+                    },
+                ))
+            } else {
+                None
+            };
 
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
@@ -102,6 +140,7 @@ impl StreamReaderBuilder {
             },
             self.source_desc.source.config.clone(),
             schema_change_tx,
+            report_cdc_auto_schema_change_fail,
         );
 
         (column_ids, source_ctx)
