@@ -145,7 +145,7 @@ sea-schema = { version = "0.16", default-features = false, features = [
     "sqlx-postgres",
     "sqlx-mysql",
 ] }
-serde = { version = "1", features = ["derive", "rc"] }
+serde = { workspace = true, features = ["rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
@@ -205,7 +205,7 @@ pretty_assertions = "1"
 proc-macro2 = "1.0"
 quote = "1"
 rand = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_yaml = "0.9"
 syn = { version = "2", features = ["full"] }
 tempfile = "3"

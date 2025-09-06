@@ -20,7 +20,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
   "fs",
   "rt",

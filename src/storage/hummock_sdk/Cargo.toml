@@ -18,7 +18,7 @@ parse-display = "0.10"
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_pb = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
