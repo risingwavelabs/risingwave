@@ -32,7 +32,7 @@ services:
                    --advertise-addr 0.0.0.0:4566 \
                    --prometheus-listener-addr 0.0.0.0:1250 \
                    --health-check-listener-addr 0.0.0.0:6786 \
-                    --webhook-listen-addr 0.0.0.0:4567 \ 
+                   --webhook-listen-addr 0.0.0.0:4567 \ 
                    --meta-addr http://0.0.0.0:5690 \
                    --frontend-total-memory-bytes=4294967296\" \
                  --compactor-opts=\" \
