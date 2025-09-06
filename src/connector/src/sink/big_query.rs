@@ -394,7 +394,10 @@ impl BigQuerySink {
             DataType::Jsonb => Ok("JSON".to_owned()),
             DataType::Serial => Ok("INT64".to_owned()),
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "INT256 is not supported for BigQuery sink."
+                "Int256 is not supported for BigQuery sink."
+            ))),
+            DataType::UInt256 => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "UInt256 is not supported for BigQuery sink."
             ))),
             DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "MAP is not supported for BigQuery sink."
@@ -449,7 +452,12 @@ impl BigQuerySink {
             DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
             DataType::Int256 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "INT256 is not supported for BigQuery sink."
+                    "Int256 is not supported for BigQuery sink."
+                )));
+            }
+            DataType::UInt256 => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "UInt256 is not supported for BigQuery sink."
                 )));
             }
             DataType::Map(_) => {
@@ -965,9 +973,19 @@ fn build_protobuf_field(
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
-        DataType::Float32 | DataType::Int256 => {
+        DataType::Float32 => {
             return Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Don't support Float32 and Int256"
+                "Float32 is not supported for BigQuery sink."
+            )));
+        }
+        DataType::Int256 => {
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Int256 is not supported for BigQuery sink."
+            )));
+        }
+        DataType::UInt256 => {
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "UInt256 is not supported for BigQuery sink."
             )));
         }
         DataType::Map(_) => return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Map"))),
