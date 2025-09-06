@@ -19,7 +19,8 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
-use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
+use pulsar::reader::Reader;
+use pulsar::{ConsumerBuilder, ConsumerOptions, Pulsar, TokioExecutor};
 use risingwave_common::{bail, ensure};
 
 use crate::error::ConnectorResult;
@@ -95,7 +96,7 @@ struct PulsarFilterOffset {
 pub struct PulsarBrokerReader {
     #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
-    consumer: Consumer<Vec<u8>, TokioExecutor>,
+    reader: Reader<Vec<u8>, TokioExecutor>,
     #[expect(dead_code)]
     split: PulsarSplit,
     #[expect(dead_code)]
@@ -164,10 +165,9 @@ impl SplitReader for PulsarBrokerReader {
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
-            .consumer()
+            .reader()
             .with_topic(&topic)
-            .with_subscription_type(SubType::Exclusive)
-            .with_subscription(format!(
+            .with_consumer_name(format!(
                 "{}-{}-{}",
                 props
                     .subscription_name_prefix
@@ -189,16 +189,12 @@ impl SplitReader for PulsarBrokerReader {
                     )
                 } else {
                     builder.with_options(
-                        ConsumerOptions::default()
-                            .with_initial_position(InitialPosition::Earliest)
-                            .durable(false),
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
                     )
                 }
             }
             PulsarEnumeratorOffset::Latest => builder.with_options(
-                ConsumerOptions::default()
-                    .with_initial_position(InitialPosition::Latest)
-                    .durable(false),
+                ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
             ),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
@@ -216,7 +212,6 @@ impl SplitReader for PulsarBrokerReader {
                         batch_index: start_message_id.batch_index,
                     });
                     builder.with_options(pulsar::ConsumerOptions {
-                        durable: Some(false),
                         start_message_id: Some(start_message_id),
                         ..Default::default()
                     })
@@ -226,17 +221,15 @@ impl SplitReader for PulsarBrokerReader {
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
 
-        let consumer: Consumer<Vec<u8>, _> = builder.build().await?;
-        if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
-            // FIXME: Here we need pulsar-rs to support the send + sync consumer
-            // consumer
-            //     .seek(None, None, Some(ts as u64), pulsar.clone())
-            //     .await?;
+        let mut reader: Reader<Vec<u8>, _> = builder.into_reader().await?;
+        if let PulsarEnumeratorOffset::Timestamp(ts) = split.start_offset {
+            // Use Reader's seek method to seek to timestamp
+            reader.seek(None, Some(ts as u64)).await?;
         }
 
         Ok(Self {
             pulsar,
-            consumer,
+            reader,
             split_id: split.id(),
             split,
             parser_config,
@@ -257,12 +250,12 @@ impl PulsarBrokerReader {
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         let mut already_read_offset = self.already_read_offset;
-        #[for_await]
-        for msgs in self.consumer.ready_chunks(max_chunk_size) {
-            let mut res = Vec::with_capacity(msgs.len());
-            for msg in msgs {
-                let msg = msg?;
 
+        #[for_await]
+        for msg_chunk in self.reader.ready_chunks(max_chunk_size) {
+            let mut res = Vec::with_capacity(msg_chunk.len());
+            for msg in msg_chunk {
+                let msg = msg?;
                 if let Some(PulsarFilterOffset {
                     ledger_id,
                     entry_id,
@@ -291,7 +284,6 @@ impl PulsarBrokerReader {
                         already_read_offset = None;
                     }
                 }
-
                 let msg = SourceMessage::from(msg);
                 res.push(msg);
             }
