@@ -51,6 +51,7 @@ pub struct StorageCatalogS3Config {
     endpoint: Option<String>,
     region: Option<String>,
     path_style_access: Option<bool>,
+    ssl_verify: Option<bool>,
     enable_config_load: Option<bool>,
 }
 
@@ -96,6 +97,12 @@ impl StorageCatalog {
                 if let Some(path_style_access) = &config.path_style_access {
                     file_io_builder =
                         file_io_builder.with_prop(S3_PATH_STYLE_ACCESS, path_style_access);
+                }
+                if let Some(ssl_verify) = config.ssl_verify{
+                    if !ssl_verify {
+                        file_io_builder =
+                            file_io_builder.with_prop("client.trust-all-certificates", "true");
+                    }
                 }
                 let enable_config_load = config.enable_config_load.unwrap_or(false);
                 file_io_builder = file_io_builder
