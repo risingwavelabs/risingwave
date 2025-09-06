@@ -337,6 +337,11 @@ impl CatalogController {
         // clean upstream fragment ids from (fragment)
         // clean stream node from (fragment)
         // clean upstream actor ids from (actor)
+
+        // The cleanup of fragment and StreamNode is to maintain compatibility with old versions of data. For the
+        // current sink-into-table implementation, there is no need to restore the contents of StreamNode, because the
+        // `UpstreamSinkUnion` operator does not persist any data, but relies on refill during recovery.
+
         let all_fragment_ids: Vec<FragmentId> = Fragment::find()
             .select_only()
             .column(fragment::Column::FragmentId)

@@ -13,9 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::StreamJobStatus;
-use risingwave_pb::ddl_service::{ReplaceJobPlan, replace_job_plan};
-use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -23,8 +20,6 @@ use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
-use crate::handler::alter_table_column::hijack_merger_for_target_table;
-use crate::handler::create_sink::{fetch_incoming_sinks, reparse_table_for_sink};
 
 pub async fn handle_drop_sink(
     handler_args: HandlerArgs,
@@ -62,60 +57,8 @@ pub async fn handle_drop_sink(
 
     let sink_id = sink.id;
 
-    if sink.stream_job_status == StreamJobStatus::Creating && sink.target_table.is_none() {
-        let canceled_jobs = session
-            .env()
-            .meta_client()
-            .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
-                job_ids: vec![sink_id.sink_id],
-            }))
-            .await?;
-        tracing::info!(?canceled_jobs, "cancelled creating jobs");
-    } else {
-        // No matter whether the sink is being created or not, we need to replace the target table graph.
-        // TODO(august): using cancel interface to cancel the creating job after refactoring sink into table.
-        let mut affected_table_change = None;
-        if let Some(target_table_id) = &sink.target_table {
-            let table_catalog = {
-                let reader = session.env().catalog_reader().read_guard();
-                let table = reader.get_any_table_by_id(target_table_id)?;
-                table.clone()
-            };
-
-            let (mut graph, table, source, target_job_type) =
-                reparse_table_for_sink(&session, &table_catalog).await?;
-
-            let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
-            for sink in fetch_incoming_sinks(&session, &table_catalog)? {
-                if sink.id == sink_id {
-                    // Skip the sink being dropped.
-                    continue;
-                }
-                hijack_merger_for_target_table(
-                    &mut graph,
-                    &columns_without_rw_timestamp,
-                    &sink,
-                    Some(&sink.unique_identity()),
-                )?;
-            }
-
-            affected_table_change = Some(ReplaceJobPlan {
-                replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
-                    replace_job_plan::ReplaceTable {
-                        table: Some(table.to_prost()),
-                        source: source.map(|x| x.to_prost()),
-                        job_type: target_job_type as _,
-                    },
-                )),
-                fragment_graph: Some(graph),
-            });
-        }
-
-        let catalog_writer = session.catalog_writer()?;
-        catalog_writer
-            .drop_sink(sink_id.sink_id, cascade, affected_table_change)
-            .await?;
-    }
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer.drop_sink(sink_id.sink_id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }
