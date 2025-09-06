@@ -217,6 +217,15 @@ impl OrderType {
     pub fn reverse(self) -> Self {
         Self::new(self.direction.reverse(), self.nulls_are)
     }
+
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::ascending_nulls_first(),
+            Self::ascending_nulls_last(),
+            Self::descending_nulls_first(),
+            Self::descending_nulls_last(),
+        ]
+    }
 }
 
 impl fmt::Display for OrderType {
