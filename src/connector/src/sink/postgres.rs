@@ -12,20 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Copyright 2025 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use info file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
@@ -36,16 +22,14 @@ use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use itertools::Itertools;
 use phf::phf_set;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use serde_derive::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
-use tokio_postgres::Transaction;
 use tokio_postgres::types::Type as PgType;
-use tracing::warn;
 
 use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
@@ -275,7 +259,9 @@ impl Sink for PostgresSink {
     }
 }
 
-struct PostgresTableInfo {
+pub struct PostgresSinkWriter {
+    is_append_only: bool,
+    client: tokio_postgres::Client,
     pk_indices: Vec<usize>,
     pk_types: Vec<PgType>,
     schema_types: Vec<PgType>,
@@ -285,12 +271,6 @@ struct PostgresTableInfo {
     insert_sql: Arc<tokio_postgres::Statement>,
     delete_sql: Arc<tokio_postgres::Statement>,
     upsert_sql: Arc<tokio_postgres::Statement>,
-}
-
-pub struct PostgresSinkWriter {
-    is_append_only: bool,
-    client: tokio_postgres::Client,
-    info: PostgresTableInfo,
 }
 
 impl PostgresSinkWriter {
@@ -381,17 +361,15 @@ impl PostgresSinkWriter {
         let writer = Self {
             is_append_only,
             client,
-            info: PostgresTableInfo {
-                pk_indices,
-                pk_types,
-                schema_types,
-                raw_insert_sql: Arc::new(raw_insert_sql),
-                raw_upsert_sql: Arc::new(raw_upsert_sql),
-                raw_delete_sql: Arc::new(raw_delete_sql),
-                insert_sql: Arc::new(insert_sql),
-                delete_sql: Arc::new(delete_sql),
-                upsert_sql: Arc::new(upsert_sql),
-            },
+            pk_indices,
+            pk_types,
+            schema_types,
+            raw_insert_sql: Arc::new(raw_insert_sql),
+            raw_upsert_sql: Arc::new(raw_upsert_sql),
+            raw_delete_sql: Arc::new(raw_delete_sql),
+            insert_sql: Arc::new(insert_sql),
+            delete_sql: Arc::new(delete_sql),
+            upsert_sql: Arc::new(upsert_sql),
         };
         Ok(writer)
     }
@@ -412,9 +390,9 @@ impl PostgresSinkWriter {
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
-                    let pg_row = convert_row_to_pg_row(row, &self.info.schema_types);
-                    let insert_sql = self.info.insert_sql.clone();
-                    let raw_insert_sql = self.info.raw_insert_sql.clone();
+                    let pg_row = convert_row_to_pg_row(row, &self.schema_types);
+                    let insert_sql = self.insert_sql.clone();
+                    let raw_insert_sql = self.raw_insert_sql.clone();
                     let transaction = transaction.clone();
                     let future = async move {
                         transaction
@@ -454,19 +432,15 @@ impl PostgresSinkWriter {
         let mut delete_futures = Vec::new();
         let mut upsert_futures = Vec::new();
 
-        fn gen_delete_future<'a>(
-            info: &PostgresTableInfo,
-            transaction: &Arc<Transaction<'a>>,
-            row: RowRef<'_>,
-        ) -> impl Future<Output = anyhow::Result<u64>> + 'a {
-            {
-                {
+        for (op, row) in chunk.rows_with_consistent_pk_update(&self.pk_indices) {
+            match op {
+                Op::Delete => {
                     let pg_row =
-                        convert_row_to_pg_row(row.project(&info.pk_indices), &info.pk_types);
-                    let delete_sql = info.delete_sql.clone();
-                    let raw_delete_sql = info.raw_delete_sql.clone();
+                        convert_row_to_pg_row(row.project(&self.pk_indices), &self.pk_types);
+                    let delete_sql = self.delete_sql.clone();
+                    let raw_delete_sql = self.raw_delete_sql.clone();
                     let transaction = transaction.clone();
-                    async move {
+                    let future = async move {
                         transaction
                             .execute_raw(delete_sql.as_ref(), &pg_row)
                             .await
@@ -476,23 +450,15 @@ impl PostgresSinkWriter {
                                     raw_delete_sql, pg_row
                                 )
                             })
-                    }
+                    };
+                    delete_futures.push(future);
                 }
-            }
-        }
-
-        fn gen_insert_future<'a>(
-            info: &PostgresTableInfo,
-            transaction: &Arc<Transaction<'a>>,
-            row: RowRef<'_>,
-        ) -> impl Future<Output = anyhow::Result<u64>> + 'a {
-            {
-                {
-                    let pg_row = convert_row_to_pg_row(row, &info.schema_types);
-                    let upsert_sql = info.upsert_sql.clone();
-                    let raw_upsert_sql = info.raw_upsert_sql.clone();
+                Op::Insert | Op::UpdateInsert => {
+                    let pg_row = convert_row_to_pg_row(row, &self.schema_types);
+                    let upsert_sql = self.upsert_sql.clone();
+                    let raw_upsert_sql = self.raw_upsert_sql.clone();
                     let transaction = transaction.clone();
-                    async move {
+                    let future = async move {
                         transaction
                             .execute_raw(upsert_sql.as_ref(), &pg_row)
                             .await
@@ -502,83 +468,13 @@ impl PostgresSinkWriter {
                                     raw_upsert_sql, pg_row
                                 )
                             })
-                    }
-                }
-            }
-        }
-
-        let mut update_delete_buffer = None;
-        for (op, row) in chunk.rows() {
-            match op {
-                Op::Delete => {
-                    delete_futures.push(gen_delete_future(&self.info, &transaction, row));
-                }
-                Op::Insert => {
-                    upsert_futures.push(gen_insert_future(&self.info, &transaction, row));
+                    };
+                    upsert_futures.push(future);
                 }
                 Op::UpdateDelete => {
-                    if let Some(prev_update_delete) = update_delete_buffer.replace(row) {
-                        if cfg!(debug_assertions) {
-                            panic!(
-                                "receiving two consecutive update deletes: {:?} {:?}",
-                                prev_update_delete, row
-                            );
-                        } else {
-                            warn!(
-                                ?prev_update_delete,
-                                ?row,
-                                "receiving two consecutive update deletes"
-                            );
-                        }
-                        delete_futures.push(gen_delete_future(
-                            &self.info,
-                            &transaction,
-                            prev_update_delete,
-                        ));
-                    }
-                }
-                Op::UpdateInsert => {
-                    #[expect(clippy::collapsible_else_if)]
-                    if let Some(prev_update_delete) = update_delete_buffer.take() {
-                        if row.project(&self.info.pk_indices)
-                            != prev_update_delete.project(&self.info.pk_indices)
-                        {
-                            // handle the UpdateDelete as Delete if pk does not match with `UpdateInsert`
-                            delete_futures.push(gen_delete_future(
-                                &self.info,
-                                &transaction,
-                                prev_update_delete,
-                            ));
-                        }
-                    } else {
-                        if cfg!(debug_assertions) {
-                            panic!("no UpdateDelete before UpdateInsert in a chunk: {:?}", row,);
-                        } else {
-                            warn!(?row, "no UpdateDelete before UpdateInsert in a chunk");
-                        }
-                    }
-                    upsert_futures.push(gen_insert_future(&self.info, &transaction, row));
+                    // ignore UpdateDelete on consistent pk update
                 }
             }
-        }
-
-        if let Some(prev_update_delete) = update_delete_buffer {
-            if cfg!(debug_assertions) {
-                panic!(
-                    "no UpdateInsert after UpdateDelete in a chunk: {:?}",
-                    prev_update_delete
-                );
-            } else {
-                warn!(
-                    ?prev_update_delete,
-                    "no UpdateInsert after UpdateDelete in a chunk"
-                );
-            }
-            delete_futures.push(gen_delete_future(
-                &self.info,
-                &transaction,
-                prev_update_delete,
-            ));
         }
 
         try_join_all(delete_futures).await?;
