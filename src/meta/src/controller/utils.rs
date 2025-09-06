@@ -2210,14 +2210,14 @@ where
 pub async fn get_sink_fragment_by_ids<C>(
     txn: &C,
     sink_ids: Vec<SinkId>,
-) -> MetaResult<Vec<FragmentId>>
+) -> MetaResult<HashMap<SinkId, FragmentId>>
 where
     C: ConnectionTrait,
 {
     let sink_num = sink_ids.len();
-    let sink_fragment_ids: Vec<FragmentId> = Fragment::find()
+    let sink_fragment_ids: Vec<(SinkId, FragmentId)> = Fragment::find()
         .select_only()
-        .column(fragment::Column::FragmentId)
+        .columns([fragment::Column::JobId, fragment::Column::FragmentId])
         .filter(
             fragment::Column::JobId
                 .is_in(sink_ids)
@@ -2236,7 +2236,7 @@ where
         .into());
     }
 
-    Ok(sink_fragment_ids)
+    Ok(sink_fragment_ids.into_iter().collect())
 }
 
 pub fn build_select_node_list(

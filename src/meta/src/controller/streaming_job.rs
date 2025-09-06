@@ -572,14 +572,12 @@ impl CatalogController {
                 let sink_target_fragment = fetch_target_fragments(&txn, [sink_fragment_id]).await?;
                 sink_target_fragment
                     .get(&sink_fragment_id)
-                    .and_then(|target_fragments| {
-                        assert!(
-                            !target_fragments.is_empty(),
-                            "sink should have at least one downstream fragment"
-                        );
-                        target_fragments.first().cloned()
+                    .map(|target_fragments| {
+                        let target_fragment_id = *target_fragments
+                            .first()
+                            .expect("sink should have at least one downstream fragment");
+                        (sink_fragment_id, target_fragment_id)
                     })
-                    .map(|target_fragment_id| (sink_fragment_id, target_fragment_id))
             } else {
                 None
             };

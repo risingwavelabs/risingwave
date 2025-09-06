@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::StreamingParallelism;
@@ -284,24 +284,24 @@ impl GlobalBarrierWorkerContextImpl {
             assert_eq!(table.table_type(), PbTableType::Table);
             let fragments = jobs.get_mut(&table.id).unwrap();
             let mut target_fragment_id = None;
-            for fragment in fragments.fragment_infos.values_mut() {
+            for fragment in fragments.fragment_infos.values() {
                 let mut is_target_fragment = false;
-                visit_stream_node_body(&fragment.nodes, |body| {
-                    if let PbNodeBody::UpstreamSinkUnion(_) = body {
+                visit_stream_node_cont(&fragment.nodes, |node| {
+                    if let Some(PbNodeBody::UpstreamSinkUnion(_)) = node.node_body {
                         is_target_fragment = true;
+                        false
+                    } else {
+                        true
                     }
                 });
                 if is_target_fragment {
-                    // Each table should have only one target fragment.
-                    if let Some(ref target_fragment_id) = target_fragment_id {
-                        assert_eq!(*target_fragment_id, fragment.fragment_id);
-                    } else {
-                        target_fragment_id = Some(fragment.fragment_id);
-                    }
+                    target_fragment_id = Some(fragment.fragment_id);
+                    break;
                 }
             }
-            let target_fragment_id =
-                target_fragment_id.expect("Table should have upstream-sink-union node");
+            let target_fragment_id = target_fragment_id.ok_or(anyhow::anyhow!(
+                "Table should have upstream-sink-union node"
+            ))?;
             let target_fragment = fragments
                 .fragment_infos
                 .get_mut(&target_fragment_id)

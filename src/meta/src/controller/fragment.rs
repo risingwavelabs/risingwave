@@ -23,7 +23,6 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
-use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
@@ -1792,10 +1791,15 @@ impl CatalogController {
         let sink_fragment_ids = get_sink_fragment_by_ids(&txn, sink_ids).await?;
 
         let mut upstream_sink_infos = Vec::with_capacity(incoming_sinks.len());
-        for (pb_sink, sink_fragment_id) in incoming_sinks
-            .iter()
-            .zip_eq_debug(sink_fragment_ids.into_iter())
-        {
+        for pb_sink in &incoming_sinks {
+            let sink_fragment_id =
+                sink_fragment_ids
+                    .get(&(pb_sink.id as _))
+                    .cloned()
+                    .ok_or(anyhow::anyhow!(
+                        "sink fragment not found for sink id {}",
+                        pb_sink.id
+                    ))?;
             let upstream_info = build_upstream_sink_info(
                 pb_sink,
                 sink_fragment_id,
