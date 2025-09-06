@@ -35,7 +35,7 @@ use crate::vector::hnsw::{
     HnswBuilderOptions, HnswGraphBuilder, VectorAccessor, insert_graph, new_node,
 };
 
-pub(crate) struct HnswFlatIndexWriter {
+pub struct HnswFlatIndexWriter {
     measure: DistanceMeasurement,
     options: HnswBuilderOptions,
     sstable_store: SstableStoreRef,
@@ -50,7 +50,7 @@ pub(crate) struct HnswFlatIndexWriter {
 }
 
 impl HnswFlatIndexWriter {
-    pub(crate) async fn new(
+    pub async fn new(
         index: &HnswFlatIndex,
         dimension: usize,
         measure: DistanceMeasurement,
@@ -90,7 +90,7 @@ impl HnswFlatIndexWriter {
         })
     }
 
-    pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
+    pub fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
         self.vector_store
             .building_vectors
             .as_mut()
@@ -100,7 +100,7 @@ impl HnswFlatIndexWriter {
         Ok(())
     }
 
-    pub(crate) fn seal_current_epoch(&mut self) -> Option<HnswFlatIndexAdd> {
+    pub fn seal_current_epoch(&mut self) -> Option<HnswFlatIndexAdd> {
         let building_vectors = &mut self
             .vector_store
             .building_vectors
@@ -125,7 +125,7 @@ impl HnswFlatIndexWriter {
         })
     }
 
-    pub(crate) async fn flush(&mut self) -> HummockResult<usize> {
+    pub async fn flush(&mut self) -> HummockResult<usize> {
         self.add_pending_vectors_to_graph().await?;
         let new_file = self.vector_store.flush().await?;
         if let Some(new_file) = new_file {
@@ -164,7 +164,7 @@ impl HnswFlatIndexWriter {
         }
     }
 
-    pub(crate) async fn try_flush(&mut self) -> HummockResult<()> {
+    pub async fn try_flush(&mut self) -> HummockResult<()> {
         self.vector_store
             .building_vectors
             .as_mut()
