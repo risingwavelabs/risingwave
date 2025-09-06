@@ -32,6 +32,7 @@ services:
                    --advertise-addr 0.0.0.0:4566 \
                    --prometheus-listener-addr 0.0.0.0:1250 \
                    --health-check-listener-addr 0.0.0.0:6786 \
+                    --webhook-listen-addr 0.0.0.0:4567 \ 
                    --meta-addr http://0.0.0.0:5690 \
                    --frontend-total-memory-bytes=4294967296\" \
                  --compactor-opts=\" \
@@ -47,11 +48,13 @@ services:
       - "5690"
       - "1250"
       - "5691"
+      - "4567" 
     ports:
       - "4566:4566"
       - "5690:5690"
       - "5691:5691"
       - "1250:1250"
+      - "4567:4567"
     depends_on:
       - postgres-0
       - minio-0
