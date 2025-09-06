@@ -1136,7 +1136,14 @@ impl LogicalJoin {
                 }
             })
             .collect_vec();
+
         // Use UpstreamOnly chain type
+        if new_scan.cross_database() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires the lookup table to be in the same database as the stream source table".into(),
+                "Please ensure both tables are in the same database".into(),
+            )));
+        }
         let new_stream_table_scan =
             StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
         Ok((

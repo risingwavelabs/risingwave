@@ -265,7 +265,8 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .optional_associated_source_id
                 .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id as _)),
             description: value.0.description,
-            incoming_sinks: value.0.incoming_sinks.into_u32_array(),
+            #[expect(deprecated)]
+            incoming_sinks: vec![],
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),

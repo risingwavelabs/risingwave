@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -47,7 +47,7 @@ pub async fn get_new_table_definition_for_cdc_table(
     table_name: ObjectName,
     new_columns: &[ColumnCatalog],
 ) -> Result<(Statement, Arc<TableCatalog>)> {
-    let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let (original_catalog, _) = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     assert_eq!(
         original_catalog.row_id_index, None,
@@ -112,14 +112,12 @@ pub async fn get_replace_table_plan(
     )
     .await?;
 
-    let incoming_sink_ids: HashSet<_> = old_catalog.incoming_sinks.iter().copied().collect();
-
     let target_columns = (table.columns.iter())
         .filter(|col| !col.is_rw_timestamp_column())
         .cloned()
         .collect_vec();
 
-    for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
+    for sink in fetch_incoming_sinks(session, old_catalog)? {
         hijack_merger_for_target_table(
             &mut graph,
             &target_columns,
@@ -130,7 +128,6 @@ pub async fn get_replace_table_plan(
 
     // Set some fields ourselves so that the meta service does not need to maintain them.
     let mut table = table;
-    table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
     table.vnode_count = VnodeCount::set(old_catalog.vnode_count());
 
     Ok((source, table, graph, job_type))
@@ -201,9 +198,10 @@ pub async fn handle_alter_table_column(
     operation: AlterTableOperation,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let (original_catalog, has_incoming_sinks) =
+        fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
-    if !original_catalog.incoming_sinks.is_empty() && original_catalog.has_generated_column() {
+    if has_incoming_sinks && original_catalog.has_generated_column() {
         return Err(RwError::from(ErrorCode::BindError(
             "Alter a table with incoming sink and generated column has not been implemented."
                 .to_owned(),
@@ -222,9 +220,7 @@ pub async fn handle_alter_table_column(
         panic!("unexpected statement: {:?}", definition);
     };
 
-    if !original_catalog.incoming_sinks.is_empty()
-        && matches!(operation, AlterTableOperation::DropColumn { .. })
-    {
+    if has_incoming_sinks && matches!(operation, AlterTableOperation::DropColumn { .. }) {
         return Err(ErrorCode::InvalidInputSyntax(
             "dropping columns in target table of sinks is not supported".to_owned(),
         ))?;
@@ -400,7 +396,7 @@ pub async fn handle_alter_table_column(
 pub fn fetch_table_catalog_for_alter(
     session: &SessionImpl,
     table_name: &ObjectName,
-) -> Result<Arc<TableCatalog>> {
+) -> Result<(Arc<TableCatalog>, bool)> {
     let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -409,7 +405,7 @@ pub fn fetch_table_catalog_for_alter(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let original_catalog = {
+    {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
@@ -424,10 +420,14 @@ pub fn fetch_table_catalog_for_alter(
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
-        table.clone()
-    };
+        let has_incoming_sinks = reader
+            .get_schema_by_id(&table.database_id, &table.schema_id)?
+            .table_incoming_sinks(table.id)
+            .map(|sinks| !sinks.is_empty())
+            .unwrap_or(false);
 
-    Ok(original_catalog)
+        Ok((table.clone(), has_incoming_sinks))
+    }
 }
 
 #[cfg(test)]
