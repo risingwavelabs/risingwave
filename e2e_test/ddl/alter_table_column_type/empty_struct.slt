@@ -1,10 +1,11 @@
 statement ok
 set RW_IMPLICIT_FLUSH to true;
 
-# Currently, parser does not allow the syntax for zero-field struct type (`struct<>`).
-# `CREATE TABLE AS` is a workaround.
 statement ok
-create table t as select row() as v;
+create table t(v struct< >);
+
+statement ok
+insert into t values (row());
 
 query T
 select v from t;
