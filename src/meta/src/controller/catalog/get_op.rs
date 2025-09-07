@@ -605,6 +605,7 @@ impl CatalogController {
             parallelism,
             max_parallelism,
             specific_resource_group: _,
+            ..
         } in streaming_jobs
         {
             let fragment_infos = job_infos.get(&job_id).unwrap();
