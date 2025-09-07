@@ -43,9 +43,6 @@ download-and-decompress-artifact sqlsmith-reducer-"$profile" target/debug/
 mv target/debug/sqlsmith-reducer-"$profile" target/debug/sqlsmith-reducer
 chmod +x ./target/debug/sqlsmith-reducer
 
-echo "--- e2e, ci-3cn-1fe, build"
-risedev ci-start ci-3cn-1fe
-
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
 set +e
 seq 32 | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
@@ -55,6 +52,8 @@ failed_logs=$(ls $LOGDIR/fuzzing-*.log 2>/dev/null || true)
 
 if [[ -n "$failed_logs" ]]; then
     echo "Simulation fuzzing failed, see logs in $LOGDIR"
+    echo "--- e2e, ci-3cn-1fe, build for reducer to start"
+    risedev ci-start ci-3cn-1fe
     for log_file in $failed_logs; do
         seed=$(basename "$log_file" .log | cut -d'-' -f2)
         error_sql="$LOGDIR/error-$seed.sql.log"
