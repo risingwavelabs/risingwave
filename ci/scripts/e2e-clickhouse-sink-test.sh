@@ -36,7 +36,7 @@ sleep 2
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/clickhouse_sink.slt'
 sleep 5
-./clickhouse client --host=clickhouse-server --port=9000 --password='default' --query="select * from demo_test FORMAT CSV;" > ./query_result.csv
+echo "select * from demo_test FORMAT CSV;" | curl 'http://clickhouse-server:8123/?password=default&query=' -s --data-binary @- > ./query_result.csv
 
 # check sink destination using shell
 # Check each expected row exists in CSV output (order independent)
