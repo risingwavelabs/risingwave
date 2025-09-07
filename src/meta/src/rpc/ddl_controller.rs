@@ -917,12 +917,13 @@ impl DdlController {
             let sink = sink.expect("sink not found");
             Self::inject_replace_table_plan_for_sink(
                 sink.id,
+                sink,
                 &sink_fragment,
                 target_table,
                 &mut replace_table_ctx,
                 stream_job_fragments.inner.union_fragment_for_table(),
                 None,
-            );
+            )?;
         }
 
         let [table_catalog]: [_; 1] = mgr
@@ -932,9 +933,7 @@ impl DdlController {
             .expect("Target table should exist in sink into table");
 
         {
-            let catalogs = mgr
-                .get_sink_catalog_by_ids(&table_catalog.incoming_sinks)
-                .await?;
+            let catalogs = mgr.get_table_incoming_sinks(table_catalog.id).await?;
 
             for sink in catalogs {
                 let sink_id = sink.id;
@@ -945,6 +944,12 @@ impl DdlController {
                     continue;
                 };
 
+                if let Some(creating_sink) = creating_sink_table_fragments
+                    && creating_sink.stream_job_id.table_id == sink_id
+                {
+                    continue;
+                }
+
                 let sink_table_fragments = mgr
                     .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink_id))
                     .await?;
@@ -953,12 +958,13 @@ impl DdlController {
 
                 Self::inject_replace_table_plan_for_sink(
                     sink_id,
+                    &sink,
                     &sink_fragment,
                     target_table,
                     &mut replace_table_ctx,
                     stream_job_fragments.inner.union_fragment_for_table(),
                     Some(&sink.unique_identity()),
-                );
+                )?;
             }
         }
 
@@ -1009,12 +1015,13 @@ impl DdlController {
 
     pub(crate) fn inject_replace_table_plan_for_sink(
         sink_id: u32,
+        sink: &PbSink,
         sink_fragment: &Fragment,
         table: &Table,
         replace_table_ctx: &mut ReplaceStreamJobContext,
         union_fragment: &mut Fragment,
         unique_identity: Option<&str>,
-    ) {
+    ) -> MetaResult<()> {
         let sink_fields = sink_fragment.nodes.fields.clone();
 
         let output_indices = sink_fields
@@ -1023,7 +1030,45 @@ impl DdlController {
             .map(|(idx, _)| idx as _)
             .collect_vec();
 
-        let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
+        let dist_key_indices: anyhow::Result<Vec<u32>> = try {
+            let sink_columns = if !sink.original_target_columns.is_empty() {
+                sink.original_target_columns.clone()
+            } else {
+                table.columns.clone()
+            };
+            let sink_idx_by_col_id = sink_columns
+                .into_iter()
+                .enumerate()
+                .map(|(idx, col)| {
+                    let column_desc = col
+                        .column_desc
+                        .ok_or_else(|| anyhow::anyhow!("sink column_desc is None"))?;
+                    Ok((column_desc.column_id, idx as u32))
+                })
+                .collect::<anyhow::Result<HashMap<_, _>>>()?;
+            table
+                .distribution_key
+                .iter()
+                .map(|dist_idx| {
+                    let column_desc = table.columns[*dist_idx as usize]
+                        .column_desc
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("table column_desc is None"))?;
+                    let sink_idx =
+                        sink_idx_by_col_id
+                            .get(&column_desc.column_id)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "column id {} not found in sink",
+                                    column_desc.column_id
+                                )
+                            })?;
+                    Ok(*sink_idx)
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?
+        };
+        let dist_key_indices =
+            dist_key_indices.map_err(|e| e.context("failed to get distribution key indices"))?;
 
         let sink_fragment_downstreams = replace_table_ctx
             .upstream_fragment_downstreams
@@ -1034,7 +1079,7 @@ impl DdlController {
             sink_fragment_downstreams.push(DownstreamFragmentRelation {
                 downstream_fragment_id: union_fragment.fragment_id,
                 dispatcher_type: DispatcherType::Hash,
-                dist_key_indices: dist_key_indices.clone(),
+                dist_key_indices,
                 output_mapping: PbDispatchOutputMapping::simple(output_indices),
             });
         }
@@ -1096,6 +1141,8 @@ impl DdlController {
                 });
             }
         }
+
+        Ok(())
     }
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
@@ -1504,8 +1551,6 @@ impl DdlController {
                             streaming_job,
                             replace_upstream,
                             SinkIntoTableContext {
-                                creating_sink_id: None,
-                                dropping_sink_id: Some(sink_id),
                                 updated_sink_catalogs: vec![],
                             },
                             None, // no source is dropped when dropping sink into table
@@ -1782,7 +1827,7 @@ impl DdlController {
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
                 let catalogs = self
                     .metadata_manager
-                    .get_sink_catalog_by_ids(&table.incoming_sinks)
+                    .get_table_incoming_sinks(table.id)
                     .await?;
 
                 for sink in catalogs {
@@ -1799,12 +1844,13 @@ impl DdlController {
 
                     Self::inject_replace_table_plan_for_sink(
                         *sink_id,
+                        &sink,
                         &sink_fragment,
                         table,
                         &mut ctx,
                         stream_job_fragments.inner.union_fragment_for_table(),
                         Some(&sink.unique_identity()),
-                    );
+                    )?;
 
                     if sink.original_target_columns.is_empty() {
                         updated_sink_catalogs.push(sink.id as _);
@@ -1826,10 +1872,7 @@ impl DdlController {
                             &sink.actor_status,
                             &empty_actor_splits,
                             &empty_downstreams,
-                            false,
-                            sink.original_sink.definition.clone(),
                             true,
-                            Some(&sink.original_sink),
                             None,
                         )
                         .await?;
@@ -1857,8 +1900,6 @@ impl DdlController {
                         streaming_job,
                         replace_upstream,
                         SinkIntoTableContext {
-                            creating_sink_id: None,
-                            dropping_sink_id: None,
                             updated_sink_catalogs,
                         },
                         drop_table_connector_ctx.as_ref(),

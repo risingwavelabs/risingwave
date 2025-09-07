@@ -17,7 +17,7 @@ USER airflow
 RUN pip install --no-cache-dir "apache-airflow==${AIRFLOW_VERSION}" apache-airflow-providers-apache-spark==4.1.1 pyspark==3.3.1
 
 
-FROM bitnami/spark:3.3 as spark
+FROM bitnamilegacy/spark:3.3 as spark
 
 USER root
 

@@ -31,10 +31,10 @@ use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array,
-    JobStatus, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId,
-    UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment, fragment_relation,
-    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
-    subscription, table, user, user_default_privilege, user_privilege, view,
+    JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
+    TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment,
+    fragment_relation, function, index, object, object_dependency, schema, secret, sink, source,
+    streaming_job, subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -366,6 +366,20 @@ where
             object_type.as_str(),
             obj_id,
         ));
+    }
+    Ok(())
+}
+
+pub async fn ensure_job_not_canceled<C>(job_id: ObjectId, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Object::find_by_id(job_id).count(db).await?;
+    if count == 0 {
+        return Err(MetaError::cancelled(format!(
+            "job {} might be cancelled manually or by recovery",
+            job_id
+        )));
     }
     Ok(())
 }
@@ -2048,25 +2062,20 @@ pub async fn rename_relation_refer(
     }
     let mut objs = get_referring_objects(object_id, txn).await?;
     if object_type == ObjectType::Table {
-        let incoming_sinks: I32Array = Table::find_by_id(object_id)
+        let incoming_sinks: Vec<SinkId> = Sink::find()
             .select_only()
-            .column(table::Column::IncomingSinks)
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::TargetTable.eq(object_id))
             .into_tuple()
-            .one(txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+            .all(txn)
+            .await?;
 
-        objs.extend(
-            incoming_sinks
-                .into_inner()
-                .into_iter()
-                .map(|id| PartialObject {
-                    oid: id,
-                    obj_type: ObjectType::Sink,
-                    schema_id: None,
-                    database_id: None,
-                }),
-        );
+        objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
+            oid: id,
+            obj_type: ObjectType::Sink,
+            schema_id: None,
+            database_id: None,
+        }));
     }
 
     for obj in objs {

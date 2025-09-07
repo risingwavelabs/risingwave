@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_pb::stream_plan::SortNode;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::eowc::{SortExecutor, SortExecutorArgs};
 
 pub struct SortExecutorBuilder;
@@ -32,8 +32,10 @@ impl ExecutorBuilder for SortExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for sort"));
-        let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, store, Some(vnodes)).await;
+        let state_table = StateTableBuilder::new(node.get_state_table()?, store, Some(vnodes))
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
         let exec = SortExecutor::new(SortExecutorArgs {
             actor_ctx: params.actor_context,
             schema: params.info.schema.clone(),

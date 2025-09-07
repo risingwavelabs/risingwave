@@ -33,7 +33,7 @@ use crate::TableCatalog;
 use crate::binder::BoundBaseTable;
 use crate::catalog::ColumnId;
 use crate::catalog::index_catalog::{IndexType, TableIndex, VectorIndex};
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::ApplyResult;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -608,20 +608,21 @@ impl ToStream for LogicalScan {
         ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self.predicate().always_true() {
-            // Force rewrite scan type to cross-db scan
-            if self.core.table_catalog.database_id != self.base.ctx().session_ctx().database_id() {
-                Ok(StreamTableScan::new_with_stream_scan_type(
-                    self.core.clone(),
-                    StreamScanType::CrossDbSnapshotBackfill,
+            if self.core.cross_database() && ctx.stream_scan_type() == StreamScanType::UpstreamOnly
+            {
+                return Err(ErrorCode::NotSupported(
+                    "We currently do not support cross database scan in upstream only mode."
+                        .to_owned(),
+                    "Please ensure the source table is in the same database.".to_owned(),
                 )
-                .into())
-            } else {
-                Ok(StreamTableScan::new_with_stream_scan_type(
-                    self.core.clone(),
-                    ctx.stream_scan_type(),
-                )
-                .into())
+                .into());
             }
+
+            Ok(StreamTableScan::new_with_stream_scan_type(
+                self.core.clone(),
+                ctx.stream_scan_type(),
+            )
+            .into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

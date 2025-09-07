@@ -27,6 +27,7 @@ user batch_enable_distributed_dml
 user batch_enable_lookup_join
 user batch_enable_sort_agg
 user batch_expr_strict_mode
+user batch_hnsw_ef_search
 user batch_parallelism
 user bypass_cluster_limits
 user bytea_output

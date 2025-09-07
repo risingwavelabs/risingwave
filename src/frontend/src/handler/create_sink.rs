@@ -32,13 +32,19 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
+use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
+use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
+use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    enforce_secret_sink,
+    Sink, enforce_secret_sink,
 };
-use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
+use risingwave_connector::{
+    AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
+    SINK_TARGET_TABLE_NAME, WithPropertiesExt,
+};
 use risingwave_pb::catalog::PbSink;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
@@ -55,7 +61,6 @@ use super::create_mv::get_column_names;
 use super::create_source::{SqlColumnStrategy, UPSTREAM_SOURCE_KEY};
 use super::util::gen_query_from_table_name;
 use crate::binder::{Binder, Relation};
-use crate::catalog::SinkId;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
@@ -175,6 +180,21 @@ pub async fn gen_sink_plan(
         Feature::SinkAutoSchemaChange.check_available()?;
     }
 
+    let sink_into_table_name = stmt.into_table_name.as_ref().map(|name| name.real_value());
+    if sink_into_table_name.is_some() {
+        let prev = resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_owned(), "table".to_owned());
+
+        if prev.is_some() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_owned(),
+            )));
+        }
+    }
+    let connector = resolved_with_options
+        .get(CONNECTOR_TYPE_KEY)
+        .cloned()
+        .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
+
     // Used for debezium's table name
     let sink_from_table_name;
     // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
@@ -184,10 +204,39 @@ pub async fn gen_sink_plan(
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
             direct_sink_from_name = Some((from_name.clone(), is_auto_schema_change));
-            if is_auto_schema_change && stmt.into_table_name.is_some() {
+            if is_auto_schema_change && sink_into_table_name.is_some() {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "auto schema change not supported for sink-into-table".to_owned(),
                 )));
+            }
+            if resolved_with_options
+                .value_eq_ignore_case(SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, "true")
+                && connector == RedshiftSink::SINK_NAME
+                || connector == SnowflakeV2Sink::SINK_NAME
+            {
+                if let Some(table_name) = resolved_with_options.get(SINK_TARGET_TABLE_NAME) {
+                    // auto fill intermediate table name if target table name is specified
+                    if resolved_with_options
+                        .get(SINK_INTERMEDIATE_TABLE_NAME)
+                        .is_none()
+                    {
+                        // generate the intermediate table name with random value appended to the target table name
+                        let intermediate_table_name = format!(
+                            "rw_{}_{}_{}",
+                            sink_table_name,
+                            table_name,
+                            uuid::Uuid::new_v4()
+                        );
+                        resolved_with_options.insert(
+                            SINK_INTERMEDIATE_TABLE_NAME.to_owned(),
+                            intermediate_table_name,
+                        );
+                    }
+                } else {
+                    return Err(RwError::from(ErrorCode::BindError(
+                        "'table.name' option must be specified.".to_owned(),
+                    )));
+                }
             }
             Box::new(gen_query_from_table_name(from_name))
         }
@@ -202,8 +251,6 @@ pub async fn gen_sink_plan(
             query
         }
     };
-
-    let sink_into_table_name = stmt.into_table_name.as_ref().map(|name| name.real_value());
 
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
@@ -242,6 +289,7 @@ pub async fn gen_sink_plan(
         } else {
             None
         };
+
         let bound = binder.bind_query(&query)?;
 
         (
@@ -259,25 +307,10 @@ pub async fn gen_sink_plan(
         get_column_names(&bound, stmt.columns)?
     };
 
-    if sink_into_table_name.is_some() {
-        let prev = resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_owned(), "table".to_owned());
-
-        if prev.is_some() {
-            return Err(RwError::from(ErrorCode::BindError(
-                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_owned(),
-            )));
-        }
-    }
-
     let emit_on_window_close = stmt.emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
-
-    let connector = resolved_with_options
-        .get(CONNECTOR_TYPE_KEY)
-        .cloned()
-        .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
 
     let format_desc = match stmt.sink_schema {
         // Case A: new syntax `format ... encode ...`
@@ -326,7 +359,7 @@ pub async fn gen_sink_plan(
     let target_table_catalog = stmt
         .into_table_name
         .as_ref()
-        .map(|table_name| fetch_table_catalog_for_alter(session, table_name))
+        .map(|table_name| fetch_table_catalog_for_alter(session, table_name).map(|t| t.0))
         .transpose()?;
 
     if let Some(target_table_catalog) = &target_table_catalog {
@@ -578,17 +611,12 @@ pub async fn handle_create_sink(
     if let Some(table_catalog) = target_table_catalog {
         use crate::handler::alter_table_column::hijack_merger_for_target_table;
 
-        let (mut graph, mut table, source, target_job_type) =
+        let (mut graph, table, source, target_job_type) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
         sink.original_target_columns = table.columns.clone();
 
-        table
-            .incoming_sinks
-            .clone_from(&table_catalog.incoming_sinks);
-
-        let incoming_sink_ids: HashSet<_> = table_catalog.incoming_sinks.iter().copied().collect();
-        let incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
+        let incoming_sinks = fetch_incoming_sinks(&session, &table_catalog)?;
 
         let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
         for existing_sink in incoming_sinks {
@@ -642,19 +670,22 @@ pub async fn handle_create_sink(
 
 pub fn fetch_incoming_sinks(
     session: &Arc<SessionImpl>,
-    incoming_sink_ids: &HashSet<SinkId>,
+    table: &TableCatalog,
 ) -> Result<Vec<Arc<SinkCatalog>>> {
     let reader = session.env().catalog_reader().read_guard();
-    let mut sinks = Vec::with_capacity(incoming_sink_ids.len());
-    let db_name = &session.database();
-    for schema in reader.iter_schemas(db_name)? {
-        for sink in schema.iter_sink() {
-            if incoming_sink_ids.contains(&sink.id.sink_id) {
-                sinks.push(sink.clone());
-            }
-        }
+    let schema = reader.get_schema_by_id(&table.database_id, &table.schema_id)?;
+    let Some(incoming_sinks) = schema.table_incoming_sinks(table.id) else {
+        return Ok(vec![]);
+    };
+    let mut sinks = vec![];
+    for sink_id in incoming_sinks {
+        sinks.push(
+            schema
+                .get_sink_by_id(sink_id)
+                .expect("should exist")
+                .clone(),
+        );
     }
-
     Ok(sinks)
 }
 
@@ -879,7 +910,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::file_sink::fs::FsSink;
         use risingwave_connector::sink::file_sink::gcs::GcsSink;
         use risingwave_connector::sink::file_sink::opendal_sink::FileSink;
-        use risingwave_connector::sink::file_sink::s3::{S3Sink, SnowflakeSink};
+        use risingwave_connector::sink::file_sink::s3::S3Sink;
         use risingwave_connector::sink::file_sink::webhdfs::WebhdfsSink;
         use risingwave_connector::sink::google_pubsub::GooglePubSubSink;
         use risingwave_connector::sink::kafka::KafkaSink;

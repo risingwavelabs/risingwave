@@ -455,7 +455,7 @@ impl Binder {
             "table {table_id} not found in {db_name}.{schema_name}"
         );
 
-        Ok(schema.get_indexes_by_table_id(&table_id))
+        Ok(schema.get_created_indexes_by_table_id(&table_id))
     }
 
     pub(crate) fn bind_table(

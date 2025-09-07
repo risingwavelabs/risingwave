@@ -12,3 +12,21 @@
     sql parser error: invalid data_type: unconsumed `>>`
     LINE 1: SELECT NULL::STRUCT<v1 INT, v2 INT>>
                                                 ^
+- input: SELECT NULL::STRUCT<>
+  error_msg: |-
+    sql parser error: invalid struct_data_type
+    LINE 1: SELECT NULL::STRUCT<>
+                               ^
+- input: SELECT NULL::STRUCT< >
+  formatted_sql: SELECT CAST(NULL AS STRUCT< >)
+- input: create table empty_struct (v1 int, v2 struct< >, v3 struct<  >)
+  formatted_sql: CREATE TABLE empty_struct (v1 INT, v2 STRUCT< >, v3 STRUCT< >)
+- input: create table nested_empty_struct (v struct<v struct<>>)
+  error_msg: |-
+    sql parser error: invalid struct_data_type
+    LINE 1: create table nested_empty_struct (v struct<v struct<>>)
+                                                               ^
+- input: create table nested_empty_struct (v struct<v1 struct<   >, v2 struct< >>)
+  formatted_sql: CREATE TABLE nested_empty_struct (v STRUCT<v1 STRUCT< >, v2 STRUCT< >>)
+- input: SELECT ARRAY[]::STRUCT< >[]
+  formatted_sql: SELECT CAST(ARRAY[] AS STRUCT< >[])
