@@ -694,7 +694,7 @@ impl CatalogController {
                                 VnodeBitmap::from(&bitmap.to_protobuf())
                             }),
                             expr_context_2: (&PbExprContext {
-                                time_zone: job_info.timezone.clone().unwrap_or("".to_string()),
+                                time_zone: job_info.timezone.clone().unwrap_or("".to_owned()),
                                 strict_mode: false,
                             }).into(),
                         })
@@ -1117,7 +1117,7 @@ impl CatalogController {
                                     VnodeBitmap::from(&bitmap.to_protobuf())
                                 }),
                                 expr_context_2: (&PbExprContext {
-                                    time_zone: job.timezone.clone().unwrap_or("".to_string()),
+                                    time_zone: job.timezone.clone().unwrap_or("".to_owned()),
                                     strict_mode: false,
                                 }).into()
                             })
@@ -2553,7 +2553,7 @@ mod tests {
                         .map(|bitmap| bitmap.to_protobuf())
                         .as_ref()
                         .map(VnodeBitmap::from),
-                    expr_context: ExprContext::from(&PbExprContext {
+                    expr_context_2: ExprContext::from(&PbExprContext {
                         time_zone: String::from("America/New_York"),
                         strict_mode: false,
                     }),
@@ -2618,7 +2618,7 @@ mod tests {
                 splits,
                 worker_id: _,
                 vnode_bitmap,
-                expr_context,
+                expr_context_2,
                 ..
             },
             StreamActor {
@@ -2659,7 +2659,7 @@ mod tests {
                 pb_actor_splits.get(&pb_actor_id).map(ConnectorSplits::from)
             );
 
-            assert_eq!(Some(expr_context.to_protobuf()), pb_expr_context);
+            assert_eq!(Some(expr_context_2.to_protobuf()), pb_expr_context);
         }
     }
 

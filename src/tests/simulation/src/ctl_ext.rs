@@ -132,6 +132,7 @@ impl Fragment {
     }
 
     /// Generate a reschedule plan for the fragment.
+    #[deprecated]
     pub fn reschedule(
         &self,
         remove: impl AsRef<[WorkerSlotId]>,
@@ -187,6 +188,7 @@ impl Fragment {
     /// Generate a random reschedule plan for the fragment.
     ///
     /// Consumes `self` as the actor info will be stale after rescheduling.
+    #[deprecated]
     pub fn random_reschedule(self) -> String {
         let all_worker_slots = self.all_worker_slots();
         let used_worker_slots = self.used_worker_slots();

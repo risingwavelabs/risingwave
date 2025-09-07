@@ -16,9 +16,9 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 
-use crate::{
-    ConnectorSplits, SourceId, source_splits,
-};
+
+use crate::{ConnectorSplits, SourceId, source_splits};
+
 
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
