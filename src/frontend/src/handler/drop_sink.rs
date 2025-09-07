@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::StreamJobStatus;
 use risingwave_pb::ddl_service::{ReplaceJobPlan, replace_job_plan};
@@ -84,16 +82,15 @@ pub async fn handle_drop_sink(
                 table.clone()
             };
 
-            let (mut graph, mut table, source, target_job_type) =
+            let (mut graph, table, source, target_job_type) =
                 reparse_table_for_sink(&session, &table_catalog).await?;
 
-            let mut incoming_sink_ids: HashSet<_> =
-                table_catalog.incoming_sinks.iter().copied().collect();
-            incoming_sink_ids.remove(&sink_id.sink_id);
-            table.incoming_sinks = incoming_sink_ids.iter().cloned().collect();
-
             let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
-            for sink in fetch_incoming_sinks(&session, &incoming_sink_ids)? {
+            for sink in fetch_incoming_sinks(&session, &table_catalog)? {
+                if sink.id == sink_id {
+                    // Skip the sink being dropped.
+                    continue;
+                }
                 hijack_merger_for_target_table(
                     &mut graph,
                     &columns_without_rw_timestamp,

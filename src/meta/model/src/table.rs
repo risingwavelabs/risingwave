@@ -201,7 +201,7 @@ pub struct Model {
     pub value_indices: I32Array,
     pub definition: String,
     pub handle_pk_conflict_behavior: HandleConflictBehavior,
-    pub version_column_index: Option<i32>,
+    pub version_column_indices: Option<I32Array>,
     pub read_prefix_len_hint: i32,
     pub watermark_indices: I32Array,
     pub dist_key_in_pk: I32Array,
@@ -211,7 +211,6 @@ pub struct Model {
     pub description: Option<String>,
     pub version: Option<TableVersion>,
     pub retention_seconds: Option<i32>,
-    pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
     pub vnode_count: i32,
     pub webhook_info: Option<WebhookSourceInfo>,
@@ -338,7 +337,14 @@ impl From<PbTable> for ActiveModel {
             value_indices: Set(pb_table.value_indices.into()),
             definition: Set(pb_table.definition),
             handle_pk_conflict_behavior: Set(handle_pk_conflict_behavior.into()),
-            version_column_index: Set(pb_table.version_column_index.map(|x| x as i32)),
+            version_column_indices: Set(Some(
+                pb_table
+                    .version_column_indices
+                    .iter()
+                    .map(|x| *x as i32)
+                    .collect::<Vec<_>>()
+                    .into(),
+            )),
             read_prefix_len_hint: Set(pb_table.read_prefix_len_hint as _),
             watermark_indices: Set(pb_table.watermark_indices.into()),
             dist_key_in_pk: Set(pb_table.dist_key_in_pk.into()),
@@ -348,7 +354,6 @@ impl From<PbTable> for ActiveModel {
             description: Set(pb_table.description),
             version: Set(pb_table.version.as_ref().map(|v| v.into())),
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
-            incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
             vnode_count,
             webhook_info: Set(pb_table.webhook_info.as_ref().map(WebhookSourceInfo::from)),

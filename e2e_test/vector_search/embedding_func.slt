@@ -18,10 +18,7 @@ select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v
 ----
 NULL
 
-statement ok
-create function get_embedding(string) returns vector(3) language sql as $$
-select openai_embedding('{"model": "model", "api_base": "http://127.0.0.1:8088/v1"}'::jsonb, $1)::vector(3);
-$$;
+include create_embedding_udf.slt.part
 
 query
 select get_embedding('first')::vector(3);
@@ -89,5 +86,4 @@ drop materialized view embedding_mv;
 statement ok
 drop table t;
 
-statement ok
-drop function get_embedding;
+include drop_embedding_udf.slt.part

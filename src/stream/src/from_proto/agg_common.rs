@@ -16,11 +16,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::*;
 use crate::common::StateTableColumnMapping;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTableBuilder};
 use crate::executor::aggregate::AggStateStorage;
 
 /// Parse from stream proto plan agg call states, generate state tables and column mappings.
@@ -29,6 +30,7 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
     agg_call_states: &[risingwave_pb::stream_plan::AggCallState],
     store: S,
     vnodes: Option<Arc<Bitmap>>,
+    streaming_config: &StreamingConfig,
 ) -> Vec<AggStateStorage<S>> {
     use risingwave_pb::stream_plan::agg_call_state;
 
@@ -37,11 +39,13 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
         let agg_state_store = match agg_call_state.get_inner().unwrap() {
             agg_call_state::Inner::ValueState(..) => AggStateStorage::Value,
             agg_call_state::Inner::MaterializedInputState(state) => {
-                let table = StateTable::from_table_catalog(
+                let table = StateTableBuilder::new(
                     state.get_table().unwrap(),
                     store.clone(),
                     vnodes.clone(),
                 )
+                .enable_preload_all_rows_by_config(streaming_config)
+                .build()
                 .await;
                 let mapping = StateTableColumnMapping::new(
                     state
@@ -80,12 +84,16 @@ pub async fn build_distinct_dedup_table_from_proto<S: StateStore>(
     dedup_tables: &HashMap<u32, risingwave_pb::catalog::Table>,
     store: S,
     vnodes: Option<Arc<Bitmap>>,
+    streaming_config: &StreamingConfig,
 ) -> HashMap<usize, StateTable<S>> {
     if dedup_tables.is_empty() {
         return HashMap::new();
     }
     futures::future::join_all(dedup_tables.iter().map(|(distinct_col, table_pb)| async {
-        let table = StateTable::from_table_catalog(table_pb, store.clone(), vnodes.clone()).await;
+        let table = StateTableBuilder::new(table_pb, store.clone(), vnodes.clone())
+            .enable_preload_all_rows_by_config(streaming_config)
+            .build()
+            .await;
         (*distinct_col as usize, table)
     }))
     .await

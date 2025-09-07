@@ -33,10 +33,9 @@ use iceberg::{
     TableUpdate,
 };
 use itertools::Itertools;
-use jni::JavaVM;
 use jni::objects::{GlobalRef, JObject};
 use risingwave_common::bail;
-use risingwave_common::global_jvm::JVM;
+use risingwave_common::global_jvm::Jvm;
 use risingwave_jni_core::call_method;
 use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str};
 use serde::{Deserialize, Serialize};
@@ -113,7 +112,7 @@ impl From<&TableCreation> for CreateTableRequest {
 #[derive(Debug)]
 pub struct JniCatalog {
     java_catalog: GlobalRef,
-    jvm: &'static JavaVM,
+    jvm: Jvm,
     file_io_props: HashMap<String, String>,
 }
 
@@ -511,7 +510,7 @@ impl JniCatalog {
         catalog_impl: impl ToString,
         java_catalog_props: HashMap<String, String>,
     ) -> ConnectorResult<Self> {
-        let jvm = JVM.get_or_init()?;
+        let jvm = Jvm::get_or_init()?;
 
         execute_with_jni_env(jvm, |env| {
             // Convert props to string array

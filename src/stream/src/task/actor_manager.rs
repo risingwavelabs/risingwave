@@ -38,7 +38,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
@@ -177,8 +177,10 @@ impl StreamActorManager {
             BatchTable::new_partial(state_store.clone(), column_ids, vnodes.clone(), table_desc);
 
         let state_table = node.get_state_table()?;
-        let state_table =
-            StateTable::from_table_catalog(state_table, state_store.clone(), vnodes).await;
+        let state_table = StateTableBuilder::new(state_table, state_store.clone(), vnodes)
+            .enable_preload_all_rows_by_config(&actor_context.streaming_config)
+            .build()
+            .await;
 
         let executor = SnapshotBackfillExecutor::new(
             upstream_table,

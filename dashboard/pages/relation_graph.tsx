@@ -126,16 +126,19 @@ export default function StreamingGraph() {
       if (!fragmentToRelationMap) {
         return new Map<string, ChannelDeltaStats>()
       }
-      let inMap = fragmentToRelationMap.inMap
-      let outMap = fragmentToRelationMap.outMap
+      let mapping = fragmentToRelationMap.fragmentToRelationMap
       if (channelStats) {
         let map = new Map<string, ChannelDeltaStats>()
         for (const [key, stats] of channelStats) {
           const [outputFragment, inputFragment] = key.split("_").map(Number)
-          if (outMap[outputFragment] && inMap[inputFragment]) {
-            const outputRelation = outMap[outputFragment]
-            const inputRelation = inMap[inputFragment]
-            let key = `${outputRelation}_${inputRelation}`
+          let input_relation = mapping[inputFragment]
+          let output_relation = mapping[outputFragment]
+          if (
+            input_relation &&
+            output_relation &&
+            input_relation !== output_relation
+          ) {
+            let key = `${output_relation}_${input_relation}`
             map.set(key, stats)
           }
         }

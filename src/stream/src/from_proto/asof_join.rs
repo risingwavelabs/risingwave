@@ -20,7 +20,7 @@ use risingwave_pb::plan_common::AsOfJoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::{AsOfJoinNode, JoinEncodingType as JoinEncodingTypeProto};
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTableBuilder};
 use crate::executor::asof_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -81,11 +81,15 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
 
-        let state_table_l =
-            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone())).await;
+        let state_table_l = StateTableBuilder::new(table_l, store.clone(), Some(vnodes.clone()))
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
 
-        let state_table_r =
-            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone())).await;
+        let state_table_r = StateTableBuilder::new(table_r, store.clone(), Some(vnodes.clone()))
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
 
         let join_type_proto = node.get_join_type()?;
         let as_of_desc_proto = node.get_asof_desc()?;

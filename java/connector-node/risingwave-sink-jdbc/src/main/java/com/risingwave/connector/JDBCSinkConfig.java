@@ -42,6 +42,13 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "jdbc.auto.commit")
     private boolean autoCommit = false;
 
+    @JsonProperty(value = "database.name")
+    private String databaseName;
+
+    // Only applicable for redshift BatchAppendOnlyJDBCSink
+    @JsonProperty(value = "batch.insert.rows")
+    private int batchInsertRows = 0;
+
     @JsonCreator
     public JDBCSinkConfig(
             @JsonProperty(value = "jdbc.url") String jdbcUrl,
@@ -87,5 +94,13 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public boolean isAutoCommit() {
         return autoCommit;
+    }
+
+    public String getDatabaseName() {
+        return databaseName;
+    }
+
+    public int getBatchInsertRows() {
+        return batchInsertRows;
     }
 }

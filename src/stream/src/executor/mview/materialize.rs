@@ -24,7 +24,7 @@ use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
+    ColumnDesc, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
 use risingwave_common::row::{CompactedRow, OwnedRow};
 use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DataType, ScalarImpl};
@@ -38,8 +38,9 @@ use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
-use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
-use crate::common::table::test_utils::gen_pbtable;
+use crate::common::table::state_table::{
+    StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
+};
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::prelude::*;
 
@@ -60,7 +61,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     conflict_behavior: ConflictBehavior,
 
-    version_column_index: Option<u32>,
+    version_column_indices: Vec<u32>,
 
     may_have_downstream: bool,
 
@@ -107,7 +108,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
-        version_column_index: Option<u32>,
+        version_column_indices: Vec<u32>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -167,13 +168,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             &depended_subscription_ids,
         );
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
-        let state_table = StateTableInner::from_table_catalog_with_consistency_level(
-            table_catalog,
-            store,
-            vnodes,
-            op_consistency_level,
-        )
-        .await;
+        let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
+            .with_op_consistency_level(op_consistency_level)
+            .enable_preload_all_rows_by_config(&actor_context.streaming_config)
+            .build()
+            .await;
 
         let mv_metrics = metrics.new_materialize_metrics(
             TableId::new(table_catalog.id),
@@ -197,10 +196,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 watermark_epoch,
                 metrics_info,
                 row_serde,
-                version_column_index,
+                version_column_indices.clone(),
             ),
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             is_dummy_table,
             may_have_downstream,
             depended_subscription_ids,
@@ -243,7 +242,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false,
                     // and the conflict behavior is overwrite.
                     let do_not_handle_conflict = !self.state_table.is_consistent_op()
-                        && self.version_column_index.is_none()
+                        && self.version_column_indices.is_empty()
                         && self.conflict_behavior == ConflictBehavior::Overwrite;
 
                     match self.conflict_behavior {
@@ -403,13 +402,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
 impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
-    #[allow(clippy::too_many_arguments)]
+    #[cfg(any(test, feature = "test"))]
     pub async fn for_test(
         input: Executor,
         store: S,
         table_id: TableId,
         keys: Vec<ColumnOrder>,
-        column_ids: Vec<ColumnId>,
+        column_ids: Vec<risingwave_common::catalog::ColumnId>,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
@@ -427,7 +426,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             Arc::from(columns.clone().into_boxed_slice()),
         );
         let state_table = StateTableInner::from_table_catalog(
-            &gen_pbtable(
+            &crate::common::table::test_utils::gen_pbtable(
                 table_id,
                 columns,
                 arrange_order_types,
@@ -451,10 +450,10 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 watermark_epoch,
                 MetricsInfo::for_test(),
                 row_serde,
-                None,
+                vec![],
             ),
             conflict_behavior,
-            version_column_index: None,
+            version_column_indices: vec![],
             is_dummy_table: false,
             toastable_column_indices: None,
             may_have_downstream: true,
@@ -681,7 +680,7 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 struct MaterializeCache<SD> {
     lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
     row_serde: BasicSerde,
-    version_column_index: Option<u32>,
+    version_column_indices: Vec<u32>,
     _serde: PhantomData<SD>,
 }
 
@@ -692,14 +691,14 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
-        version_column_index: Option<u32>,
+        version_column_indices: Vec<u32>,
     ) -> Self {
         let lru_cache: ManagedLruCache<Vec<u8>, CacheValue> =
             ManagedLruCache::unbounded(watermark_sequence, metrics_info.clone());
         Self {
             lru_cache,
             row_serde,
-            version_column_index,
+            version_column_indices,
             _serde: PhantomData,
         }
     }
@@ -731,7 +730,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
         let mut change_buffer = ChangeBuffer::new();
         let row_serde = self.row_serde.clone();
-        let version_column_index = self.version_column_index;
+        let version_column_indices = self.version_column_indices.clone();
         for (op, key, row) in row_ops {
             match op {
                 Op::Insert | Op::UpdateInsert => {
@@ -752,10 +751,11 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                             let new_row_deserialized =
                                 row_serde.deserializer.deserialize(row.clone())?;
 
-                            let need_overwrite = if let Some(idx) = version_column_index {
-                                version_is_newer_or_equal(
-                                    old_row_deserialized.index(idx as usize),
-                                    new_row_deserialized.index(idx as usize),
+                            let need_overwrite = if !version_column_indices.is_empty() {
+                                versions_are_newer_or_equal(
+                                    &old_row_deserialized,
+                                    &new_row_deserialized,
+                                    &version_column_indices,
                                 )
                             } else {
                                 // no version column specified, just overwrite
@@ -806,10 +806,11 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 row_serde.deserializer.deserialize(old_row.row.clone())?;
                             let new_row_deserialized =
                                 row_serde.deserializer.deserialize(row.clone())?;
-                            let need_overwrite = if let Some(idx) = version_column_index {
-                                version_is_newer_or_equal(
-                                    old_row_deserialized.index(idx as usize),
-                                    new_row_deserialized.index(idx as usize),
+                            let need_overwrite = if !version_column_indices.is_empty() {
+                                versions_are_newer_or_equal(
+                                    &old_row_deserialized,
+                                    &new_row_deserialized,
+                                    &version_column_indices,
                                 )
                             } else {
                                 true
@@ -953,13 +954,31 @@ fn replace_if_not_null(row: &mut Vec<Option<ScalarImpl>>, replacement: OwnedRow)
     }
 }
 
-/// Determines whether pk conflict handling should update an existing row with newly-received value,
-/// according to the value of version column of the new and old rows.
-fn version_is_newer_or_equal(
-    old_version: &Option<ScalarImpl>,
-    new_version: &Option<ScalarImpl>,
+/// Compare multiple version columns lexicographically.
+/// Returns true if `new_row` has a newer or equal version compared to `old_row`.
+fn versions_are_newer_or_equal(
+    old_row: &OwnedRow,
+    new_row: &OwnedRow,
+    version_column_indices: &[u32],
 ) -> bool {
-    cmp_datum(old_version, new_version, OrderType::ascending_nulls_first()).is_le()
+    if version_column_indices.is_empty() {
+        // No version columns specified, always consider new version as newer
+        return true;
+    }
+
+    for &idx in version_column_indices {
+        let old_value = old_row.index(idx as usize);
+        let new_value = new_row.index(idx as usize);
+
+        match cmp_datum(old_value, new_value, OrderType::ascending_nulls_first()) {
+            std::cmp::Ordering::Less => return true,     // new is newer
+            std::cmp::Ordering::Greater => return false, // old is newer
+            std::cmp::Ordering::Equal => continue,       // equal, check next column
+        }
+    }
+
+    // All version columns are equal, consider new version as equal (should overwrite)
+    true
 }
 
 #[cfg(test)]
@@ -2149,7 +2168,7 @@ mod tests {
         let pk_indices = vec![0];
 
         let mut table = StateTable::from_table_catalog(
-            &gen_pbtable(
+            &crate::common::table::test_utils::gen_pbtable(
                 TableId::from(1002),
                 column_descs.clone(),
                 order_types,

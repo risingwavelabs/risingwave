@@ -225,6 +225,8 @@ pub struct DebeziumSourceOffset {
     #[serde(rename = "txId")]
     pub txid: Option<i64>,
     pub tx_usec: Option<u64>,
+    pub lsn_commit: Option<u64>,
+    pub lsn_proc: Option<u64>,
 
     // sql server offset
     pub commit_lsn: Option<String>,
@@ -509,3 +511,5 @@ impl ExternalTableImpl {
         }
     }
 }
+
+pub const CDC_TABLE_SPLIT_ID_START: i64 = 1;
