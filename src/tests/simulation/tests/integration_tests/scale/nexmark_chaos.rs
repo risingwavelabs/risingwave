@@ -16,9 +16,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use itertools::Itertools;
+use rand::Rng;
 use risingwave_simulation::cluster::Configuration;
-use risingwave_simulation::ctl_ext::Fragment;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
@@ -29,16 +28,18 @@ use tokio::time::sleep;
 /// - If `MULTIPLE` is true, we'll randomly pick random number of fragments and reschedule them,
 ///   then pick another set to reschedule again.
 async fn nexmark_chaos_common_inner(
+    query_name: &'static str,
     create: &'static str,
     select: &'static str,
     drop: &'static str,
     initial_interval: Duration,
     initial_timeout: Duration,
     after_scale_duration: Duration,
-    multiple: bool,
+    _multiple: bool,
 ) -> Result<()> {
-    let mut cluster =
-        NexmarkCluster::new(Configuration::for_scale(), 6, Some(20 * THROUGHPUT), false).await?;
+    let configuration = Configuration::for_scale();
+    let total_cores = configuration.total_streaming_cores();
+    let mut cluster = NexmarkCluster::new(configuration, 6, Some(20 * THROUGHPUT), false).await?;
     let mut session = cluster.start_session();
     session.run(create).await?;
     sleep(Duration::from_secs(30)).await;
@@ -56,33 +57,32 @@ async fn nexmark_chaos_common_inner(
         .await?
         .assert_result_ne(&final_result);
 
-    if multiple {
-        let join_plans = |fragments: Vec<Fragment>| {
-            fragments
-                .into_iter()
-                .map(|f| f.random_reschedule())
-                .join(";")
-        };
+    let (parallelism_1, parallelism_2) = {
+        use rand::{Rng, rng as thread_rng};
+        let rng = &mut thread_rng();
 
-        let fragments = cluster.locate_random_fragments().await?;
-        cluster.reschedule(join_plans(fragments)).await?;
+        let parallelism_1 = rng.random_range(1..=total_cores);
+        let parallelism_2 = rng.random_range(1..=total_cores);
 
-        sleep(after_scale_duration).await;
-        session.run(select).await?.assert_result_ne(&final_result);
+        (parallelism_1, parallelism_2)
+    };
 
-        let fragments = cluster.locate_random_fragments().await?;
-        cluster.reschedule(join_plans(fragments)).await?;
-    } else {
-        let fragment = cluster.locate_random_fragment().await?;
-        let id = fragment.id();
-        cluster.reschedule(fragment.random_reschedule()).await?;
+    cluster
+        .run(format!(
+            "alter materialized view nexmark_{} set parallelism = {};",
+            query_name, parallelism_1,
+        ))
+        .await?;
 
-        sleep(after_scale_duration).await;
-        session.run(select).await?.assert_result_ne(&final_result);
+    sleep(after_scale_duration).await;
+    session.run(select).await?.assert_result_ne(&final_result);
 
-        let fragment = cluster.locate_fragment_by_id(id).await?;
-        cluster.reschedule(fragment.random_reschedule()).await?;
-    }
+    cluster
+        .run(format!(
+            "alter materialized view nexmark_{} set parallelism = {};",
+            query_name, parallelism_2,
+        ))
+        .await?;
 
     sleep(Duration::from_secs(50)).await;
 
@@ -92,6 +92,7 @@ async fn nexmark_chaos_common_inner(
 }
 
 fn nexmark_chaos_common(
+    query_name: &'static str,
     create: &'static str,
     select: &'static str,
     drop: &'static str,
@@ -101,6 +102,7 @@ fn nexmark_chaos_common(
     multiple: bool,
 ) -> BoxFuture<'static, Result<()>> {
     Box::pin(nexmark_chaos_common_inner(
+        query_name,
         create,
         select,
         drop,
@@ -121,6 +123,7 @@ macro_rules! test {
             async fn [< nexmark_chaos_ $query _single >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
                 nexmark_chaos_common(
+                    stringify!($query),
                     CREATE,
                     SELECT,
                     DROP,
@@ -136,6 +139,7 @@ macro_rules! test {
             async fn [< nexmark_chaos_ $query _multiple >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
                 nexmark_chaos_common(
+                    stringify!($query),
                     CREATE,
                     SELECT,
                     DROP,
