@@ -49,6 +49,7 @@ mod m20250722_155040_table_refreshable;
 mod m20250729_174630_add_vector_index_info;
 mod m20250810_000000_add_user_admin_field;
 mod m20250820_120000_add_cdc_table_type;
+mod m20250907_000000_source_actors;
 mod utils;
 
 pub struct Migrator;
