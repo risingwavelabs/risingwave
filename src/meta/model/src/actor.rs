@@ -60,7 +60,7 @@ pub struct Model {
     #[deprecated]
     pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,
-    pub expr_context: ExprContext,
+    // pub expr_context: ExprContext,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +71,7 @@ pub struct ActorModel {
     pub splits: Option<ConnectorSplits>,
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<VnodeBitmap>,
-    pub expr_context: ExprContext,
+    pub expr_context_2: ExprContext,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

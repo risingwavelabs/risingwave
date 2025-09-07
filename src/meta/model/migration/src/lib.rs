@@ -53,6 +53,7 @@ mod m20250820_120000_add_cdc_table_type;
 mod m20250821_081110_cdc_table_snapshot_splits_add_column;
 mod m20250905_144810_deprecate_table_incoming_sinks;
 mod m20250907_000000_source_splits;
+mod m20250907_090144_move_expr_context_to_streaming_job;
 mod utils;
 
 pub struct Migrator;

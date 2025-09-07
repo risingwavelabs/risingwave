@@ -58,6 +58,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbState};
 use risingwave_pb::meta::{FragmentDistribution, PbFragmentWorkerSlotMapping};
+use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -295,7 +296,7 @@ impl CatalogController {
                 vnode_bitmap: vnode_bitmap
                     .as_ref()
                     .map(|bitmap| VnodeBitmap::from(&bitmap.to_protobuf())),
-                expr_context: ExprContext::from(pb_expr_context),
+                expr_context_2: ExprContext::from(pb_expr_context),
             });
         }
 
@@ -417,13 +418,13 @@ impl CatalogController {
                 worker_id,
                 splits,
                 vnode_bitmap,
-                expr_context,
+                expr_context_2,
                 ..
             } = actor;
 
             let vnode_bitmap =
                 vnode_bitmap.map(|vnode_bitmap| Bitmap::from(vnode_bitmap.to_protobuf()));
-            let pb_expr_context = Some(expr_context.to_protobuf());
+            let pb_expr_context = Some(expr_context_2.to_protobuf());
 
             pb_actor_status.insert(
                 actor_id as _,
@@ -663,6 +664,11 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
 
+        let job_info = StreamingJob::find_by_id(job_id)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
+
         // Build (FragmentModel, Vec<ActorModel>) from the in-memory cache
         let fragment_actors_from_cache: Vec<(_, Vec<ActorModel>)> = {
             let info = self.env.shared_actor_infos().read_guard();
@@ -687,7 +693,10 @@ impl CatalogController {
                             vnode_bitmap: actor_info.vnode_bitmap.as_ref().map(|bitmap| {
                                 VnodeBitmap::from(&bitmap.to_protobuf())
                             }),
-                            expr_context: ExprContext::default(), // Placeholder, actual expr_context should be fetched from DB if needed
+                            expr_context_2: (&PbExprContext {
+                                time_zone: job_info.timezone.clone().unwrap_or("".to_string()),
+                                strict_mode: false,
+                            }).into(),
                         })
                         .collect();
                     (fm, actors)
@@ -697,11 +706,6 @@ impl CatalogController {
 
         // Use cache-based result from here on
         let fragment_actors = fragment_actors_from_cache;
-
-        let job_info = StreamingJob::find_by_id(job_id)
-            .one(&inner.db)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
 
         let job_definition = resolve_streaming_job_definition(&inner.db, &HashSet::from([job_id]))
             .await?
@@ -1112,7 +1116,10 @@ impl CatalogController {
                                 vnode_bitmap: actor_info.vnode_bitmap.as_ref().map(|bitmap| {
                                     VnodeBitmap::from(&bitmap.to_protobuf())
                                 }),
-                                expr_context: ExprContext::default(), // Placeholder, actual expr_context should be fetched from DB if needed
+                                expr_context_2: (&PbExprContext {
+                                    time_zone: job.timezone.clone().unwrap_or("".to_string()),
+                                    strict_mode: false,
+                                }).into()
                             })
                             .collect();
 
