@@ -2347,10 +2347,7 @@ impl DdlController {
                         );
                     }
 
-                    todo!()
-                    // *downstream_fragment = SharedFragmentInfo {
-                    //
-                    // };
+                    *downstream_fragment = (&sink.new_fragment_info()).into();
                 }
             }
             assert!(remaining_fragment.is_empty());
