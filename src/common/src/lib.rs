@@ -83,6 +83,7 @@ pub mod global_jvm;
 pub mod hash;
 pub mod log;
 pub mod memory;
+pub mod metrics_reader;
 pub mod telemetry;
 pub mod test_utils;
 pub mod transaction;
