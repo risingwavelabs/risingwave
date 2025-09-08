@@ -652,18 +652,15 @@ where
                     })?;
                 self.ready_for_query()?;
             }
-            UserAuthenticator::ClearText(_) | UserAuthenticator::OAuth(_) => {
+            UserAuthenticator::ClearText(_)
+            | UserAuthenticator::OAuth(_)
+            | UserAuthenticator::Ldap(_) => {
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
             }
             UserAuthenticator::Md5WithSalt { salt, .. } => {
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))?;
-            }
-            UserAuthenticator::Ldap(_) => {
-                // LDAP authentication requires clear text password
-                self.stream
-                    .write_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
             }
         }
 

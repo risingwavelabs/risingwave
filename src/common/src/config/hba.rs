@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// RisingWave HBA (Host-Based Authentication) configuration, similar to PostgreSQL's pg_hba.conf
+/// RisingWave HBA (Host-Based Authentication) configuration, similar to PostgreSQL's `pg_hba.conf`
 /// This determines which authentication method to use for each connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HbaConfig {
@@ -32,8 +33,8 @@ impl Default for HbaConfig {
                 // Default rule: allow all local connections without authentication
                 HbaEntry {
                     connection_type: ConnectionType::Local,
-                    databases: vec!["all".to_string()],
-                    users: vec!["all".to_string()],
+                    databases: vec!["all".to_owned()],
+                    users: vec!["all".to_owned()],
                     addresses: None,
                     auth_method: AuthMethod::Trust,
                     auth_options: HashMap::new(),
@@ -41,10 +42,10 @@ impl Default for HbaConfig {
                 // Default rule: require password for all remote connections
                 HbaEntry {
                     connection_type: ConnectionType::Host,
-                    databases: vec!["all".to_string()],
-                    users: vec!["all".to_string()],
-                    addresses: Some(vec![AddressPattern::Cidr("0.0.0.0/0".to_string())]),
-                    auth_method: AuthMethod::Md5,
+                    databases: vec!["all".to_owned()],
+                    users: vec!["all".to_owned()],
+                    addresses: Some(vec![AddressPattern::Cidr("0.0.0.0/0".to_owned())]),
+                    auth_method: AuthMethod::Password,
                     auth_options: HashMap::new(),
                 },
             ],
@@ -58,7 +59,7 @@ pub struct HbaEntry {
     pub connection_type: ConnectionType,
     /// Database names or "all"
     pub databases: Vec<String>,
-    /// User names or "all"
+    /// Usernames or "all"
     pub users: Vec<String>,
     /// Client addresses (only for non-local connections)
     pub addresses: Option<Vec<AddressPattern>>,
@@ -150,15 +151,15 @@ impl HbaConfig {
         }
 
         // Check address (only for non-local connections)
-        if *connection_type != ConnectionType::Local {
-            if let Some(addresses) = &entry.addresses {
-                if let Some(addr) = client_addr {
-                    if !self.matches_address(addresses, addr) {
-                        return false;
-                    }
-                } else {
+        if *connection_type != ConnectionType::Local
+            && let Some(addresses) = &entry.addresses
+        {
+            if let Some(addr) = client_addr {
+                if !self.matches_address(addresses, addr) {
                     return false;
                 }
+            } else {
+                return false;
             }
         }
 

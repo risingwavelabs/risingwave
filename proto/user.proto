@@ -15,7 +15,6 @@ message AuthInfo {
     SHA256 = 2;
     MD5 = 3;
     OAUTH = 4;
-    LDAP = 5;
   }
   EncryptionType encryption_type = 1;
   bytes encrypted_value = 2;

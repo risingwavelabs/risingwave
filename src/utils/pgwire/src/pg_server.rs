@@ -21,6 +21,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
+use risingwave_common::config::HbaEntry;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -29,6 +30,7 @@ use serde::Deserialize;
 use thiserror_ext::AsReport;
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::ldap_auth::LdapAuthenticator;
 use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
@@ -175,8 +177,7 @@ pub enum UserAuthenticator {
         salt: [u8; 4],
     },
     OAuth(HashMap<String, String>),
-    // LDAP authentication
-    Ldap(Box<dyn LdapAuthenticator>),
+    Ldap(HbaEntry),
 }
 
 /// A JWK Set is a JSON object that represents a set of JWKs.
@@ -235,34 +236,6 @@ async fn validate_jwt(
     Ok(true)
 }
 
-/// Trait for LDAP authenticators to allow dynamic dispatch
-pub trait LdapAuthenticator: Send + Sync + std::fmt::Debug + LdapAuthenticatorClone {
-    fn authenticate(
-        &self,
-        username: &str,
-        password: &str,
-    ) -> std::pin::Pin<Box<dyn Future<Output = PsqlResult<bool>> + Send>>;
-}
-
-pub trait LdapAuthenticatorClone {
-    fn clone_box(&self) -> Box<dyn LdapAuthenticator>;
-}
-
-impl<T> LdapAuthenticatorClone for T
-where
-    T: 'static + Clone + LdapAuthenticator,
-{
-    fn clone_box(&self) -> Box<dyn LdapAuthenticator> {
-        Box::new(self.clone())
-    }
-}
-
-impl Clone for Box<dyn LdapAuthenticator> {
-    fn clone(&self) -> Self {
-        self.clone_box()
-    }
-}
-
 impl UserAuthenticator {
     pub async fn authenticate(&self, password: &[u8]) -> PsqlResult<()> {
         let success = match self {
@@ -284,7 +257,8 @@ impl UserAuthenticator {
                 .await
                 .map_err(PsqlError::StartupError)?
             }
-            UserAuthenticator::Ldap(ldap_auth) => {
+            UserAuthenticator::Ldap(hba_entry) => {
+                let ldap_auth = LdapAuthenticator::new(&hba_entry)?;
                 // Convert password to string, defaulting to empty if not valid UTF-8
                 let password_str = String::from_utf8_lossy(password).into_owned();
                 // Implement a username placeholder. In RisingWave, this would be passed from the session context

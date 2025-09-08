@@ -9681,6 +9681,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "jsonwebtoken",
+ "ldap3",
  "madsim-tokio",
  "openssl",
  "panic-message",
@@ -12256,7 +12257,6 @@ dependencies = [
  "iceberg",
  "itertools 0.14.0",
  "jsonbb",
- "ldap3",
  "linkme",
  "madsim-tokio",
  "madsim-tonic",
@@ -12591,6 +12591,7 @@ version = "2.7.0-alpha"
 dependencies = [
  "easy-ext",
  "madsim-tokio",
+ "risingwave_common",
  "sea-orm",
  "sea-orm-migration",
  "serde",

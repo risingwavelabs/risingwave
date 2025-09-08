@@ -13,13 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 
-use ldap3::{LdapConn, Scope, SearchEntry};
-use pgwire::error::{PsqlError, PsqlResult};
-use pgwire::pg_server::LdapAuthenticator as PgwireLdapAuthenticator;
+use ldap3::{LdapConnAsync, LdapError, Scope, SearchEntry};
 use risingwave_common::config::{AuthMethod, HbaEntry};
+
+use crate::error::{PsqlError, PsqlResult};
 
 /// LDAP configuration extracted from HBA entry
 #[derive(Debug, Clone)]
@@ -31,6 +29,7 @@ pub struct LdapConfig {
     /// LDAP search filter template
     pub search_filter: Option<String>,
     /// Additional LDAP configuration options
+    #[allow(dead_code)]
     pub options: HashMap<String, String>,
 }
 
@@ -58,33 +57,6 @@ pub struct LdapAuthenticator {
     config: LdapConfig,
 }
 
-impl PgwireLdapAuthenticator for LdapAuthenticator {
-    fn authenticate(
-        &self,
-        username: &str,
-        password: &str,
-    ) -> Pin<Box<dyn Future<Output = PsqlResult<bool>> + Send>> {
-        let username = username.to_string();
-        let password = password.to_string();
-        let config = self.config.clone();
-        Box::pin(async move {
-            // Skip authentication if password is empty
-            if password.is_empty() {
-                return Ok(false);
-            }
-
-            // Determine the authentication strategy
-            if config.base_dn.is_some() && config.search_filter.is_some() {
-                // Search-then-bind authentication
-                LdapAuthenticator::search_and_bind(&config, &username, &password).await
-            } else {
-                // Simple bind authentication
-                LdapAuthenticator::simple_bind(&config, &username, &password).await
-            }
-        })
-    }
-}
-
 impl LdapAuthenticator {
     /// Create a new LDAP authenticator from HBA entry options
     pub fn new(hba_entry: &HbaEntry) -> PsqlResult<Self> {
@@ -98,6 +70,28 @@ impl LdapAuthenticator {
         Ok(Self { config })
     }
 
+    /// Authenticate a user
+    pub async fn authenticate(&self, username: &str, password: &str) -> PsqlResult<bool> {
+        // Skip authentication if password is empty
+        if password.is_empty() {
+            return Ok(false);
+        }
+
+        // Determine the authentication strategy
+        if self.config.base_dn.is_some() && self.config.search_filter.is_some() {
+            // Search-then-bind authentication
+            Self::search_and_bind(&self.config, username, password).await
+        } else {
+            // Simple bind authentication
+            Self::simple_bind(&self.config, username, password).await
+        }
+    }
+
+    /// Establish an LDAP connection with configurable options
+    async fn establish_connection(server: &str) -> Result<ldap3::Ldap, LdapError> {
+        LdapConnAsync::new(server).await.map(|(_, ldap)| ldap)
+    }
+
     /// Search for user in LDAP directory and then bind
     async fn search_and_bind(
         config: &LdapConfig,
@@ -105,20 +99,27 @@ impl LdapAuthenticator {
         password: &str,
     ) -> PsqlResult<bool> {
         // Establish connection to LDAP server
-        let mut conn = LdapConn::new(&config.server).map_err(|e| {
-            PsqlError::StartupError(format!("LDAP connection failed: {}", e).into())
-        })?;
+        let mut ldap = Self::establish_connection(&config.server)
+            .await
+            .map_err(|e| {
+                PsqlError::StartupError(format!("LDAP connection failed: {}", e).into())
+            })?;
 
-        // Search for the user with the provided filter
-        let base_dn = config.base_dn.as_ref().unwrap();
+        // Validate base_dn and search_filter configuration
+        let base_dn = config
+            .base_dn
+            .as_ref()
+            .ok_or_else(|| PsqlError::StartupError("LDAP base_dn not configured".into()))?;
         let search_filter = config
             .search_filter
             .as_ref()
-            .unwrap()
-            .replace("{username}", username);
+            .ok_or_else(|| PsqlError::StartupError("LDAP search_filter not configured".into()))?;
 
-        let rs = conn
+        let search_filter = search_filter.replace("{username}", username);
+
+        let rs = ldap
             .search(base_dn, Scope::Subtree, &search_filter, vec!["dn"])
+            .await
             .map_err(|e| PsqlError::StartupError(format!("LDAP search failed: {}", e).into()))?;
 
         // If no user found, authentication fails
@@ -131,9 +132,16 @@ impl LdapAuthenticator {
         // Attempt to bind with the user's DN and password
         let user_dn = &search_entries[0].dn;
 
-        conn.simple_bind(user_dn, password)
+        let bind_result = ldap
+            .simple_bind(user_dn, password)
+            .await
             .map_err(|e| PsqlError::StartupError(format!("LDAP bind failed: {}", e).into()))
-            .map(|_| true)
+            .map(|_| true);
+
+        // Explicitly unbind the connection
+        let _ = ldap.unbind().await;
+
+        bind_result
     }
 
     /// Simple bind authentication
@@ -142,16 +150,25 @@ impl LdapAuthenticator {
         let dn = if let Some(base_dn) = &config.base_dn {
             format!("uid={},{}", username, base_dn)
         } else {
-            username.to_string()
+            username.to_owned()
         };
 
         // Attempt to bind
-        let mut conn = LdapConn::new(&config.server).map_err(|e| {
-            PsqlError::StartupError(format!("LDAP connection failed: {}", e).into())
-        })?;
+        let mut ldap = Self::establish_connection(&config.server)
+            .await
+            .map_err(|e| {
+                PsqlError::StartupError(format!("LDAP connection failed: {}", e).into())
+            })?;
 
-        conn.simple_bind(&dn, password)
+        let bind_result = ldap
+            .simple_bind(&dn, password)
+            .await
             .map_err(|e| PsqlError::StartupError(format!("LDAP bind failed: {}", e).into()))
-            .map(|_| true)
+            .map(|_| true);
+
+        // Explicitly unbind the connection
+        let _ = ldap.unbind().await;
+
+        bind_result
     }
 }

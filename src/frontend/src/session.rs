@@ -48,7 +48,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    AuthMethod, BatchConfig, ConnectionType, FrontendConfig, HbaConfig, MetaConfig, MetricLevel,
+    AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
     StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
@@ -123,7 +123,6 @@ use crate::scheduler::{
 };
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::UserId;
-use crate::user::ldap_auth::LdapAuthenticator;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -1533,68 +1532,92 @@ impl SessionManagerImpl {
                     "User does not have CONNECT privilege.",
                 )));
             }
-            let user_authenticator = match &user.auth_info {
-                None => UserAuthenticator::None,
-                Some(auth_info) => {
-                    // Check HBA configuration for LDAP authentication
-                    let connection_type = match peer_addr.as_ref() {
-                        Address::Tcp(_) => ConnectionType::Host,
-                        Address::Unix(_) => ConnectionType::Local,
-                    };
 
-                    let client_addr = match peer_addr.as_ref() {
-                        Address::Tcp(socket_addr) => Some(&socket_addr.ip()),
-                        _ => None,
-                    };
+            // Check HBA configuration for LDAP authentication
+            let connection_type = match peer_addr.as_ref() {
+                Address::Tcp(_) => ConnectionType::Host,
+                Address::Unix(_) => ConnectionType::Local,
+            };
 
-                    let hba_entry_opt = self.env.frontend_config().hba_config.find_matching_entry(
-                        &connection_type,
-                        database_name,
-                        user_name,
-                        client_addr,
-                        false,
-                    );
+            let client_addr = match peer_addr.as_ref() {
+                Address::Tcp(socket_addr) => Some(&socket_addr.ip()),
+                _ => None,
+            };
 
-                    if auth_info.encryption_type() == EncryptionType::Plaintext {
-                        UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
-                    } else if auth_info.encryption_type() == EncryptionType::Md5 {
-                        let mut salt = [0; 4];
-                        let mut rng = rand::rng();
-                        rng.fill_bytes(&mut salt);
-                        UserAuthenticator::Md5WithSalt {
-                            encrypted_password: md5_hash_with_salt(
-                                &auth_info.encrypted_value,
-                                &salt,
-                            ),
-                            salt,
+            let hba_entry_opt = self.env.frontend_config().hba_config.find_matching_entry(
+                &connection_type,
+                database_name,
+                user_name,
+                client_addr,
+                false,
+            );
+
+            // TODO: adding `FATAL` message support for no matching HBA entry.
+            let Some(hba_entry_opt) = hba_entry_opt else {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    format!(
+                        "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
+                    ),
+                )));
+            };
+
+            // Determine the user authenticator based on the user's auth info.
+            let authenticator_by_info = || -> std::result::Result<UserAuthenticator, BoxedError> {
+                let authenticator = match &user.auth_info {
+                    None => UserAuthenticator::None,
+                    Some(auth_info) => match auth_info.encryption_type() {
+                        EncryptionType::Plaintext => {
+                            UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
                         }
-                    } else if auth_info.encryption_type() == EncryptionType::Oauth {
-                        UserAuthenticator::OAuth(auth_info.metadata.clone())
-                    } else if auth_info.encryption_type() == EncryptionType::Ldap {
-                        // LDAP authentication through HBA configuration
-                        match hba_entry_opt {
-                            Some(hba_entry) if hba_entry.auth_method == AuthMethod::Ldap => {
-                                let ldap_auth = LdapAuthenticator::new(hba_entry).map_err(|e| {
-                                    Box::new(Error::new(
-                                        ErrorKind::Other,
-                                        format!("Failed to create LDAP authenticator: {}", e),
-                                    ))
-                                })?;
-                                UserAuthenticator::Ldap(Box::new(ldap_auth))
-                            }
-                            _ => {
-                                return Err(Box::new(Error::new(
-                                    ErrorKind::PermissionDenied,
-                                    "LDAP authentication not configured for this connection",
-                                )));
+                        EncryptionType::Md5 => {
+                            let mut salt = [0; 4];
+                            let mut rng = rand::rng();
+                            rng.fill_bytes(&mut salt);
+                            UserAuthenticator::Md5WithSalt {
+                                encrypted_password: md5_hash_with_salt(
+                                    &auth_info.encrypted_value,
+                                    &salt,
+                                ),
+                                salt,
                             }
                         }
-                    } else {
-                        return Err(Box::new(Error::new(
-                            ErrorKind::Unsupported,
-                            format!("Unsupported auth type: {}", auth_info.encryption_type),
-                        )));
-                    }
+                        EncryptionType::Oauth => {
+                            UserAuthenticator::OAuth(auth_info.metadata.clone())
+                        }
+                        _ => {
+                            return Err(Box::new(Error::new(
+                                ErrorKind::Unsupported,
+                                format!(
+                                    "Unsupported auth type: {}",
+                                    auth_info.encryption_type().as_str_name()
+                                ),
+                            )));
+                        }
+                    },
+                };
+                Ok(authenticator)
+            };
+
+            let user_authenticator = match (&hba_entry_opt.auth_method, &user.auth_info) {
+                (AuthMethod::Trust, _) => UserAuthenticator::None,
+                (AuthMethod::Password, _) => authenticator_by_info()?,
+                (AuthMethod::Md5, Some(auth_info))
+                    if auth_info.encryption_type() == EncryptionType::Md5 =>
+                {
+                    authenticator_by_info()?
+                }
+                (AuthMethod::OAuth, Some(auth_info))
+                    if auth_info.encryption_type() == EncryptionType::Oauth =>
+                {
+                    authenticator_by_info()?
+                }
+                (AuthMethod::Ldap, _) => UserAuthenticator::Ldap(hba_entry_opt.clone()),
+                _ => {
+                    return Err(Box::new(Error::new(
+                        ErrorKind::PermissionDenied,
+                        format!("password authentication failed for user \"{user_name}\""),
+                    )));
                 }
             };
 
