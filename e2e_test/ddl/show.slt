@@ -130,7 +130,7 @@ my_schema t4
 public t3
 
 statement ok
-reset search_path;
+set search_path to default;
 
 statement ok
 drop schema my_schema cascade;
