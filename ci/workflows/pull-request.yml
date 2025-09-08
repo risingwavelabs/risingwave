@@ -506,9 +506,6 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
           environment:
@@ -526,9 +523,6 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      # - seek-oss/aws-sm#v2.3.2:
-      #     env:
-      #       BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-deterministic-token
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
@@ -550,9 +544,6 @@ steps:
       || build.pull_request.labels includes "ci/run-heap-flamegraph"
       || build.env("CI_STEPS") =~ /(^|,)(cpu-flamegraph|heap-flamegraph)(,|$$)/
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
           environment:
@@ -565,9 +556,6 @@ steps:
     depends_on: "flamegraph-env-build"
     if: build.pull_request.labels includes "ci/run-cpu-flamegraph" || build.env("CI_STEPS") =~ /(^|,)cpu-flamegraph(,|$$)/
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: ci-flamegraph-env
@@ -587,9 +575,6 @@ steps:
     if: build.pull_request.labels includes "ci/run-heap-flamegraph" || build.env("CI_STEPS") =~ /(^|,)heap-flamegraph(,|$$)/
 
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: ci-flamegraph-env
@@ -742,10 +727,6 @@ steps:
       - "BUILDKITE_BUILD_NUMBER=$BUILDKITE_BUILD_NUMBER ci/scripts/upload-micro-bench-results.sh"
     depends_on: "run-micro-benchmarks"
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            BUILDKITE_TOKEN: buildkite_token
-            GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
           environment:
@@ -756,16 +737,13 @@ steps:
   - wait: ~
 
   # Only if all steps are successful, we upload coverage reports.
-  - label: "upload coverage reports"
-    command: "ci/scripts/upload-coverage.sh"
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            CODECOV_TOKEN: my-codecov-token
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          environment:
-          - CODECOV_TOKEN
-    timeout_in_minutes: 10
-    retry: *auto-retry
-    soft_fail: true
+  #- label: "upload coverage reports"
+  #  command: "ci/scripts/upload-coverage.sh"
+  #  plugins:
+  #    - docker-compose#v5.5.0:
+  #        <<: *docker-compose
+  #        environment:
+  #        - CODECOV_TOKEN
+  #  timeout_in_minutes: 10
+  #  retry: *auto-retry
+  #  soft_fail: true
