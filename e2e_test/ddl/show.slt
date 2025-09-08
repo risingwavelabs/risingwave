@@ -134,6 +134,7 @@ set search_path to default;
 
 statement ok
 drop schema my_schema cascade;
+
 # Test search path done.
 
 query TT
