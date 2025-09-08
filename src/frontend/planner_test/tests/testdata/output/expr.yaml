@@ -491,7 +491,7 @@
     └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [[t.v1]], output: [t.v1, t._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |

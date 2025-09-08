@@ -1,0 +1,70 @@
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+create table t (v int, t timestamptz);
+
+# This will be planned as a semi-join on the right side `StreamNow` operator.
+statement ok
+create materialized view mv as select v from t where date_trunc('century', t.t) = date_trunc('century', now());
+
+statement ok
+create materialized view mv_changelog as with c as changelog from mv select * from c;
+
+statement ok
+insert into t select v, now() from generate_series(1, 3) g(v);
+
+query I rowsort
+select * from mv;
+----
+1
+2
+3
+
+# `1` means Insert here.
+query II rowsort
+select v, changelog_op from mv_changelog;
+----
+1 1
+2 1
+3 1
+
+# Trigger some barriers to update the output of `now()`.
+statement ok
+flush;
+
+statement ok
+flush;
+
+# The "century" part of the timestamp should not change.
+# We assert that there's actually no re-calculation by checking the changelog.
+query II rowsort
+select v, changelog_op from mv_changelog;
+----
+1 1
+2 1
+3 1
+
+statement ok
+delete from t where v = 1;
+
+query I rowsort
+select * from mv;
+----
+2
+3
+
+# `2` means Delete here.
+query II rowsort
+select v, changelog_op from mv_changelog;
+----
+1 1
+1 2
+2 1
+3 1
+
+statement ok
+flush;
+
+statement ok
+drop table t cascade;
