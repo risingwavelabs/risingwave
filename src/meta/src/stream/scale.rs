@@ -313,6 +313,7 @@ impl ScaleController {
             actor_splits: Default::default(),
             newly_created_actors,
             cdc_table_snapshot_split_assignment: Default::default(),
+            cdc_table_id: None,
         };
 
         Ok(reschedule)

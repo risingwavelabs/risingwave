@@ -73,7 +73,6 @@ use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 
 use crate::controller::fragment::FragmentTypeMaskExt;
-use crate::controller::catalog::ActorInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
 

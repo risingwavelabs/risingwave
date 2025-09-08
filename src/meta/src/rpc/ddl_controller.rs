@@ -57,13 +57,7 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
- PbUpstreamSinkInfo,
-
-    MergeNode,  PbDispatcherType,
-
-    StreamFragmentGraph as StreamFragmentGraphProto,
-};
+use risingwave_pb::stream_plan::{PbUpstreamSinkInfo, MergeNode, PbDispatcherType, StreamFragmentGraph as StreamFragmentGraphProto, PbStreamFragmentGraph, PbDispatchOutputMapping, PbStreamNode};
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use strum::Display;
@@ -83,7 +77,7 @@ use crate::manager::{
     NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
-    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId, StreamContext,
+    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::cdc::{
