@@ -420,6 +420,8 @@ struct ShowSubscriptionCursorRow {
 /// Infer the row description for different show objects.
 pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
     fields_to_descriptors(match objects {
+        ShowObject::Database => ShowDatabaseRow::fields(),
+        ShowObject::Schema => ShowSchemaRow::fields(),
         ShowObject::Columns { .. } => ShowColumnRow::fields(),
         ShowObject::Connection { .. } => ShowConnectionRow::fields(),
         ShowObject::Function { .. } => ShowFunctionRow::fields(),
@@ -427,7 +429,17 @@ pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
         ShowObject::Cluster => ShowClusterRow::fields(),
         ShowObject::Jobs => ShowJobRow::fields(),
         ShowObject::ProcessList => ShowProcessListRow::fields(),
-        _ => ShowObjectRow::fields(),
+        ShowObject::Cursor => ShowCursorRow::fields(),
+        ShowObject::SubscriptionCursor => ShowSubscriptionCursorRow::fields(),
+        ShowObject::Subscription { .. } => ShowSubscriptionRow::fields(),
+
+        ShowObject::Table { .. }
+        | ShowObject::InternalTable { .. }
+        | ShowObject::View { .. }
+        | ShowObject::MaterializedView { .. }
+        | ShowObject::Source { .. }
+        | ShowObject::Sink { .. }
+        | ShowObject::Secret { .. } => ShowObjectRow::fields(),
     })
 }
 
@@ -957,7 +969,10 @@ mod tests {
 
         let mut rows = frontend.query_formatted_result("SHOW SOURCES").await;
         rows.sort();
-        assert_eq!(rows, vec!["Row([Some(b\"t1\")])".to_owned(),]);
+        assert_eq!(
+            rows,
+            vec!["Row([Some(b\"public\"), Some(b\"t1\")])".to_owned()]
+        );
     }
 
     #[tokio::test]
