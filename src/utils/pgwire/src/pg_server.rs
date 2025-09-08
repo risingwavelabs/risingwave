@@ -174,7 +174,10 @@ pub enum UserAuthenticator {
         encrypted_password: Vec<u8>,
         salt: [u8; 4],
     },
-    OAuth(HashMap<String, String>),
+    OAuth {
+        metadata: HashMap<String, String>,
+        cluster_id: String,
+    },
 }
 
 /// A JWK Set is a JSON object that represents a set of JWKs.
@@ -199,18 +202,19 @@ async fn validate_jwt(
     jwt: &str,
     jwks_url: &str,
     issuer: &str,
+    cluster_id: &str,
     metadata: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
     let header = decode_header(jwt)?;
     let jwks: Jwks = reqwest::get(jwks_url).await?.json().await?;
 
     // 1. Retrieve the kid from the header to find the right JWK in the JWK Set.
-    let kid = header.kid.ok_or("kid not found in jwt header")?;
+    let kid = header.kid.ok_or("JWT header missing 'kid' field")?;
     let jwk = jwks
         .keys
         .into_iter()
         .find(|k| k.kid == kid)
-        .ok_or("kid not found in jwks")?;
+        .ok_or(format!("No matching key found in JWKS for kid: '{}'", kid))?;
 
     // 2. Check if the algorithms are matched.
     if Algorithm::from_str(&jwk.alg)? != header.alg {
@@ -221,7 +225,8 @@ async fn validate_jwt(
     let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
     let mut validation = Validation::new(header.alg);
     validation.set_issuer(&[issuer]);
-    validation.set_required_spec_claims(&["exp", "iss"]);
+    validation.set_audience(&[cluster_id]); // JWT 'aud' claim must match cluster_id
+    validation.set_required_spec_claims(&["exp", "iss", "aud"]);
     let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
 
     // 4. Check if the metadata in the token matches.
@@ -241,7 +246,10 @@ impl UserAuthenticator {
             UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
-            UserAuthenticator::OAuth(metadata) => {
+            UserAuthenticator::OAuth {
+                metadata,
+                cluster_id,
+            } => {
                 let mut metadata = metadata.clone();
                 let jwks_url = metadata.remove("jwks_url").unwrap();
                 let issuer = metadata.remove("issuer").unwrap();
@@ -249,6 +257,7 @@ impl UserAuthenticator {
                     &String::from_utf8_lossy(password),
                     &jwks_url,
                     &issuer,
+                    cluster_id,
                     &metadata,
                 )
                 .await
