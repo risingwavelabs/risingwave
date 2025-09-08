@@ -299,6 +299,14 @@ impl GlobalBarrierWorkerContextImpl {
                     break;
                 }
             }
+            // TODO(zyx): When the migration is done, delete this part.
+            if target_fragment_id.is_none() {
+                tracing::debug!(
+                    "The table {} created by old versions has not yet been migrated, so sinks cannot be created or dropped on this table.",
+                    table.id
+                );
+                continue;
+            }
             let target_fragment_id = target_fragment_id.ok_or(anyhow::anyhow!(
                 "Table should have upstream-sink-union node"
             ))?;
