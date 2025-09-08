@@ -12,24 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog;
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+use risingwave_connector::WithOptionsSecResolved;
+use risingwave_connector::source::{ConnectorProperties, SplitImpl};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
-    Database, Fragment, FragmentRelation, Sink, Source, StreamingJob, Table,
+    Database, Fragment, FragmentRelation, Sink, Source, SourceSplits, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    DatabaseId, DispatcherType, FragmentId, ObjectId, StreamingParallelism, TableId, WorkerId,
-    database, fragment, fragment_relation, object, sink, source, streaming_job, table,
+    ConnectorSplits, DatabaseId, DispatcherType, FragmentId, ObjectId, Property, SourceId,
+    StreamingParallelism, TableId, WorkerId, database, fragment, fragment_relation, object, sink,
+    source, source_splits, streaming_job, table,
 };
 use risingwave_meta_model_migration::Condition;
+use risingwave_pb::source::ConnectorSplit;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, QueryTrait,
     RelationTrait,
@@ -40,7 +45,7 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::id::{IdCategory, IdGeneratorManagerRef};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor};
-use crate::stream::AssignerBuilder;
+use crate::stream::{AssignerBuilder, SourceManagerRef, SourceWorkerProperties};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
     txn: &C,
@@ -148,14 +153,22 @@ where
 
     println!("before render");
 
-    render_jobs(
+    let RenderedGraph {
+        fragments,
+        ensembles,
+        source_fragments,
+        cdc_source_fragments,
+    } = render_jobs(
         txn,
         id_gen,
         jobs,
         available_workers,
         adaptive_parallelism_strategy,
+        None,
     )
-    .await
+    .await?;
+
+    Ok(fragments)
 }
 
 #[derive(Debug)]
@@ -170,13 +183,21 @@ pub struct WorkerInfo {
     pub resource_group: Option<String>,
 }
 
+pub struct RenderedGraph {
+    pub fragments: HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>,
+    pub ensembles: Vec<NoShuffleEnsemble>,
+    pub source_fragments: HashMap<FragmentId, Vec<ActorId>>,
+    pub cdc_source_fragments: HashMap<FragmentId, Vec<ActorId>>,
+}
+
 pub async fn render_jobs<C>(
     txn: &C,
     id_gen: &IdGeneratorManagerRef,
     job_ids: HashSet<ObjectId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+    mut source_properties: HashMap<SourceId, SourceWorkerProperties>,
+) -> MetaResult<RenderedGraph>
 where
     C: ConnectionTrait,
 {
@@ -184,6 +205,8 @@ where
 
     println!("jobs {:?}", job_ids);
     println!("workers {:?}", workers);
+
+    // SourceSplits::find().all
 
     let jobs: HashMap<_, _> = StreamingJob::find()
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
@@ -228,6 +251,9 @@ where
         .map(|fragment| (fragment.fragment_id, fragment))
         .collect();
 
+    let (fragment_source_ids, source_splits) =
+        resolve_source_fragments(txn, source_properties, &fragment_map).await?;
+
     let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
         .select_only()
         .column(streaming_job::Column::JobId)
@@ -258,7 +284,7 @@ where
     for NoShuffleEnsemble {
         entries,
         components,
-    } in ensembles
+    } in &ensembles
     {
         let entry_fragments = entries
             .iter()
@@ -332,6 +358,13 @@ where
 
         let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
 
+        if let Some(entry_fragment) = entry_fragments.iter().next() {
+            if let Some(source_id) = fragment_source_ids.get(&entry_fragment.fragment_id) {
+                println!("fragment {} source_id {}", entry_fragment.fragment_id, source_id);
+                assert_eq!(entry_fragments.len(), 1);
+            }
+        }
+
         for fragment_id in components {
             let fragment::Model {
                 fragment_id,
@@ -365,6 +398,7 @@ where
                         InflightActorInfo {
                             worker_id,
                             vnode_bitmap,
+                            splits: todo!(),
                         },
                     )
                 })
@@ -398,7 +432,71 @@ where
         }
     }
 
-    Ok(result)
+    Ok(RenderedGraph {
+        fragments: result,
+        ensembles: vec![],
+        source_fragments: Default::default(),
+        cdc_source_fragments: Default::default(),
+    })
+}
+
+async fn resolve_source_fragments<C>(
+    txn: &C,
+    mut source_properties: HashMap<SourceId, SourceWorkerProperties>,
+    fragment_map: &HashMap<FragmentId, fragment::Model>,
+) -> MetaResult<(
+    HashMap<FragmentId, SourceId>,
+    HashMap<SourceId, (SourceWorkerProperties, Vec<ConnectorSplit>)>,
+)>
+where
+    C: ConnectionTrait,
+{
+    let mut source_fragment_ids = HashMap::new();
+    for (fragment_id, fragment) in &fragment_map {
+        if FragmentTypeMask::from(fragment.fragment_type_mask).contains(FragmentTypeFlag::Source) {
+            if let Some(source_id) = fragment.stream_node.to_protobuf().find_stream_source() {
+                source_fragment_ids
+                    .entry(source_id as SourceId)
+                    .or_insert_with(BTreeSet::new)
+                    .insert(fragment_id);
+            }
+        }
+    }
+
+    let fragment_source_ids: HashMap<_, _> = source_fragment_ids
+        .iter()
+        .flat_map(|(source_id, fragment_ids)| {
+            fragment_ids
+                .iter()
+                .map(|fragment_id| (**fragment_id, *source_id))
+        })
+        .collect();
+
+    let source_ids = source_fragment_ids.keys().cloned().collect_vec();
+
+    let sources: Vec<_> = SourceSplits::find()
+        .filter(source_splits::Column::SourceId.is_in(source_ids))
+        .all(txn)
+        .await?;
+
+    let source_splits: HashMap<_, _> = sources
+        .into_iter()
+        .flat_map(|model| {
+            model.splits.map(|splits| {
+                (
+                    model.source_id,
+                    (
+                        source_properties
+                            .remove(&model.source_id)
+                            .unwrap_or_default(),
+                        splits.to_protobuf().splits,
+                    ),
+                )
+            })
+        })
+        .collect();
+
+    Ok((fragment_source_ids, source_splits))
 }
 
 // Helper struct to make the function signature cleaner and to properly bundle the required data.
