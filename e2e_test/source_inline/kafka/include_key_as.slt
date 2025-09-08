@@ -175,6 +175,11 @@ WITH (
 	topic = 'test_include_key')
 FORMAT UPSERT ENCODE JSON
 
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'upsert_students';
+----
+CREATE TABLE upsert_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL, PRIMARY KEY (rw_key)) INCLUDE KEY AS rw_key
+
 
 system ok
 rpk topic delete 'test_additional_columns' || true;
@@ -221,6 +226,11 @@ WITH (
 	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
 	topic = 'test_additional_columns')
 FORMAT PLAIN ENCODE JSON
+
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'additional_columns';
+----
+CREATE TABLE additional_columns (a INT) INCLUDE key AS key_col INCLUDE partition AS partition_col INCLUDE offset AS offset_col INCLUDE timestamp AS timestamp_col INCLUDE header AS header_col_combined INCLUDE header 'header1' AS header_col_1 INCLUDE header 'header2' AS header_col_2 INCLUDE header 'header2' CHARACTER VARYING AS header_col_3 INCLUDE header 'header3' AS header_col_4
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 3s
