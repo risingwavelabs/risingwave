@@ -670,13 +670,11 @@ impl ToStream for LogicalOverWindow {
         if partition_key_indices.is_empty() {
             empty_partition_by_not_implemented!();
         }
-        let input = if let Some(better_plan) =
-            self.core.input.try_better_locality(&partition_key_indices)
-        {
-            better_plan
-        } else {
-            self.core.input.clone()
-        };
+        let input = self
+            .core
+            .input
+            .try_better_locality(&partition_key_indices)
+            .unwrap_or_else(|| self.core.input.clone());
         let stream_input = input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
