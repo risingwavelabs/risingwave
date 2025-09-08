@@ -22,7 +22,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(SourceSplits::Splits).rw_binary(manager))
                     .foreign_key(
                         &mut ForeignKey::create()
-                            .name("FK_fragment_relation_source_oid")
+                            .name("FK_source_splits_source_oid")
                             .from(SourceSplits::Table, SourceSplits::SourceId)
                             .to(Source::Table, Source::SourceId)
                             .on_delete(ForeignKeyAction::Cascade)

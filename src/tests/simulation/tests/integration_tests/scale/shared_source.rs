@@ -120,27 +120,7 @@ async fn test_shared_source() -> Result<()> {
     session
         .run("create materialized view mv as select count(*) from s group by v1;")
         .await?;
-    let source_fragment = cluster
-        .locate_one_fragment([
-            identity_contains("Source"),
-            no_identity_contains("StreamSourceScan"),
-        ])
-        .await?;
-    let source_workers = source_fragment.all_worker_count().into_keys().collect_vec();
-    let source_backfill_fragment = cluster
-        .locate_one_fragment([identity_contains("StreamSourceScan")])
-        .await?;
-    let source_backfill_workers = source_backfill_fragment
-        .all_worker_count()
-        .into_keys()
-        .collect_vec();
-    let hash_agg_fragment = cluster
-        .locate_one_fragment([identity_contains("hashagg")])
-        .await?;
-    let hash_agg_workers = hash_agg_fragment
-        .all_worker_count()
-        .into_keys()
-        .collect_vec();
+
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
         1 6 HASH {SOURCE} 6 256
