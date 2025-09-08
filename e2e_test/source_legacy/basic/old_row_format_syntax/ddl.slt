@@ -70,11 +70,11 @@ create table s (
 statement ok
 drop table s
 
-query T
+query TT
 show sources
 ----
 
-query T
+query TT
 show tables
 ----
 
@@ -99,11 +99,11 @@ drop materialized view mv_1
 statement ok
 drop source s
 
-query T
+query TT
 show sources
 ----
 
-query T
+query TT
 show tables
 ----
 
@@ -116,12 +116,12 @@ create source s (
   properties.bootstrap.server = 'message_queue:29092'
 ) ROW FORMAT JSON;
 
-query T
+query TT
 show sources
 ----
-s
+public s
 
-query T
+query TT
 show tables
 ----
 
@@ -139,15 +139,15 @@ create table s (
 
 # We should introduce `show connectors` to display all connectors created via both
 # `create source` and `create table`.
-query T
+query TT
 show sources
 ----
-s
+public s
 
-query T
+query TT
 show tables
 ----
-s
+public s
 
 statement ok
 drop table s
