@@ -692,14 +692,24 @@ impl ToStream for LogicalScan {
         if columns.is_empty() {
             return None;
         }
+        if self.table_indexes().is_empty() {
+            return None;
+        }
+        let orders = if columns.len() <= 3 {
+            OrderType::all()
+        } else {
+            // Limit the number of order type combinations to avoid explosion.
+            // For more than 3 columns, we only consider ascending nulls last and descending.
+            // Since by default, indexes are created with ascending nulls last.
+            // This is a heuristic to reduce the search space.
+            vec![OrderType::ascending_nulls_last(), OrderType::descending()]
+        };
         for order_type_combo in columns
             .iter()
-            .map(|&col| {
-                OrderType::all()
-                    .into_iter()
-                    .map(move |ot| ColumnOrder::new(col, ot))
-            })
+            .map(|&col| orders.iter().map(move |ot| ColumnOrder::new(col, *ot)))
             .multi_cartesian_product()
+            .take(256)
+        // limit the number of combinations
         {
             let required_order = Order {
                 column_orders: order_type_combo,
