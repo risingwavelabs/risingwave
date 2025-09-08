@@ -158,6 +158,19 @@ where
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowObjectRow {
+    schema_name: String,
+    name: String,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowDatabaseRow {
+    name: String,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowSchemaRow {
     name: String,
 }
 
@@ -282,6 +295,7 @@ impl ShowColumnRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowConnectionRow {
+    schema_name: String,
     name: String,
     r#type: String,
     properties: String,
@@ -290,6 +304,7 @@ struct ShowConnectionRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowFunctionRow {
+    schema_name: String,
     name: String,
     arguments: String,
     return_type: String,
@@ -366,6 +381,7 @@ struct ShowCreateObjectRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowSubscriptionRow {
+    schema_name: String,
     name: String,
     retention_seconds: i64,
 }
@@ -421,7 +437,7 @@ pub async fn handle_show_object(
     let catalog_reader = session.env().catalog_reader();
     let user_reader = session.env().user_info_reader();
 
-    let names = match command {
+    let rows: Vec<ShowObjectRow> = match command {
         ShowObject::Table { schema } => {
             let reader = catalog_reader.read_guard();
             let user_reader = user_reader.read_guard();
@@ -431,7 +447,10 @@ pub async fn handle_show_object(
             iter_schema_items(&session, &schema, &reader, |schema| {
                 schema
                     .iter_user_table_with_acl(current_user)
-                    .map(|t| t.name.clone())
+                    .map(|t| ShowObjectRow {
+                        schema_name: schema.name.clone(),
+                        name: t.name.clone(),
+                    })
                     .collect()
             })
         }
@@ -444,14 +463,33 @@ pub async fn handle_show_object(
             iter_schema_items(&session, &schema, &reader, |schema| {
                 schema
                     .iter_internal_table_with_acl(current_user)
-                    .map(|t| t.name.clone())
+                    .map(|t| ShowObjectRow {
+                        schema_name: schema.name.clone(),
+                        name: t.name.clone(),
+                    })
                     .collect()
             })
         }
-        ShowObject::Database => catalog_reader.read_guard().get_all_database_names(),
-        ShowObject::Schema => catalog_reader
-            .read_guard()
-            .get_all_schema_names(&session.database())?,
+        ShowObject::Database => {
+            let rows = catalog_reader
+                .read_guard()
+                .get_all_database_names()
+                .into_iter()
+                .map(|name| ShowDatabaseRow { name });
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .rows(rows)
+                .into());
+        }
+        ShowObject::Schema => {
+            let rows = catalog_reader
+                .read_guard()
+                .get_all_schema_names(&session.database())?
+                .into_iter()
+                .map(|name| ShowSchemaRow { name });
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .rows(rows)
+                .into());
+        }
         ShowObject::View { schema } => {
             let reader = catalog_reader.read_guard();
             let user_reader = user_reader.read_guard();
@@ -461,7 +499,10 @@ pub async fn handle_show_object(
             iter_schema_items(&session, &schema, &reader, |schema| {
                 schema
                     .iter_view_with_acl(current_user)
-                    .map(|t| t.name.clone())
+                    .map(|t| ShowObjectRow {
+                        schema_name: schema.name.clone(),
+                        name: t.name.clone(),
+                    })
                     .collect()
             })
         }
@@ -474,7 +515,10 @@ pub async fn handle_show_object(
             iter_schema_items(&session, &schema, &reader, |schema| {
                 schema
                     .iter_created_mvs_with_acl(current_user)
-                    .map(|t| t.name.clone())
+                    .map(|t| ShowObjectRow {
+                        schema_name: schema.name.clone(),
+                        name: t.name.clone(),
+                    })
                     .collect()
             })
         }
@@ -487,10 +531,23 @@ pub async fn handle_show_object(
             let mut sources = iter_schema_items(&session, &schema, &reader, |schema| {
                 schema
                     .iter_source_with_acl(current_user)
-                    .map(|t| t.name.clone())
+                    .map(|t| ShowObjectRow {
+                        schema_name: schema.name.clone(),
+                        name: t.name.clone(),
+                    })
                     .collect()
             });
-            sources.extend(session.temporary_source_manager().keys());
+            // Add temporary sources.
+            sources.extend(
+                session
+                    .temporary_source_manager()
+                    .keys()
+                    .into_iter()
+                    .map(|name| ShowObjectRow {
+                        schema_name: "<temporary>".to_owned(),
+                        name: name.clone(),
+                    }),
+            );
             sources
         }
         ShowObject::Sink { schema } => {
@@ -502,7 +559,10 @@ pub async fn handle_show_object(
             iter_schema_items(&session, &schema, &reader, |schema| {
                 schema
                     .iter_sink_with_acl(current_user)
-                    .map(|t| t.name.clone())
+                    .map(|t| ShowObjectRow {
+                        schema_name: schema.name.clone(),
+                        name: t.name.clone(),
+                    })
                     .collect()
             })
         }
@@ -512,6 +572,7 @@ pub async fn handle_show_object(
                 schema
                     .iter_subscription()
                     .map(|t| ShowSubscriptionRow {
+                        schema_name: schema.name.clone(),
                         name: t.name.clone(),
                         retention_seconds: t.retention_seconds as i64,
                     })
@@ -524,7 +585,13 @@ pub async fn handle_show_object(
         ShowObject::Secret { schema } => {
             let reader = catalog_reader.read_guard();
             iter_schema_items(&session, &schema, &reader, |schema| {
-                schema.iter_secret().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_secret()
+                    .map(|t| ShowObjectRow {
+                        schema_name: schema.name.clone(),
+                        name: t.name.clone(),
+                    })
+                    .collect()
             })
         }
         ShowObject::Columns { table } => {
@@ -594,6 +661,7 @@ pub async fn handle_show_object(
                         }
                     };
                     ShowConnectionRow {
+                        schema_name: schema.name.clone(),
                         name,
                         r#type,
                         properties,
@@ -610,6 +678,7 @@ pub async fn handle_show_object(
                 schema
                     .iter_function()
                     .map(|t| ShowFunctionRow {
+                        schema_name: schema.name.clone(),
                         name: t.name.clone(),
                         arguments: t.arg_types.iter().map(|t| t.to_string()).join(", "),
                         return_type: t.return_type.to_string(),
@@ -737,15 +806,13 @@ pub async fn handle_show_object(
         }
     };
 
-    let rows = names
-        .into_iter()
-        .filter(|arg| match &filter {
-            Some(ShowStatementFilter::Like(pattern)) => like_default(arg, pattern),
-            Some(ShowStatementFilter::ILike(pattern)) => i_like_default(arg, pattern),
-            Some(ShowStatementFilter::Where(..)) => unreachable!(),
-            None => true,
-        })
-        .map(|name| ShowObjectRow { name });
+    // Apply filters.
+    let rows = rows.into_iter().filter(|row| match &filter {
+        Some(ShowStatementFilter::Like(pattern)) => like_default(&row.name, pattern),
+        Some(ShowStatementFilter::ILike(pattern)) => i_like_default(&row.name, pattern),
+        Some(ShowStatementFilter::Where(..)) => unreachable!(),
+        None => true,
+    });
 
     Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
         .rows(rows)
