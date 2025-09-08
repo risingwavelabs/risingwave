@@ -1,16 +1,16 @@
 query II rowsort
-select * from t1;
+select * from sink_t1;
 ----
 1 11
 
 query ITI rowsort
-select * from t2;
+select * from sink_t2;
 ----
 3 a 13
 4 b 14
 
 query II rowsort
-select * from t3;
+select * from sink_t3;
 ----
 1 11
 3 13
@@ -18,7 +18,7 @@ select * from t3;
 5 15
 
 query I rowsort
-select * from t4;
+select * from sink_t4;
 ----
 1
 2

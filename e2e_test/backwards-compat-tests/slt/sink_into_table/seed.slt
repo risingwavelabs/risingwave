@@ -2,34 +2,34 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t1 (v1 int, v2 int);
+create table sink_t1 (v1 int, v2 int);
 
 statement ok
-create table t2 (v1 int, v2 varchar, v3 int);
+create table sink_t2 (v1 int, v2 varchar, v3 int);
 
 statement ok
-create table t3 (v1 int primary key, v2 int);
+create table sink_t3 (v1 int primary key, v2 int);
 
 statement ok
-create table t4 (v1 int);
+create table sink_t4 (v1 int);
 
 statement ok
-create sink s1 into t3 from t1;
+create sink sink_s1 into sink_t3 from sink_t1;
 
 statement ok
-create sink s2 into t3 as select v1, v3 from t2;
+create sink sink_s2 into sink_t3 as select v1, v3 from sink_t2;
 
 statement ok
-create sink s3 into t4 as select v1 from t3 with (type = 'append-only', force_append_only = 'true');
+create sink sink_s3 into sink_t4 as select v1 from sink_t3 with (type = 'append-only', force_append_only = 'true');
 
 statement ok
-insert into t1 values (1, 11), (2, 12);
+insert into sink_t1 values (1, 11), (2, 12);
 
 statement ok
-insert into t2 values (3, 'a', 13), (4, 'b', 14);
+insert into sink_t2 values (3, 'a', 13), (4, 'b', 14);
 
 statement ok
-insert into t3 values (5, 15);
+insert into sink_t3 values (5, 15);
 
 statement ok
-delete from t1 where v1 = 2;
+delete from sink_t1 where v1 = 2;

@@ -2,25 +2,25 @@ statement ok
 SET RW_IMPLICIT_FLUSH=true;
 
 statement ok
-insert into t1 values (11, 101);
+insert into sink_t1 values (11, 101);
 
 statement ok
-insert into t2 values (12, 'aa', 102);
+insert into sink_t2 values (12, 'aa', 102);
 
 statement ok
-delete from t2 where v1 = 3;
+delete from sink_t2 where v1 = 3;
 
 statement ok
-insert into t3 values (13, 103);
+insert into sink_t3 values (13, 103);
 
 query II rowsort
-select * from t1;
+select * from sink_t1;
 ----
 1 11
 11 101
 
 statement ok
-drop table t1 cascade;
+drop table sink_t1 cascade;
 
 query I
 select count(*) from rw_sinks;
@@ -28,44 +28,44 @@ select count(*) from rw_sinks;
 2
 
 statement ok
-create table t5 (v1 int primary key, v2 varchar);
+create table sink_t5 (v1 int primary key, v2 varchar);
 
 statement ok
-create sink s4 into t5 as select v1, v2 from t2;
+create sink sink_s4 into sink_t5 as select v1, v2 from sink_t2;
 
 statement ok
-insert into t2 values (14, 'bb', 104);
+insert into sink_t2 values (14, 'bb', 104);
 
 query ITI rowsort
-select * from t2;
+select * from sink_t2;
 ----
 12 aa 102
 14 bb 104
 4 b 14
 
 query IT rowsort
-select * from t5;
+select * from sink_t5;
 ----
 12 aa
 14 bb
 4 b
 
 query I
-select count(*) from t4;
+select count(*) from sink_t4;
 ----
 9
 
 statement ok
-drop table t2 cascade;
+drop table sink_t2 cascade;
 
 statement ok
-drop table t5;
+drop table sink_t5;
 
 statement ok
-drop sink s3;
+drop sink sink_s3;
 
 statement ok
-drop table t3;
+drop table sink_t3;
 
 statement ok
-drop table t4;
+drop table sink_t4;
