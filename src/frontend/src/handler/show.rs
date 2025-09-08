@@ -166,6 +166,19 @@ where
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowObjectRow {
+    schema_name: String,
+    name: String,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowDatabaseRow {
+    name: String,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowSchemaRow {
     name: String,
 }
 
@@ -290,6 +303,7 @@ impl ShowColumnRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowConnectionRow {
+    schema_name: String,
     name: String,
     r#type: String,
     properties: String,
@@ -298,6 +312,7 @@ struct ShowConnectionRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowFunctionRow {
+    schema_name: String,
     name: String,
     arguments: String,
     return_type: String,
@@ -374,6 +389,7 @@ struct ShowCreateObjectRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowSubscriptionRow {
+    schema_name: String,
     name: String,
     retention_seconds: i64,
 }
@@ -438,7 +454,7 @@ pub async fn handle_show_object(
         (reader, current_user)
     };
 
-    let names = match command {
+    let rows: Vec<ShowObjectRow> = match command {
         ShowObject::Table { schema } => {
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
@@ -495,6 +511,7 @@ pub async fn handle_show_object(
                 schema
                     .iter_subscription()
                     .map(|t| ShowSubscriptionRow {
+                        schema_name: schema.name.clone(),
                         name: t.name.clone(),
                         retention_seconds: t.retention_seconds as i64,
                     })
@@ -577,6 +594,7 @@ pub async fn handle_show_object(
                         }
                     };
                     ShowConnectionRow {
+                        schema_name: schema.name.clone(),
                         name,
                         r#type,
                         properties,
@@ -593,6 +611,7 @@ pub async fn handle_show_object(
                 schema
                     .iter_function()
                     .map(|t| ShowFunctionRow {
+                        schema_name: schema.name.clone(),
                         name: t.name.clone(),
                         arguments: t.arg_types.iter().map(|t| t.to_string()).join(", "),
                         return_type: t.return_type.to_string(),
@@ -720,15 +739,13 @@ pub async fn handle_show_object(
         }
     };
 
-    let rows = names
-        .into_iter()
-        .filter(|arg| match &filter {
-            Some(ShowStatementFilter::Like(pattern)) => like_default(arg, pattern),
-            Some(ShowStatementFilter::ILike(pattern)) => i_like_default(arg, pattern),
-            Some(ShowStatementFilter::Where(..)) => unreachable!(),
-            None => true,
-        })
-        .map(|name| ShowObjectRow { name });
+    // Apply filters.
+    let rows = rows.into_iter().filter(|row| match &filter {
+        Some(ShowStatementFilter::Like(pattern)) => like_default(&row.name, pattern),
+        Some(ShowStatementFilter::ILike(pattern)) => i_like_default(&row.name, pattern),
+        Some(ShowStatementFilter::Where(..)) => unreachable!(),
+        None => true,
+    });
 
     Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
         .rows(rows)
