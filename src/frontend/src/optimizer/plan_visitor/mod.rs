@@ -45,6 +45,8 @@ mod rw_timestamp_validator;
 pub use distributed_dml_visitor::*;
 pub use read_storage_table_visitor::*;
 pub use rw_timestamp_validator::*;
+mod iceberg_scan_detector;
+pub use iceberg_scan_detector::*;
 
 use crate::for_each_convention_all_plan_nodes;
 use crate::optimizer::plan_node::*;

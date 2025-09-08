@@ -38,7 +38,7 @@ use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
     BatchPlanRoot, ExecutionModeDecider, OptimizerContext, OptimizerContextRef,
-    ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor,
+    ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor, IcebergScanDetector,
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -184,6 +184,12 @@ pub async fn handle_execute(
     }
 }
 
+/// Enum to wrap different batch plan results.
+pub enum BatchPlanResult {
+    RW(BatchQueryPlanResult),
+    DF(BatchQueryPlanResult),
+}
+
 pub fn gen_batch_plan_by_statement(
     session: &SessionImpl,
     context: OptimizerContextRef,
@@ -260,6 +266,11 @@ fn gen_batch_query_plan(
     };
 
     let logical = planner.plan(bound)?;
+
+    let contains_iceberg_scan = IcebergScanDetector::contains_logical_iceberg_scan(&logical);
+
+    // TODO: convert rw logical plan to df logical plan if contains iceberg scan
+
     let schema = logical.schema();
     let batch_plan = logical.gen_batch_plan()?;
 
