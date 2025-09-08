@@ -12,12 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Integration benchmark for parsing protobuf messages.
-//!
-//! To cover the code path in real-world scenarios, the parser is created through
-//! `ByteStreamSourceParserImpl::create` based on the given configuration, rather
-//! than depending on a specific internal implementation.
-
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
@@ -40,7 +34,7 @@ use tokio::runtime::Runtime;
 use tracing::Level;
 use tracing_subscriber::prelude::*;
 
-static BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(|| make_batch());
+static BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(make_batch);
 
 fn load_protobuf_descriptor() -> prost_reflect::MessageDescriptor {
     let pool_path =
@@ -91,14 +85,13 @@ fn create_sample_protobuf_data(index: usize) -> Vec<u8> {
     message.set_field_by_name("enum_field", Value::EnumNumber((base_val % 3) as i32));
 
     // Nested message
-    if let Some(nested_field) = descriptor.get_field_by_name("nested_message_field") {
-        if let Some(nested_descriptor) = nested_field.kind().as_message() {
-            let mut nested_message = DynamicMessage::new(nested_descriptor.clone());
-            nested_message.set_field_by_name("id", Value::I32(100 + (base_val as i32)));
-            nested_message
-                .set_field_by_name("name", Value::String(format!("nested_name_{}", index)));
-            message.set_field_by_name("nested_message_field", Value::Message(nested_message));
-        }
+    if let Some(nested_field) = descriptor.get_field_by_name("nested_message_field")
+        && let Some(nested_descriptor) = nested_field.kind().as_message()
+    {
+        let mut nested_message = DynamicMessage::new(nested_descriptor.clone());
+        nested_message.set_field_by_name("id", Value::I32(100 + (base_val as i32)));
+        nested_message.set_field_by_name("name", Value::String(format!("nested_name_{}", index)));
+        message.set_field_by_name("nested_message_field", Value::Message(nested_message));
     }
 
     // Repeated field with varying length
@@ -172,9 +165,9 @@ fn make_parser(rt: &Runtime) -> ByteStreamSourceParserImpl {
             ),
             aws_auth_props: None,
         },
-        message_name: "all_types.AllTypes".to_string(),
+        message_name: "all_types.AllTypes".to_owned(),
         key_message_name: None,
-        messages_as_jsonb: HashSet::from(["google.protobuf.Any".to_string()]),
+        messages_as_jsonb: HashSet::from(["google.protobuf.Any".to_owned()]),
     };
 
     let encoding_props = EncodingProperties::Protobuf(protobuf_properties);
@@ -232,8 +225,6 @@ fn bench(c: &mut Criterion) {
     });
 
     c.bench_function("parse_protobuf_with_tracing", |b| {
-        // Note: `From<S> for Dispatch` has global side effects. Moving this out of `bench_function`
-        // does not work. Why?
         let dispatch: tracing::dispatcher::Dispatch = tracing_subscriber::registry()
             .with(
                 tracing_subscriber::fmt::layer().with_filter(
