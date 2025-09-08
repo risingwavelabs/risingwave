@@ -26,7 +26,7 @@ pin-project-lite = { workspace = true }
 prometheus = { version = "0.14" }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 tonic = { workspace = true }
