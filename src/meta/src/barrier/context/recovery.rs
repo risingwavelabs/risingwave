@@ -117,10 +117,12 @@ impl GlobalBarrierWorkerContextImpl {
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>> {
         println!("worker nodes {:#?}", worker_nodes);
         let database_id = database_id.map(|database_id| database_id.database_id as _);
+
+        let source_manager_ref = self.source_manager.clone();
         let all_actor_infos = self
             .metadata_manager
             .catalog_controller
-            .load_all_actors_dynamic(database_id, worker_nodes)
+            .load_all_actors_dynamic(database_id, worker_nodes, source_manager_ref)
             .await?;
 
         Ok(all_actor_infos
@@ -757,6 +759,7 @@ impl GlobalBarrierWorkerContextImpl {
                 }
             }
         }
+        // TODO
         stream_actors
     }
 }

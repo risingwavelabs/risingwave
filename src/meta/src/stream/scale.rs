@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use futures::future;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeMask};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::{
@@ -41,7 +41,9 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
-use crate::controller::scale::{WorkerInfo, find_fragment_no_shuffle_dags_detailed, render_jobs};
+use crate::controller::scale::{
+    RenderedGraph, WorkerInfo, find_fragment_no_shuffle_dags_detailed, render_jobs,
+};
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers};
 use crate::serving::{
@@ -249,6 +251,7 @@ impl ScaleController {
                             InflightActorInfo {
                                 worker_id: _,
                                 vnode_bitmap,
+                                ..
                             },
                         )| {
                             (*actor_id as hash::ActorId, vnode_bitmap.clone().unwrap())
@@ -310,8 +313,8 @@ impl ScaleController {
             upstream_fragment_dispatcher_ids,
             upstream_dispatcher_mapping,
             downstream_fragment_ids,
-            actor_splits: Default::default(),
             newly_created_actors,
+            actor_splits: Default::default(),
             cdc_table_snapshot_split_assignment: Default::default(),
             cdc_table_id: None,
         };
@@ -501,8 +504,10 @@ impl ScaleController {
         let id_gen = self.env.id_gen_manager();
 
         println!("render for {:#?}, workers {:#?}", jobs, workers);
-        let render_result =
-            render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy).await?;
+        let RenderedGraph {
+            fragments: render_result,
+            ..
+        } = render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy, None).await?;
 
         for (db, jobs) in &render_result {
             println!("\tdb: {db}");
@@ -568,29 +573,38 @@ impl ScaleController {
             );
         }
 
+        let all_related_fragment_ids: HashSet<_> = fragment_ids
+            .iter()
+            .copied()
+            .chain(
+                all_upstream_fragments
+                    .values()
+                    .flatten()
+                    .map(|(id, _)| *id as i32),
+            )
+            .chain(
+                all_downstream_fragments
+                    .values()
+                    .flatten()
+                    .map(|(id, _)| *id as i32),
+            )
+            .collect();
+
+        let all_related_fragment_ids = all_related_fragment_ids.into_iter().collect_vec();
+
+        // let all_fragments_from_db: HashMap<_, _> = Fragment::find()
+        //     .filter(fragment::Column::FragmentId.is_in(all_related_fragment_ids.clone()))
+        //     .all(&txn)
+        //     .await?
+        //     .into_iter()
+        //     .map(|f| (f.fragment_id, f))
+        //     .collect();
+
         let all_prev_fragments: HashMap<_, _> = {
-            let all_fragment_ids: HashSet<_> = fragment_ids
-                .iter()
-                .copied()
-                .chain(
-                    all_upstream_fragments
-                        .values()
-                        .flatten()
-                        .map(|(id, _)| *id as i32),
-                )
-                .chain(
-                    all_downstream_fragments
-                        .values()
-                        .flatten()
-                        .map(|(id, _)| *id as i32),
-                )
-                .collect();
-
             let read_guard = self.env.shared_actor_infos().read_guard();
-
-            all_fragment_ids
-                .into_iter()
-                .map(|fragment_id| {
+            all_related_fragment_ids
+                .iter()
+                .map(|&fragment_id| {
                     (
                         fragment_id,
                         read_guard
@@ -601,55 +615,6 @@ impl ScaleController {
                 })
                 .collect()
         };
-
-        // // HACK: The reschedule command currently cannot support direct actor migration.
-        // // Therefore, when an actor migration is detected, we assign it a new actor_id,
-        // // which is effectively equivalent to a "drop old actor, create new actor" operation.
-        // // Since the new ID generation logic is consistent with the initial creation (based on a 0-index),
-        // // vnode affinity is preserved. This logic does not affect the recovery process.
-        // for (_, fragments) in render_result.values_mut().flatten() {
-        //     for (fragment_id, fragment_info) in fragments {
-        //         println!("processing fragment {}", fragment_id);
-        //         let prev_fragment: &SharedFragmentInfo =
-        //             all_prev_fragments.get(fragment_id).unwrap();
-        //
-        //         let used_actor_ids: HashSet<_> = prev_fragment
-        //             .actors
-        //             .keys()
-        //             .chain(fragment_info.actors.keys())
-        //             .copied()
-        //             .collect();
-        //
-        //         println!("\tfrag {} used_actor_ids: {:?}", fragment_id, used_actor_ids);
-        //
-        //         let mut available_ids = (0..)
-        //             .map(|idx| build_actor_id(*fragment_id as u32, idx as usize))
-        //             .filter(|id| !used_actor_ids.contains(id));
-        //
-        //         for (actor_id, prev_actor_info) in &prev_fragment.actors {
-        //             if let Some(curr_actor_info) = fragment_info.actors.get(actor_id)
-        //                 && prev_actor_info.worker_id != curr_actor_info.worker_id
-        //             {
-        //                 println!(
-        //                     "actor {} moved from {} to {}",
-        //                     actor_id, prev_actor_info.worker_id, curr_actor_info.worker_id
-        //                 );
-        //
-        //                 let new_actor_id = available_ids.next().unwrap();
-        //
-        //                 let actor_info = fragment_info.actors.remove(actor_id).unwrap();
-        //                 fragment_info.actors.insert(new_actor_id, actor_info);
-        //
-        //                 println!(
-        //                     "-> Re-mapped actor_id {} to new available id {}",
-        //                     actor_id, new_actor_id
-        //                 );
-        //             } else {
-        //                 println!("fragment {} actor {} not moved {}", fragment_id, actor_id, prev_actor_info.worker_id);
-        //             }
-        //         }
-        //     }
-        // }
 
         let all_rendered_fragments: HashMap<_, _> = render_result
             .values()
@@ -771,6 +736,8 @@ impl ScaleController {
 
                 let prev_fragment = all_prev_fragments.get(&{ *fragment_id }).unwrap();
 
+                // NOTE: diff fragment does not handle split reassignment currently because we can't fetch stream node from inflight info.
+                // So we need to manually handle later.
                 let reschedule = self.diff_fragment(
                     prev_fragment,
                     actors,
@@ -778,6 +745,8 @@ impl ScaleController {
                     downstream_fragments,
                     all_actor_dispatchers,
                 )?;
+
+                //
 
                 reschedules.insert(*fragment_id as _, reschedule);
             }

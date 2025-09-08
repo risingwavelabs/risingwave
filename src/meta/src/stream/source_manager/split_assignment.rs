@@ -354,6 +354,8 @@ impl SourceManagerCore {
                     continue 'loop_source;
                 }
 
+                println!("discovered splits {:#?}", discovered_splits);
+
                 let prev_actor_splits: HashMap<_, _> = actors
                     .into_iter()
                     .map(|actor_id| {

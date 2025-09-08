@@ -109,13 +109,16 @@ use crate::model::{
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
-use crate::stream::{SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
+use crate::stream::{
+    SourceManager, SourceManagerRef, SplitAssignment, UpstreamSinkInfo, build_actor_split_impls,
+};
 
 /// Some information of running (inflight) actors.
 #[derive(Clone, Debug)]
 pub struct InflightActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<Bitmap>,
+    pub splits: Option<PbConnectorSplits>,
 }
 
 #[derive(Clone, Debug)]
@@ -1415,6 +1418,7 @@ impl CatalogController {
         &self,
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
+        source_manager_ref: SourceManagerRef,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
         let adaptive_parallelism_strategy = {

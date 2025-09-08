@@ -218,6 +218,8 @@ impl AutoRefreshSchemaSinkContext {
                                 .unwrap()
                                 .worker_node_id as _,
                             vnode_bitmap: actor.vnode_bitmap.clone(),
+                            // QQ: always none?
+                            splits: None,
                         },
                     )
                 })

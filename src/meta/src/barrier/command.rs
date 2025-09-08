@@ -39,7 +39,8 @@ use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{
-    ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
+    ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration, PbConnectorSplit,
+    PbConnectorSplits,
 };
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
@@ -258,6 +259,14 @@ impl StreamJobFragments {
                                         .worker_id()
                                         as WorkerId,
                                     vnode_bitmap: actor.vnode_bitmap.clone(),
+                                    splits: self.actor_splits.get(&actor.actor_id).map(|splits| {
+                                        PbConnectorSplits {
+                                            splits: splits
+                                                .iter()
+                                                .map(PbConnectorSplit::from)
+                                                .collect(),
+                                        }
+                                    }),
                                 },
                             )
                         })
@@ -553,6 +562,15 @@ impl Command {
                                                         .0
                                                         .vnode_bitmap
                                                         .clone(),
+                                                    splits: reschedule
+                                                        .actor_splits
+                                                        .get(actor_id)
+                                                        .map(|splits| PbConnectorSplits {
+                                                            splits: splits
+                                                                .iter()
+                                                                .map(PbConnectorSplit::from)
+                                                                .collect(),
+                                                        }),
                                                 },
                                             )
                                         })

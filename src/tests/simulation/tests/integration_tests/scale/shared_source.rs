@@ -89,7 +89,7 @@ async fn validate_splits_aligned(cluster: &mut Cluster) -> Result<()> {
             )))
     );
     let actor_splits = cluster.list_source_splits().await?;
-    tracing::info!("{:#?}", actor_splits);
+    println!("{:#?}", actor_splits);
     for (actor, upstream) in actor_upstream {
         assert_eq!(
             actor_splits.get(&actor).unwrap(),
