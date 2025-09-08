@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use rand::Rng;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;

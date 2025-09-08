@@ -22,13 +22,12 @@ use rdkafka::error::KafkaResult;
 use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use tokio::time;
 
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int) append only;";
 const APPEND_ONLY_SINK_CREATE: &str = "create sink s1 from t with (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='t_sink_append_only', type='append-only');";
-const MV_CREATE: &str = "create materialized view m as select count(*) from t;";
-const DEBEZIUM_SINK_CREATE: &str = "create sink s2 from m with (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='t_sink_debezium', type='debezium');";
+const _MV_CREATE: &str = "create materialized view m as select count(*) from t;";
+const _DEBEZIUM_SINK_CREATE: &str = "create sink s2 from m with (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='t_sink_debezium', type='debezium');";
 
 const APPEND_ONLY_TOPIC: &str = "t_sink_append_only";
 const DEBEZIUM_TOPIC: &str = "t_sink_debezium";
@@ -107,13 +106,6 @@ async fn test_sink_append_only() -> Result<()> {
         .await;
 
     let mut stream = consumer.stream();
-
-    let materialize_fragment = cluster
-        .locate_one_fragment([
-            identity_contains("materialize"),
-            no_identity_contains("simpleAgg"),
-        ])
-        .await?;
 
     check_kafka_after_insert(&mut cluster, &mut stream, &[1, 2, 3]).await?;
     cluster
