@@ -22,9 +22,8 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, TableId};
-
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::expr::PbExprNode;
@@ -48,7 +47,6 @@ use crate::manager::{
 use crate::model::{
     ActorId, DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId,
     FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate,
-    TableParallelism,
 };
 use crate::stream::cdc::{
     assign_cdc_table_snapshot_splits, is_parallelized_backfill_enabled_cdc_scan_fragment,

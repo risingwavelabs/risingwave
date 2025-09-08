@@ -40,7 +40,7 @@ use risingwave_meta_model::{
     VnodeBitmap, WorkerId, database, fragment, fragment_relation, object, sink, source,
     streaming_job, table,
 };
-use risingwave_meta_model_migration::{Alias, ExprTrait, SelectStatement, SimpleExpr};
+use risingwave_meta_model_migration::{ExprTrait, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
@@ -69,6 +69,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
+use crate::MetaResult;
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
@@ -83,7 +84,6 @@ use crate::model::{
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
 use crate::stream::{SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
-use crate::{MetaError, MetaResult};
 
 /// Some information of running (inflight) actors.
 #[derive(Clone, Debug)]
