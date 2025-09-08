@@ -104,7 +104,11 @@ impl ToStream for LogicalDedup {
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         use super::stream::prelude::*;
 
-        let input = self.input().to_stream(ctx)?;
+        let logical_input = self
+            .input()
+            .try_better_locality(self.dedup_cols())
+            .unwrap_or_else(|| self.input());
+        let input = logical_input.to_stream(ctx)?;
         let input = RequiredDist::hash_shard(self.dedup_cols())
             .streaming_enforce_if_not_satisfies(input)?;
         if input.append_only() {

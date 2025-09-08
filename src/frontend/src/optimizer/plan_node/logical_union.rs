@@ -324,6 +324,15 @@ impl ToStream for LogicalUnion {
             Ok((new_union.into(), out_col_change))
         }
     }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        let new_inputs = self
+            .inputs()
+            .iter()
+            .map(|input| input.try_better_locality(columns))
+            .collect::<Option<Vec<PlanRef>>>()?;
+        Some(self.clone_with_inputs(&new_inputs))
+    }
 }
 
 #[cfg(test)]
