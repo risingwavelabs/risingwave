@@ -511,8 +511,8 @@ impl GlobalBarrierWorkerContextImpl {
                     let cdc_table_backfill_actors = self
                         .metadata_manager
                         .catalog_controller
-                        .cdc_table_backfill_actor_ids()
-                        .await?;
+                        .cdc_table_backfill_actor_ids()?;
+
                     let cdc_table_ids = cdc_table_backfill_actors
                         .keys()
                         .cloned()
@@ -701,8 +701,8 @@ impl GlobalBarrierWorkerContextImpl {
         let cdc_table_backfill_actors = self
             .metadata_manager
             .catalog_controller
-            .cdc_table_backfill_actor_ids()
-            .await?;
+            .cdc_table_backfill_actor_ids()?;
+
         let cdc_table_ids = cdc_table_backfill_actors
             .keys()
             .cloned()

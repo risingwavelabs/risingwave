@@ -74,7 +74,7 @@ use crate::model::{
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
-    JobReschedulePostUpdates, SplitAssignment, SplitState, ThrottleConfig, UpstreamSinkInfo,
+    SplitAssignment, SplitState, ThrottleConfig, UpstreamSinkInfo,
     build_actor_connector_splits,
 };
 

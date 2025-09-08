@@ -69,7 +69,7 @@ use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
 
-use crate::barrier::{Command, Reschedule};
+use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 
@@ -77,7 +77,7 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
-    fetch_target_fragments, get_fragment_actor_ids, get_internal_tables_by_id, get_table_columns,
+    fetch_target_fragments,  get_internal_tables_by_id, get_table_columns,
     grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
 };
 
@@ -793,30 +793,30 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let actor_ids = actor_ids.into_iter().map(|id| id as ActorId).collect_vec();
-
-        Actor::update_many()
-            .col_expr(
-                actor::Column::Status,
-                SimpleExpr::from(ActorStatus::Running.into_value()),
-            )
-            .filter(actor::Column::ActorId.is_in(actor_ids))
-            .exec(&txn)
-            .await?;
-
-        for splits in split_assignment.values() {
-            for (actor_id, splits) in splits {
-                let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-                let connector_splits = &PbConnectorSplits { splits };
-                actor::ActiveModel {
-                    actor_id: Set(*actor_id as _),
-                    splits: Set(Some(connector_splits.into())),
-                    ..Default::default()
-                }
-                .update(&txn)
-                .await?;
-            }
-        }
+        // let actor_ids = actor_ids.into_iter().map(|id| id as ActorId).collect_vec();
+        //
+        // Actor::update_many()
+        //     .col_expr(
+        //         actor::Column::Status,
+        //         SimpleExpr::from(ActorStatus::Running.into_value()),
+        //     )
+        //     .filter(actor::Column::ActorId.is_in(actor_ids))
+        //     .exec(&txn)
+        //     .await?;
+        //
+        // for splits in split_assignment.values() {
+        //     for (actor_id, splits) in splits {
+        //         let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
+        //         let connector_splits = &PbConnectorSplits { splits };
+        //         actor::ActiveModel {
+        //             actor_id: Set(*actor_id as _),
+        //             splits: Set(Some(connector_splits.into())),
+        //             ..Default::default()
+        //         }
+        //         .update(&txn)
+        //         .await?;
+        //     }
+        // }
 
         insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;
 

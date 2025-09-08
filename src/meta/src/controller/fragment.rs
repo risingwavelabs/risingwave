@@ -75,11 +75,11 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::MetaResult;
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
 use crate::controller::utils::{
+
 
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
 
@@ -94,6 +94,10 @@ use crate::controller::utils::{
     rebuild_fragment_mapping,
 
 
+
+
+
+
 };
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
@@ -103,7 +107,6 @@ use crate::model::{
 use crate::rpc::ddl_controller::build_upstream_sink_info;
 use crate::stream::{SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
 use crate::{MetaError, MetaResult};
-
 
 /// Some information of running (inflight) actors.
 #[derive(Clone, Debug)]
@@ -1359,34 +1362,19 @@ impl CatalogController {
 
         let sink_name_mapping: HashMap<SinkId, String> = sink_id_names.into_iter().collect();
 
-        let actor_with_type: Vec<(ActorId, SinkId)> = Actor::find()
-            .select_only()
-            .column(actor::Column::ActorId)
-            .column(fragment::Column::JobId)
-            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-            .filter(
-                fragment::Column::JobId
-                    .is_in(sink_ids)
-                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Sink)),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        let actor_with_type_from_cache: Vec<(ActorId, ObjectId, FragmentTypeMask)> = {
+        let actor_with_type: Vec<(ActorId, ObjectId)> = {
             let info = self.env.shared_actor_infos().read_guard();
 
-            // todo
             info.iter_over_fragments()
-                .filter(|(_, fragment)| sink_ids.contains(&fragment.job_id))
+                .filter(|(_, fragment)| {
+                    sink_ids.contains(&fragment.job_id)
+                        && fragment.fragment_type_mask.contains(FragmentTypeFlag::Sink)
+                })
                 .flat_map(|(_, fragment)| {
-                    fragment.actors.keys().map(move |actor_id| {
-                        (
-                            *actor_id as _,
-                            fragment.job_id as _,
-                            fragment.fragment_type_mask,
-                        )
-                    })
+                    fragment
+                        .actors
+                        .keys()
+                        .map(move |actor_id| (*actor_id as _, fragment.job_id as _))
                 })
                 .collect()
         };
@@ -2179,90 +2167,6 @@ impl CatalogController {
             }
         }
         Ok(source_fragment_ids)
-    }
-
-    // note remove
-    #[deprecated]
-    pub async fn deprecated_load_actor_splits(
-        &self,
-    ) -> MetaResult<HashMap<ActorId, ConnectorSplits>> {
-        let inner = self.inner.read().await;
-        let splits_from_cache: Vec<(ActorId, ConnectorSplits)> = inner
-            .actors
-            .models
-            .iter()
-            .filter_map(|(&actor_id, model)| model.splits.clone().map(|splits| (actor_id, splits)))
-            .collect();
-
-        {
-            let splits_from_db: Vec<(ActorId, ConnectorSplits)> = Actor::find()
-                .select_only()
-                .columns([actor::Column::ActorId, actor::Column::Splits])
-                .filter(actor::Column::Splits.is_not_null())
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
-
-            let set_db: HashSet<(ActorId, _)> = splits_from_db
-                .into_iter()
-                .flat_map(|(actor_id, splits)| {
-                    splits
-                        .to_protobuf()
-                        .splits
-                        .into_iter()
-                        .map(move |split| (actor_id, split.encoded_split))
-                })
-                .collect();
-
-            let set_cache: HashSet<(ActorId, _)> = splits_from_cache
-                .iter()
-                .cloned()
-                .flat_map(|(actor_id, splits)| {
-                    splits
-                        .to_protobuf()
-                        .splits
-                        .into_iter()
-                        .map(move |split| (actor_id, split.encoded_split))
-                })
-                .collect();
-
-            debug_assert_eq!(set_db, set_cache, "Splits mismatch between DB and cache");
-        }
-
-        let splits = splits_from_cache;
-        Ok(splits.into_iter().collect())
-    }
-
-    /// Get the actor count of `Materialize` or `Sink` fragment of the specified table.
-    pub async fn get_actual_job_fragment_parallelism(
-        &self,
-        job_id: ObjectId,
-    ) -> MetaResult<Option<usize>> {
-        let inner = self.inner.read().await;
-        let fragments: Vec<(FragmentId, i64)> = FragmentModel::find()
-            .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
-            .select_only()
-            .columns([fragment::Column::FragmentId])
-            .column_as(actor::Column::ActorId.count(), "count")
-            .filter(
-                fragment::Column::JobId
-                    .eq(job_id)
-                    .and(FragmentTypeMask::intersects_any([
-                        FragmentTypeFlag::Mview,
-                        FragmentTypeFlag::Sink,
-                    ])),
-            )
-            .group_by(fragment::Column::FragmentId)
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        Ok(fragments
-            .into_iter()
-            .at_most_one()
-            .ok()
-            .flatten()
-            .map(|(_, count)| count as usize))
     }
 
     pub async fn get_all_upstream_sink_infos(
