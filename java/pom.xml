@@ -64,15 +64,15 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- dependency versions -->
         <protobuf.version>3.25.8</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
-        <grpc.version>1.74.0</grpc.version>
+        <grpc.version>1.75.0</grpc.version>
         <log4j.version>2.25.1</log4j.version>
         <slf4j.version>2.0.17</slf4j.version>
         <debezium.version>2.6.2.Final</debezium.version>
-        <jackson.version>2.19.2</jackson.version>
-        <hadoop.version>3.4.1</hadoop.version>
+        <jackson.version>2.20.0</jackson.version>
+        <hadoop.version>3.4.2</hadoop.version>
         <testcontainers.version>1.21.3</testcontainers.version>
-        <aws.version>2.32.19</aws.version>
-        <jetty.version>12.0.24</jetty.version>
+        <aws.version>2.33.4</aws.version>
+        <jetty.version>12.1.1</jetty.version>
         <parquet.version>1.15.1</parquet.version>
     </properties>
 
@@ -490,7 +490,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
-                <version>3.11.2</version>
+                <version>3.11.3</version>
                 <executions>
                     <execution>
                         <id>attach-javadocs</id>
