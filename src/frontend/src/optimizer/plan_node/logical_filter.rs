@@ -219,7 +219,11 @@ impl ToStream for LogicalFilter {
     }
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        self.input().try_better_locality(columns)
+        if let Some(better_input) = self.input().try_better_locality(columns) {
+            Some(self.clone_with_input(better_input).into())
+        } else {
+            None
+        }
     }
 }
 
