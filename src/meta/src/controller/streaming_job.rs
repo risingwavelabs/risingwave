@@ -59,37 +59,28 @@ use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
-    ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
-    TransactionTrait,
-
-    IntoSimpleExpr,
+    ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, JoinType,
+    ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
-
-use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
+use crate::barrier::{Command, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
-
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
-    fetch_target_fragments,  get_internal_tables_by_id, get_table_columns,
+    fetch_target_fragments, get_internal_tables_by_id, get_table_columns,
     grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
 };
-
-use crate::controller::fragment::InflightFragmentInfo;
-
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate,
 };
-use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -785,9 +776,7 @@ impl CatalogController {
     pub async fn post_collect_job_fragments(
         &self,
         job_id: ObjectId,
-        _actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
-        split_assignment: &SplitAssignment,
         new_sink_downstream: Option<FragmentDownstreamRelation>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;

@@ -145,6 +145,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250821_081110_cdc_table_snapshot_splits_add_column::Migration),
             Box::new(m20250905_144810_deprecate_table_incoming_sinks::Migration),
             Box::new(m20250907_000000_source_splits::Migration),
+            Box::new(m20250907_090144_move_expr_context_to_streaming_job::Migration),
         ]
     }
 }

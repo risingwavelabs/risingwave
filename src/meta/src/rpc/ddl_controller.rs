@@ -57,7 +57,10 @@ use risingwave_pb::ddl_service::{
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{PbUpstreamSinkInfo, MergeNode, PbDispatcherType, StreamFragmentGraph as StreamFragmentGraphProto, PbStreamFragmentGraph, PbDispatchOutputMapping, PbStreamNode};
+use risingwave_pb::stream_plan::{
+    PbDispatchOutputMapping, PbStreamFragmentGraph, PbStreamNode, PbUpstreamSinkInfo,
+    StreamFragmentGraph as StreamFragmentGraphProto,
+};
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use strum::Display;
@@ -86,11 +89,9 @@ use crate::stream::cdc::{
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-
- UpstreamSinkInfo,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
     ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
-    check_sink_fragments_support_refresh_schema, create_source_worker,
+    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
     rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;

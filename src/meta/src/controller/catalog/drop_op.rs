@@ -269,12 +269,14 @@ impl CatalogController {
         }
 
         let (removed_source_fragments, removed_sink_fragments, removed_actors, removed_fragments) =
-            get_fragments_for_jobs(&txn,
+            get_fragments_for_jobs(
+                &txn,
+                self.env.shared_actor_infos(),
+                removed_streaming_job_ids.clone(),
+            )
+            .await?;
 
-                                   self.env.shared_actor_infos(),
-                                   removed_streaming_job_ids.clone()).await?;
-
-        //todo
+        // todo
         // let (removed_source_fragments, removed_actors, removed_fragments) =
         //     get_fragments_for_jobs(&txn, &inner.actors, removed_streaming_job_ids.clone()).await?;
 

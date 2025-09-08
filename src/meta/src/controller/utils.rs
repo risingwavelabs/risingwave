@@ -31,13 +31,10 @@ use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array,
-
     JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
-    TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment,
-    fragment_relation, function, index, object, object_dependency, schema, secret, sink, source,
-    streaming_job, subscription, table, user, user_default_privilege, user_privilege, view,
-
-
+    TableId, UserId, VnodeBitmap, WorkerId, connection, database, fragment, fragment_relation,
+    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
+    subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -71,12 +68,8 @@ use thiserror_ext::AsReport;
 
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
-
 use crate::controller::fragment::FragmentTypeMaskExt;
-use crate::controller::fragment::InflightFragmentInfo;
-use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
-
-
+use crate::model::FragmentDownstreamRelation;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
