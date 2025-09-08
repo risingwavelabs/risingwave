@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::FragmentTypeMask;
-
 use super::*;
-use crate::controller::fragment::FragmentTypeMaskExt;
 
 pub(crate) async fn update_internal_tables(
     txn: &DatabaseTransaction,
@@ -327,133 +324,6 @@ impl CatalogController {
         }
         self.env.event_log_manager_ref().add_event_logs(event_logs);
         Ok(())
-    }
-
-    /// Returns the IDs of tables whose catalogs have been updated.
-    pub(crate) async fn clean_dirty_sink_downstreams(
-        txn: &DatabaseTransaction,
-    ) -> MetaResult<Vec<TableId>> {
-        // clean incoming sink from (table)
-        // clean upstream fragment ids from (fragment)
-        // clean stream node from (fragment)
-        // clean upstream actor ids from (actor)
-
-        // The cleanup of fragment and StreamNode is to maintain compatibility with old versions of data. For the
-        // current sink-into-table implementation, there is no need to restore the contents of StreamNode, because the
-        // `UpstreamSinkUnion` operator does not persist any data, but relies on refill during recovery.
-
-        let all_fragment_ids: Vec<FragmentId> = Fragment::find()
-            .select_only()
-            .column(fragment::Column::FragmentId)
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        let all_fragment_ids: HashSet<_> = all_fragment_ids.into_iter().collect();
-
-        let all_sink_into_tables: Vec<Option<TableId>> = Sink::find()
-            .select_only()
-            .column(sink::Column::TargetTable)
-            .filter(sink::Column::TargetTable.is_not_null())
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        let mut table_with_incoming_sinks: HashSet<TableId> = HashSet::new();
-        for target_table_id in all_sink_into_tables {
-            table_with_incoming_sinks.insert(target_table_id.expect("filter by non null"));
-        }
-
-        // no need to update, returning
-        if table_with_incoming_sinks.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let mut updated_table_ids = vec![];
-        for table_id in table_with_incoming_sinks {
-            tracing::info!("cleaning dirty table sink downstream table {}", table_id);
-            updated_table_ids.push(table_id);
-
-            let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
-                .select_only()
-                .columns(vec![
-                    fragment::Column::FragmentId,
-                    fragment::Column::StreamNode,
-                ])
-                .filter(fragment::Column::JobId.eq(table_id).and(
-                    // dirty downstream should be materialize fragment of table
-                    FragmentTypeMask::intersects(FragmentTypeFlag::Mview),
-                ))
-                .into_tuple()
-                .all(txn)
-                .await?;
-
-            for (fragment_id, stream_node) in fragments {
-                {
-                    let mut dirty_upstream_fragment_ids = HashSet::new();
-
-                    let mut pb_stream_node = stream_node.to_protobuf();
-
-                    visit_stream_node_cont_mut(&mut pb_stream_node, |node| {
-                        if let Some(NodeBody::Union(_)) = node.node_body {
-                            node.input.retain_mut(|input| match &mut input.node_body {
-                                Some(NodeBody::Project(_)) => {
-                                    let body = input.input.iter().exactly_one().unwrap();
-                                    let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
-                                        unreachable!("expect merge node");
-                                    };
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
-                                    {
-                                        true
-                                    } else {
-                                        dirty_upstream_fragment_ids
-                                            .insert(merge_node.upstream_fragment_id);
-                                        false
-                                    }
-                                }
-                                Some(NodeBody::Merge(merge_node)) => {
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
-                                    {
-                                        true
-                                    } else {
-                                        dirty_upstream_fragment_ids
-                                            .insert(merge_node.upstream_fragment_id);
-                                        false
-                                    }
-                                }
-                                _ => false,
-                            });
-                        }
-                        true
-                    });
-
-                    tracing::info!(
-                        "cleaning dirty table sink fragment {:?} from downstream fragment {}",
-                        dirty_upstream_fragment_ids,
-                        fragment_id
-                    );
-
-                    if !dirty_upstream_fragment_ids.is_empty() {
-                        tracing::info!(
-                            "fixing dirty stream node in downstream fragment {}",
-                            fragment_id
-                        );
-                        Fragment::update_many()
-                            .col_expr(
-                                fragment::Column::StreamNode,
-                                StreamNode::from(&pb_stream_node).into(),
-                            )
-                            .filter(fragment::Column::FragmentId.eq(fragment_id))
-                            .exec(txn)
-                            .await?;
-                    }
-                }
-            }
-        }
-
-        Ok(updated_table_ids)
     }
 
     pub async fn has_any_streaming_jobs(&self) -> MetaResult<bool> {

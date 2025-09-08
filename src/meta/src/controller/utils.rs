@@ -2239,6 +2239,21 @@ where
     Ok(sink_fragment_ids.into_iter().collect())
 }
 
+pub async fn get_all_user_created_table_ids<C>(txn: &C) -> MetaResult<Vec<TableId>>
+where
+    C: ConnectionTrait,
+{
+    let table_ids: Vec<TableId> = Table::find()
+        .select_only()
+        .column(table::Column::TableId)
+        .filter(table::Column::TableType.eq(TableType::Table))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    Ok(table_ids)
+}
+
 pub fn build_select_node_list(
     from: &[ColumnCatalog],
     to: &[ColumnCatalog],

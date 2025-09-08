@@ -36,7 +36,9 @@ use tracing::{debug, info, warn};
 use super::BarrierWorkerRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::barrier::info::InflightStreamingJobInfo;
-use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
+use crate::barrier::{
+    BarrierManagerStatus, DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo, RecoveryReason,
+};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
@@ -254,6 +256,13 @@ impl GlobalBarrierWorkerContextImpl {
         Ok((table_committed_epoch, log_epochs))
     }
 
+    fn recovery_reason(&self) -> Option<RecoveryReason> {
+        match self.status.load().as_ref() {
+            BarrierManagerStatus::Recovering(reason) => Some(reason.clone()),
+            _ => None,
+        }
+    }
+
     /// For normal DDL operations, the `UpstreamSinkUnion` operator is modified dynamically, and does not persist the
     /// newly added or deleted upstreams in meta-store. Therefore, when restoring jobs, we need to restore the
     /// information required by the operator based on the current state of the upstream (sink) and downstream (table) of
@@ -323,6 +332,15 @@ impl GlobalBarrierWorkerContextImpl {
         {
             {
                 {
+                    let recovery_reason = self.recovery_reason();
+                    if matches!(recovery_reason, Some(RecoveryReason::Bootstrap)) {
+                        self.metadata_manager
+                            .catalog_controller
+                            .migrate_legacy_fragments()
+                            .await
+                            .context("migrate legacy fragments")?;
+                    }
+
                     self.clean_dirty_streaming_jobs(None)
                         .await
                         .context("clean dirty streaming jobs")?;

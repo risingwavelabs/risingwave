@@ -28,7 +28,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, SYSTEM_SCHEMAS, TableOption,
+    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, SYSTEM_SCHEMAS, TableOption,
 };
 use risingwave_common::current_cluster_version;
 use risingwave_common::secret::LocalSecretManager;
@@ -60,6 +60,7 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbUpstreamSinkUnionNode};
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
@@ -79,6 +80,7 @@ use super::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::controller::catalog::util::update_internal_tables;
+use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::*;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, MetaSrvEnv, NotificationVersion,
@@ -87,6 +89,9 @@ use crate::manager::{
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::{MetaTelemetryJobDesc, report_event};
 use crate::{MetaError, MetaResult};
+
+// A value different from other operator_ids, used for new operator when reloading a table from an older version.
+const UPSTREAM_SINK_UNION_OPERATOR_ID: u64 = 1 << 16;
 
 pub type Catalog = (
     Vec<PbDatabase>,
@@ -417,6 +422,124 @@ impl CatalogController {
         Ok(())
     }
 
+    /// A `Union` node on the table, in older versions, should contain multiple `Merge` + `Project` nodes at the end as
+    /// input for upstream sinks.
+    fn transform_upstream_sink_union(union_node: &mut PbStreamNode) -> bool {
+        assert!(matches!(
+            union_node.get_node_body().unwrap(),
+            NodeBody::Union(_)
+        ));
+        assert!(
+            !union_node.get_input().is_empty(),
+            "should at least have dml-operator as input"
+        );
+        if matches!(
+            union_node
+                .get_input()
+                .last()
+                .unwrap()
+                .get_node_body()
+                .unwrap(),
+            NodeBody::UpstreamSinkUnion(_)
+        ) {
+            // Skip the table-fragment that has been migrated.
+            return false;
+        }
+        let mut upstream_sink_count = 0;
+        for union_input in union_node.get_input().iter().rev() {
+            let mut is_sink_into = false;
+            if let NodeBody::Project(project) = union_input.get_node_body().unwrap() {
+                let project_input = union_input.get_input().first().unwrap();
+                if let NodeBody::Merge(merge) = project_input.get_node_body().unwrap() {
+                    // Operators created in older versions should meet these conditions.
+                    assert!(
+                        project.get_watermark_input_cols().is_empty()
+                            && project.get_watermark_output_cols().is_empty()
+                            && project.get_nondecreasing_exprs().is_empty()
+                            && !project.noop_update_hint
+                            && merge.upstream_dispatcher_type() == PbDispatcherType::Hash
+                    );
+                    is_sink_into = true;
+                    upstream_sink_count += 1;
+                }
+            }
+            if !is_sink_into {
+                break;
+            }
+        }
+
+        assert!(union_node.get_input().len() >= upstream_sink_count);
+        union_node
+            .input
+            .truncate(union_node.get_input().len() - upstream_sink_count);
+
+        let upstream_sink_union = PbUpstreamSinkUnionNode {
+            // Real upstreams will be refilled in the subsequent recovery process.
+            init_upstreams: Default::default(),
+        };
+        let stream_node = PbStreamNode {
+            operator_id: UPSTREAM_SINK_UNION_OPERATOR_ID,
+            input: Default::default(),
+            stream_key: union_node.get_stream_key().clone(),
+            stream_kind: union_node.stream_kind().into(), // not used, so it doesn't matter here
+            identity: "UpstreamSinkUnion".to_owned(),
+            fields: union_node.get_fields().clone(),
+            node_body: Some(NodeBody::UpstreamSinkUnion(Box::new(upstream_sink_union))),
+        };
+        union_node.input.push(stream_node);
+
+        true
+    }
+
+    // Currently it is only used to refill table fragments with upstream sinks.
+    pub async fn migrate_legacy_fragments(&self) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let all_table_ids = get_all_user_created_table_ids(&txn).await?;
+        let table_mview_fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns(vec![
+                fragment::Column::FragmentId,
+                fragment::Column::StreamNode,
+            ])
+            .filter(
+                fragment::Column::JobId
+                    .is_in(all_table_ids.clone())
+                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Mview)),
+            )
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        for (fragment_id, stream_node) in table_mview_fragments {
+            let mut pb_stream_node = stream_node.to_protobuf();
+            let mut updated = false;
+            visit_stream_node_cont_mut(&mut pb_stream_node, |node| {
+                if matches!(node.node_body, Some(NodeBody::Union(_))) {
+                    updated = Self::transform_upstream_sink_union(node);
+                    false
+                } else {
+                    true
+                }
+            });
+
+            if updated {
+                Fragment::update(fragment::ActiveModel {
+                    fragment_id: Set(fragment_id),
+                    stream_node: Set(StreamNode::from(&pb_stream_node)),
+                    ..Default::default()
+                })
+                .exec(&txn)
+                .await?;
+            }
+        }
+
+        txn.commit().await?;
+
+        Ok(())
+    }
+
     /// `clean_dirty_creating_jobs` cleans up creating jobs that are creating in Foreground mode or in Initial status.
     pub async fn clean_dirty_creating_jobs(
         &self,
@@ -452,39 +575,7 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let updated_table_ids = Self::clean_dirty_sink_downstreams(&txn).await?;
-        let updated_table_objs = if !updated_table_ids.is_empty() {
-            Table::find()
-                .find_also_related(Object)
-                .filter(table::Column::TableId.is_in(updated_table_ids))
-                .all(&txn)
-                .await?
-        } else {
-            vec![]
-        };
-
         if dirty_job_objs.is_empty() {
-            if !updated_table_objs.is_empty() {
-                txn.commit().await?;
-
-                // Notify the frontend to update the table info.
-                self.notify_frontend(
-                    NotificationOperation::Update,
-                    NotificationInfo::ObjectGroup(PbObjectGroup {
-                        objects: updated_table_objs
-                            .into_iter()
-                            .map(|(t, obj)| PbObject {
-                                object_info: PbObjectInfo::Table(
-                                    ObjectModel(t, obj.unwrap()).into(),
-                                )
-                                .into(),
-                            })
-                            .collect(),
-                    }),
-                )
-                .await;
-            }
-
             return Ok(vec![]);
         }
 
@@ -596,23 +687,6 @@ impl CatalogController {
         let _version = self
             .notify_frontend(NotificationOperation::Delete, object_group)
             .await;
-
-        // Notify the frontend to update the table info.
-        if !updated_table_objs.is_empty() {
-            self.notify_frontend(
-                NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: updated_table_objs
-                        .into_iter()
-                        .map(|(t, obj)| PbObject {
-                            object_info: PbObjectInfo::Table(ObjectModel(t, obj.unwrap()).into())
-                                .into(),
-                        })
-                        .collect(),
-                }),
-            )
-            .await;
-        }
 
         Ok(dirty_associated_source_ids)
     }
