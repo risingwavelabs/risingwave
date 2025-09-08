@@ -161,7 +161,7 @@ FORMAT PLAIN ENCODE JSON
 
 statement ok
 CREATE TABLE upsert_students (
-    primary key (rw_key),
+    primary key (my_key),
     "ID" INT,
     "firstName" VARCHAR,
     "lastName" VARCHAR,
@@ -169,7 +169,7 @@ CREATE TABLE upsert_students (
     height REAL,
     weight REAL,
 )
-INCLUDE KEY AS rw_key
+INCLUDE KEY AS my_key
 WITH (
 	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
 	topic = 'test_include_key')
@@ -178,7 +178,7 @@ FORMAT UPSERT ENCODE JSON
 query T
 SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'upsert_students';
 ----
-CREATE TABLE upsert_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL, PRIMARY KEY (rw_key)) INCLUDE KEY AS rw_key
+CREATE TABLE upsert_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL, PRIMARY KEY (my_key)) INCLUDE KEY AS my_key
 
 
 system ok
