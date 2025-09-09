@@ -69,13 +69,9 @@ async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>) -> Result<()> {
     let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
         internal_tables
             .split("\n")
-            .filter(|line| {
-                line.contains(table_name_prefix)
-                    && line
-                        .strip_prefix(table_name_prefix)
-                        .unwrap()
-                        .contains("sink")
-            })
+            .filter_map(|line| line.split_whitespace().nth(1)) // skip schema name
+            .filter_map(|table_name| table_name.strip_prefix(table_name_prefix))
+            .filter(|name| name.contains("sink"))
             .collect_vec(),
     )
     .unwrap()[0]
