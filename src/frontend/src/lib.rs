@@ -69,6 +69,8 @@ mod utils;
 pub use utils::{WithOptions, WithOptionsSecResolved, explain_stream_graph};
 pub(crate) mod error;
 mod meta_client;
+pub mod metrics_reader;
+pub use metrics_reader::MetricsReaderImpl;
 pub mod test_utils;
 mod user;
 pub mod webhook;

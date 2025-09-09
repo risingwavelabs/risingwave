@@ -103,7 +103,10 @@ use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulabili
 use risingwave_pb::meta::{FragmentDistribution, *};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
+use risingwave_pb::monitor_service::{
+    GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse, StackTraceRequest,
+    StackTraceResponse,
+};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
@@ -1795,6 +1798,14 @@ impl MetaClient {
         Ok(resp)
     }
 
+    /// Get channel delta statistics from the meta node.
+    pub async fn get_channel_delta_stats(
+        &self,
+        request: GetChannelDeltaStatsRequest,
+    ) -> Result<GetChannelDeltaStatsResponse> {
+        self.inner.get_channel_delta_stats(request).await
+    }
+
     pub async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
         let request = SetSyncLogStoreAlignedRequest { job_id, aligned };
         self.inner.set_sync_log_store_aligned(request).await?;
@@ -2501,6 +2512,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_limit_client, get_cluster_limits, GetClusterLimitsRequest, GetClusterLimitsResponse }
             ,{ hosted_iceberg_catalog_service_client, list_iceberg_tables, ListIcebergTablesRequest, ListIcebergTablesResponse }
             ,{ monitor_client, stack_trace, StackTraceRequest, StackTraceResponse }
+            ,{ monitor_client, get_channel_delta_stats, GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse }
         }
     };
 }
