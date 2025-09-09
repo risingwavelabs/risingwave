@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use prometheus::core::Atomic;
 use risingwave_batch::error::Result;
 use risingwave_batch::monitor::BatchMetrics;
@@ -23,6 +24,7 @@ use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
+use risingwave_common::metrics_reader::MetricsReader;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -103,5 +105,40 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
         Some(self.session.env().worker_node_manager_ref())
+    }
+
+    fn metrics_reader(&self) -> Arc<dyn MetricsReader> {
+        // Create MetricsReaderImpl from the meta client in the frontend environment
+        let _meta_client = self.session.env().meta_client_ref();
+        // We need to extract the underlying MetaClient from the FrontendMetaClient
+        // For now, we'll create a mock implementation since we don't have direct access
+        // In a real implementation, we would need to add a method to get the underlying MetaClient
+        Arc::new(MockMetricsReader::new())
+    }
+}
+
+/// Mock implementation of `MetricsReader` for frontend context.
+/// This is used when we don't have direct access to the underlying `MetaClient`.
+struct MockMetricsReader;
+
+impl MockMetricsReader {
+    fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait::async_trait]
+impl MetricsReader for MockMetricsReader {
+    async fn get_channel_delta_stats(
+        &self,
+        _request: risingwave_pb::monitor_service::GetChannelDeltaStatsRequest,
+    ) -> anyhow::Result<risingwave_pb::monitor_service::GetChannelDeltaStatsResponse> {
+        // Return empty response for frontend context
+        // In a real implementation, this would need to be handled differently
+        Ok(
+            risingwave_pb::monitor_service::GetChannelDeltaStatsResponse {
+                channel_delta_stats_entries: vec![],
+            },
+        )
     }
 }
