@@ -52,7 +52,7 @@ use crate::task::CreateMviewProgressReporter;
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
 /// Interval for querying `confirm_flush_lsn` from upstream PostgreSQL (5 minutes).
-pub const CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS: u64 = 300;
+pub const CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS: u64 = 3;
 
 /// Start background task to periodically query `confirm_flush_lsn` from upstream PostgreSQL
 pub fn start_confirm_flush_lsn_monitor(
@@ -61,6 +61,7 @@ pub fn start_confirm_flush_lsn_monitor(
     slot_name: String,
     external_table: ExternalStorageTable,
 ) {
+    println!("slot_name: {:?}", slot_name);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(
             CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS,

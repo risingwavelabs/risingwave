@@ -16,6 +16,14 @@ use risingwave_connector::WithPropertiesExt;
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
+use risingwave_connector::source::cdc::external::{
+    ExternalTableConfig, SchemaTableName,
+};
+use risingwave_connector::source::cdc::external::postgres::PostgresExternalTableReader;
+use risingwave_connector::source::cdc::{CdcProperties, Postgres};
+use risingwave_connector::source::base::ConnectorProperties;
+use risingwave_connector::connector_common::SslMode;
+use risingwave_common::catalog::Schema;
 
 use super::*;
 
@@ -358,6 +366,49 @@ impl ConnectorSourceWorker {
                 .collect(),
         );
 
+        // Monitor PostgreSQL CDC confirmed flush LSN
+        if let ConnectorProperties::PostgresCdc(cdc_props) = &self.connector_properties {
+            let source_id = self.source_id;
+            let metrics = self.metrics.clone();
+            println!("这里查一次");
+            match Self::query_confirm_flush_lsn(cdc_props).await {
+                Ok(Some(lsn)) => {
+                    // Get slot name from properties
+                    if let Some(slot_name) = cdc_props.properties.get("slot.name") {
+                        // Update metrics
+                        metrics
+                            .pg_cdc_confirm_flush_lsn
+                            .with_guarded_label_values(&[&source_id.to_string(), slot_name])
+                            .set(lsn as i64);
+                        tracing::debug!(
+                            "Updated confirm_flush_lsn for source {} slot {}: {}",
+                            source_id,
+                            slot_name,
+                            lsn
+                        );
+                    } else {
+                        tracing::warn!(
+                            "slot.name not found in CDC properties for source {}",
+                            source_id
+                        );
+                    }
+                }
+                Ok(None) => {
+                    tracing::warn!(
+                        "No confirmed_flush_lsn found for source {}",
+                        source_id
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to query confirmed_flush_lsn for source {}: {}",
+                        source_id,
+                        e.as_report()
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -369,6 +420,91 @@ impl ConnectorSourceWorker {
     async fn finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> MetaResult<()> {
         self.enumerator.on_finish_backfill(fragment_ids).await?;
         Ok(())
+    }
+
+    /// Query confirmed flush LSN from PostgreSQL
+    async fn query_confirm_flush_lsn(
+        cdc_props: &CdcProperties<Postgres>,
+    ) -> MetaResult<Option<u64>> {
+        // 1. Construct ExternalTableConfig manually
+        // 1. 构造 ExternalTableConfig
+        println!("cdc_props: {:?}", cdc_props);
+        let config = ExternalTableConfig {
+            connector: "postgres-cdc".to_string(),
+            host: cdc_props
+                .properties
+                .get("hostname")
+                .unwrap_or(&"localhost".to_string())
+                .clone(),
+            port: cdc_props
+                .properties
+                .get("port")
+                .unwrap_or(&"8432".to_string())
+                .clone(),
+            username: cdc_props
+                .properties
+                .get("username")
+                .unwrap_or(&"postgres".to_string())
+                .clone(),
+            password: cdc_props
+                .properties
+                .get("password")
+                .unwrap_or(&"".to_string())
+                .clone(),
+            database: cdc_props
+                .properties
+                .get("database.name")
+                .unwrap_or(&"postgres".to_string())
+                .clone(),
+            schema: cdc_props
+                .properties
+                .get("schema.name")
+                .unwrap_or(&"public".to_string())
+                .clone(),
+            table: cdc_props
+                .properties
+                .get("table.name")
+                .unwrap_or(&"unknown".to_string())
+                .clone(),
+            ssl_mode: SslMode::Disabled,
+            ssl_root_cert: None,
+            encrypt: "false".to_string(),
+        };
+        // 打印 config
+        println!("ExternalTableConfig: {:?}", config);
+        
+
+        // 2. Create PostgresExternalTableReader
+        let reader = PostgresExternalTableReader::new(
+            config,
+            Schema::default(), // For monitoring, we don't need the actual schema
+            vec![],            // pk_indices - not needed for monitoring
+            SchemaTableName {
+                schema_name: cdc_props
+                    .properties
+                    .get("schema.name")
+                    .unwrap_or(&"public".to_string())
+                    .clone(),
+                table_name: cdc_props
+                    .properties
+                    .get("table.name")
+                    .unwrap_or(&"pg_replication_slots".to_string())
+                    .clone(),
+            },
+        )
+        .await
+        .map_err(|e| crate::MetaError::from(e))?;
+
+        // 3. Query confirm_flush_lsn
+        let slot_name = cdc_props
+            .properties
+            .get("slot.name")
+            .ok_or_else(|| anyhow::anyhow!("slot.name not found in CDC properties"))?;
+        println!("slot_name: {:?}", slot_name);
+        reader
+            .query_confirm_flush_lsn(slot_name)
+            .await
+            .map_err(|e| crate::MetaError::from(e))
     }
 }
 

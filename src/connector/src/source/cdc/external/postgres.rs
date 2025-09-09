@@ -179,7 +179,11 @@ impl PostgresExternalTableReader {
             &config.ssl_root_cert,
         )
         .await?;
-
+        // 把 config 里的内容全部打印出来，方便调试
+        println!("PostgresExternalTableReader::new 传入的 ExternalTableConfig: {:?}", config);
+        println!("PostgresExternalTableReader::new 传入的 rw_schema: {:?}", rw_schema);
+        println!("PostgresExternalTableReader::new 传入的 pk_indices: {:?}", pk_indices);
+        println!("PostgresExternalTableReader::new 传入的 schema_table_name: {:?}", schema_table_name);
         let field_names = rw_schema
             .fields
             .iter()
@@ -385,6 +389,7 @@ impl PostgresExternalTableReader {
     pub async fn query_confirm_flush_lsn(&self, slot_name: &str) -> ConnectorResult<Option<u64>> {
         let client = self.client.lock().await;
         let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
+        println!("这里query是: {:?}", query);
         let row = client.query_opt(query, &[&slot_name]).await?;
 
         match row {
