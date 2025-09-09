@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
+use itertools::Itertools;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
@@ -224,7 +225,8 @@ async fn validate_jwt(
     validation.set_issuer(&[issuer]);
     validation.set_required_spec_claims(&["exp", "iss"]);
     if let Some(audience) = audience {
-        validation.set_audience(&[&audience]);
+        let audiences = audience.split(',').map(|au| au.trim()).collect_vec();
+        validation.set_audience(&audiences);
     }
     let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
 
