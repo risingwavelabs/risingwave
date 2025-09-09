@@ -1059,6 +1059,20 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::fifo_probation_ratio")]
     pub fifo_probation_ratio: f64,
 
+    /// Set the blob index size for each blob.
+    ///
+    /// A larger blob index size can hold more blob entries, but it will also increase the io size of each blob part
+    /// write.
+    ///
+    /// NOTE:
+    ///
+    /// - The size will be aligned up to a multiplier of 4K.
+    /// - Modifying this configuration will invalidate all existing file cache data.
+    ///
+    /// Default: 16 `KiB`
+    #[serde(default = "default::file_cache::blob_index_size_kb")]
+    pub blob_index_size_kb: usize,
+
     /// Recover mode.
     ///
     /// Options:
@@ -2049,6 +2063,10 @@ pub mod default {
 
         pub fn fifo_probation_ratio() -> f64 {
             0.1
+        }
+
+        pub fn blob_index_size_kb() -> usize {
+            16
         }
 
         pub fn recover_mode() -> RecoverMode {
