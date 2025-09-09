@@ -89,9 +89,8 @@ impl MySqlExternalTable {
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
             .ssl_mode(match config.ssl_mode {
-                // Default behavior is set to Preferred, because it will establish an encrypted connection if the server supports it,
-                // and fall back to an unencrypted connection if an encrypted connection cannot be established.
-                SslMode::Disabled | SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
+                SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
+                SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
                 SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
                 _ => {
                     return Err(anyhow!("unsupported SSL mode").into());

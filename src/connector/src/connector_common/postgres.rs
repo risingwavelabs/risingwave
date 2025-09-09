@@ -120,8 +120,8 @@ impl PostgresExternalTable {
             .port(port)
             .database(database)
             .ssl_mode(match ssl_mode {
-                // Default behavior is set to `PgSslMode::Prefer, because it will first try an SSL connection; if that fails, try a non-SSL connection.
-                SslMode::Disabled | SslMode::Preferred => PgSslMode::Prefer,
+                SslMode::Disabled => PgSslMode::Disable,
+                SslMode::Preferred => PgSslMode::Prefer,
                 SslMode::Required => PgSslMode::Require,
                 SslMode::VerifyCa => PgSslMode::VerifyCa,
                 SslMode::VerifyFull => PgSslMode::VerifyFull,
