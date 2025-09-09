@@ -23,7 +23,7 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{Agg, PlanAggCall};
 use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
 
-/// Unifies FIRST_VALUE and LAST_VALUE aggregation calls with the same ordering to reuse a single aggregation call with ROW construction.
+/// Unifies `FIRST_VALUE` and `LAST_VALUE` aggregation calls with the same ordering to reuse a single aggregation call with ROW construction.
 ///
 /// This rule is particularly beneficial for streaming queries as it reduces the number of states maintained.
 /// It specifically targets `FIRST_VALUE` and `LAST_VALUE` aggregation functions that have identical ordering clauses.
