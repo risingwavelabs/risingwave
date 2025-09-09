@@ -83,7 +83,7 @@ impl TableFunctionToInternalGetChannelDeltaStatsRule {
 
         // Extract parameters if provided
         let (_at_time, _time_offset) = match table_function.args.len() {
-            0 => (None, 60), // Default 60 seconds offset
+            0 => (None, None), // No default, let the service handle it
             2 => {
                 let at_expr = &table_function.args[0];
                 let offset_expr = &table_function.args[1];
@@ -93,7 +93,7 @@ impl TableFunctionToInternalGetChannelDeltaStatsRule {
                     anyhow::anyhow!("Second argument 'offset' must be a constant value")
                 })?;
 
-                (at_time, time_offset)
+                (at_time, Some(time_offset))
             }
             _ => {
                 bail!("internal_get_channel_delta_stats expects 0 or 2 arguments");

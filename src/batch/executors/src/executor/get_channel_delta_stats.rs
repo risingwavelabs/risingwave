@@ -34,7 +34,7 @@ pub struct GetChannelDeltaStatsExecutor {
     schema: Schema,
     identity: String,
     at_time: Option<u64>,
-    time_offset: u64,
+    time_offset: Option<u64>,
     metrics_reader: Arc<dyn MetricsReader>,
 }
 
@@ -43,7 +43,7 @@ impl GetChannelDeltaStatsExecutor {
         schema: Schema,
         identity: String,
         at_time: Option<u64>,
-        time_offset: u64,
+        time_offset: Option<u64>,
         metrics_reader: Arc<dyn MetricsReader>,
     ) -> Self {
         Self {
@@ -69,7 +69,7 @@ impl GetChannelDeltaStatsExecutor {
         // Create request for channel delta stats
         let request = GetChannelDeltaStatsRequest {
             at: self.at_time.map(|t| t as i64),
-            time_offset: Some(self.time_offset as i64),
+            time_offset: self.time_offset.map(|t| t as i64),
         };
 
         // Fetch channel delta stats from meta node
