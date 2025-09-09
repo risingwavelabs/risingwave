@@ -78,7 +78,9 @@ use crate::controller::utils::{
     grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
 };
 use crate::error::MetaErrorInner;
-use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{
+    IGNORED_NOTIFICATION_VERSION, NotificationVersion, StreamingJob, StreamingJobType,
+};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
