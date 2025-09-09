@@ -12,19 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use risingwave_common::metrics_reader::MetricsReader;
 use risingwave_pb::monitor_service::{GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse};
-use risingwave_rpc_client::MetaClient;
 
-/// Implementation of `MetricsReader` that wraps a `MetaClient`.
+use crate::meta_client::FrontendMetaClient;
+
+/// Implementation of `MetricsReader` that wraps a `FrontendMetaClient`.
 pub struct MetricsReaderImpl {
-    meta_client: MetaClient,
+    meta_client: Arc<dyn FrontendMetaClient>,
 }
 
 impl MetricsReaderImpl {
-    /// Creates a new `MetricsReaderImpl` with the given `MetaClient`.
-    pub fn new(meta_client: MetaClient) -> Self {
+    /// Creates a new `MetricsReaderImpl` with the given `FrontendMetaClient`.
+    pub fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Self {
         Self { meta_client }
     }
 }
