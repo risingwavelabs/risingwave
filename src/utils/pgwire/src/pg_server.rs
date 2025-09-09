@@ -199,6 +199,7 @@ async fn validate_jwt(
     jwt: &str,
     jwks_url: &str,
     issuer: &str,
+    audience: Option<String>,
     metadata: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
     let header = decode_header(jwt)?;
@@ -222,6 +223,9 @@ async fn validate_jwt(
     let mut validation = Validation::new(header.alg);
     validation.set_issuer(&[issuer]);
     validation.set_required_spec_claims(&["exp", "iss"]);
+    if let Some(audience) = audience {
+        validation.set_audience(&[&audience]);
+    }
     let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
 
     // 4. Check if the metadata in the token matches.
@@ -245,10 +249,12 @@ impl UserAuthenticator {
                 let mut metadata = metadata.clone();
                 let jwks_url = metadata.remove("jwks_url").unwrap();
                 let issuer = metadata.remove("issuer").unwrap();
+                let audience = metadata.remove("aud");
                 validate_jwt(
                     &String::from_utf8_lossy(password),
                     &jwks_url,
                     &issuer,
+                    audience,
                     &metadata,
                 )
                 .await
