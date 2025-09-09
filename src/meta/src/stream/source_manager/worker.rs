@@ -16,18 +16,14 @@ use risingwave_connector::WithPropertiesExt;
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
-use risingwave_connector::source::cdc::external::{
-    ExternalTableConfig, SchemaTableName,
-};
-use risingwave_connector::source::cdc::external::postgres::PostgresExternalTableReader;
 use risingwave_connector::source::cdc::{CdcProperties, Postgres};
 use risingwave_connector::source::base::ConnectorProperties;
-use risingwave_connector::connector_common::SslMode;
-use risingwave_common::catalog::Schema;
-
+use risingwave_connector::connector_common::{create_pg_client, SslMode};
+use tokio_postgres::types::PgLsn;
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
+
 
 // The key used to load `SplitImpl` directly from source properties.
 // When this key is present, the enumerator will only return the given ones
@@ -422,89 +418,83 @@ impl ConnectorSourceWorker {
         Ok(())
     }
 
-    /// Query confirmed flush LSN from PostgreSQL
+    /// Query confirmed flush LSN from PostgreSQL using a simple client connection
     async fn query_confirm_flush_lsn(
         cdc_props: &CdcProperties<Postgres>,
     ) -> MetaResult<Option<u64>> {
-        // 1. Construct ExternalTableConfig manually
-        // 1. 构造 ExternalTableConfig
-        println!("cdc_props: {:?}", cdc_props);
-        let config = ExternalTableConfig {
-            connector: "postgres-cdc".to_string(),
-            host: cdc_props
-                .properties
-                .get("hostname")
-                .unwrap_or(&"localhost".to_string())
-                .clone(),
-            port: cdc_props
-                .properties
-                .get("port")
-                .unwrap_or(&"8432".to_string())
-                .clone(),
-            username: cdc_props
-                .properties
-                .get("username")
-                .unwrap_or(&"postgres".to_string())
-                .clone(),
-            password: cdc_props
-                .properties
-                .get("password")
-                .unwrap_or(&"".to_string())
-                .clone(),
-            database: cdc_props
-                .properties
-                .get("database.name")
-                .unwrap_or(&"postgres".to_string())
-                .clone(),
-            schema: cdc_props
-                .properties
-                .get("schema.name")
-                .unwrap_or(&"public".to_string())
-                .clone(),
-            table: cdc_props
-                .properties
-                .get("table.name")
-                .unwrap_or(&"unknown".to_string())
-                .clone(),
-            ssl_mode: SslMode::Disabled,
-            ssl_root_cert: None,
-            encrypt: "false".to_string(),
-        };
-        // 打印 config
-        println!("ExternalTableConfig: {:?}", config);
+        println!("这里cdc_props是: {:?}", cdc_props);
+        // Extract connection parameters from CDC properties
+        let hostname = cdc_props
+            .properties
+            .get("hostname")
+            .ok_or_else(|| anyhow::anyhow!("hostname not found in CDC properties"))?;
+        let port = cdc_props
+            .properties
+            .get("port")
+            .ok_or_else(|| anyhow::anyhow!("port not found in CDC properties"))?;
+        let user = cdc_props
+            .properties
+            .get("username")
+            .ok_or_else(|| anyhow::anyhow!("username not found in CDC properties"))?;
+        let password = cdc_props
+            .properties
+            .get("password")
+            .ok_or_else(|| anyhow::anyhow!("password not found in CDC properties"))?;
+        let database = cdc_props
+            .properties
+            .get("database.name")
+            .ok_or_else(|| anyhow::anyhow!("database.name not found in CDC properties"))?;
         
-
-        // 2. Create PostgresExternalTableReader
-        let reader = PostgresExternalTableReader::new(
-            config,
-            Schema::default(), // For monitoring, we don't need the actual schema
-            vec![],            // pk_indices - not needed for monitoring
-            SchemaTableName {
-                schema_name: cdc_props
-                    .properties
-                    .get("schema.name")
-                    .unwrap_or(&"public".to_string())
-                    .clone(),
-                table_name: cdc_props
-                    .properties
-                    .get("table.name")
-                    .unwrap_or(&"pg_replication_slots".to_string())
-                    .clone(),
-            },
-        )
-        .await
-        .map_err(|e| crate::MetaError::from(e))?;
-
-        // 3. Query confirm_flush_lsn
+        // Parse SSL mode (default to disabled if not specified)
+        // SSLMode直接用Preferred，不从properties读取
+        let ssl_mode = SslMode::Preferred;
+        
+        let ssl_root_cert = cdc_props
+            .properties
+            .get("database.ssl.root.cert")
+            .cloned();
+        
         let slot_name = cdc_props
             .properties
             .get("slot.name")
             .ok_or_else(|| anyhow::anyhow!("slot.name not found in CDC properties"))?;
-        println!("slot_name: {:?}", slot_name);
-        reader
-            .query_confirm_flush_lsn(slot_name)
-            .await
-            .map_err(|e| crate::MetaError::from(e))
+        
+        println!("Connecting to PostgreSQL: host={}, port={}, user={}, database={}, slot={}", 
+                 hostname, port, user, database, slot_name);
+
+        println!("create pg client的参数：user={}, password={}, hostname={}, port={}, database={}, ssl_mode={}, ssl_root_cert={:?}", user, password, hostname, port, database, ssl_mode, ssl_root_cert);
+        // Create PostgreSQL client
+        let client = create_pg_client(
+            user,
+            password,
+            hostname,
+            port,
+            database,
+            &ssl_mode,
+            &ssl_root_cert,
+        )
+        .await
+        .map_err(|e| crate::MetaError::from(e))?;
+
+        // Query confirmed_flush_lsn - use string interpolation instead of parameterized query
+        let query = format!("SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '{}'", slot_name);
+        println!("Executing query: {}", query);
+        
+        let row = client.query_opt(&query, &[]).await
+            .map_err(|e| anyhow::anyhow!("PostgreSQL query error: {}", e))?;
+
+            match row {
+                Some(row) => {
+                    let confirm_flush_lsn: Option<PgLsn> = row.get(0);
+                    Ok(confirm_flush_lsn.map(|lsn| lsn.into()))
+                }
+                None => {
+                    tracing::warn!("No replication slot found with name: {}", slot_name);
+                    Ok(None)
+                }
+
+            }
+       
     }
 }
 

@@ -168,7 +168,7 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-
+        println!("create pg client的参数：user={}, password={}, hostname={}, port={}, database={}, ssl_mode={}, ssl_root_cert={:?}", config.username, config.password, config.host, config.port, config.database, config.ssl_mode, config.ssl_root_cert);
         let client = create_pg_client(
             &config.username,
             &config.password,
@@ -389,7 +389,7 @@ impl PostgresExternalTableReader {
     pub async fn query_confirm_flush_lsn(&self, slot_name: &str) -> ConnectorResult<Option<u64>> {
         let client = self.client.lock().await;
         let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
-        println!("这里query是: {:?}", query);
+        println!("这里query是: {:?}, slot_name是: {:?}", query, slot_name);
         let row = client.query_opt(query, &[&slot_name]).await?;
 
         match row {
