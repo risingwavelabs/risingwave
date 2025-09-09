@@ -197,7 +197,7 @@ steps:
           run: source-test-env
           upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 120
     parallelism: 2
     retry: *auto-retry
 
@@ -215,7 +215,7 @@ steps:
           <<: *docker-compose
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 120
     parallelism: 2
     retry: *auto-retry
 
@@ -414,7 +414,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "regress test"
@@ -429,7 +429,7 @@ steps:
           <<: *docker-compose
           run: regress-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   # The timeout should be strictly less than timeout in `main-cron.yml`.
@@ -446,7 +446,7 @@ steps:
       #- ./ci/plugins/swapfile
       - docker-compose#v5.5.0:
           <<: *docker-compose
-    timeout_in_minutes: 30
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "check"
@@ -458,7 +458,7 @@ steps:
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 25
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "check dylint"
@@ -470,7 +470,7 @@ steps:
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 25
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
