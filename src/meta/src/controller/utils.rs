@@ -2239,6 +2239,38 @@ where
     Ok(sink_fragment_ids.into_iter().collect())
 }
 
+pub async fn has_table_been_migrated<C>(txn: &C, table_id: TableId) -> MetaResult<bool>
+where
+    C: ConnectionTrait,
+{
+    let mview_fragment: Vec<i32> = Fragment::find()
+        .select_only()
+        .column(fragment::Column::FragmentTypeMask)
+        .filter(
+            fragment::Column::JobId
+                .eq(table_id)
+                .and(FragmentTypeMask::intersects(FragmentTypeFlag::Mview)),
+        )
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    if mview_fragment.len() != 1 {
+        return Err(anyhow::anyhow!(
+            "expected exactly one mview fragment for table {}, found {}",
+            table_id,
+            mview_fragment.len()
+        )
+        .into());
+    }
+
+    let mview_fragment = mview_fragment.into_iter().next().unwrap();
+    let migrated =
+        FragmentTypeMask::from(mview_fragment).contains(FragmentTypeFlag::UpstreamSinkUnion);
+
+    Ok(migrated)
+}
+
 pub fn build_select_node_list(
     from: &[ColumnCatalog],
     to: &[ColumnCatalog],
