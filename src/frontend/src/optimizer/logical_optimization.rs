@@ -340,7 +340,11 @@ static CONVERT_DISTINCT_AGG_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::n
 static SIMPLIFY_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simplify Aggregation",
-        vec![AggGroupBySimplifyRule::create(), AggCallMergeRule::create()],
+        vec![
+            AggGroupBySimplifyRule::create(),
+            AggCallMergeRule::create(),
+            UnifySameAggCallPatternRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
