@@ -773,7 +773,7 @@ impl StateStoreImpl {
                             opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                         )
                         .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                        .with_blob_index_size(opts.data_file_cache_blob_index_size)
+                        .with_blob_index_size(opts.data_file_cache_blob_index_size_kb * KB)
                         .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                             opts.data_file_cache_fifo_probation_ratio,
                         ))]);
