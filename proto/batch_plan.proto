@@ -421,7 +421,7 @@ message GetChannelDeltaStatsNode {
   // Optional timestamp to get channel stats at a specific time
   optional uint64 at_time = 1;
   // Time offset in seconds for the query window
-  uint64 time_offset = 2;
+  optional uint64 time_offset = 2;
 }
 
 message PlanNode {
