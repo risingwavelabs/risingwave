@@ -33,6 +33,11 @@ fi
 # We just want to run `scale::*`.
 
 echo "--- Run integration tests in deterministic simulation mode"
+echo "$TEST_NUM"
+echo "$NEXTEST_PARTITION_ARG"
+echo "$TEST_PATTERN"
+echo "$LOGDIR"
+
 seq "$TEST_NUM" | parallel -j 8 --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
  cargo nextest run \
  $NEXTEST_PARTITION_ARG \
