@@ -69,7 +69,7 @@ impl GetChannelDeltaStatsExecutor {
         // Create request for channel delta stats
         let request = GetChannelDeltaStatsRequest {
             at: self.at_time.map(|t| t as i64),
-            time_offset: self.time_offset as i64,
+            time_offset: Some(self.time_offset as i64),
         };
 
         // Fetch channel delta stats from meta node
