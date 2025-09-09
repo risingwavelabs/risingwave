@@ -846,6 +846,8 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
 
+        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
+
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
@@ -866,8 +868,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
 
         plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
-
-        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
