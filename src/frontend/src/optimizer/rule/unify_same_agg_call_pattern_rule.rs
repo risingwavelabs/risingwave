@@ -28,7 +28,9 @@ use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
 /// This rule is particularly beneficial for streaming queries as it reduces the number of states maintained.
 /// It supports MIN, MAX, `FIRST_VALUE`, `LAST_VALUE`, `ARRAY_AGG` and `JSONB_AGG` aggregation functions that have the same ordering.
 ///
-/// Before:
+/// # Example transformation:
+///
+/// ## Before:
 /// ```sql
 /// SELECT
 ///   LAST_VALUE(col1 ORDER BY col2) AS last_col1,
@@ -39,7 +41,7 @@ use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
 /// GROUP BY group_col;
 /// ```
 ///
-/// After:
+/// ## After:
 /// ```sql
 /// SELECT
 ///   (unified_last).f0 AS last_col1,
@@ -52,6 +54,33 @@ use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
 ///   FROM table_name GROUP BY group_col
 /// ) sub;
 /// ```
+///
+/// # Plan transformation:
+///
+/// ## Before:
+/// ```text
+/// LogicalAgg [group_col]
+///  ├─agg_calls:
+///  │  ├─ LAST_VALUE(col1 ORDER BY col2)     -- State 1
+///  │  ├─ LAST_VALUE(col3 ORDER BY col2)     -- State 2
+///  │  ├─ LAST_VALUE(col4 ORDER BY col2)     -- State 3
+///  │  └─ LAST_VALUE(col5 ORDER BY col2)     -- State 4
+///  └─LogicalScan { table: table_name }
+/// ```
+///
+/// ## After:
+/// ```text
+/// LogicalProject
+///  ├─exprs: [(unified_last).f0, (unified_last).f1, (unified_last).f2, (unified_last).f3]
+///  └─LogicalAgg [group_col]
+///     ├─agg_calls:
+///     │  └─ LAST_VALUE(ROW(col1,col3,col4,col5) ORDER BY col2)  -- Single State!
+///     └─LogicalProject
+///        ├─exprs: [group_col, col1, col2, col3, col4, col5, ROW(col1,col3,col4,col5)]
+///        └─LogicalScan { table: table_name }
+/// ```
+///
+/// The key benefit: **4 aggregation states → 1 aggregation state** for streaming performance!
 pub struct UnifySameAggCallPatternRule {}
 
 impl Rule<Logical> for UnifySameAggCallPatternRule {
@@ -279,7 +308,6 @@ impl UnifySameAggCallPatternRule {
                 | AggType::Builtin(PbAggKind::LastValue)
                 | AggType::Builtin(PbAggKind::ArrayAgg)
                 | AggType::Builtin(PbAggKind::JsonbAgg)
-
         )
     }
 }
