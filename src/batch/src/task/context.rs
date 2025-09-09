@@ -13,11 +13,13 @@
 // limitations under the License.
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use prometheus::core::Atomic;
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
+use risingwave_common::metrics_reader::MetricsReader;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
@@ -66,6 +68,8 @@ pub trait BatchTaskContext: Send + Sync + 'static {
     fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext;
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef>;
+
+    fn metrics_reader(&self) -> Arc<dyn MetricsReader>;
 }
 
 /// Batch task context on compute node.
@@ -129,6 +133,12 @@ impl BatchTaskContext for ComputeNodeContext {
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
         None
     }
+
+    fn metrics_reader(&self) -> Arc<dyn MetricsReader> {
+        // For compute node context, we don't have direct access to meta client
+        // Return a mock implementation for now
+        Arc::new(MockMetricsReader::new())
+    }
 }
 
 impl ComputeNodeContext {
@@ -152,5 +162,31 @@ impl ComputeNodeContext {
             batch_metrics,
             mem_context,
         })
+    }
+}
+
+/// Mock implementation of `MetricsReader` for compute node context.
+/// This is used when the compute node doesn't have direct access to a meta client.
+struct MockMetricsReader;
+
+impl MockMetricsReader {
+    fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait::async_trait]
+impl MetricsReader for MockMetricsReader {
+    async fn get_channel_delta_stats(
+        &self,
+        _request: risingwave_pb::monitor_service::GetChannelDeltaStatsRequest,
+    ) -> anyhow::Result<risingwave_pb::monitor_service::GetChannelDeltaStatsResponse> {
+        // Return empty response for compute node context
+        // In a real implementation, this would need to be handled differently
+        Ok(
+            risingwave_pb::monitor_service::GetChannelDeltaStatsResponse {
+                channel_delta_stats_entries: vec![],
+            },
+        )
     }
 }
