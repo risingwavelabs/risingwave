@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, IndexId, Schema};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties};
+use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbVectorIndexInfo};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{OwnedByUserCatalog, TableCatalog};
@@ -56,9 +56,22 @@ pub struct TableIndex {
     pub index_columns_len: u32,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Educe)]
+#[educe(Hash)]
+pub struct VectorIndex {
+    pub index_table: Arc<TableCatalog>,
+    pub vector_expr: ExprImpl,
+    #[educe(Hash(ignore))]
+    pub primary_to_included_info_column_mapping: HashMap<usize, usize>,
+    pub primary_key_idx_in_info_columns: Vec<usize>,
+    pub included_info_columns: Vec<usize>,
+    pub vector_index_info: PbVectorIndexInfo,
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum IndexType {
     Table(Arc<TableIndex>),
+    Vector(Arc<VectorIndex>),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -138,6 +151,37 @@ impl IndexCatalog {
                     function_mapping,
                 }))
             }
+            TableType::VectorIndex => {
+                assert_eq!(index_prost.index_columns_len, 1);
+                let included_info_columns = index_item[1..].iter().map(|item| {
+                    let ExprImpl::InputRef(input) = item else {
+                        panic!("vector index included columns must be from direct input column, but got: {:?}", item);
+                    };
+                    input.index
+                }).collect_vec();
+                let primary_to_included_info_column_mapping: HashMap<_, _> = included_info_columns
+                    .iter()
+                    .enumerate()
+                    .map(|(included_info_column_idx, primary_column_idx)| {
+                        (*primary_column_idx, included_info_column_idx)
+                    })
+                    .collect();
+                let primary_key_idx_in_info_columns = primary_table
+                    .pk()
+                    .iter()
+                    .map(|order| primary_to_included_info_column_mapping[&order.column_index])
+                    .collect();
+                IndexType::Vector(Arc::new(VectorIndex {
+                    index_table: index_table.clone(),
+                    vector_expr: index_item[0].clone(),
+                    primary_to_included_info_column_mapping,
+                    primary_key_idx_in_info_columns,
+                    included_info_columns,
+                    vector_index_info: index_table
+                        .vector_index_info
+                        .expect("should exist for vector index"),
+                }))
+            }
             TableType::Table | TableType::MaterializedView | TableType::Internal => {
                 unreachable!()
             }
@@ -203,6 +247,7 @@ impl IndexCatalog {
     pub fn index_table(&self) -> &Arc<TableCatalog> {
         match &self.index_type {
             IndexType::Table(index) => &index.index_table,
+            IndexType::Vector(index) => &index.index_table,
         }
     }
 
@@ -210,6 +255,17 @@ impl IndexCatalog {
     pub fn get_column_properties(&self, column_idx: usize) -> Option<PbIndexColumnProperties> {
         match &self.index_type {
             IndexType::Table(index) => index.index_column_properties.get(column_idx).cloned(),
+            IndexType::Vector { .. } => {
+                if column_idx == 0 {
+                    // return with the default value defined in [https://www.postgresql.org/docs/current/sql-createindex.html]
+                    Some(PbIndexColumnProperties {
+                        is_desc: false,
+                        nulls_first: false,
+                    })
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -275,6 +331,10 @@ impl IndexCatalog {
             include_columns,
             distributed_by_columns,
         }
+    }
+
+    pub fn is_created(&self) -> bool {
+        self.index_table().is_created()
     }
 }
 

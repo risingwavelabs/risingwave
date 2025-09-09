@@ -23,8 +23,12 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::StreamingParallelism;
+use risingwave_pb::catalog::table::PbTableType;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
@@ -35,6 +39,7 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
@@ -253,6 +258,73 @@ impl GlobalBarrierWorkerContextImpl {
         Ok((table_committed_epoch, log_epochs))
     }
 
+    /// For normal DDL operations, the `UpstreamSinkUnion` operator is modified dynamically, and does not persist the
+    /// newly added or deleted upstreams in meta-store. Therefore, when restoring jobs, we need to restore the
+    /// information required by the operator based on the current state of the upstream (sink) and downstream (table) of
+    /// the operator.
+    async fn recovery_table_with_upstream_sinks(
+        &self,
+        inflight_jobs: &mut HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
+    ) -> MetaResult<()> {
+        let mut jobs = inflight_jobs.values_mut().try_fold(
+            HashMap::new(),
+            |mut acc, table_map| -> MetaResult<_> {
+                for (tid, job) in table_map {
+                    if acc.insert(tid.table_id, job).is_some() {
+                        return Err(anyhow::anyhow!("Duplicate table id found: {:?}", tid).into());
+                    }
+                }
+                Ok(acc)
+            },
+        )?;
+        let job_ids = jobs.keys().cloned().collect_vec();
+        // Only `Table` will be returned here, ignoring other catalog objects.
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .get_user_created_table_by_ids(job_ids.into_iter().map(|id| id as _).collect())
+            .await?;
+        for table in tables {
+            assert_eq!(table.table_type(), PbTableType::Table);
+            let fragments = jobs.get_mut(&table.id).unwrap();
+            let mut target_fragment_id = None;
+            for fragment in fragments.fragment_infos.values() {
+                let mut is_target_fragment = false;
+                visit_stream_node_cont(&fragment.nodes, |node| {
+                    if let Some(PbNodeBody::UpstreamSinkUnion(_)) = node.node_body {
+                        is_target_fragment = true;
+                        false
+                    } else {
+                        true
+                    }
+                });
+                if is_target_fragment {
+                    target_fragment_id = Some(fragment.fragment_id);
+                    break;
+                }
+            }
+            let Some(target_fragment_id) = target_fragment_id else {
+                tracing::debug!(
+                    "The table {} created by old versions has not yet been migrated, so sinks cannot be created or dropped on this table.",
+                    table.id
+                );
+                continue;
+            };
+            let target_fragment = fragments
+                .fragment_infos
+                .get_mut(&target_fragment_id)
+                .unwrap();
+            let upstream_infos = self
+                .metadata_manager
+                .catalog_controller
+                .get_all_upstream_sink_infos(&table, target_fragment_id as _)
+                .await?;
+            refill_upstream_sink_union_in_table(&mut target_fragment.nodes, &upstream_infos);
+        }
+
+        Ok(())
+    }
+
     pub(super) async fn reload_runtime_info_impl(
         &self,
     ) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
@@ -281,7 +353,6 @@ impl GlobalBarrierWorkerContextImpl {
                                     .catalog_controller
                                     .finish_streaming_job(
                                         stream_job_fragments.stream_job_id().table_id as _,
-                                        None,
                                     )
                                     .await?;
                             } else {
@@ -372,6 +443,8 @@ impl GlobalBarrierWorkerContextImpl {
                         })?
                     }
 
+                    self.recovery_table_with_upstream_sinks(&mut info).await?;
+
                     let info = info;
 
                     self.purge_state_table_from_hummock(
@@ -453,12 +526,30 @@ impl GlobalBarrierWorkerContextImpl {
                         .catalog_controller
                         .cdc_table_backfill_actor_ids()
                         .await?;
+                    let cdc_table_ids = cdc_table_backfill_actors
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>();
                     let cdc_table_snapshot_split_assignment =
                         assign_cdc_table_snapshot_splits_pairs(
                             cdc_table_backfill_actors,
                             self.env.meta_store_ref(),
+                            self.env.cdc_table_backfill_tracker.completed_job_ids(),
                         )
                         .await?;
+                    let cdc_table_snapshot_split_assignment =
+                        if cdc_table_snapshot_split_assignment.is_empty() {
+                            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+                        } else {
+                            let generation = self
+                                .env
+                                .cdc_table_backfill_tracker
+                                .next_generation(cdc_table_ids.into_iter());
+                            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                                cdc_table_snapshot_split_assignment,
+                                generation,
+                            )
+                        };
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
@@ -502,12 +593,15 @@ impl GlobalBarrierWorkerContextImpl {
             .scheduled_barriers
             .pre_apply_drop_cancel(Some(database_id));
 
-        let info = self
+        let mut info = self
             .resolve_graph_info(Some(database_id))
             .await
             .inspect_err(|err| {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
+
+        self.recovery_table_with_upstream_sinks(&mut info).await?;
+
         assert!(info.len() <= 1);
         let Some(info) = info.into_iter().next().map(|(loaded_database_id, info)| {
             assert_eq!(loaded_database_id, database_id);
@@ -530,10 +624,7 @@ impl GlobalBarrierWorkerContextImpl {
                     // If there's no tracking actor in the job, we can finish the job directly.
                     self.metadata_manager
                         .catalog_controller
-                        .finish_streaming_job(
-                            stream_job_fragments.stream_job_id().table_id as _,
-                            None,
-                        )
+                        .finish_streaming_job(stream_job_fragments.stream_job_id().table_id as _)
                         .await?;
                 } else {
                     background_jobs
@@ -595,11 +686,27 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .cdc_table_backfill_actor_ids()
             .await?;
+        let cdc_table_ids = cdc_table_backfill_actors
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
             cdc_table_backfill_actors,
             self.env.meta_store_ref(),
+            self.env.cdc_table_backfill_tracker.completed_job_ids(),
         )
         .await?;
+        let cdc_table_snapshot_split_assignment = if cdc_table_snapshot_split_assignment.is_empty()
+        {
+            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
+        } else {
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                cdc_table_snapshot_split_assignment,
+                self.env
+                    .cdc_table_backfill_tracker
+                    .next_generation(cdc_table_ids.into_iter()),
+            )
+        };
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,

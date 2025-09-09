@@ -39,8 +39,9 @@ pub struct StreamStatelessSimpleAgg {
 }
 
 impl StreamStatelessSimpleAgg {
-    pub fn new(core: generic::Agg<StreamPlanRef>) -> Self {
+    pub fn new(core: generic::Agg<StreamPlanRef>) -> Result<Self> {
         let input = core.input.clone();
+        reject_upsert_input!(input);
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
@@ -55,12 +56,14 @@ impl StreamStatelessSimpleAgg {
         let base = PlanBase::new_stream_with_core(
             &core,
             input_dist.clone(),
-            input.append_only(),
+            // Stateless simple agg outputs one `Insert` row per epoch to the global phase.
+            StreamKind::AppendOnly,
             input.emit_on_window_close(),
             watermark_columns,
             MonotonicityMap::new(),
         );
-        StreamStatelessSimpleAgg { base, core }
+
+        Ok(StreamStatelessSimpleAgg { base, core })
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -77,7 +80,7 @@ impl PlanTreeNodeUnary<Stream> for StreamStatelessSimpleAgg {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core)
+        Self::new(core).unwrap()
     }
 }
 impl_plan_tree_node_for_unary! { Stream, StreamStatelessSimpleAgg }
@@ -110,7 +113,7 @@ impl ExprRewritable<Stream> for StreamStatelessSimpleAgg {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core).into()
+        Self::new(core).unwrap().into()
     }
 }
 

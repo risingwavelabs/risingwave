@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ops::Deref;
 
 use itertools::Itertools;
@@ -130,6 +131,12 @@ pub struct ColumnDesc {
     pub nullable: bool,
 }
 
+impl AsRef<ColumnDesc> for ColumnDesc {
+    fn as_ref(&self) -> &ColumnDesc {
+        self
+    }
+}
+
 impl ColumnDesc {
     pub fn unnamed(column_id: ColumnId, data_type: DataType) -> ColumnDesc {
         Self::named("", column_id, data_type)
@@ -223,6 +230,28 @@ impl ColumnDesc {
             Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
         )
     }
+
+    pub fn get_id_to_op_idx_mapping(
+        columns: &[impl AsRef<Self>],
+        output_col_ids: Option<&[usize]>,
+    ) -> HashMap<ColumnId, usize> {
+        if let Some(output_col_ids) = output_col_ids {
+            Self::get_id_to_op_idx_mapping_inner(columns, output_col_ids.iter().cloned())
+        } else {
+            Self::get_id_to_op_idx_mapping_inner(columns, 0..columns.len())
+        }
+    }
+
+    fn get_id_to_op_idx_mapping_inner(
+        columns: &[impl AsRef<Self>],
+        output_col_ids: impl Iterator<Item = usize>,
+    ) -> HashMap<ColumnId, usize> {
+        let mut id_to_idx = HashMap::new();
+        output_col_ids.enumerate().for_each(|(idx, output_idx)| {
+            id_to_idx.insert(columns[output_idx].as_ref().column_id, idx);
+        });
+        id_to_idx
+    }
 }
 
 impl From<PbColumnDesc> for ColumnDesc {
@@ -273,6 +302,12 @@ impl Deref for ColumnCatalog {
     }
 }
 
+impl AsRef<ColumnDesc> for ColumnCatalog {
+    fn as_ref(&self) -> &ColumnDesc {
+        &self.column_desc
+    }
+}
+
 impl ColumnCatalog {
     pub fn visible(column_desc: ColumnDesc) -> Self {
         Self {
@@ -304,7 +339,7 @@ impl ColumnCatalog {
 
     /// Returns whether the column is defined by user within the column definition clause
     /// in the `CREATE TABLE` statement.
-    pub fn is_user_defined(&self) -> bool {
+    pub fn is_defined_in_columns_clause(&self) -> bool {
         !self.is_hidden() && !self.is_rw_sys_column() && !self.is_connector_additional_column()
     }
 

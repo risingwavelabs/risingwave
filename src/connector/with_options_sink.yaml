@@ -603,6 +603,30 @@ IcebergConfig:
     comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     required: false
     default: ICEBERG_WRITE_MODE_MERGE_ON_READ . to_owned ()
+  - name: snapshot_expiration_max_age_millis
+    field_type: i64
+    comments: |-
+      The maximum age (in milliseconds) for snapshots before they expire
+      For example, if set to 3600000, snapshots older than 1 hour will be expired
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: snapshot_expiration_retain_last
+    field_type: i32
+    comments: The number of snapshots to retain
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: snapshot_expiration_clear_expired_files
+    field_type: bool
+    required: false
+    default: 'true'
+    allow_alter_on_fly: true
+  - name: snapshot_expiration_clear_expired_meta_data
+    field_type: bool
+    required: false
+    default: 'true'
+    allow_alter_on_fly: true
 KafkaConfig:
   fields:
   - name: topic
@@ -1256,6 +1280,83 @@ PulsarConfig:
     field_type: usize
     required: false
     default: 1 << 20
+RedShiftConfig:
+  fields:
+  - name: jdbc.url
+    field_type: String
+    required: true
+  - name: user
+    field_type: String
+    required: false
+  - name: password
+    field_type: String
+    required: false
+  - name: schema
+    field_type: String
+    required: false
+  - name: table.name
+    field_type: String
+    required: true
+  - name: intermediate.table.name
+    field_type: String
+    required: false
+  - name: create_table_if_not_exists
+    field_type: bool
+    required: false
+    default: Default::default
+  - name: schedule_seconds
+    field_type: u64
+    required: false
+    default: '3600'
+  - name: batch_insert_rows
+    field_type: u32
+    required: false
+    default: '4096'
+  - name: with_s3
+    field_type: bool
+    required: false
+    default: 'true'
+  - name: s3.region_name
+    field_type: String
+    required: true
+    alias:
+    - snowflake.aws_region
+  - name: s3.bucket_name
+    field_type: String
+    required: true
+    alias:
+    - snowflake.s3_bucket
+  - name: s3.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: false
+    default: Default::default
+    alias:
+    - snowflake.s3_path
+  - name: enable_config_load
+    field_type: bool
+    comments: Enable config load. This parameter set to true will load s3 credentials from the environment. Only allowed to be used in a self-hosted environment.
+    required: false
+    default: Default::default
+  - name: s3.credentials.access
+    field_type: String
+    required: false
+    default: Default::default
+    alias:
+    - snowflake.aws_access_key_id
+  - name: s3.credentials.secret
+    field_type: String
+    required: false
+    default: Default::default
+    alias:
+    - snowflake.aws_secret_access_key
+  - name: s3.endpoint_url
+    field_type: String
+    required: false
+  - name: s3.assume_role
+    field_type: String
+    required: false
+    default: Default::default
 RedisConfig:
   fields:
   - name: redis.url
@@ -1319,6 +1420,104 @@ SnowflakeConfig:
   - name: r#type
     field_type: String
     required: true
+SnowflakeV2Config:
+  fields:
+  - name: type
+    field_type: String
+    required: true
+  - name: intermediate.table.name
+    field_type: String
+    required: false
+  - name: table.name
+    field_type: String
+    required: false
+  - name: database
+    field_type: String
+    required: false
+  - name: schema
+    field_type: String
+    required: false
+  - name: snowflake_schedule_seconds
+    field_type: u64
+    required: false
+    default: '3600'
+  - name: warehouse
+    field_type: String
+    required: false
+  - name: jdbc.url
+    field_type: String
+    required: false
+  - name: username
+    field_type: String
+    required: false
+  - name: password
+    field_type: String
+    required: false
+  - name: commit_checkpoint_interval
+    field_type: u64
+    comments: Commit every n(>0) checkpoints, default is 10.
+    required: false
+    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
+  - name: auto_schema_change
+    field_type: bool
+    comments: |-
+      Enable auto schema change for upsert sink.
+      If enabled, the sink will automatically alter the target table to add new columns.
+    required: false
+    default: Default::default
+  - name: create_table_if_not_exists
+    field_type: bool
+    required: false
+    default: Default::default
+  - name: with_s3
+    field_type: bool
+    required: false
+    default: 'true'
+  - name: s3.region_name
+    field_type: String
+    required: true
+    alias:
+    - snowflake.aws_region
+  - name: s3.bucket_name
+    field_type: String
+    required: true
+    alias:
+    - snowflake.s3_bucket
+  - name: s3.path
+    field_type: String
+    comments: The directory where the sink file is located.
+    required: false
+    default: Default::default
+    alias:
+    - snowflake.s3_path
+  - name: enable_config_load
+    field_type: bool
+    comments: Enable config load. This parameter set to true will load s3 credentials from the environment. Only allowed to be used in a self-hosted environment.
+    required: false
+    default: Default::default
+  - name: s3.credentials.access
+    field_type: String
+    required: false
+    default: Default::default
+    alias:
+    - snowflake.aws_access_key_id
+  - name: s3.credentials.secret
+    field_type: String
+    required: false
+    default: Default::default
+    alias:
+    - snowflake.aws_secret_access_key
+  - name: s3.endpoint_url
+    field_type: String
+    required: false
+  - name: s3.assume_role
+    field_type: String
+    required: false
+    default: Default::default
+  - name: stage
+    field_type: String
+    required: false
 SqlServerConfig:
   fields:
   - name: sqlserver.host

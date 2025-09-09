@@ -19,7 +19,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use risingwave_common::catalog::DatabaseId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
@@ -61,6 +61,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn finish_creating_job(
         &self,
         job: TrackingJob,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
+    fn finish_cdc_table_backfill(
+        &self,
+        job_id: TableId,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     async fn new_control_stream(

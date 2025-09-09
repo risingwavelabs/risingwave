@@ -20,6 +20,9 @@ statement ok
 create view v as select * from mv1;
 
 statement ok
+create materialized view mv3 as select * from idx1;
+
+statement ok
 create sink sink1 from mv2 with (connector='blackhole');
 
 statement ok
@@ -27,16 +30,18 @@ create sink sink2 into t2 as select a from t1;
 
 # equivalent to:
 # select objid::regclass, refobjid::regclass from rw_depend;
-query TT rowsort
+query TT rowsort retry 3 backoff 1s
 select r1.name, r2.name relname
 from rw_depend d
 join rw_relations r1 on d.objid = r1.id
 join rw_relations r2 on d.refobjid = r2.id;
 ----
 idx1  t1
+mv1 idx1
 mv1   s1
 mv1   t1
 mv2   mv1
+mv3   idx1
 sink1 mv2
 sink2 t1
 t2    sink2
@@ -59,6 +64,15 @@ drop materialized view mv1;
 
 statement ok
 drop source s1;
+
+statement error
+drop table t1;
+
+statement error
+drop index idx1;
+
+statement ok
+drop materialized view mv3;
 
 statement ok
 drop table t1;

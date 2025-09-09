@@ -120,7 +120,7 @@ impl ToStream for LogicalDedup {
                 Order::default(),
                 self.dedup_cols().to_vec(),
             );
-            Ok(StreamGroupTopN::new(logical_top_n, None).into())
+            Ok(StreamGroupTopN::new(logical_top_n, None)?.into())
         }
     }
 }

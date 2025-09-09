@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod cdc_progress;
 pub mod progress;
+
 pub use progress::CreateMviewProgressReporter;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::util::epoch::EpochPair;
@@ -23,6 +25,7 @@ use crate::error::{IntoUnexpectedExit, StreamError};
 use crate::executor::exchange::permit::{self, channel_from_config};
 use crate::executor::{Barrier, BarrierInner};
 use crate::task::barrier_manager::progress::BackfillState;
+use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, StreamEnvironment};
 
 /// Events sent from actors via [`LocalBarrierManager`] to [`super::barrier_worker::managed_state::DatabaseManagedBarrierState`].
@@ -58,6 +61,11 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
         tx: permit::Sender,
+    },
+    ReportCdcTableBackfillProgress {
+        actor_id: ActorId,
+        epoch: EpochPair,
+        state: CdcTableBackfillState,
     },
 }
 

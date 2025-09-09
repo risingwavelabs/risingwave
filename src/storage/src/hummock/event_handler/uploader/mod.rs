@@ -2442,7 +2442,7 @@ pub(crate) mod tests {
     async fn test_uploader_frequently_flush() {
         let config = StorageOpts {
             shared_buffer_capacity_mb: 10,
-            shared_buffer_flush_ratio: 0.8,
+            shared_buffer_flush_ratio: 0.12,
             // This test will fail when we set it to 0
             shared_buffer_min_batch_flush_size_mb: 1,
             ..Default::default()

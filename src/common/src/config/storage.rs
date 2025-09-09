@@ -336,6 +336,10 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::threshold")]
     pub threshold: f64,
 
+    /// Recent filter layer shards.
+    #[serde(default = "default::cache_refill::recent_filter_shards")]
+    pub recent_filter_shards: usize,
+
     /// Recent filter layer count.
     #[serde(default = "default::cache_refill::recent_filter_layers")]
     pub recent_filter_layers: usize,
@@ -343,6 +347,12 @@ pub struct CacheRefillConfig {
     /// Recent filter layer rotate interval.
     #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
     pub recent_filter_rotate_interval_ms: usize,
+
+    /// Skip check recent filter on data refill.
+    ///
+    /// This option is suitable for a single compute node or debugging.
+    #[serde(default = "default::cache_refill::skip_recent_filter")]
+    pub skip_recent_filter: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -390,6 +400,20 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::fifo_probation_ratio")]
     pub fifo_probation_ratio: f64,
+
+    /// Set the blob index size for each blob.
+    ///
+    /// A larger blob index size can hold more blob entries, but it will also increase the io size of each blob part
+    /// write.
+    ///
+    /// NOTE:
+    ///
+    /// - The size will be aligned up to a multiplier of 4K.
+    /// - Modifying this configuration will invalidate all existing file cache data.
+    ///
+    /// Default: 16 `KiB`
+    #[serde(default = "default::file_cache::blob_index_size_kb")]
+    pub blob_index_size_kb: usize,
 
     /// Recover mode.
     ///
@@ -1100,6 +1124,10 @@ pub mod default {
             0.1
         }
 
+        pub fn blob_index_size_kb() -> usize {
+            16
+        }
+
         pub fn recover_mode() -> RecoverMode {
             RecoverMode::Quiet
         }
@@ -1141,12 +1169,20 @@ pub mod default {
             0.5
         }
 
+        pub fn recent_filter_shards() -> usize {
+            16
+        }
+
         pub fn recent_filter_layers() -> usize {
             6
         }
 
         pub fn recent_filter_rotate_interval_ms() -> usize {
             10000
+        }
+
+        pub fn skip_recent_filter() -> bool {
+            false
         }
     }
 

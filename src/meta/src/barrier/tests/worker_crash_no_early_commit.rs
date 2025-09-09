@@ -131,6 +131,10 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unimplemented!()
     }
 
+    async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+        unimplemented!()
+    }
+
     async fn handle_refresh_finished_table_ids(
         &self,
         _refresh_finished_table_ids: Vec<u32>,

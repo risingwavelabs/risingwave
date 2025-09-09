@@ -54,6 +54,13 @@ impl Rule<Stream> for IndexDeltaJoinRule {
             table_scan: &StreamTableScan,
             stream_scan_type: StreamScanType,
         ) -> Option<PlanRef> {
+            if table_scan.core().cross_database()
+                && stream_scan_type == StreamScanType::UpstreamOnly
+            {
+                // We currently do not support cross database index scan in upstream only mode.
+                return None;
+            }
+
             for index in &table_scan.core().table_indexes {
                 // Only full covering index can be used in delta join
                 if !index.full_covering() {
@@ -108,7 +115,7 @@ impl Rule<Stream> for IndexDeltaJoinRule {
             {
                 // Check join key is prefix of primary table order key
                 let primary_table_order_key_prefix = primary_table
-                    .table_desc
+                    .table_catalog
                     .pk
                     .iter()
                     .map(|x| x.column_index)

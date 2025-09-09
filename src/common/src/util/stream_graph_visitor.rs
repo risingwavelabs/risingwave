@@ -304,6 +304,11 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "MaterializedExprs");
             }
 
+            // Vector Index Write
+            NodeBody::VectorIndexWrite(node) if !internal_tables_only => {
+                always!(node.table, "StreamVectorIndexWrite");
+            }
+
             _ => {}
         }
     };

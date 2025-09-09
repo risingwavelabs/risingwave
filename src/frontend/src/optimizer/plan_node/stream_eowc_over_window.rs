@@ -23,7 +23,7 @@ use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,7 +55,7 @@ impl StreamEowcOverWindow {
         let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
-            true,
+            StreamKind::AppendOnly,
             true,
             watermark_columns,
             // we cannot derive monotonicity for any column for the same reason as watermark columns

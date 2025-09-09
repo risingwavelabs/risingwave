@@ -26,7 +26,7 @@ use super::GenericPlanNode;
 use crate::TableCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, StreamKind};
 
 /// In which scnario the source node is created
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -103,6 +103,21 @@ impl GenericPlanNode for Source {
 }
 
 impl Source {
+    pub fn stream_kind(&self) -> StreamKind {
+        if let Some(catalog) = &self.catalog {
+            if catalog.append_only {
+                StreamKind::AppendOnly
+            } else {
+                // Always treat source as upsert, as we either don't parse the old record for `Update`, or we don't
+                // trust the old record from external source.
+                StreamKind::Upsert
+            }
+        } else {
+            // `Source` acts only as a barrier receiver. There's no data at all.
+            StreamKind::AppendOnly
+        }
+    }
+
     /// The output is [`risingwave_connector::source::filesystem::FsPageItem`] / [`iceberg::scan::FileScanTask`]
     pub fn file_list_node(core: Self) -> Self {
         let column_catalog = if core.is_iceberg_connector() {

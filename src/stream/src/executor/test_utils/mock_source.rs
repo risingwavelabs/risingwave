@@ -118,7 +118,7 @@ impl MockSource {
 
     pub fn into_executor(self, schema: Schema, pk_indices: Vec<usize>) -> Executor {
         Executor::new(
-            ExecutorInfo::new(schema, pk_indices, "MockSource".to_owned(), 0),
+            ExecutorInfo::for_test(schema, pk_indices, "MockSource".to_owned(), 0),
             self.boxed(),
         )
     }

@@ -29,10 +29,11 @@ use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, collect_input_refs};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist, StreamKind};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
@@ -265,35 +266,62 @@ impl ToStream for LogicalProject {
             .config()
             .streaming_enable_materialized_expressions();
 
-        let stream_plan = if enable_materialized_exprs {
-            // Extract impure functions to `MaterializedExprs` operator
-            let mut impure_field_names = BTreeMap::new();
-            let mut impure_expr_indices = HashSet::new();
-            let impure_exprs: Vec<_> = self
-                .exprs()
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, expr)| {
-                    // Extract impure expressions
-                    if expr.is_impure() {
-                        impure_expr_indices.insert(idx);
-                        if let Some(name) = self.core.field_names.get(&idx) {
-                            impure_field_names.insert(idx, name.clone());
-                        }
-                        Some(expr.clone())
-                    } else {
+        let should_materialize_expr = match new_input.stream_kind() {
+            StreamKind::AppendOnly => None,
+            kind @ (StreamKind::Retract | StreamKind::Upsert) => {
+                if enable_materialized_exprs {
+                    // Extract impure functions to `MaterializedExprs` operator
+                    let mut impure_field_names = BTreeMap::new();
+                    let mut impure_expr_indices = HashSet::new();
+                    let impure_exprs: Vec<_> = self
+                        .exprs()
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, expr)| {
+                            // Extract impure expressions
+                            if expr.is_impure() {
+                                impure_expr_indices.insert(idx);
+                                if let Some(name) = self.core.field_names.get(&idx) {
+                                    impure_field_names.insert(idx, name.clone());
+                                }
+                                Some(expr.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if impure_exprs.is_empty() {
                         None
+                    } else if kind == StreamKind::Upsert
+                        && new_input
+                            .stream_key()
+                            .into_iter()
+                            .flatten()
+                            .all(|stream_key_idx| !impure_expr_indices.contains(stream_key_idx))
+                    {
+                        // We're operating on non-stream-key columns of upsert stream, no need to materialize.
+                        None
+                    } else {
+                        Some((impure_field_names, impure_expr_indices, impure_exprs))
                     }
-                })
-                .collect();
+                } else {
+                    None
+                }
+            }
+        };
 
-            if !impure_exprs.is_empty() {
+        let stream_plan = if let Some((impure_field_names, impure_expr_indices, impure_exprs)) =
+            should_materialize_expr
+        {
+            {
+                let new_input = new_input.enforce_concrete_distribution();
+
                 // Create `MaterializedExprs` for impure expressions
                 let mat_exprs_plan: StreamPlanRef = StreamMaterializedExprs::new(
                     new_input.clone(),
                     impure_exprs,
                     impure_field_names,
-                )
+                )?
                 .into();
 
                 let input_len = new_input.schema().len();
@@ -317,13 +345,9 @@ impl ToStream for LogicalProject {
 
                 let core = generic::Project::new(final_exprs, mat_exprs_plan);
                 StreamProject::new(core).into()
-            } else {
-                // No impure expressions, create a regular `StreamProject`
-                let core = generic::Project::new(self.exprs().clone(), new_input);
-                StreamProject::new(core).into()
             }
         } else {
-            // Materialized expressions feature is not enabled, create a regular `StreamProject`
+            // No expressions to materialize or the feature is not enabled, create a regular `StreamProject`
             let core = generic::Project::new(self.exprs().clone(), new_input);
             StreamProject::new(core).into()
         };
@@ -365,6 +389,18 @@ impl ToStream for LogicalProject {
         let (map, _) = out_col_change.into_parts();
         let out_col_change = ColIndexMapping::new(map, proj.base.schema().len());
         Ok((proj.into(), out_col_change))
+    }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+        let input_columns = columns
+            .iter()
+            .map(|&col| self.o2i_col_mapping().try_map(col))
+            .collect::<Option<Vec<usize>>>()?;
+        let new_input = self.input().try_better_locality(&input_columns)?;
+        Some(self.clone_with_input(new_input).into())
     }
 }
 

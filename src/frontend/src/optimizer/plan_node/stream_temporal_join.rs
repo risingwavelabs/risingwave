@@ -50,9 +50,11 @@ impl StreamTemporalJoin {
         core: generic::Join<PlanRef>,
         eq_join_predicate: EqJoinPredicate,
         is_nested_loop: bool,
-    ) -> Self {
+    ) -> Result<Self> {
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
-        let append_only = core.left.append_only();
+        // TODO(kind): theoretically, the impl can handle upsert stream.
+        let stream_kind = reject_upsert_input!(core.left);
+        let append_only = stream_kind.is_append_only();
         assert!(!is_nested_loop || append_only);
 
         let right = core.right.clone();
@@ -93,19 +95,19 @@ impl StreamTemporalJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            stream_kind,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             columns_monotonicity,
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
             eq_join_predicate,
             append_only,
             is_nested_loop,
-        }
+        })
     }
 
     /// Get join type
@@ -218,7 +220,7 @@ impl PlanTreeNodeBinary<Stream> for StreamTemporalJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone(), self.is_nested_loop)
+        Self::new(core, self.eq_join_predicate.clone(), self.is_nested_loop).unwrap()
     }
 }
 
@@ -257,7 +259,7 @@ impl TryToStreamPb for StreamTemporalJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
-            table_desc: Some(scan.core().table_desc.try_to_protobuf()?),
+            table_desc: Some(scan.core().table_catalog.table_desc().try_to_protobuf()?),
             table_output_indices: scan.core().output_col_idx.iter().map(|&i| i as _).collect(),
             memo_table: if self.append_only {
                 None
@@ -284,6 +286,7 @@ impl ExprRewritable<Stream> for StreamTemporalJoin {
             self.eq_join_predicate.rewrite_exprs(r),
             self.is_nested_loop,
         )
+        .unwrap()
         .into()
     }
 }

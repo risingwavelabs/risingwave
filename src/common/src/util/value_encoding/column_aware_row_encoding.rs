@@ -174,8 +174,6 @@ mod new_serde {
             DataType::Struct(struct_def) => new_deserialize_struct(struct_def, data)?,
             DataType::List(item_type) => new_deserialize_list(item_type, data)?,
             DataType::Map(map_type) => new_deserialize_map(map_type, data)?,
-            DataType::Vector(_) => plain::deserialize_value(ty, data)?,
-
             data_types::simple!() => plain::deserialize_value(ty, data)?,
         })
     }
@@ -263,12 +261,22 @@ where
 {
     fn encode_to(self, data_type: &DataType, data: &mut Vec<u8>) {
         if let Some(v) = self.to_datum_ref() {
+            let curr_len = data.len();
+
             // Use different encoding logic for alterable types.
             if data_type.can_alter() == Some(true) {
                 new_serde::new_serialize_scalar(data_type, v, data);
             } else {
                 plain::serialize_scalar(v, data);
             }
+
+            // See `Deserializer::deserialize` for the decoding logic to understand this check.
+            // See also: https://github.com/risingwavelabs/risingwave/issues/23050
+            debug_assert_ne!(
+                data.len(),
+                curr_len,
+                "scalar ({v:?}) should not be encoded to empty bytes, as it will be indistinguishable from NULL",
+            );
         }
     }
 }

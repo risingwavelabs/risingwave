@@ -28,6 +28,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_service::barrier_complete_response::PbCdcTableBackfillProgress;
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{mpsc, oneshot};
@@ -67,6 +68,7 @@ enum ManagedBarrierStateInner {
     AllCollected {
         create_mview_progress: Vec<PbCreateMviewProgress>,
         load_finished_source_ids: Vec<u32>,
+        cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         truncate_tables: Vec<u32>,
         refresh_finished_tables: Vec<u32>,
     },
@@ -92,6 +94,7 @@ use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
 use crate::task::barrier_worker::ScoredStreamError;
 use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
+use crate::task::cdc_progress::CdcTableBackfillState;
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
     running_actors: BTreeSet<ActorId>,
@@ -319,6 +322,8 @@ pub(crate) struct PartialGraphManagedBarrierState {
     /// Used for refreshable batch source.
     pub(crate) load_finished_source_ids: HashMap<u64, HashSet<u32>>,
 
+    pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
+
     /// Record the tables to truncate for each epoch of concurrent checkpoints.
     pub(crate) truncate_tables: HashMap<u64, HashSet<u32>>,
     /// Record the tables that have finished refresh for each epoch of concurrent checkpoints.
@@ -345,6 +350,7 @@ impl PartialGraphManagedBarrierState {
             mv_depended_subscriptions: Default::default(),
             create_mview_progress: Default::default(),
             load_finished_source_ids: Default::default(),
+            cdc_table_backfill_progress: Default::default(),
             truncate_tables: Default::default(),
             refresh_finished_tables: Default::default(),
             state_store,
@@ -1001,6 +1007,13 @@ impl DatabaseManagedBarrierState {
                         NewOutputRequest::Local(tx),
                     );
                 }
+                LocalBarrierEvent::ReportCdcTableBackfillProgress {
+                    actor_id,
+                    epoch,
+                    state,
+                } => {
+                    self.update_cdc_table_backfill_progress(epoch, actor_id, state);
+                }
             }
         }
 
@@ -1041,6 +1054,7 @@ impl DatabaseManagedBarrierState {
             .map(|barrier| (prev_partial_graph_id, barrier))
     }
 
+    #[allow(clippy::type_complexity)]
     pub(super) fn pop_barrier_to_complete(
         &mut self,
         partial_graph_id: PartialGraphId,
@@ -1191,6 +1205,14 @@ impl PartialGraphManagedBarrierState {
                 .into_iter()
                 .collect();
 
+            let cdc_table_backfill_progress = self
+                .cdc_table_backfill_progress
+                .remove(&barrier_state.barrier.epoch.curr)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(actor, state)| state.to_pb(actor, barrier_state.barrier.epoch.curr))
+                .collect();
+
             let truncate_tables = self
                 .truncate_tables
                 .remove(&barrier_state.barrier.epoch.curr)
@@ -1211,6 +1233,7 @@ impl PartialGraphManagedBarrierState {
                     load_finished_source_ids,
                     truncate_tables,
                     refresh_finished_tables,
+                    cdc_table_backfill_progress,
                 },
             );
 
@@ -1237,6 +1260,7 @@ impl PartialGraphManagedBarrierState {
         let (
             create_mview_progress,
             load_finished_source_ids,
+            cdc_table_backfill_progress,
             truncate_tables,
             refresh_finished_tables,
         ) = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected {
@@ -1244,8 +1268,9 @@ impl PartialGraphManagedBarrierState {
             load_finished_source_ids,
             truncate_tables,
             refresh_finished_tables,
+            cdc_table_backfill_progress,
         } => {
-            (create_mview_progress, load_finished_source_ids, truncate_tables, refresh_finished_tables)
+            (create_mview_progress, load_finished_source_ids, cdc_table_backfill_progress, truncate_tables, refresh_finished_tables)
         });
         BarrierToComplete {
             barrier: barrier_state.barrier,
@@ -1254,6 +1279,7 @@ impl PartialGraphManagedBarrierState {
             load_finished_source_ids,
             truncate_tables,
             refresh_finished_tables,
+            cdc_table_backfill_progress,
         }
     }
 }
@@ -1265,6 +1291,7 @@ pub(crate) struct BarrierToComplete {
     pub load_finished_source_ids: Vec<u32>,
     pub truncate_tables: Vec<u32>,
     pub refresh_finished_tables: Vec<u32>,
+    pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
 }
 
 impl PartialGraphManagedBarrierState {

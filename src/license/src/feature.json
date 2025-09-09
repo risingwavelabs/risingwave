@@ -92,6 +92,11 @@
             "description": "Sink auto schema change.",
             "type": "string",
             "const": "SinkAutoSchemaChange"
+        },
+        {
+            "description": "Support state table memory preload for boosting performance.",
+            "type": "string",
+            "const": "StateTableMemoryPreload"
         }
     ]
 }

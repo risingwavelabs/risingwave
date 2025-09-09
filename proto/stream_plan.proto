@@ -17,7 +17,17 @@ message Dispatchers {
   repeated Dispatcher dispatchers = 1;
 }
 
+message UpstreamSinkInfo {
+  uint32 upstream_fragment_id = 1;
+  repeated plan_common.Field sink_output_schema = 2;
+  repeated expr.ExprNode project_exprs = 3;
+}
+
 message AddMutation {
+  message NewUpstreamSink {
+    UpstreamSinkInfo info = 1;
+    repeated common.ActorInfo upstream_actors = 2;
+  }
   // New dispatchers for each actor.
   map<uint32, Dispatchers> actor_dispatchers = 1;
   // All actors to be added (to the main connected component of the graph) in this update.
@@ -33,11 +43,19 @@ message AddMutation {
   // nodes which should be paused initially.
   repeated uint32 backfill_nodes_to_pause = 6;
   // CDC table snapshot splits
-  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
+  source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
+  // Use downstream_fragment_id as keys.
+  map<uint32, NewUpstreamSink> new_upstream_sinks = 8;
 }
 
 message StopMutation {
   repeated uint32 actors = 1;
+  // Only sink-fragment in the sink job is recorded.
+  repeated uint32 dropped_sink_fragments = 2;
+}
+
+message SinkAddColumns {
+  repeated plan_common.Field fields = 1;
 }
 
 message UpdateMutation {
@@ -82,7 +100,8 @@ message UpdateMutation {
   // Consistent with the semantics in AddMutation.
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
   // CDC table snapshot splits
-  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
+  source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
+  map<uint32, SinkAddColumns> sink_add_columns = 8;
 }
 
 message SourceChangeSplitMutation {
@@ -968,7 +987,26 @@ message MaterializedExprsNode {
   optional uint32 state_clean_col_idx = 3;
 }
 
+message VectorIndexWriteNode {
+  catalog.Table table = 1;
+}
+
+message UpstreamSinkUnionNode {
+  // It is always empty in the persisted metadata, and get filled before we spawn the actors.
+  // The actual upstream info may be added and removed dynamically at runtime.
+  repeated UpstreamSinkInfo init_upstreams = 1;
+}
+
 message StreamNode {
+  // This field used to be a `bool append_only`.
+  // Enum variants are ordered for backwards compatibility.
+  enum StreamKind {
+    // buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+    STREAM_KIND_RETRACT = 0;
+    STREAM_KIND_APPEND_ONLY = 1;
+    STREAM_KIND_UPSERT = 2;
+  }
+
   oneof node_body {
     SourceNode source = 100;
     ProjectNode project = 101;
@@ -1019,6 +1057,8 @@ message StreamNode {
     AsOfJoinNode as_of_join = 147;
     SyncLogStoreNode sync_log_store = 148;
     MaterializedExprsNode materialized_exprs = 149;
+    VectorIndexWriteNode vector_index_write = 150;
+    UpstreamSinkUnionNode upstream_sink_union = 151;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -1026,7 +1066,7 @@ message StreamNode {
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
   repeated uint32 stream_key = 2;
-  bool append_only = 24;
+  StreamKind stream_kind = 24;
   string identity = 18;
   // The schema of the plan node
   repeated plan_common.Field fields = 19;

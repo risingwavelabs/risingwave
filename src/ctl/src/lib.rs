@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -80,6 +81,9 @@ enum Commands {
     Profile(ProfileCommands),
     #[clap(subcommand)]
     Throttle(ThrottleCommands),
+    /// Commands for Self-testing
+    #[clap(subcommand, hide = true)]
+    Test(TestCommands),
 }
 
 #[derive(Subcommand)]
@@ -499,6 +503,12 @@ pub enum AwaitTreeCommands {
 }
 
 #[derive(Subcommand, Clone, Debug)]
+enum TestCommands {
+    /// Test if JVM and Java libraries are working
+    Jvm,
+}
+
+#[derive(Subcommand, Clone, Debug)]
 enum ThrottleCommands {
     Source(ThrottleCommandArgs),
     Mv(ThrottleCommandArgs),
@@ -558,6 +568,11 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
     result
 }
 
+#[expect(
+    clippy::large_stack_frames,
+    reason = "Pre-opt MIR sums locals across match arms in async dispatch; \
+              post-layout generator stores only one arm at a time (~13–16 KiB)."
+)]
 async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
@@ -919,6 +934,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             set_cdc_table_backfill_parallelism(context, table_id, parallelism).await?;
         }
+        Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }
     Ok(())
 }
