@@ -107,8 +107,14 @@ message GetStreamingPrometheusStatsResponse {
   map<uint32, RelationStats> relation_stats = 3;
 }
 
+message ChannelDeltaStatsEntry {
+  uint32 upstream_fragment_id = 1;
+  uint32 downstream_fragment_id = 2;
+  ChannelDeltaStats channel_delta_stats_entry = 3;
+}
+
 message GetChannelDeltaStatsResponse {
-  map<string, ChannelDeltaStats> channel_stats = 1;
+  repeated ChannelDeltaStatsEntry channel_delta_stats_entries = 1;
 }
 
 message GetChannelDeltaStatsRequest {
