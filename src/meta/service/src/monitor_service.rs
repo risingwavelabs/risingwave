@@ -114,7 +114,7 @@ impl MonitorService for MonitorServiceImpl {
         }
 
         let request = request.into_inner();
-        let time_offset = request.time_offset;
+        let time_offset = request.time_offset.unwrap_or(60); // Default to 60 seconds if not provided
         let at_time = request.at;
 
         // Check if Prometheus client is available

@@ -121,7 +121,7 @@ message GetChannelDeltaStatsRequest {
   /// Unix timestamp in seconds for the evaluation time. If not set, defaults to current Prometheus server time.
   optional int64 at = 1;
   /// Time offset for throughput and backpressure rate calculation in seconds. If not set, defaults to 60s.
-  int64 time_offset = 2;
+  optional int64 time_offset = 2;
 }
 
 message TieredCacheTracingRequest {
