@@ -33,7 +33,7 @@ mod plan_visitor;
 
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
-    SysTableVisitor, IcebergScanDetector,
+    SysTableVisitor, IcebergScanDetector, RWToDFConverter, 
 };
 
 pub mod backfill_order_strategy;

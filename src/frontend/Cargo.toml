@@ -20,6 +20,9 @@ bk-tree = "0.5.0"
 bytes = "1"
 chrono = { workspace = true }
 clap = { workspace = true }
+datafusion = "45.0.0"
+datafusion-common = "45.0.0"
+arrow = "54.0.0"
 downcast-rs = "2.0"
 dyn-clone = "1.0.14"
 easy-ext = "1"

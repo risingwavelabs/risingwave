@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use datafusion::arrow::ipc::convert;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -37,8 +38,7 @@ use crate::handler::flush::do_flush;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
-    BatchPlanRoot, ExecutionModeDecider, OptimizerContext, OptimizerContextRef,
-    ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor, IcebergScanDetector,
+    BatchPlanRoot, ExecutionModeDecider, IcebergScanDetector, OptimizerContext, OptimizerContextRef, RWToDFConverter, ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -48,22 +48,43 @@ use crate::scheduler::{
 };
 use crate::session::SessionImpl;
 
+/// Choice between running RisingWave's own batch executor (RW) or a DataFusion (DF) logical plan.
+pub enum BatchPlanChoice {
+    RW(BatchQueryPlanResult),
+    DF {
+        df_plan: datafusion::logical_expr::LogicalPlan,
+        schema: Schema,
+        stmt_type: StatementType,
+        dependent_relations: Vec<TableId>,
+        read_storage_tables: HashSet<TableId>,
+    },
+}
+
 pub async fn handle_query(
     handler_args: HandlerArgs,
     stmt: Statement,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let plan_fragmenter_result = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
-        // Time zone is used by Hummock time travel query.
-        risingwave_expr::expr_context::TIME_ZONE::sync_scope(
-            session.config().timezone().to_owned(),
-            || gen_batch_plan_fragmenter(&session, plan_result),
-        )?
-    };
-    execute(session, plan_fragmenter_result, formats).await
+    // Generate either an internal (RW) batch plan or a DataFusion (DF) logical plan choice.
+    let context = OptimizerContext::from_handler_args(handler_args);
+    let plan_choice = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
+
+    match plan_choice {
+        BatchPlanChoice::RW(plan_result) => {
+            // Time zone is used by Hummock time travel query.
+            let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+                session.config().timezone().to_owned(),
+                || gen_batch_plan_fragmenter(&session, plan_result),
+            )?;
+            execute(session, plan_fragmenter_result, formats).await
+        }
+        BatchPlanChoice::DF { df_plan, schema, stmt_type, dependent_relations, read_storage_tables } => {
+            // TODO: run DataFusion plan execution here.
+            tracing::info!("DataFusion plan chosen for execution: {:?}", df_plan);
+            todo!("DataFusion execution path not implemented yet")
+        }
+    }
 }
 
 pub fn handle_parse(
@@ -184,17 +205,11 @@ pub async fn handle_execute(
     }
 }
 
-/// Enum to wrap different batch plan results.
-pub enum BatchPlanResult {
-    RW(BatchQueryPlanResult),
-    DF(BatchQueryPlanResult),
-}
-
 pub fn gen_batch_plan_by_statement(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
-) -> Result<BatchQueryPlanResult> {
+) -> Result<BatchPlanChoice> {
     let bound_result = gen_bound(session, stmt, vec![])?;
     gen_batch_query_plan(session, context, bound_result)
 }
@@ -250,7 +265,7 @@ fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     bind_result: BoundResult,
-) -> Result<BatchQueryPlanResult> {
+) -> Result<BatchPlanChoice> {
     let BoundResult {
         stmt_type,
         must_dist,
@@ -266,13 +281,27 @@ fn gen_batch_query_plan(
     };
 
     let logical = planner.plan(bound)?;
-
-    let contains_iceberg_scan = IcebergScanDetector::contains_logical_iceberg_scan(&logical);
-
-    // TODO: convert rw logical plan to df logical plan if contains iceberg scan
-
     let schema = logical.schema();
-    let batch_plan = logical.gen_batch_plan()?;
+    let contains_iceberg_scan = IcebergScanDetector::contains_logical_iceberg_scan(&logical);
+    if contains_iceberg_scan {
+        // Convert RisingWave logical plan to DataFusion logical plan for Iceberg queries.
+        let mut converter = crate::optimizer::RWToDFConverter::default();
+        let df_plan = converter.convert(logical.clone().plan);
+
+        // Prepare metadata for DF branch. We don't build RW physical plan in this branch.
+        let schema = logical.clone().schema();
+        let dependent_relations_vec = dependent_relations.into_iter().collect_vec();
+        let read_storage_tables = HashSet::new();
+
+        return Ok(BatchPlanChoice::DF {
+            df_plan,
+            schema,
+            stmt_type,
+            dependent_relations: dependent_relations_vec,
+            read_storage_tables,
+        });
+    }
+    let batch_plan = logical.gen_batch_plan()?; // TODO: partially optimised logical plan 
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());
@@ -303,14 +332,14 @@ fn gen_batch_query_plan(
         QueryMode::Distributed => batch_plan.gen_batch_distributed_plan()?,
     };
 
-    Ok(BatchQueryPlanResult {
+    Ok(BatchPlanChoice::RW(BatchQueryPlanResult {
         plan: physical,
         query_mode,
         schema,
         stmt_type,
         dependent_relations: dependent_relations.into_iter().collect_vec(),
         read_storage_tables,
-    })
+    }))
 }
 
 fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
