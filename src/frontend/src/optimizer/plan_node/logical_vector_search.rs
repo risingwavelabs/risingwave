@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::array::VECTOR_DISTANCE_TYPE;
@@ -26,6 +28,7 @@ use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
 
 use crate::OptimizerContextRef;
+use crate::catalog::index_catalog::VectorIndex;
 use crate::error::ErrorCode;
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
@@ -124,9 +127,9 @@ impl LogicalVectorSearch {
         distance_type: PbDistanceType,
         left: ExprImpl,
         right: ExprImpl,
-        output_indices: Vec<usize>,
         input: PlanRef,
     ) -> Self {
+        let output_indices = (0..input.schema().len()).collect();
         let core = VectorSearchCore {
             top_n,
             distance_type,
@@ -141,10 +144,6 @@ impl LogicalVectorSearch {
     fn with_core(core: VectorSearchCore) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
-    }
-
-    pub(crate) fn i2o_mapping(&self) -> ColIndexMapping {
-        self.core.i2o_mapping()
     }
 }
 
@@ -360,17 +359,24 @@ impl LogicalVectorSearch {
     }
 }
 
-impl ToBatch for LogicalVectorSearch {
-    fn to_batch(&self) -> crate::error::Result<BatchPlanRef> {
-        if let Some((scan, vector_expr, vector_column_expr)) = self.as_vector_table_scan()
-            && !scan.vector_indexes().is_empty()
-            && self
-                .core
-                .ctx()
-                .session_ctx()
-                .config()
-                .enable_index_selection()
-        {
+impl LogicalVectorSearch {
+    #[expect(clippy::type_complexity)]
+    pub fn resolve_vector_index_lookup<'a>(
+        scan: &'a LogicalScan,
+        vector_column_expr: &ExprImpl,
+        distance_type: PbDistanceType,
+        output_indices: &[usize],
+    ) -> Option<(
+        &'a Arc<VectorIndex>,
+        Vec<usize>,
+        Vec<usize>,
+        Vec<(bool, usize)>,
+    )> {
+        if !scan.vector_indexes().is_empty() {
+            let primary_table_cols_idx = output_indices
+                .iter()
+                .map(|input_idx| scan.output_col_idx()[*input_idx])
+                .collect_vec();
             for index in scan.vector_indexes() {
                 if !Self::is_matched_vector_column_expr(
                     &index.vector_expr,
@@ -379,16 +385,10 @@ impl ToBatch for LogicalVectorSearch {
                 ) {
                     continue;
                 }
-                if index.vector_index_info.distance_type() != self.core.distance_type {
+                if index.vector_index_info.distance_type() != distance_type {
                     continue;
                 }
 
-                let primary_table_cols_idx = self
-                    .core
-                    .output_indices
-                    .iter()
-                    .map(|input_idx| scan.output_col_idx()[*input_idx])
-                    .collect_vec();
                 let mut covered_table_cols_idx = Vec::new();
                 let mut non_covered_table_cols_idx = Vec::new();
                 let mut primary_table_col_in_output =
@@ -405,6 +405,40 @@ impl ToBatch for LogicalVectorSearch {
                         non_covered_table_cols_idx.push(*table_col_idx);
                     }
                 }
+                return Some((
+                    index,
+                    covered_table_cols_idx,
+                    non_covered_table_cols_idx,
+                    primary_table_col_in_output,
+                ));
+            }
+        }
+        None
+    }
+}
+
+impl ToBatch for LogicalVectorSearch {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
+        if let Some((scan, vector_expr, vector_column_expr)) = self.as_vector_table_scan()
+            && self
+                .core
+                .ctx()
+                .session_ctx()
+                .config()
+                .enable_index_selection()
+            && let Some((
+                index,
+                covered_table_cols_idx,
+                non_covered_table_cols_idx,
+                primary_table_col_in_output,
+            )) = Self::resolve_vector_index_lookup(
+                scan,
+                vector_column_expr,
+                self.core.distance_type,
+                &self.core.output_indices,
+            )
+        {
+            {
                 let vector_data_type = vector_expr.return_type();
                 let literal_vector_input = BatchValues::new(LogicalValues::new(
                     vec![vec![vector_expr]],
