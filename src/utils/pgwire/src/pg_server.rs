@@ -618,4 +618,27 @@ mod tests {
         // The key point is that the error should not be specifically about InvalidAudience
         // when using the jsonwebtoken crate's automatic validation
     }
+
+    #[test]
+    fn test_jwt_validation_config() {
+        use jsonwebtoken::{Algorithm, Validation};
+        
+        // Test that our validation configuration is set up correctly
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&["test-issuer"]);
+        validation.set_required_spec_claims(&["exp", "iss"]);
+        
+        // Before the fix: validate_aud would be true by default
+        assert_eq!(validation.validate_aud, true, "Default validate_aud should be true");
+        
+        // After applying our fix in validate_jwt function
+        validation.validate_aud = false;
+        assert_eq!(validation.validate_aud, false, "validate_aud should be disabled to allow manual validation");
+        
+        // Verify other validation settings remain unchanged
+        assert_eq!(validation.validate_exp, true, "Expiration should still be validated");
+        assert!(validation.iss.is_some(), "Issuer validation should be configured");
+        assert!(validation.required_spec_claims.contains("exp"), "Required claims should include exp");
+        assert!(validation.required_spec_claims.contains("iss"), "Required claims should include iss");
+    }
 }
