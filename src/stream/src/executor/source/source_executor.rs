@@ -194,7 +194,6 @@ impl<S: StateStore> SourceExecutor<S> {
             },
             source_desc.source.config.clone(),
             schema_change_tx,
-            None,
         );
 
         (column_ids, source_ctx)

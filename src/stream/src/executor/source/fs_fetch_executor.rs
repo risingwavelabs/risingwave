@@ -209,7 +209,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             },
             source_desc.source.config.clone(),
             None,
-            None, // No callback for fs fetch executor
         )
     }
 

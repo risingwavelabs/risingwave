@@ -150,7 +150,7 @@ impl PlainParser {
                                         let clean_table_name =
                                             table_name.trim_matches('"').replace("\".\"", ".");
                                         let fail_info = format!(
-                                            "Unsupported postgres type '{}' in table '{}'",
+                                            "Unsupported data type '{}' in table '{}'",
                                             ty, clean_table_name
                                         );
                                         // Build cdc_table_id: source_name.schema.table_name
@@ -174,7 +174,7 @@ impl PlainParser {
                                     (fail_info, "".to_owned(), "".to_owned())
                                 }
                             };
-                            self.source_ctx.report_cdc_auto_schema_change_fail(
+                            self.source_ctx.on_cdc_auto_schema_change_failure(
                                 self.source_ctx.source_id.table_id,
                                 table_name,
                                 cdc_table_id,

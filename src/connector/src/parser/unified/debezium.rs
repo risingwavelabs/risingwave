@@ -212,11 +212,13 @@ pub fn parse_schema_change(
                 _ => unreachable!(""),
             };
             let id = jsonb_access_field!(jsonb, "id", string);
+            println!("id: {}", id);
             let ty = jsonb_access_field!(jsonb, "type", string);
             // Try to extract table name from the JSON data
             let table_name = jsonb_access_field!(jsonb, "id", string)
                 .trim_matches('"')
                 .to_owned();
+            println!("table_name: {}", table_name);
             let ddl_type: TableChangeType = ty.as_str().into();
             if matches!(ddl_type, TableChangeType::Create | TableChangeType::Drop) {
                 tracing::debug!("skip table schema change for create/drop command");

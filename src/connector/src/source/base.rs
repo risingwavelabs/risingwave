@@ -324,7 +324,7 @@ pub struct SourceContext {
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
     // callback function to report CDC auto schema change fail events
-    pub report_cdc_auto_schema_change_fail: Option<CdcAutoSchemaChangeFailCallback>,
+    pub on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
 }
 
 impl SourceContext {
@@ -339,7 +339,32 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
-        report_cdc_auto_schema_change_fail: Option<CdcAutoSchemaChangeFailCallback>,
+    ) -> Self {
+        Self::new_with_auto_schema_change_callback(
+            actor_id,
+            source_id,
+            fragment_id,
+            source_name,
+            metrics,
+            source_ctrl_opts,
+            connector_props,
+            schema_change_channel,
+            None,
+        )
+    }
+
+    pub fn new_with_auto_schema_change_callback(
+        actor_id: u32,
+        source_id: TableId,
+        fragment_id: u32,
+        source_name: String,
+        metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
+        connector_props: ConnectorProperties,
+        schema_change_channel: Option<
+            mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
+        >,
+        on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
     ) -> Self {
         Self {
             actor_id,
@@ -350,7 +375,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
-            report_cdc_auto_schema_change_fail,
+            on_cdc_auto_schema_change_failure,
         }
     }
 
@@ -369,13 +394,12 @@ impl SourceContext {
             },
             ConnectorProperties::default(),
             None,
-            None,
         )
     }
 
     /// Report CDC auto schema change fail event
     /// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
-    pub fn report_cdc_auto_schema_change_fail(
+    pub fn on_cdc_auto_schema_change_failure(
         &self,
         table_id: u32,
         table_name: String,
@@ -384,7 +408,7 @@ impl SourceContext {
         fail_info: String,
     ) {
         if let Some(ref cdc_auto_schema_change_fail_callback) =
-            self.report_cdc_auto_schema_change_fail
+            self.on_cdc_auto_schema_change_failure
         {
             cdc_auto_schema_change_fail_callback.call(
                 table_id,

@@ -30,6 +30,11 @@ use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 
+type AutoSchemaChangeSetup = (
+    Option<mpsc::Sender<(SchemaChangeEnvelope, oneshot::Sender<()>)>>,
+    Option<CdcAutoSchemaChangeFailCallback>,
+);
+
 pub(crate) struct StreamReaderBuilder {
     pub source_desc: SourceDesc,
     pub rate_limit: Option<u32>,
@@ -43,17 +48,10 @@ pub(crate) struct StreamReaderBuilder {
 }
 
 impl StreamReaderBuilder {
-    fn prepare_source_stream_build(&self) -> (Vec<ColumnId>, SourceContext) {
-        let column_ids = self
-            .source_desc
-            .columns
-            .iter()
-            .map(|column_desc| column_desc.column_id)
-            .collect_vec();
-
-        let (schema_change_tx, mut schema_change_rx) =
-            mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
-        let schema_change_tx = if self.is_auto_schema_change_enable {
+    fn setup_auto_schema_change(&self) -> AutoSchemaChangeSetup {
+        if self.is_auto_schema_change_enable {
+            let (schema_change_tx, mut schema_change_rx) =
+                mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
             let meta_client = self.actor_ctx.meta_client.clone();
             // spawn a task to handle schema change event from source parser
             let _join_handle = tokio::task::spawn(async move {
@@ -85,15 +83,11 @@ impl StreamReaderBuilder {
                     }
                 }
             });
-            Some(schema_change_tx)
-        } else {
-            info!("auto schema change is disabled in config");
-            None
-        };
 
-        // Create callback function for reporting CDC auto schema change fail events
-        let report_cdc_auto_schema_change_fail =
-            if let Some(ref meta_client) = self.actor_ctx.meta_client {
+            // Create callback function for reporting CDC auto schema change fail events
+            let on_cdc_auto_schema_change_failure = if let Some(ref meta_client) =
+                self.actor_ctx.meta_client
+            {
                 let meta_client = meta_client.clone();
                 let source_id = self.source_id;
                 Some(CdcAutoSchemaChangeFailCallback::new(
@@ -128,7 +122,24 @@ impl StreamReaderBuilder {
                 None
             };
 
-        let source_ctx = SourceContext::new(
+            (Some(schema_change_tx), on_cdc_auto_schema_change_failure)
+        } else {
+            info!("auto schema change is disabled in config");
+            (None, None)
+        }
+    }
+
+    fn prepare_source_stream_build(&self) -> (Vec<ColumnId>, SourceContext) {
+        let column_ids = self
+            .source_desc
+            .columns
+            .iter()
+            .map(|column_desc| column_desc.column_id)
+            .collect_vec();
+
+        let (schema_change_tx, on_cdc_auto_schema_change_failure) = self.setup_auto_schema_change();
+
+        let source_ctx = SourceContext::new_with_auto_schema_change_callback(
             self.actor_ctx.id,
             self.source_id,
             self.actor_ctx.fragment_id,
@@ -140,7 +151,7 @@ impl StreamReaderBuilder {
             },
             self.source_desc.source.config.clone(),
             schema_change_tx,
-            report_cdc_auto_schema_change_fail,
+            on_cdc_auto_schema_change_failure,
         );
 
         (column_ids, source_ctx)

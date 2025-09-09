@@ -315,7 +315,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             },
             source_desc.source.config.clone(),
             None,
-            None, // No callback for backfill executor
         );
 
         // We will check watermark to decide whether we need to backfill.
