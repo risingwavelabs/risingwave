@@ -69,7 +69,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use sea_orm::DatabaseConnection;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;

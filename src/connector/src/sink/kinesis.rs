@@ -23,7 +23,7 @@ use futures::{FutureExt, TryFuture};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 

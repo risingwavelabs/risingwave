@@ -44,7 +44,6 @@ risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
 sea-orm = { workspace = true }
 serde = { workspace = true }
-serde_derive = "1.0.188"
 serde_json = "1.0.107"
 sqllogictest = "0.28.0"
 tempfile = "3"

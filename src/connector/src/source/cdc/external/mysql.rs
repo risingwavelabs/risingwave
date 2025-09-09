@@ -32,7 +32,7 @@ use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;

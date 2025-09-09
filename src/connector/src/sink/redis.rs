@@ -23,7 +23,7 @@ use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 use with_options::WithOptions;
