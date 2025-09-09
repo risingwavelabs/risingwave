@@ -2382,7 +2382,7 @@ pub(crate) mod tests {
         )
         .await;
 
-        hummock_manager_ref.get_new_object_ids(10).await.unwrap();
+        hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
         let compact_ctx = get_compactor_context(&storage);
         let compaction_catalog_agent_ref =
             CompactionCatalogAgent::for_test(vec![existing_table_id, filtered_table_id]);
@@ -2454,7 +2454,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
 
-        let object_id_manager = Arc::new(ObjectIdManager::new(
+        let object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
                 .storage_opts()
@@ -2469,7 +2469,7 @@ pub(crate) mod tests {
             compact_ctx.clone(),
             task.clone(),
             compaction_catalog_agent_ref.clone(),
-            object_id_manager.clone() as Arc<dyn GetObjectId>,
+            Box::new(object_id_manager.clone()) as Box<dyn GetObjectId>,
             Arc::new(TaskProgress::default()),
             state_cleanup_filter,
         );
