@@ -21,7 +21,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use super::prelude::{PlanRef, *};
 use crate::expr::TableFunctionType;
 use crate::optimizer::OptimizerContext;
-use crate::optimizer::plan_node::{Logical, LogicalGetChannelStats, LogicalTableFunction};
+use crate::optimizer::plan_node::{Logical, LogicalGetChannelDeltaStats, LogicalTableFunction};
 use crate::optimizer::rule::{ApplyResult, FallibleRule};
 
 /// Helper function to extract a constant u64 value from an `ExprImpl`.
@@ -48,15 +48,15 @@ fn expr_impl_to_u64_fn(arg: &crate::expr::ExprImpl) -> anyhow::Result<Option<u64
     }
 }
 
-/// Transform the `internal_get_channel_stats()` table function
+/// Transform the `internal_get_channel_delta_stats()` table function
 /// into a plan graph which will return channel statistics from the dashboard API.
 /// It will return channel stats with `upstream_fragment_id` and `downstream_fragment_id` as primary key.
-pub struct TableFunctionToInternalGetChannelStatsRule {}
-impl FallibleRule<Logical> for TableFunctionToInternalGetChannelStatsRule {
+pub struct TableFunctionToInternalGetChannelDeltaStatsRule {}
+impl FallibleRule<Logical> for TableFunctionToInternalGetChannelDeltaStatsRule {
     fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function.function_type
-            != TableFunctionType::InternalGetChannelStats
+            != TableFunctionType::InternalGetChannelDeltaStats
         {
             return ApplyResult::NotApplicable;
         }
@@ -65,7 +65,7 @@ impl FallibleRule<Logical> for TableFunctionToInternalGetChannelStatsRule {
     }
 }
 
-impl TableFunctionToInternalGetChannelStatsRule {
+impl TableFunctionToInternalGetChannelDeltaStatsRule {
     fn build_plan(
         ctx: Rc<OptimizerContext>,
         table_function: &crate::expr::TableFunction,
@@ -96,24 +96,28 @@ impl TableFunctionToInternalGetChannelStatsRule {
                 (at_time, time_offset)
             }
             _ => {
-                bail!("internal_get_channel_stats expects 0 or 2 arguments");
+                bail!("internal_get_channel_delta_stats expects 0 or 2 arguments");
             }
         };
 
         // TODO: In a real implementation, this would:
         // 1. Call the dashboard API with the parameters
         // 2. Parse the response to get channel stats
-        // 3. Convert the stats to rows in the LogicalGetChannelStats
+        // 3. Convert the stats to rows in the LogicalGetChannelDeltaStats
 
-        // For now, create a LogicalGetChannelStats node
-        let plan =
-            LogicalGetChannelStats::new(ctx.clone(), Schema::new(fields), _at_time, _time_offset);
+        // For now, create a LogicalGetChannelDeltaStats node
+        let plan = LogicalGetChannelDeltaStats::new(
+            ctx.clone(),
+            Schema::new(fields),
+            _at_time,
+            _time_offset,
+        );
         Ok(plan.into())
     }
 }
 
-impl TableFunctionToInternalGetChannelStatsRule {
+impl TableFunctionToInternalGetChannelDeltaStatsRule {
     pub fn create() -> BoxedRule {
-        Box::new(TableFunctionToInternalGetChannelStatsRule {})
+        Box::new(TableFunctionToInternalGetChannelDeltaStatsRule {})
     }
 }

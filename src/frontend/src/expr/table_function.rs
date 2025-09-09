@@ -625,7 +625,7 @@ impl TableFunction {
         }
     }
 
-    pub fn new_internal_get_channel_stats(args: Vec<ExprImpl>) -> Self {
+    pub fn new_internal_get_channel_delta_stats(args: Vec<ExprImpl>) -> Self {
         Self {
             args,
             return_type: DataType::Struct(StructType::new(vec![
@@ -636,7 +636,7 @@ impl TableFunction {
                 ("recv_throughput".to_owned(), DataType::Float64),
                 ("send_throughput".to_owned(), DataType::Float64),
             ])),
-            function_type: TableFunctionType::InternalGetChannelStats,
+            function_type: TableFunctionType::InternalGetChannelDeltaStats,
             user_defined: None,
         }
     }

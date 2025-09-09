@@ -26,19 +26,19 @@ use crate::error::Result;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
-/// `BatchGetChannelStats` represents a batch plan node that retrieves channel statistics
+/// `BatchGetChannelDeltaStats` represents a batch plan node that retrieves channel statistics
 /// from the dashboard API. It has no inputs and returns channel stats data.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BatchGetChannelStats {
+pub struct BatchGetChannelDeltaStats {
     pub base: PlanBase<Batch>,
     pub at_time: Option<u64>,
     pub time_offset: u64,
 }
 
-impl PlanTreeNodeLeaf for BatchGetChannelStats {}
-impl_plan_tree_node_for_leaf! { Batch, BatchGetChannelStats }
+impl PlanTreeNodeLeaf for BatchGetChannelDeltaStats {}
+impl_plan_tree_node_for_leaf! { Batch, BatchGetChannelDeltaStats }
 
-impl BatchGetChannelStats {
+impl BatchGetChannelDeltaStats {
     pub fn new(
         ctx: crate::OptimizerContextRef,
         schema: Schema,
@@ -74,17 +74,17 @@ impl BatchGetChannelStats {
     }
 }
 
-impl Distill for BatchGetChannelStats {
+impl Distill for BatchGetChannelDeltaStats {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![
             ("at_time", Pretty::debug(&self.at_time)),
             ("time_offset", Pretty::debug(&self.time_offset)),
         ];
-        childless_record("BatchGetChannelStats", fields)
+        childless_record("BatchGetChannelDeltaStats", fields)
     }
 }
 
-impl ToDistributedBatch for BatchGetChannelStats {
+impl ToDistributedBatch for BatchGetChannelDeltaStats {
     fn to_distributed(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(
             self.base.ctx().clone(),
@@ -97,18 +97,18 @@ impl ToDistributedBatch for BatchGetChannelStats {
     }
 }
 
-impl ToBatchPb for BatchGetChannelStats {
+impl ToBatchPb for BatchGetChannelDeltaStats {
     fn to_batch_prost_body(&self) -> NodeBody {
-        use risingwave_pb::batch_plan::GetChannelStatsNode;
+        use risingwave_pb::batch_plan::GetChannelDeltaStatsNode;
 
-        NodeBody::GetChannelStats(GetChannelStatsNode {
+        NodeBody::GetChannelDeltaStats(GetChannelDeltaStatsNode {
             at_time: self.at_time,
             time_offset: self.time_offset,
         })
     }
 }
 
-impl ToLocalBatch for BatchGetChannelStats {
+impl ToLocalBatch for BatchGetChannelDeltaStats {
     fn to_local(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(
             self.base.ctx().clone(),
@@ -121,7 +121,7 @@ impl ToLocalBatch for BatchGetChannelStats {
     }
 }
 
-impl ExprRewritable<Batch> for BatchGetChannelStats {
+impl ExprRewritable<Batch> for BatchGetChannelDeltaStats {
     fn has_rewritable_expr(&self) -> bool {
         false
     }
@@ -131,7 +131,7 @@ impl ExprRewritable<Batch> for BatchGetChannelStats {
     }
 }
 
-impl crate::optimizer::plan_node::expr_visitable::ExprVisitable for BatchGetChannelStats {
+impl crate::optimizer::plan_node::expr_visitable::ExprVisitable for BatchGetChannelDeltaStats {
     fn visit_exprs(&self, _v: &mut dyn crate::expr::ExprVisitor) {
         // No expressions to visit
     }

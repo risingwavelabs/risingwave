@@ -28,9 +28,9 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 
-/// [`GetChannelStatsExecutor`] implements the executor for retrieving channel statistics
+/// [`GetChannelDeltaStatsExecutor`] implements the executor for retrieving channel statistics
 /// from the meta node via RPC calls. This executor has no inputs and returns channel stats data.
-pub struct GetChannelStatsExecutor {
+pub struct GetChannelDeltaStatsExecutor {
     schema: Schema,
     identity: String,
     at_time: Option<u64>,
@@ -38,7 +38,7 @@ pub struct GetChannelStatsExecutor {
     metrics_reader: Arc<dyn MetricsReader>,
 }
 
-impl GetChannelStatsExecutor {
+impl GetChannelDeltaStatsExecutor {
     pub fn new(
         schema: Schema,
         identity: String,
@@ -138,7 +138,7 @@ impl GetChannelStatsExecutor {
     }
 }
 
-impl Executor for GetChannelStatsExecutor {
+impl Executor for GetChannelDeltaStatsExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -152,7 +152,7 @@ impl Executor for GetChannelStatsExecutor {
     }
 }
 
-impl GetChannelStatsExecutor {
+impl GetChannelDeltaStatsExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         // 1. Read the channel stats from the meta node RPC.
@@ -182,19 +182,19 @@ impl GetChannelStatsExecutor {
     }
 }
 
-impl BoxedExecutorBuilder for GetChannelStatsExecutor {
+impl BoxedExecutorBuilder for GetChannelDeltaStatsExecutor {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
             inputs.is_empty(),
-            "GetChannelStatsExecutor should have no child!"
+            "GetChannelDeltaStatsExecutor should have no child!"
         );
 
-        let get_channel_stats_node = try_match_expand!(
+        let get_channel_delta_stats_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
-            NodeBody::GetChannelStats
+            NodeBody::GetChannelDeltaStats
         )?;
 
         // Create a schema for channel stats
@@ -216,8 +216,8 @@ impl BoxedExecutorBuilder for GetChannelStatsExecutor {
         Ok(Box::new(Self::new(
             schema,
             source.plan_node().get_identity().clone(),
-            get_channel_stats_node.at_time,
-            get_channel_stats_node.time_offset,
+            get_channel_delta_stats_node.at_time,
+            get_channel_delta_stats_node.time_offset,
             metrics_reader,
         )))
     }
