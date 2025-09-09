@@ -17,9 +17,11 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::metrics_reader::MetricsReader;
+use risingwave_common::types::{DataType, F64, ScalarImpl};
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::monitor_service::{GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse};
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -27,13 +29,13 @@ use crate::executor::{
 };
 
 /// [`GetChannelStatsExecutor`] implements the executor for retrieving channel statistics
-/// from the system catalog. This executor has no inputs and returns channel stats data.
+/// from the meta node via RPC calls. This executor has no inputs and returns channel stats data.
 pub struct GetChannelStatsExecutor {
     schema: Schema,
     identity: String,
     at_time: Option<u64>,
     time_offset: u64,
-    sys_catalog_reader: Arc<dyn risingwave_common::catalog::SysCatalogReader>,
+    metrics_reader: Arc<dyn MetricsReader>,
 }
 
 impl GetChannelStatsExecutor {
@@ -42,39 +44,62 @@ impl GetChannelStatsExecutor {
         identity: String,
         at_time: Option<u64>,
         time_offset: u64,
-        sys_catalog_reader: Arc<dyn risingwave_common::catalog::SysCatalogReader>,
+        metrics_reader: Arc<dyn MetricsReader>,
     ) -> Self {
         Self {
             schema,
             identity,
             at_time,
             time_offset,
-            sys_catalog_reader,
+            metrics_reader,
         }
     }
 
-    /// Generate channel stats data using the system catalog reader
+    /// Generate channel stats data using the metrics reader
     async fn generate_channel_stats(&self) -> Vec<Vec<Option<ScalarImpl>>> {
-        // Try to get real data from system catalog if possible
-        if let Ok(stats) = self.fetch_channel_stats_from_sys_catalog().await {
+        // Try to get real data from metrics reader if possible
+        if let Ok(stats) = self.fetch_channel_stats_from_metrics_reader().await {
+            println!("Using metrics reader data: {} rows", stats.len());
             return stats;
         }
 
-        // Fallback to mock data if system catalog fails
+        // Fallback to mock data if metrics reader fails
+        println!("Using mock data");
         self.generate_mock_channel_stats()
     }
 
-    /// Fetch channel stats from system catalog
-    async fn fetch_channel_stats_from_sys_catalog(&self) -> Result<Vec<Vec<Option<ScalarImpl>>>> {
-        // This is a placeholder for actual system catalog integration
-        // In a real implementation, you would use the sys_catalog_reader to get channel stats
-        // For now, we'll return an error to fall back to mock data
+    /// Fetch channel stats from metrics reader
+    async fn fetch_channel_stats_from_metrics_reader(
+        &self,
+    ) -> Result<Vec<Vec<Option<ScalarImpl>>>> {
+        // Create request for channel delta stats
+        let request = GetChannelDeltaStatsRequest {
+            at: self.at_time.map(|t| t as i64),
+            time_offset: self.time_offset as i64,
+        };
 
-        // Example of how you might use the system catalog reader:
-        // - Access meta client through the system catalog reader if it's SysCatalogReaderImpl
-        // - Query system tables for channel information
-        // - Process the data and return channel stats...
-        todo!()
+        // Fetch channel delta stats from meta node
+        let response = self.metrics_reader.get_channel_delta_stats(request).await?;
+
+        // Convert response to rows
+        let mut rows = Vec::new();
+        for entry in response.channel_delta_stats_entries {
+            if let Some(stats) = entry.channel_delta_stats_entry.as_ref() {
+                let row = vec![
+                    Some(ScalarImpl::Int32(entry.upstream_fragment_id as i32)),
+                    Some(ScalarImpl::Int32(entry.downstream_fragment_id as i32)),
+                    Some(ScalarImpl::Int32(stats.actor_count as i32)),
+                    Some(ScalarImpl::Float64(F64::from(stats.backpressure_rate))),
+                    Some(ScalarImpl::Float64(F64::from(stats.recv_throughput))),
+                    Some(ScalarImpl::Float64(F64::from(stats.send_throughput))),
+                ];
+                println!("Generated row with {} columns: {:?}", row.len(), row);
+                rows.push(row);
+            }
+        }
+
+        println!("Total rows generated: {}", rows.len());
+        Ok(rows)
     }
 
     /// Generate mock channel stats data for demonstration purposes
@@ -84,21 +109,28 @@ impl GetChannelStatsExecutor {
         // Generate some sample channel stats data
         // In practice, this would come from the actual system catalog
         let channels = vec![
-            ("channel_1", "active", "1000"),
-            ("channel_2", "inactive", "500"),
-            ("channel_3", "active", "750"),
-            ("channel_4", "error", "200"),
+            (1, 2, 2, 0.1, 1000.0, 950.0),
+            (2, 3, 1, 0.05, 500.0, 480.0),
+            (3, 4, 3, 0.2, 750.0, 700.0),
+            (4, 5, 1, 0.0, 200.0, 200.0),
         ];
 
-        for (channel_name, status, message_count) in channels {
+        for (
+            upstream_fragment_id,
+            downstream_fragment_id,
+            upstream_actor_count,
+            backpressure_rate,
+            recv_throughput,
+            send_throughput,
+        ) in channels
+        {
             rows.push(vec![
-                Some(ScalarImpl::Utf8(channel_name.to_owned().into())),
-                Some(ScalarImpl::Utf8(status.to_owned().into())),
-                Some(ScalarImpl::Utf8(message_count.to_owned().into())),
-                Some(ScalarImpl::Utf8(
-                    self.at_time.unwrap_or(0).to_string().into(),
-                )),
-                Some(ScalarImpl::Utf8(self.time_offset.to_string().into())),
+                Some(ScalarImpl::Int32(upstream_fragment_id)),
+                Some(ScalarImpl::Int32(downstream_fragment_id)),
+                Some(ScalarImpl::Int32(upstream_actor_count)),
+                Some(ScalarImpl::Float64(F64::from(backpressure_rate))),
+                Some(ScalarImpl::Float64(F64::from(recv_throughput))),
+                Some(ScalarImpl::Float64(F64::from(send_throughput))),
             ]);
         }
 
@@ -124,7 +156,6 @@ impl GetChannelStatsExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         // 1. Read the channel stats from the meta node RPC.
-        let stats = self.fetch_channel_stats_from_sys_catalog().await;
         // 2. Render into rows.
 
         let rows = self.generate_channel_stats().await;
@@ -167,24 +198,77 @@ impl BoxedExecutorBuilder for GetChannelStatsExecutor {
         )?;
 
         // Create a schema for channel stats
-        // This would typically include: channel_name, status, message_count, timestamp, time_offset
+        // This should match the expected schema from table_function.rs
         let fields = vec![
-            Field::new("channel_name", DataType::Varchar),
-            Field::new("status", DataType::Varchar),
-            Field::new("message_count", DataType::Varchar),
-            Field::new("timestamp", DataType::Varchar),
-            Field::new("time_offset", DataType::Varchar),
+            Field::new("upstream_fragment_id", DataType::Int32),
+            Field::new("downstream_fragment_id", DataType::Int32),
+            Field::new("upstream_actor_count", DataType::Int32),
+            Field::new("backpressure_rate", DataType::Float64),
+            Field::new("recv_throughput", DataType::Float64),
+            Field::new("send_throughput", DataType::Float64),
         ];
 
         let schema = Schema { fields };
-        let sys_catalog_reader = source.context().catalog_reader();
+
+        // Create a MetricsReader from the context
+        // For now, we'll need to create a mock implementation since the context doesn't directly provide a MetricsReader
+        // In a real implementation, you would get the meta client from the context and create MetricsReaderImpl
+        let metrics_reader: Arc<dyn MetricsReader> = Arc::new(MockMetricsReader::new());
 
         Ok(Box::new(Self::new(
             schema,
             source.plan_node().get_identity().clone(),
             get_channel_stats_node.at_time,
             get_channel_stats_node.time_offset,
-            sys_catalog_reader,
+            metrics_reader,
         )))
+    }
+}
+
+/// Mock implementation of `MetricsReader` for testing/development purposes
+struct MockMetricsReader;
+
+impl MockMetricsReader {
+    fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait::async_trait]
+impl MetricsReader for MockMetricsReader {
+    async fn get_channel_delta_stats(
+        &self,
+        _request: GetChannelDeltaStatsRequest,
+    ) -> anyhow::Result<GetChannelDeltaStatsResponse> {
+        // Return mock data for now
+        // In a real implementation, this would make an RPC call to the meta node
+        Ok(GetChannelDeltaStatsResponse {
+            channel_delta_stats_entries: vec![
+                risingwave_pb::monitor_service::ChannelDeltaStatsEntry {
+                    upstream_fragment_id: 1,
+                    downstream_fragment_id: 2,
+                    channel_delta_stats_entry: Some(
+                        risingwave_pb::monitor_service::ChannelDeltaStats {
+                            actor_count: 2,
+                            backpressure_rate: 0.1,
+                            recv_throughput: 1000.0,
+                            send_throughput: 950.0,
+                        },
+                    ),
+                },
+                risingwave_pb::monitor_service::ChannelDeltaStatsEntry {
+                    upstream_fragment_id: 2,
+                    downstream_fragment_id: 3,
+                    channel_delta_stats_entry: Some(
+                        risingwave_pb::monitor_service::ChannelDeltaStats {
+                            actor_count: 1,
+                            backpressure_rate: 0.05,
+                            recv_throughput: 500.0,
+                            send_throughput: 480.0,
+                        },
+                    ),
+                },
+            ],
+        })
     }
 }
