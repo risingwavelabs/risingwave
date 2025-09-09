@@ -106,6 +106,13 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         request: Request<GetChannelDeltaStatsRequest>,
     ) -> Result<Response<GetChannelDeltaStatsResponse>, Status> {
+        // Local structural type for channel identification
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        struct ChannelKey {
+            upstream_fragment_id: u32,
+            downstream_fragment_id: u32,
+        }
+
         let request = request.into_inner();
         let time_offset = request.time_offset;
         let at_time = request.at;
@@ -157,7 +164,7 @@ impl MonitorService for MonitorServiceImpl {
         };
 
         // Process channel delta stats
-        let mut channel_data = HashMap::new();
+        let mut channel_data: HashMap<ChannelKey, ChannelDeltaStats> = HashMap::new();
 
         // Collect input throughput
         if let Some(channel_input_throughput_data) =
@@ -172,7 +179,10 @@ impl MonitorService for MonitorServiceImpl {
                         upstream_fragment_id_str.parse::<u32>(),
                     )
                 {
-                    let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                    let key = ChannelKey {
+                        upstream_fragment_id,
+                        downstream_fragment_id: fragment_id,
+                    };
                     channel_data
                         .entry(key)
                         .or_insert_with(|| ChannelDeltaStats {
@@ -199,7 +209,10 @@ impl MonitorService for MonitorServiceImpl {
                         upstream_fragment_id_str.parse::<u32>(),
                     )
                 {
-                    let key = format!("{}_{}", upstream_fragment_id, fragment_id);
+                    let key = ChannelKey {
+                        upstream_fragment_id,
+                        downstream_fragment_id: fragment_id,
+                    };
                     channel_data
                         .entry(key)
                         .or_insert_with(|| ChannelDeltaStats {
@@ -224,7 +237,10 @@ impl MonitorService for MonitorServiceImpl {
                         downstream_fragment_id_str.parse::<u32>(),
                     )
                 {
-                    let key = format!("{}_{}", fragment_id, downstream_fragment_id);
+                    let key = ChannelKey {
+                        upstream_fragment_id: fragment_id,
+                        downstream_fragment_id,
+                    };
                     channel_data
                         .entry(key)
                         .or_insert_with(|| ChannelDeltaStats {
@@ -245,8 +261,19 @@ impl MonitorService for MonitorServiceImpl {
             channel_stats.actor_count = 0;
         }
 
+        // Convert HashMap to Vec<ChannelDeltaStatsEntry>
+        let channel_delta_stats_entries: Vec<monitor_service::ChannelDeltaStatsEntry> =
+            channel_data
+                .into_iter()
+                .map(|(key, stats)| monitor_service::ChannelDeltaStatsEntry {
+                    upstream_fragment_id: key.upstream_fragment_id,
+                    downstream_fragment_id: key.downstream_fragment_id,
+                    channel_delta_stats_entry: Some(stats),
+                })
+                .collect();
+
         Ok(Response::new(GetChannelDeltaStatsResponse {
-            channel_stats: channel_data,
+            channel_delta_stats_entries,
         }))
     }
 }
