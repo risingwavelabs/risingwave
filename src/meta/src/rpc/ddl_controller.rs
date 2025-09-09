@@ -1093,7 +1093,7 @@ impl DdlController {
             _ => {}
         }
 
-        self.metadata_manager
+        let version = self.metadata_manager
             .catalog_controller
             .prepare_stream_job_fragments(&stream_job_fragments, streaming_job, false)
             .await?;
@@ -1140,7 +1140,7 @@ impl DdlController {
                             stream_job_id
                         )
                     })??;
-                Ok(IGNORED_NOTIFICATION_VERSION)
+                Ok(version)
             }
         }
     }
@@ -1443,7 +1443,7 @@ impl DdlController {
                 let empty_actor_splits = HashMap::new();
                 let empty_downstreams = FragmentDownstreamRelation::default();
                 for sink in sinks {
-                    self.metadata_manager
+                    let _ = self.metadata_manager
                         .catalog_controller
                         .prepare_streaming_job(
                             sink.tmp_sink_id,
@@ -1458,7 +1458,7 @@ impl DdlController {
                 }
             }
 
-            self.metadata_manager
+            let _ = self.metadata_manager
                 .catalog_controller
                 .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true)
                 .await?;

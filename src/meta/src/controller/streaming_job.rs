@@ -78,7 +78,7 @@ use crate::controller::utils::{
     grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
 };
 use crate::error::MetaErrorInner;
-use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
+use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType, IGNORED_NOTIFICATION_VERSION};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
@@ -404,7 +404,7 @@ impl CatalogController {
         stream_job_fragments: &StreamJobFragmentsToCreate,
         streaming_job: &StreamingJob,
         for_replace: bool,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<NotificationVersion> {
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id().table_id as _,
             || stream_job_fragments.fragments.values(),
@@ -432,7 +432,7 @@ impl CatalogController {
         downstreams: &FragmentDownstreamRelation,
         for_replace: bool,
         creating_streaming_job: Option<&'a StreamingJob>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<NotificationVersion> {
         let fragment_actors = Self::extract_fragment_and_actors_from_fragments(
             job_id,
             get_fragments(),
@@ -544,17 +544,19 @@ impl CatalogController {
         // FIXME: there's a gap between the catalog creation and notification, which may lead to
         // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
         // need to either forward the notification or filter catalogs without any fragments in the metastore.
-        if !objects_to_notify.is_empty() {
+        let version = if !objects_to_notify.is_empty() {
             self.notify_frontend(
                 Operation::Add,
                 Info::ObjectGroup(PbObjectGroup {
                     objects: objects_to_notify,
                 }),
             )
-            .await;
-        }
+            .await
+        } else {
+            IGNORED_NOTIFICATION_VERSION
+        };
 
-        Ok(())
+        Ok(version)
     }
 
     /// Builds a cancel command for the streaming job. If the sink (with target table) needs to be dropped, additional
