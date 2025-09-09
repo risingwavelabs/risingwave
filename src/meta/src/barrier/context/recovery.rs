@@ -299,9 +299,13 @@ impl GlobalBarrierWorkerContextImpl {
                     break;
                 }
             }
-            let target_fragment_id = target_fragment_id.ok_or(anyhow::anyhow!(
-                "Table should have upstream-sink-union node"
-            ))?;
+            let Some(target_fragment_id) = target_fragment_id else {
+                tracing::debug!(
+                    "The table {} created by old versions has not yet been migrated, so sinks cannot be created or dropped on this table.",
+                    table.id
+                );
+                continue;
+            };
             let target_fragment = fragments
                 .fragment_infos
                 .get_mut(&target_fragment_id)
