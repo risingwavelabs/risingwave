@@ -29,17 +29,17 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalGetChannelStats` represents a plan node that retrieves channel statistics
+/// `LogicalGetChannelDeltaStats` represents a plan node that retrieves channel statistics
 /// from the dashboard API. It has no inputs and returns channel stats data.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LogicalGetChannelStats {
+pub struct LogicalGetChannelDeltaStats {
     pub base: PlanBase<Logical>,
     pub at_time: Option<u64>,
     pub time_offset: u64,
 }
 
-impl LogicalGetChannelStats {
-    /// Create a new `LogicalGetChannelStats` node
+impl LogicalGetChannelDeltaStats {
+    /// Create a new `LogicalGetChannelDeltaStats` node
     pub fn new(
         ctx: crate::OptimizerContextRef,
         schema: Schema,
@@ -66,19 +66,19 @@ impl LogicalGetChannelStats {
     }
 }
 
-impl_plan_tree_node_for_leaf! { Logical, LogicalGetChannelStats }
+impl_plan_tree_node_for_leaf! { Logical, LogicalGetChannelDeltaStats }
 
-impl Distill for LogicalGetChannelStats {
+impl Distill for LogicalGetChannelDeltaStats {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![
             ("at_time", Pretty::debug(&self.at_time)),
             ("time_offset", Pretty::debug(&self.time_offset)),
         ];
-        childless_record("LogicalGetChannelStats", fields)
+        childless_record("LogicalGetChannelDeltaStats", fields)
     }
 }
 
-impl ExprRewritable<Logical> for LogicalGetChannelStats {
+impl ExprRewritable<Logical> for LogicalGetChannelDeltaStats {
     fn has_rewritable_expr(&self) -> bool {
         false
     }
@@ -88,19 +88,19 @@ impl ExprRewritable<Logical> for LogicalGetChannelStats {
     }
 }
 
-impl crate::optimizer::plan_node::expr_visitable::ExprVisitable for LogicalGetChannelStats {
+impl crate::optimizer::plan_node::expr_visitable::ExprVisitable for LogicalGetChannelDeltaStats {
     fn visit_exprs(&self, _v: &mut dyn crate::expr::ExprVisitor) {
         // No expressions to visit
     }
 }
 
-impl ColPrunable for LogicalGetChannelStats {
+impl ColPrunable for LogicalGetChannelDeltaStats {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         LogicalProject::with_out_col_idx(self.clone().into(), required_cols.iter().cloned()).into()
     }
 }
 
-impl PredicatePushdown for LogicalGetChannelStats {
+impl PredicatePushdown for LogicalGetChannelDeltaStats {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
@@ -110,10 +110,10 @@ impl PredicatePushdown for LogicalGetChannelStats {
     }
 }
 
-impl ToBatch for LogicalGetChannelStats {
+impl ToBatch for LogicalGetChannelDeltaStats {
     fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
-        use crate::optimizer::plan_node::BatchGetChannelStats;
-        Ok(BatchGetChannelStats::new(
+        use crate::optimizer::plan_node::BatchGetChannelDeltaStats;
+        Ok(BatchGetChannelDeltaStats::new(
             self.base.ctx().clone(),
             self.base.schema().clone(),
             self.at_time,
@@ -123,13 +123,13 @@ impl ToBatch for LogicalGetChannelStats {
     }
 }
 
-impl ToStream for LogicalGetChannelStats {
+impl ToStream for LogicalGetChannelDeltaStats {
     fn to_stream(
         &self,
         _ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         // Not implementing streaming for this node as requested
-        unimplemented!("Streaming not implemented for LogicalGetChannelStats")
+        unimplemented!("Streaming not implemented for LogicalGetChannelDeltaStats")
     }
 
     fn logical_rewrite_for_stream(
@@ -137,6 +137,6 @@ impl ToStream for LogicalGetChannelStats {
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
         // Not implementing streaming for this node as requested
-        unimplemented!("Streaming not implemented for LogicalGetChannelStats")
+        unimplemented!("Streaming not implemented for LogicalGetChannelDeltaStats")
     }
 }

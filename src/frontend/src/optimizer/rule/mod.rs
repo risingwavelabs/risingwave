@@ -255,7 +255,7 @@ mod source_to_iceberg_scan_rule;
 mod source_to_kafka_scan_rule;
 mod table_function_to_file_scan_rule;
 mod table_function_to_internal_backfill_progress;
-mod table_function_to_internal_get_channel_stats;
+mod table_function_to_internal_get_channel_delta_stats;
 mod table_function_to_internal_source_backfill_progress;
 mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
@@ -271,7 +271,7 @@ pub use source_to_iceberg_scan_rule::*;
 pub use source_to_kafka_scan_rule::*;
 pub use table_function_to_file_scan_rule::*;
 pub use table_function_to_internal_backfill_progress::*;
-pub use table_function_to_internal_get_channel_stats::*;
+pub use table_function_to_internal_get_channel_delta_stats::*;
 pub use table_function_to_internal_source_backfill_progress::*;
 pub use table_function_to_mysql_query_rule::*;
 pub use table_function_to_postgres_query_rule::*;
@@ -346,7 +346,7 @@ macro_rules! for_all_rules {
             , { TableFunctionToPostgresQueryRule }
             , { TableFunctionToMySqlQueryRule }
             , { TableFunctionToInternalBackfillProgressRule }
-            , { TableFunctionToInternalGetChannelStatsRule }
+            , { TableFunctionToInternalGetChannelDeltaStatsRule }
             , { TableFunctionToInternalSourceBackfillProgressRule }
             , { ApplyLimitTransposeRule }
             , { CommonSubExprExtractRule }
