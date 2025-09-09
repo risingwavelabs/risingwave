@@ -17,13 +17,11 @@ use std::assert_matches::assert_matches;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::common::PbDistanceType;
-
+use risingwave_pb::plan_common::JoinType;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::LogicalPlanRef;
 use crate::optimizer::plan_node::generic::TopNLimit;
-use crate::optimizer::plan_node::{
-    LogicalPlanRef as PlanRef, LogicalProject, LogicalTopN, LogicalVectorSearch, PlanTreeNodeUnary,
-};
+use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, LogicalProject, LogicalTopN, LogicalVectorSearch, PlanTreeNodeBinary, PlanTreeNodeUnary};
 use crate::optimizer::rule::prelude::*;
 use crate::optimizer::rule::{BoxedRule, ProjectMergeRule, Rule};
 
@@ -151,5 +149,34 @@ impl Rule<Logical> for TopNToVectorSearchRule {
         let top_n = plan.as_logical_top_n()?;
         let (vector_search, project_exprs) = Self::resolve_vector_search(top_n)?;
         Some(LogicalProject::create(vector_search.into(), project_exprs))
+    }
+}
+
+pub struct CorrelatedTopNToVectorSearchRule;
+
+impl CorrelatedTopNToVectorSearchRule {
+    pub fn create() -> BoxedRule<Logical> {
+        Box::new(CorrelatedTopNToVectorSearchRule)
+    }
+}
+
+impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+        let apply = plan.as_logical_apply()?;
+        if apply.join_type() != JoinType::LeftOuter {
+            return None;
+        }
+        if !apply.max_one_row() {
+            return None;
+        }
+        let correlated_id = apply.correlated_id();
+        let input = apply.left();
+        let right = apply.right();
+        let project = right.as_logical_project()?;
+        let project_input = project.input();
+        let agg = project_input.as_logical_agg()?;
+        let agg_input = agg.input();
+        let (vector_search, project_exprs) = TopNToVectorSearchRule::resolve_vector_search(agg_input.as_logical_top_n()?)?;
+        None
     }
 }
