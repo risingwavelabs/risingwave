@@ -32,7 +32,7 @@ use crate::optimizer::property::{Distribution, Order};
 pub struct BatchGetChannelDeltaStats {
     pub base: PlanBase<Batch>,
     pub at_time: Option<u64>,
-    pub time_offset: u64,
+    pub time_offset: Option<u64>,
 }
 
 impl PlanTreeNodeLeaf for BatchGetChannelDeltaStats {}
@@ -43,7 +43,7 @@ impl BatchGetChannelDeltaStats {
         ctx: crate::OptimizerContextRef,
         schema: Schema,
         at_time: Option<u64>,
-        time_offset: u64,
+        time_offset: Option<u64>,
     ) -> Self {
         Self::with_dist(ctx, schema, at_time, time_offset, Distribution::Single)
     }
@@ -52,7 +52,7 @@ impl BatchGetChannelDeltaStats {
         ctx: crate::OptimizerContextRef,
         schema: Schema,
         at_time: Option<u64>,
-        time_offset: u64,
+        time_offset: Option<u64>,
         dist: Distribution,
     ) -> Self {
         let base = PlanBase::new_batch(ctx, schema, dist, Order::any());
@@ -69,7 +69,7 @@ impl BatchGetChannelDeltaStats {
     }
 
     /// Get the `time_offset` parameter
-    pub fn time_offset(&self) -> u64 {
+    pub fn time_offset(&self) -> Option<u64> {
         self.time_offset
     }
 }

@@ -35,7 +35,7 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct LogicalGetChannelDeltaStats {
     pub base: PlanBase<Logical>,
     pub at_time: Option<u64>,
-    pub time_offset: u64,
+    pub time_offset: Option<u64>,
 }
 
 impl LogicalGetChannelDeltaStats {
@@ -44,7 +44,7 @@ impl LogicalGetChannelDeltaStats {
         ctx: crate::OptimizerContextRef,
         schema: Schema,
         at_time: Option<u64>,
-        time_offset: u64,
+        time_offset: Option<u64>,
     ) -> Self {
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, None, functional_dependency);
@@ -61,7 +61,7 @@ impl LogicalGetChannelDeltaStats {
     }
 
     /// Get the `time_offset` parameter
-    pub fn time_offset(&self) -> u64 {
+    pub fn time_offset(&self) -> Option<u64> {
         self.time_offset
     }
 }
