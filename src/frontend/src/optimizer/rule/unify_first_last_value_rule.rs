@@ -97,30 +97,50 @@ impl Rule<Logical> for UnifyFirstLastValueRule {
         let mut pattern_groups: HashMap<AggPattern, Vec<(usize, &PlanAggCall)>> = HashMap::new();
 
         for (idx, call) in calls.iter().enumerate() {
-            if !self.is_supported_agg_type(&call.agg_type) {
+            let PlanAggCall {
+                agg_type,
+                return_type: _,
+                inputs,
+                distinct,
+                order_by,
+                filter,
+                direct_args: _,
+            } = call;
+
+            if !self.is_supported_agg_type(agg_type) {
                 continue;
             }
 
             // Only support single input aggregations for now
-            if call.inputs.len() != 1 {
+            if inputs.len() != 1 {
                 continue;
             }
 
             let pattern = AggPattern {
-                agg_type: call.agg_type.clone(),
-                order_by: call.order_by.clone(),
-                distinct: call.distinct,
-                filter: call.filter.clone(),
+                agg_type: agg_type.clone(),
+                order_by: order_by.clone(),
+                distinct: *distinct,
+                filter: filter.clone(),
             };
 
             pattern_groups.entry(pattern).or_default().push((idx, call));
         }
 
         // Find ALL patterns with multiple calls that can be merged
-        let mergeable_patterns: Vec<(AggPattern, Vec<(usize, &PlanAggCall)>)> = pattern_groups
+        let mut mergeable_patterns: Vec<(AggPattern, Vec<(usize, &PlanAggCall)>)> = pattern_groups
             .into_iter()
             .filter(|(_, calls_in_pattern)| calls_in_pattern.len() >= 2)
             .collect();
+
+        // Sort by the minimum original index in each pattern to ensure stable optimization results
+        mergeable_patterns.sort_by_key(|(_, calls_in_pattern)| {
+            calls_in_pattern.iter().map(|(idx, _)| *idx).min().unwrap()
+        });
+
+        // Also sort calls within each pattern by their original index
+        for (_, calls_in_pattern) in &mut mergeable_patterns {
+            calls_in_pattern.sort_by_key(|(idx, _)| *idx);
+        }
 
         if mergeable_patterns.is_empty() {
             return None;
@@ -151,12 +171,11 @@ impl Rule<Logical> for UnifyFirstLastValueRule {
                 .map(|(_, call)| call.inputs[0].clone().into())
                 .collect();
 
-            let named_fields = mergeable_calls
+            let field_types = mergeable_calls
                 .iter()
-                .enumerate()
-                .map(|(i, (_, call))| (format!("f{}", i), call.return_type.clone()))
+                .map(|(_, call)| call.return_type.clone())
                 .collect::<Vec<_>>();
-            let row_data_type = DataType::Struct(StructType::new(named_fields));
+            let row_data_type = DataType::Struct(StructType::unnamed(field_types));
 
             let row_expr = FunctionCall::new_unchecked(ExprType::Row, row_inputs, row_data_type);
 
@@ -226,11 +245,6 @@ impl Rule<Logical> for UnifyFirstLastValueRule {
 
         // Sort mapping by original index to maintain order
         original_to_output_mapping.sort_by_key(|(original_idx, _, _)| *original_idx);
-
-        if new_calls.len() >= calls.len() {
-            // No benefit from optimization
-            return None;
-        }
 
         // Create aggregation on pre-projection
         let new_agg: PlanRef = Agg::new(new_calls, agg.group_key().clone(), pre_projection)
