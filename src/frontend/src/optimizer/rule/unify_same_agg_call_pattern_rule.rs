@@ -26,7 +26,7 @@ use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
 /// Unifies aggregation calls with the same pattern to reuse a single aggregation call with ROW construction.
 ///
 /// This rule is particularly beneficial for streaming queries as it reduces the number of states maintained.
-/// It supports MIN, MAX, `FIRST_VALUE` and `LAST_VALUE` aggregation functions that have the same ordering.
+/// It supports `FIRST_VALUE` and `LAST_VALUE` aggregation functions that have the same ordering.
 ///
 /// # Example transformation:
 ///
@@ -300,9 +300,7 @@ impl UnifySameAggCallPatternRule {
     fn is_supported_agg_type(&self, agg_type: &AggType) -> bool {
         matches!(
             agg_type,
-            AggType::Builtin(PbAggKind::Min)
-                | AggType::Builtin(PbAggKind::Max)
-                | AggType::Builtin(PbAggKind::FirstValue)
+            AggType::Builtin(PbAggKind::FirstValue)
                 | AggType::Builtin(PbAggKind::LastValue)
         )
     }

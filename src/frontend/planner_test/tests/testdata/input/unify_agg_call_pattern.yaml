@@ -1,24 +1,3 @@
-- name: unify agg call pattern
-  sql: |
-    create table t(a int, b int, c int, d int);
-    select max(a) max_a, max(b) max_b from t;
-  expected_outputs:
-    - batch_plan
-    - stream_plan
-- name: unify agg call pattern
-  sql: |
-    create table t(a int, b int, c int, d int);
-    select max(a) max_a, max(b) max_b from t group by c;
-  expected_outputs:
-    - batch_plan
-    - stream_plan
-- name: unify agg call pattern with distinct
-  sql: |
-    create table t(a int, b int, c int, d int);
-    select max(distinct a) max_a, max(distinct b) max_b from t group by c;
-  expected_outputs:
-    - batch_plan
-    - stream_plan
 - name: should not unify agg call pattern with first_value/last_value since their order by clauses are different
   sql: |
     create table t(a int, b int, c int, d int);
@@ -26,24 +5,24 @@
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: unify agg call pattern with min, max, first_value, last_value, and mixed with count
+- name: unify agg call pattern with first_value, last_value, and mixed with count
   sql: |
     create table t(a int, b int, c int, d int, e int, f int);
     select
-    min(a) min_a, max(a) max_a, first_value(a order by d) first_a, last_value(a order by d desc) last_a,
-    min(b) min_b, max(b) max_b, first_value(b order by d) first_b, last_value(b order by d desc) last_b,
-    min(c) min_c, max(c) max_c, first_value(c order by d) first_c, last_value(c order by d desc) last_c,
+    first_value(a order by d) first_a, last_value(a order by d desc) last_a,
+    first_value(b order by d) first_b, last_value(b order by d desc) last_b,
+    first_value(c order by d) first_c, last_value(c order by d desc) last_c,
     count(a) count_a, count(b) count_b, count(c) count_c
     from t group by e, f;
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: unify agg call pattern with max with filter
+- name: unify agg call pattern with first_value with filter
   sql: |
     create table t(a int, b int, c int);
     select
-    max(a) filter (where c > 0) max_a, max(b) filter (where c > 0) max_b,
-    max(c) filter (where c = 1) max_c
+    first_value(a order by a) filter (where c > 0) first_a, first_value(b order by a) filter (where c > 0) first_b,
+    first_value(c order by a) filter (where c = 1) first_c
     from t;
   expected_outputs:
     - batch_plan
