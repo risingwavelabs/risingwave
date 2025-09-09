@@ -31,6 +31,7 @@ pub struct Model {
     pub can_create_db: bool,
     pub can_create_user: bool,
     pub can_login: bool,
+    pub is_admin: bool,
     pub auth_info: Option<AuthInfo>,
 }
 
@@ -62,6 +63,7 @@ impl From<PbUserInfo> for ActiveModel {
             can_create_db: Set(user.can_create_db),
             can_create_user: Set(user.can_create_user),
             can_login: Set(user.can_login),
+            is_admin: Set(user.is_admin),
             auth_info: Set(user.auth_info.as_ref().map(AuthInfo::from)),
         }
     }
@@ -76,6 +78,7 @@ impl From<Model> for PbUserInfo {
             can_create_db: val.can_create_db,
             can_create_user: val.can_create_user,
             can_login: val.can_login,
+            is_admin: val.is_admin,
             auth_info: val.auth_info.map(|x| x.to_protobuf()),
             grant_privileges: vec![], // fill in later
         }

@@ -1057,6 +1057,8 @@ pub enum UserOption {
     NoCreateUser,
     Login,
     NoLogin,
+    Admin,
+    NoAdmin,
     EncryptedPassword(AstString),
     Password(Option<AstString>),
     OAuth(Vec<SqlOption>),
@@ -1073,6 +1075,8 @@ impl fmt::Display for UserOption {
             UserOption::NoCreateUser => write!(f, "NOCREATEUSER"),
             UserOption::Login => write!(f, "LOGIN"),
             UserOption::NoLogin => write!(f, "NOLOGIN"),
+            UserOption::Admin => write!(f, "ADMIN"),
+            UserOption::NoAdmin => write!(f, "NOADMIN"),
             UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
             UserOption::Password(None) => write!(f, "PASSWORD NULL"),
             UserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
@@ -1093,6 +1097,7 @@ struct UserOptionsBuilder {
     create_db: Option<UserOption>,
     create_user: Option<UserOption>,
     login: Option<UserOption>,
+    admin: Option<UserOption>,
     password: Option<UserOption>,
 }
 
@@ -1109,6 +1114,9 @@ impl UserOptionsBuilder {
             options.push(option);
         }
         if let Some(option) = self.login {
+            options.push(option);
+        }
+        if let Some(option) = self.admin {
             options.push(option);
         }
         if let Some(option) = self.password {
@@ -1135,55 +1143,49 @@ impl ParseTo for UserOptions {
                 break;
             }
 
-            if let Token::Word(ref w) = token.token {
-                let checkpoint = *parser;
-                parser.next_token();
-                let (item_mut_ref, user_option) = match w.keyword {
-                    Keyword::SUPERUSER => (&mut builder.super_user, UserOption::SuperUser),
-                    Keyword::NOSUPERUSER => (&mut builder.super_user, UserOption::NoSuperUser),
-                    Keyword::CREATEDB => (&mut builder.create_db, UserOption::CreateDB),
-                    Keyword::NOCREATEDB => (&mut builder.create_db, UserOption::NoCreateDB),
-                    Keyword::CREATEUSER => (&mut builder.create_user, UserOption::CreateUser),
-                    Keyword::NOCREATEUSER => (&mut builder.create_user, UserOption::NoCreateUser),
-                    Keyword::LOGIN => (&mut builder.login, UserOption::Login),
-                    Keyword::NOLOGIN => (&mut builder.login, UserOption::NoLogin),
-                    Keyword::PASSWORD => {
-                        if parser.parse_keyword(Keyword::NULL) {
-                            (&mut builder.password, UserOption::Password(None))
-                        } else {
-                            (
-                                &mut builder.password,
-                                UserOption::Password(Some(AstString::parse_to(parser)?)),
-                            )
-                        }
-                    }
-                    Keyword::ENCRYPTED => {
-                        parser.expect_keyword(Keyword::PASSWORD)?;
+            let option = parser.parse_identifier()?;
+            let s = option.real_value();
+            let (item_mut_ref, user_option) = match &s[..] {
+                "superuser" => (&mut builder.super_user, UserOption::SuperUser),
+                "nosuperuser" => (&mut builder.super_user, UserOption::NoSuperUser),
+                "createdb" => (&mut builder.create_db, UserOption::CreateDB),
+                "nocreatedb" => (&mut builder.create_db, UserOption::NoCreateDB),
+                "createuser" => (&mut builder.create_user, UserOption::CreateUser),
+                "nocreateuser" => (&mut builder.create_user, UserOption::NoCreateUser),
+                "login" => (&mut builder.login, UserOption::Login),
+                "nologin" => (&mut builder.login, UserOption::NoLogin),
+                "admin" => (&mut builder.admin, UserOption::Admin),
+                "noadmin" => (&mut builder.admin, UserOption::NoAdmin),
+                "password" => {
+                    if parser.parse_keyword(Keyword::NULL) {
+                        (&mut builder.password, UserOption::Password(None))
+                    } else {
                         (
                             &mut builder.password,
-                            UserOption::EncryptedPassword(AstString::parse_to(parser)?),
+                            UserOption::Password(Some(AstString::parse_to(parser)?)),
                         )
                     }
-                    Keyword::OAUTH => {
-                        let options = parser.parse_options()?;
-                        (&mut builder.password, UserOption::OAuth(options))
+                }
+                "encrypted" => {
+                    let option = parser.parse_identifier()?;
+                    let s = option.real_value();
+                    if s != "password" {
+                        parser_err!("expected PASSWORD after ENCRYPTED, found {}", option);
                     }
-                    _ => {
-                        parser.expected_at(
-                            checkpoint,
-                            "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
-                        )?;
-                        unreachable!()
-                    }
-                };
-                add_option(item_mut_ref, user_option)?;
-            } else {
-                parser.expected(
-                    "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
-                )?
-            }
+                    (
+                        &mut builder.password,
+                        UserOption::EncryptedPassword(AstString::parse_to(parser)?),
+                    )
+                }
+                "oauth" => {
+                    let options = parser.parse_options()?;
+                    (&mut builder.password, UserOption::OAuth(options))
+                }
+                _ => {
+                    parser_err!("unexpected user option: {}", option);
+                }
+            };
+            add_option(item_mut_ref, user_option)?;
         }
         Ok(builder.build())
     }

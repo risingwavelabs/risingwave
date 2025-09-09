@@ -56,7 +56,7 @@ impl StreamSourceScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::SomeShard,
-            core.catalog.as_ref().is_none_or(|s| s.append_only),
+            core.stream_kind(),
             false,
             WatermarkColumns::new(),
             MonotonicityMap::new(),
@@ -160,7 +160,7 @@ impl StreamSourceScan {
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
-            append_only: self.append_only(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
         })
     }
 }

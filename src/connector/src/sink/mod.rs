@@ -30,6 +30,7 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 use risingwave_common::bail;
+pub mod jdbc_jni_client;
 pub mod log_store;
 pub mod mock_coordination_client;
 pub mod mongodb;
@@ -39,6 +40,7 @@ pub mod postgres;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod snowflake_redshift;
 pub mod sqlserver;
 pub mod starrocks;
 pub mod test_sink;
@@ -106,6 +108,7 @@ use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
+use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
 use crate::sink::writer::SinkWriter;
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
@@ -137,7 +140,9 @@ macro_rules! for_all_sinks {
                 { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>, $crate::sink::file_sink::webhdfs::WebhdfsConfig },
 
                 { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>, $crate::sink::file_sink::fs::FsConfig },
+                { SnowflakeV2, $crate::sink::snowflake_redshift::snowflake::SnowflakeV2Sink, $crate::sink::snowflake_redshift::snowflake::SnowflakeV2Config },
                 { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>, $crate::sink::file_sink::s3::SnowflakeConfig },
+                { RedShift, $crate::sink::snowflake_redshift::redshift::RedshiftSink, $crate::sink::snowflake_redshift::redshift::RedShiftConfig },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
                 { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },
@@ -381,6 +386,7 @@ pub struct SinkMetrics {
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec,
     pub iceberg_write_bytes: LabelGuardedIntCounterVec,
+    pub iceberg_snapshot_num: LabelGuardedIntGaugeVec,
 }
 
 impl SinkMetrics {
@@ -506,6 +512,14 @@ impl SinkMetrics {
         )
         .unwrap();
 
+        let iceberg_snapshot_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_snapshot_num",
+            "The snapshot number of iceberg table",
+            &["sink_name", "catalog_name", "table_name"],
+            registry
+        )
+        .unwrap();
+
         Self {
             sink_commit_duration,
             connector_sink_rows_received,
@@ -522,6 +536,7 @@ impl SinkMetrics {
             iceberg_position_delete_cache_num,
             iceberg_partition_num,
             iceberg_write_bytes,
+            iceberg_snapshot_num,
         }
     }
 }
@@ -646,7 +661,7 @@ impl SinkWriterParam {
 fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
     matches!(
         sink_name,
-        ICEBERG_SINK | CLICKHOUSE_SINK | STARROCKS_SINK | DELTALAKE_SINK
+        ICEBERG_SINK | CLICKHOUSE_SINK | STARROCKS_SINK | DELTALAKE_SINK | SNOWFLAKE_SINK_V2
     )
 }
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
@@ -781,7 +796,12 @@ pub trait SinkCommitCoordinator {
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()>;
 }
 
 #[deprecated]
@@ -807,7 +827,12 @@ impl SinkCommitCoordinator for NoSinkCommitCoordinator {
         unreachable!()
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
+    async fn commit(
+        &mut self,
+        _epoch: u64,
+        _metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
         unreachable!()
     }
 }

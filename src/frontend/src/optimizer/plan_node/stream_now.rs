@@ -45,7 +45,11 @@ impl StreamNow {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::Single,
-            core.mode.is_generate_series(), // append only
+            if core.mode.is_generate_series() {
+                StreamKind::AppendOnly
+            } else {
+                StreamKind::Retract
+            },
             core.mode.is_generate_series(), // emit on window close
             watermark_columns,
             columns_monotonicity,

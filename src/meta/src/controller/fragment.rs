@@ -39,7 +39,8 @@ use risingwave_meta_model::{
     VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, object, sink, source,
     streaming_job, table,
 };
-use risingwave_meta_model_migration::{Alias, SelectStatement};
+use risingwave_meta_model_migration::{Alias, ExprTrait, SelectStatement, SimpleExpr};
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
@@ -70,14 +71,15 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings, get_sink_fragment_by_ids, resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
-use crate::stream::{SplitAssignment, build_actor_split_impls};
+use crate::rpc::ddl_controller::build_upstream_sink_info;
+use crate::stream::{SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
 use crate::{MetaError, MetaResult};
 
 /// Some information of running (inflight) actors.
@@ -101,6 +103,25 @@ pub struct FragmentParallelismInfo {
     pub distribution_type: FragmentDistributionType,
     pub actor_count: usize,
     pub vnode_count: usize,
+}
+
+pub(crate) trait FragmentTypeMaskExt {
+    fn intersects(flag: FragmentTypeFlag) -> SimpleExpr;
+    fn intersects_any(flags: impl IntoIterator<Item = FragmentTypeFlag>) -> SimpleExpr;
+}
+
+impl FragmentTypeMaskExt for FragmentTypeMask {
+    fn intersects(flag: FragmentTypeFlag) -> SimpleExpr {
+        Expr::col(fragment::Column::FragmentTypeMask)
+            .bit_and(Expr::value(flag as i32))
+            .ne(0)
+    }
+
+    fn intersects_any(flags: impl IntoIterator<Item = FragmentTypeFlag>) -> SimpleExpr {
+        Expr::col(fragment::Column::FragmentTypeMask)
+            .bit_and(Expr::value(FragmentTypeFlag::raw_flag(flags) as i32))
+            .ne(0)
+    }
 }
 
 #[derive(Clone, Debug, FromQueryResult, Serialize, Deserialize)]
@@ -1021,25 +1042,27 @@ impl CatalogController {
         let (sink_ids, _): (Vec<_>, Vec<_>) = sink_id_names.iter().cloned().unzip();
         let sink_name_mapping: HashMap<SinkId, String> = sink_id_names.into_iter().collect();
 
-        let actor_with_type: Vec<(ActorId, SinkId, i32)> = Actor::find()
+        let actor_with_type: Vec<(ActorId, SinkId)> = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
-            .columns([fragment::Column::JobId, fragment::Column::FragmentTypeMask])
+            .column(fragment::Column::JobId)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-            .filter(fragment::Column::JobId.is_in(sink_ids))
+            .filter(
+                fragment::Column::JobId
+                    .is_in(sink_ids)
+                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Sink)),
+            )
             .into_tuple()
             .all(&inner.db)
             .await?;
 
         let mut sink_actor_mapping = HashMap::new();
-        for (actor_id, sink_id, type_mask) in actor_with_type {
-            if FragmentTypeMask::from(type_mask).contains(FragmentTypeFlag::Sink) {
-                sink_actor_mapping
-                    .entry(sink_id)
-                    .or_insert_with(|| (sink_name_mapping.get(&sink_id).unwrap().clone(), vec![]))
-                    .1
-                    .push(actor_id);
-            }
+        for (actor_id, sink_id) in actor_with_type {
+            sink_actor_mapping
+                .entry(sink_id)
+                .or_insert_with(|| (sink_name_mapping.get(&sink_id).unwrap().clone(), vec![]))
+                .1
+                .push(actor_id);
         }
 
         Ok(sink_actor_mapping)
@@ -1664,22 +1687,16 @@ impl CatalogController {
         &self,
     ) -> MetaResult<HashMap<SourceId, BTreeSet<FragmentId>>> {
         let inner = self.inner.read().await;
-        let mut fragments: Vec<(FragmentId, i32, StreamNode)> = FragmentModel::find()
+        let fragments: Vec<(FragmentId, StreamNode)> = FragmentModel::find()
             .select_only()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::FragmentTypeMask,
-                fragment::Column::StreamNode,
-            ])
+            .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+            .filter(FragmentTypeMask::intersects(FragmentTypeFlag::Source))
             .into_tuple()
             .all(&inner.db)
             .await?;
-        fragments.retain(|(_, mask, _)| {
-            FragmentTypeMask::from(*mask).contains(FragmentTypeFlag::Source)
-        });
 
         let mut source_fragment_ids = HashMap::new();
-        for (fragment_id, _, stream_node) in fragments {
+        for (fragment_id, stream_node) in fragments {
             if let Some(source_id) = stream_node.to_protobuf().find_stream_source() {
                 source_fragment_ids
                     .entry(source_id as SourceId)
@@ -1694,22 +1711,16 @@ impl CatalogController {
         &self,
     ) -> MetaResult<HashMap<SourceId, BTreeSet<(FragmentId, u32)>>> {
         let inner = self.inner.read().await;
-        let mut fragments: Vec<(FragmentId, i32, StreamNode)> = FragmentModel::find()
+        let fragments: Vec<(FragmentId, StreamNode)> = FragmentModel::find()
             .select_only()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::FragmentTypeMask,
-                fragment::Column::StreamNode,
-            ])
+            .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+            .filter(FragmentTypeMask::intersects(FragmentTypeFlag::SourceScan))
             .into_tuple()
             .all(&inner.db)
             .await?;
-        fragments.retain(|(_, mask, _)| {
-            FragmentTypeMask::from(*mask).contains(FragmentTypeFlag::SourceScan)
-        });
 
         let mut source_fragment_ids = HashMap::new();
-        for (fragment_id, _, stream_node) in fragments {
+        for (fragment_id, stream_node) in fragments {
             if let Some((source_id, upstream_source_fragment_id)) =
                 stream_node.to_protobuf().find_source_backfill()
             {
@@ -1740,31 +1751,93 @@ impl CatalogController {
         job_id: ObjectId,
     ) -> MetaResult<Option<usize>> {
         let inner = self.inner.read().await;
-        let mut fragments: Vec<(FragmentId, i32, i64)> = FragmentModel::find()
+        let fragments: Vec<(FragmentId, i64)> = FragmentModel::find()
             .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
             .select_only()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::FragmentTypeMask,
-            ])
+            .columns([fragment::Column::FragmentId])
             .column_as(actor::Column::ActorId.count(), "count")
-            .filter(fragment::Column::JobId.eq(job_id))
+            .filter(
+                fragment::Column::JobId
+                    .eq(job_id)
+                    .and(FragmentTypeMask::intersects_any([
+                        FragmentTypeFlag::Mview,
+                        FragmentTypeFlag::Sink,
+                    ])),
+            )
             .group_by(fragment::Column::FragmentId)
             .into_tuple()
             .all(&inner.db)
             .await?;
-
-        fragments.retain(|(_, mask, _)| {
-            FragmentTypeMask::from(*mask)
-                .contains_any([FragmentTypeFlag::Mview, FragmentTypeFlag::Sink])
-        });
 
         Ok(fragments
             .into_iter()
             .at_most_one()
             .ok()
             .flatten()
-            .map(|(_, _, count)| count as usize))
+            .map(|(_, count)| count as usize))
+    }
+
+    pub async fn get_all_upstream_sink_infos(
+        &self,
+        target_table: &PbTable,
+        target_fragment_id: FragmentId,
+    ) -> MetaResult<Vec<UpstreamSinkInfo>> {
+        let incoming_sinks = self.get_table_incoming_sinks(target_table.id as _).await?;
+
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let sink_ids = incoming_sinks.iter().map(|s| s.id as SinkId).collect_vec();
+        let sink_fragment_ids = get_sink_fragment_by_ids(&txn, sink_ids).await?;
+
+        let mut upstream_sink_infos = Vec::with_capacity(incoming_sinks.len());
+        for pb_sink in &incoming_sinks {
+            let sink_fragment_id =
+                sink_fragment_ids
+                    .get(&(pb_sink.id as _))
+                    .cloned()
+                    .ok_or(anyhow::anyhow!(
+                        "sink fragment not found for sink id {}",
+                        pb_sink.id
+                    ))?;
+            let upstream_info = build_upstream_sink_info(
+                pb_sink,
+                sink_fragment_id,
+                target_table,
+                target_fragment_id,
+            )?;
+            upstream_sink_infos.push(upstream_info);
+        }
+
+        Ok(upstream_sink_infos)
+    }
+
+    pub async fn get_mview_fragment_by_id(&self, table_id: TableId) -> MetaResult<FragmentId> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let mview_fragment: Vec<FragmentId> = FragmentModel::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(
+                fragment::Column::JobId
+                    .eq(table_id)
+                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Mview)),
+            )
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        if mview_fragment.len() != 1 {
+            return Err(anyhow::anyhow!(
+                "expected exactly one mview fragment for table {}, found {}",
+                table_id,
+                mview_fragment.len()
+            )
+            .into());
+        }
+
+        Ok(mview_fragment.into_iter().next().unwrap())
     }
 }
 

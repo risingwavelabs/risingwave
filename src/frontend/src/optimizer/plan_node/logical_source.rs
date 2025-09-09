@@ -41,7 +41,9 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::optimizer::property::Distribution::HashShard;
-use crate::optimizer::property::{Distribution, MonotonicityMap, RequiredDist, WatermarkColumns};
+use crate::optimizer::property::{
+    Distribution, MonotonicityMap, RequiredDist, StreamKind, WatermarkColumns,
+};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
 /// `LogicalSource` returns contents of a table or other equivalent object
@@ -196,7 +198,7 @@ impl LogicalSource {
             base: PlanBase::new_stream_with_core(
                 &logical_source,
                 Distribution::Single,
-                true, // `list` will keep listing all objects, it must be append-only
+                StreamKind::AppendOnly, // `list` will keep listing all objects, it must be append-only
                 false,
                 WatermarkColumns::new(),
                 MonotonicityMap::new(),

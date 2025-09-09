@@ -52,7 +52,10 @@ pub async fn handle_refresh(
         TableType::Table => {
             // This is valid
         }
-        t @ (TableType::MaterializedView | TableType::Index | TableType::Internal) => {
+        t @ (TableType::MaterializedView
+        | TableType::Index
+        | TableType::VectorIndex
+        | TableType::Internal) => {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "REFRESH is only supported for tables, got {:?}.",
                 t

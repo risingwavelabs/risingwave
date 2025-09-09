@@ -21,6 +21,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{
@@ -40,7 +41,6 @@ use super::version::{CommittedVersion, HummockVersionReader, read_filter_for_ver
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 #[cfg(any(test, feature = "test"))]
 use crate::compaction_catalog_manager::{CompactionCatalogManager, FakeRemoteTableAccessor};
-use crate::dispatch_measurement;
 use crate::error::StorageResult;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::{
@@ -715,7 +715,7 @@ impl StateStoreReadVector for HummockStorageReadSnapshot {
                 );
             }
         };
-        dispatch_measurement!(options.measure, MeasurementType, {
+        dispatch_distance_measurement!(options.measure, MeasurementType, {
             Ok(self
                 .hummock_version_reader
                 .nearest::<MeasurementType, O>(

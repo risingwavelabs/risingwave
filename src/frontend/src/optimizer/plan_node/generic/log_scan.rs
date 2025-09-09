@@ -13,17 +13,18 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockVersionId;
 
+use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Order;
@@ -39,7 +40,7 @@ pub struct LogScan {
     /// Include `output_col_idx` and `op_column`
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the table
-    pub table_desc: Rc<TableDesc>,
+    pub table: Arc<TableCatalog>,
     /// Help `RowSeqLogScan` executor use a better chunk size
     pub chunk_size: Option<u32>,
 
@@ -56,19 +57,19 @@ impl LogScan {
     pub fn output_column_ids(&self) -> Vec<ColumnId> {
         self.output_col_idx
             .iter()
-            .map(|i| self.table_desc.columns[*i].column_id)
+            .map(|i| self.table.columns[*i].column_desc.column_id)
             .collect()
     }
 
     pub fn primary_key(&self) -> &[ColumnOrder] {
-        &self.table_desc.pk
+        &self.table.pk
     }
 
     fn column_names_with_table_prefix(&self) -> Vec<String> {
         let mut out_column_names: Vec<_> = self
             .output_col_idx
             .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.table_desc.columns[i].name))
+            .map(|&i| format!("{}.{}", self.table_name, self.table.columns[i].name))
             .collect();
         out_column_names.push(format!("{}.{}", self.table_name, OP_NAME));
         out_column_names
@@ -78,7 +79,7 @@ impl LogScan {
         let mut out_column_names: Vec<_> = self
             .output_col_idx
             .iter()
-            .map(|&i| self.table_desc.columns[i].name.clone())
+            .map(|&i| self.table.columns[i].name.clone())
             .collect();
         out_column_names.push(OP_NAME.to_owned());
         out_column_names
@@ -91,7 +92,7 @@ impl LogScan {
             .enumerate()
             .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
             .collect::<HashMap<_, _>>();
-        self.table_desc
+        self.table
             .distribution_key
             .iter()
             .map(|&tb_idx| tb_idx_to_op_idx.get(&tb_idx).cloned())
@@ -102,7 +103,7 @@ impl LogScan {
     pub(crate) fn new(
         table_name: String,
         output_col_idx: Vec<usize>,
-        table_desc: Rc<TableDesc>,
+        table: Arc<TableCatalog>,
         ctx: OptimizerContextRef,
         epoch_range: (u64, u64),
         version_id: HummockVersionId,
@@ -110,7 +111,7 @@ impl LogScan {
         Self {
             table_name,
             output_col_idx,
-            table_desc,
+            table,
             chunk_size: None,
             ctx,
             epoch_range,
@@ -135,7 +136,7 @@ impl LogScan {
             .output_col_idx
             .iter()
             .map(|tb_idx| {
-                let col = &self.table_desc.columns[*tb_idx];
+                let col = &self.table.columns[*tb_idx];
                 Field::from_with_table_name_prefix(col, &self.table_name)
             })
             .collect();
@@ -157,37 +158,35 @@ impl LogScan {
         self.ctx.clone()
     }
 
-    pub fn get_table_columns(&self) -> &[ColumnDesc] {
-        &self.table_desc.columns
+    pub fn get_table_columns(&self) -> &[ColumnCatalog] {
+        &self.table.columns
     }
 
     pub(crate) fn order_names(&self) -> Vec<String> {
-        self.table_desc
+        self.table
             .order_column_indices()
-            .iter()
-            .map(|&i| self.get_table_columns()[i].name.clone())
+            .map(|i| self.get_table_columns()[i].name.clone())
             .collect()
     }
 
     pub(crate) fn order_names_with_table_prefix(&self) -> Vec<String> {
-        self.table_desc
+        self.table
             .order_column_indices()
-            .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
+            .map(|i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
             .collect()
     }
 
     /// Return indices of fields the output is ordered by and
     /// corresponding direction
     pub fn get_out_column_index_order(&self) -> Order {
-        let id_to_tb_idx = self.table_desc.get_id_to_op_idx_mapping();
+        let id_to_tb_idx = self.table.get_id_to_op_idx_mapping();
         let order = Order::new(
-            self.table_desc
+            self.table
                 .pk
                 .iter()
                 .map(|order| {
                     let idx = id_to_tb_idx
-                        .get(&self.table_desc.columns[order.column_index].column_id)
+                        .get(&self.table.columns[order.column_index].column_id)
                         .unwrap();
                     ColumnOrder::new(*idx, order.order_type)
                 })

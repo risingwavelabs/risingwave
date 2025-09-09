@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, merge_multiple_new_table_watermarks,
 };
+use risingwave_hummock_sdk::vector_index::{VectorIndexAdd, VectorIndexDelta};
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -36,12 +37,14 @@ pub(super) fn collect_resp_info(
     Vec<LocalSstableInfo>,
     HashMap<TableId, TableWatermarks>,
     Vec<SstableInfo>,
+    HashMap<TableId, Vec<VectorIndexAdd>>,
     HashSet<TableId>,
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, u32> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
+    let mut vector_index_adds = HashMap::new();
     let mut truncate_tables: HashSet<TableId> = HashSet::new();
 
     for resp in resps {
@@ -57,6 +60,19 @@ pub(super) fn collect_resp_info(
         synced_ssts.extend(ssts_iter);
         table_watermarks.push(resp.table_watermarks);
         old_value_ssts.extend(resp.old_value_sstables.into_iter().map(|s| s.into()));
+        for (table_id, vector_index_add) in resp.vector_index_adds {
+            let table_id = TableId::new(table_id);
+            vector_index_adds
+                .try_insert(
+                    table_id,
+                    vector_index_add
+                        .adds
+                        .into_iter()
+                        .map(VectorIndexAdd::from)
+                        .collect(),
+                )
+                .expect("non-duplicate");
+        }
         truncate_tables.extend(resp.truncate_tables.into_iter().map(TableId::new));
     }
 
@@ -77,6 +93,7 @@ pub(super) fn collect_resp_info(
                 .collect_vec(),
         ),
         old_value_ssts,
+        vector_index_adds,
         truncate_tables,
     )
 }
@@ -88,14 +105,26 @@ pub(super) fn collect_creating_job_commit_epoch_info(
     tables_to_commit: impl Iterator<Item = TableId>,
     is_first_time: bool,
 ) {
-    let (sst_to_context, sstables, new_table_watermarks, old_value_sst, truncate_tables) =
-        collect_resp_info(resps);
+    let (
+        sst_to_context,
+        sstables,
+        new_table_watermarks,
+        old_value_sst,
+        vector_index_adds,
+        truncate_tables,
+    ) = collect_resp_info(resps);
     assert!(old_value_sst.is_empty());
     commit_info.sst_to_context.extend(sst_to_context);
     commit_info.sstables.extend(sstables);
     commit_info
         .new_table_watermarks
         .extend(new_table_watermarks);
+    for (table_id, vector_index_adds) in vector_index_adds {
+        commit_info
+            .vector_index_delta
+            .try_insert(table_id, VectorIndexDelta::Adds(vector_index_adds))
+            .expect("non-duplicate");
+    }
     commit_info.truncate_tables.extend(truncate_tables);
     let tables_to_commit: HashSet<_> = tables_to_commit.collect();
     tables_to_commit.iter().for_each(|table_id| {

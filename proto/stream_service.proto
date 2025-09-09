@@ -53,6 +53,15 @@ message BarrierCompleteResponse {
     uint64 consumed_rows = 4;
     uint64 pending_epoch_lag = 5;
   }
+  message CdcTableBackfillProgress {
+    uint32 actor_id = 1;
+    uint64 epoch = 2;
+    bool done = 3;
+    int64 split_id_start_inclusive = 4;
+    int64 split_id_end_inclusive = 5;
+    uint64 generation = 6;
+    uint32 fragment_id = 7;
+  }
   string request_id = 1;
   common.Status status = 2;
   repeated CreateMviewProgress create_mview_progress = 3;
@@ -75,10 +84,12 @@ message BarrierCompleteResponse {
   // SourceExecutor reports the source load is finished, and then
   // meta will issue a LoadFinished barrier to notify MaterializeExecutor to start diff calculation.
   repeated uint32 load_finished_source_ids = 11;
+  map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
+  repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
   // Used for truncating tables in storage layer.
   // MaterializeExecutor reports the tables to truncate, and then
   // meta will apply truncate operation in next commit epoch.
-  repeated uint32 truncate_tables = 12;
+  repeated uint32 truncate_tables = 14;
 }
 
 message StreamingControlStreamRequest {

@@ -15,6 +15,7 @@
 use risingwave_batch::error::BatchError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NoFunction, NotImplemented};
+use risingwave_common::license::FeatureNotAvailable;
 use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
@@ -182,6 +183,12 @@ pub enum ErrorCode {
     ),
     #[error("{0} has been deprecated, please use {1} instead.")]
     Deprecated(String, String),
+    #[error(transparent)]
+    FeatureNotAvailable(
+        #[from]
+        #[backtrace]
+        FeatureNotAvailable,
+    ),
 }
 
 /// The result type for the frontend crate.

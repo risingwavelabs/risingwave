@@ -21,9 +21,9 @@ import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import RelationGraph, { boxHeight, boxWidth } from "../components/RelationGraph"
+import TimeControls from "../components/TimeControls"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
-import api from "../lib/api/api"
 import useFetch from "../lib/api/fetch"
 import {
   Relation,
@@ -32,12 +32,13 @@ import {
   getRelations,
   relationIsStreamingJob,
 } from "../lib/api/streaming"
-import { RelationPoint } from "../lib/layout"
 import {
-  GetStreamingStatsResponse,
-  RelationStats,
-} from "../proto/gen/monitor_service"
-import { ChannelStatsDerived, ChannelStatsSnapshot } from "./fragment_graph"
+  TimeParams,
+  createStreamingStatsRefresh,
+} from "../lib/api/streamingStats"
+import { RelationPoint } from "../lib/layout"
+import { ChannelDeltaStats, RelationStats } from "../proto/gen/monitor_service"
+import { ChannelStatsSnapshot } from "./fragment_graph"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -75,14 +76,6 @@ export default function StreamingGraph() {
   const { response: relationDeps } = useFetch(getRelationDependencies)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
   const { response: fragmentToRelationMap } = useFetch(getFragmentToRelationMap)
-  const [resetEmbeddedBackPressures, setResetEmbeddedBackPressures] =
-    useState<boolean>(false)
-
-  const toggleResetEmbeddedBackPressures = () => {
-    setResetEmbeddedBackPressures(
-      (resetEmbeddedBackPressures) => !resetEmbeddedBackPressures
-    )
-  }
 
   const toast = useErrorToast()
 
@@ -98,71 +91,67 @@ export default function StreamingGraph() {
 
   // Periodically fetch fragment-level back-pressure from Meta node
   const [channelStats, setChannelStats] =
-    useState<Map<string, ChannelStatsDerived>>()
+    useState<Map<string, ChannelDeltaStats>>()
   const [relationStats, setRelationStats] = useState<{
     [key: number]: RelationStats
   }>()
 
+  // Time parameters state
+  const [timeParams, setTimeParams] = useState<TimeParams>()
+
   useEffect(() => {
-    // The initial snapshot is used to calculate the rate of back pressure
-    // It's not used to render the page directly, so we don't need to set it in the state
     let initialSnapshot: ChannelStatsSnapshot | undefined
 
-    if (resetEmbeddedBackPressures) {
-      setChannelStats(undefined)
-      toggleResetEmbeddedBackPressures()
-    }
+    const refresh = createStreamingStatsRefresh(
+      {
+        setChannelStats,
+        setRelationStats,
+        toast,
+      },
+      initialSnapshot,
+      "relation",
+      timeParams
+    )
 
-    function refresh() {
-      api.get("/metrics/streaming_stats").then(
-        (res) => {
-          let response = GetStreamingStatsResponse.fromJSON(res)
-          let snapshot = new ChannelStatsSnapshot(
-            new Map(Object.entries(response.channelStats)),
-            Date.now()
-          )
-          if (!initialSnapshot) {
-            initialSnapshot = snapshot
-          } else {
-            setChannelStats(snapshot.getRate(initialSnapshot))
-          }
-          setRelationStats(response.relationStats)
-        },
-        (e) => {
-          console.error(e)
-          toast(e, "error")
-        }
-      )
-    }
     refresh() // run once immediately
     const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
     return () => {
       clearInterval(interval)
     }
-  }, [toast, resetEmbeddedBackPressures])
+  }, [toast, timeParams])
 
   // Convert fragment-level backpressure rate map to relation-level backpressure rate
-  const relationChannelStats: Map<string, ChannelStatsDerived> | undefined =
+  const relationChannelStats: Map<string, ChannelDeltaStats> | undefined =
     useMemo(() => {
       if (!fragmentToRelationMap) {
-        return new Map<string, ChannelStatsDerived>()
+        return new Map<string, ChannelDeltaStats>()
       }
-      let inMap = fragmentToRelationMap.inMap
-      let outMap = fragmentToRelationMap.outMap
+      let mapping = fragmentToRelationMap.fragmentToRelationMap
       if (channelStats) {
-        let map = new Map<string, ChannelStatsDerived>()
+        let map = new Map<string, ChannelDeltaStats>()
         for (const [key, stats] of channelStats) {
           const [outputFragment, inputFragment] = key.split("_").map(Number)
-          if (outMap[outputFragment] && inMap[inputFragment]) {
-            const outputRelation = outMap[outputFragment]
-            const inputRelation = inMap[inputFragment]
-            let key = `${outputRelation}_${inputRelation}`
+          let input_relation = mapping[inputFragment]
+          let output_relation = mapping[outputFragment]
+          if (
+            input_relation &&
+            output_relation &&
+            input_relation !== output_relation
+          ) {
+            let key = `${output_relation}_${input_relation}`
             map.set(key, stats)
           }
         }
         return map
       }
     }, [channelStats, fragmentToRelationMap])
+
+  const handleTimeParamsChange = (timestamp?: number, offset?: number) => {
+    setTimeParams({
+      at: timestamp,
+      timeOffset: offset,
+    })
+  }
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -177,11 +166,8 @@ export default function StreamingGraph() {
           flexDirection="column"
         >
           <Box flex={1} overflowY="scroll">
-            <VStack width={SIDEBAR_WIDTH} align="start" spacing={1}>
-              <Button onClick={(_) => toggleResetEmbeddedBackPressures()}>
-                Reset Back Pressures
-              </Button>
-
+            <VStack width={SIDEBAR_WIDTH} align="start" spacing={3}>
+              <TimeControls onApply={handleTimeParamsChange} />
               <Text fontWeight="semibold" mb={3}>
                 Relations
               </Text>

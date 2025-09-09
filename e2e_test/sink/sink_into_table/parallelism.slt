@@ -88,3 +88,63 @@ drop table t_simple;
 statement ok
 drop table m_simple;
 
+statement ok
+SET STREAMING_PARALLELISM TO default;
+
+statement ok
+create table t_simple (v1 int, v2 int);
+
+statement ok
+create table m_simple (v1 int primary key, v2 int);
+
+statement ok
+create sink s_simple into m_simple from t_simple;
+
+statement ok
+insert into t_simple values (1, 101), (2, 102);
+
+query I
+select count(*) from m_simple;
+----
+2
+
+statement ok
+alter table t_simple set PARALLELISM = 8;
+
+query I
+select distinct(parallelism) from rw_fragment_parallelism where name = 't_simple';
+----
+8
+
+statement ok
+alter sink s_simple set PARALLELISM = 6;
+
+query I
+select parallelism from rw_fragment_parallelism where array_position(flags, 'SINK') is not null and name = 's_simple';
+----
+6
+
+statement ok
+alter table m_simple set PARALLELISM = 12;
+
+query I
+select distinct(parallelism) from rw_fragment_parallelism where name = 'm_simple';
+----
+12
+
+statement ok
+insert into t_simple values (3, 103), (4, 104);
+
+query I
+select count(*) from m_simple;
+----
+4
+
+statement ok
+drop sink s_simple;
+
+statement ok
+drop table t_simple;
+
+statement ok
+drop table m_simple;

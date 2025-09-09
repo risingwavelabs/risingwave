@@ -21,7 +21,7 @@ use risingwave_pb::secret::PbSecretRef;
 use crate::error::ConnectorResult;
 use crate::sink::catalog::SinkFormatDesc;
 use crate::source::cdc::MYSQL_CDC_CONNECTOR;
-use crate::source::cdc::external::CdcTableType;
+use crate::source::cdc::external::ExternalCdcTableType;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
     AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR,
@@ -151,17 +151,17 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
 
     /// It is shared when `CREATE SOURCE`, and not shared when `CREATE TABLE`. So called "shareable".
     fn is_shareable_cdc_connector(&self) -> bool {
-        self.is_cdc_connector() && CdcTableType::from_properties(self).can_backfill()
+        self.is_cdc_connector() && ExternalCdcTableType::from_properties(self).can_backfill()
     }
 
     /// Tables with MySQL and PostgreSQL connectors are maintained for backward compatibility.
     /// The newly added SQL Server CDC connector is only supported when created as shared.
     fn is_shareable_only_cdc_connector(&self) -> bool {
-        self.is_cdc_connector() && CdcTableType::from_properties(self).shareable_only()
+        self.is_cdc_connector() && ExternalCdcTableType::from_properties(self).shareable_only()
     }
 
     fn enable_transaction_metadata(&self) -> bool {
-        CdcTableType::from_properties(self).enable_transaction_metadata()
+        ExternalCdcTableType::from_properties(self).enable_transaction_metadata()
     }
 
     fn is_shareable_non_cdc_connector(&self) -> bool {

@@ -43,7 +43,6 @@ use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractL
 use risingwave_connector::source::iceberg::GLOBAL_ICEBERG_SCAN_METRICS;
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
-use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
@@ -90,13 +89,13 @@ use crate::telemetry::ComputeTelemetryCreator;
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
-    opts: ComputeNodeOpts,
+    opts: Arc<ComputeNodeOpts>,
     shutdown: CancellationToken,
 ) {
     // Load the configuration.
-    let config = load_config(&opts.config_path, &opts);
+    let config = Arc::new(load_config(&opts.config_path, &*opts));
     info!("Starting compute node",);
-    info!("> config: {:?}", config);
+    info!("> config: {:?}", &*config);
     info!(
         "> debug assertions: {}",
         if cfg!(debug_assertions) { "on" } else { "off" }
@@ -106,7 +105,7 @@ pub async fn compute_node_serve(
     // Initialize all the configs
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
-    register_jvm_builder();
+
     // Initialize operator lru cache global sequencer args.
     init_global_sequencer_args(
         config
@@ -165,7 +164,7 @@ pub async fn compute_node_serve(
     );
 
     let storage_opts = Arc::new(StorageOpts::from((
-        &config,
+        &*config,
         &system_params,
         &storage_memory_config,
     )));
@@ -206,7 +205,7 @@ pub async fn compute_node_serve(
     };
 
     LicenseManager::get().refresh(system_params.license_key());
-    let state_store = StateStoreImpl::new(
+    let state_store = Box::pin(StateStoreImpl::new(
         state_store_url,
         storage_opts.clone(),
         hummock_meta_client.clone(),
@@ -216,12 +215,12 @@ pub async fn compute_node_serve(
         compactor_metrics.clone(),
         await_tree_config.clone(),
         system_params.use_new_object_prefix_strategy(),
-    )
+    ))
     .await
     .unwrap();
 
     LocalSecretManager::init(
-        opts.temp_secret_file_dir,
+        opts.temp_secret_file_dir.clone(),
         meta_client.cluster_id().to_owned(),
         worker_id,
     );

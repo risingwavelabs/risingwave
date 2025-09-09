@@ -195,7 +195,7 @@ impl TableCatalogBuilder {
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
             conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
@@ -209,7 +209,6 @@ impl TableCatalogBuilder {
             create_type: CreateType::Foreground,
             stream_job_status: StreamJobStatus::Creating,
             description: None,
-            incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: None,
@@ -220,6 +219,8 @@ impl TableCatalogBuilder {
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None, // TODO: fill this field
             refreshable: false,                // Internal tables are not refreshable
+            vector_index_info: None,
+            cdc_table_type: None,
         }
     }
 
@@ -489,9 +490,7 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
     let Some(a) = a else {
         return Ok(None);
     };
-    Feature::TimeTravel
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
+    Feature::TimeTravel.check_available()?;
     let as_of_type = match a {
         AsOf::ProcessTime => {
             return Err(ErrorCode::NotSupported(

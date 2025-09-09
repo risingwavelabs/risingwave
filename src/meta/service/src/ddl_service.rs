@@ -274,7 +274,6 @@ impl DdlService for DdlServiceImpl {
                     .run_command(DdlCommand::CreateStreamingJob {
                         stream_job,
                         fragment_graph,
-                        affected_table_replace_info: None,
                         dependencies: HashSet::new(),
                         specific_resource_group: None,
                         if_not_exists: req.if_not_exists,
@@ -316,33 +315,17 @@ impl DdlService for DdlServiceImpl {
 
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
-        let affected_table_change = req
-            .get_affected_table_change()
-            .cloned()
-            .ok()
-            .map(Self::extract_replace_table_info);
         let dependencies = req
             .get_dependencies()
             .iter()
             .map(|id| *id as ObjectId)
             .collect();
 
-        let stream_job = match &affected_table_change {
-            None => StreamingJob::Sink(sink, None),
-            Some(change) => {
-                let (source, table, _) = change
-                    .streaming_job
-                    .clone()
-                    .try_as_table()
-                    .expect("must be replace table");
-                StreamingJob::Sink(sink, Some((table, source)))
-            }
-        };
+        let stream_job = StreamingJob::Sink(sink);
 
         let command = DdlCommand::CreateStreamingJob {
             stream_job,
             fragment_graph,
-            affected_table_replace_info: affected_table_change,
             dependencies,
             specific_resource_group: None,
             if_not_exists: req.if_not_exists,
@@ -367,9 +350,6 @@ impl DdlService for DdlServiceImpl {
         let command = DdlCommand::DropStreamingJob {
             job_id: StreamingJobId::Sink(sink_id as _),
             drop_mode,
-            target_replace_info: request
-                .affected_table_change
-                .map(Self::extract_replace_table_info),
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -443,7 +423,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                affected_table_replace_info: None,
                 dependencies,
                 specific_resource_group,
                 if_not_exists: req.if_not_exists,
@@ -471,7 +450,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::MaterializedView(table_id as _),
                 drop_mode,
-                target_replace_info: None,
             })
             .await?;
 
@@ -498,7 +476,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                affected_table_replace_info: None,
                 dependencies: HashSet::new(),
                 specific_resource_group: None,
                 if_not_exists: req.if_not_exists,
@@ -525,7 +502,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Index(index_id as _),
                 drop_mode,
-                target_replace_info: None,
             })
             .await?;
 
@@ -561,7 +537,10 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropFunction(request.function_id as _))
+            .run_command(DdlCommand::DropFunction(
+                request.function_id as _,
+                DropMode::from_request_setting(request.cascade),
+            ))
             .await?;
 
         Ok(Response::new(DropFunctionResponse {
@@ -591,7 +570,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                affected_table_replace_info: None,
                 dependencies,
                 specific_resource_group: None,
                 if_not_exists: request.if_not_exists,
@@ -621,7 +599,6 @@ impl DdlService for DdlServiceImpl {
                     table_id as _,
                 ),
                 drop_mode,
-                target_replace_info: None,
             })
             .await?;
 
@@ -1259,6 +1236,26 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(CompactIcebergTableResponse {
             status: None,
             task_id,
+        }))
+    }
+
+    async fn expire_iceberg_table_snapshots(
+        &self,
+        request: Request<ExpireIcebergTableSnapshotsRequest>,
+    ) -> Result<Response<ExpireIcebergTableSnapshotsResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
+
+        // Trigger manual snapshot expiration directly using the sink ID
+        self.iceberg_compaction_manager
+            .check_and_expire_snapshots(&sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!("Failed to expire snapshots: {}", e.as_report()))
+            })?;
+
+        Ok(Response::new(ExpireIcebergTableSnapshotsResponse {
+            status: None,
         }))
     }
 }

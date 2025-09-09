@@ -35,22 +35,24 @@ pub struct StreamTopN {
 }
 
 impl StreamTopN {
-    pub fn new(core: generic::TopN<PlanRef>) -> Self {
+    pub fn new(core: generic::TopN<PlanRef>) -> Result<Self> {
         assert!(core.group_key.is_empty());
         assert!(core.limit_attr.limit() > 0);
         let input = &core.input;
         assert_matches!(input.distribution(), Distribution::Single);
+        reject_upsert_input!(input);
         let watermark_columns = WatermarkColumns::new();
 
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::Single,
-            false,
+            StreamKind::Retract,
             false,
             watermark_columns,
             MonotonicityMap::new(),
         );
-        StreamTopN { base, core }
+
+        Ok(StreamTopN { base, core })
     }
 
     pub fn limit_attr(&self) -> TopNLimit {
@@ -83,7 +85,7 @@ impl PlanTreeNodeUnary<Stream> for StreamTopN {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core)
+        Self::new(core).unwrap()
     }
 }
 

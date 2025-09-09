@@ -21,7 +21,7 @@ use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
@@ -60,6 +60,13 @@ impl StreamTableScan {
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
 
+        let mut stream_scan_type = stream_scan_type;
+        if core.cross_database() {
+            assert_ne!(stream_scan_type, StreamScanType::UpstreamOnly);
+            // Force rewrite scan type to cross-db scan
+            stream_scan_type = StreamScanType::CrossDbSnapshotBackfill;
+        }
+
         let distribution = {
             match core.distribution_key() {
                 Some(distribution_key) => {
@@ -67,7 +74,7 @@ impl StreamTableScan {
                         Distribution::Single
                     } else {
                         // See also `BatchSeqScan::clone_with_dist`.
-                        Distribution::UpstreamHashShard(distribution_key, core.table_desc.table_id)
+                        Distribution::UpstreamHashShard(distribution_key, core.table_catalog.id)
                     }
                 }
                 None => Distribution::SomeShard,
@@ -77,7 +84,11 @@ impl StreamTableScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            core.append_only(),
+            if core.append_only() {
+                StreamKind::AppendOnly
+            } else {
+                StreamKind::Retract
+            },
             false,
             core.watermark_columns(),
             MonotonicityMap::new(),
@@ -193,7 +204,7 @@ impl StreamTableScan {
                 // pk columns
                 for col_order in self.core.primary_key() {
                     let col = &upstream_schema[col_order.column_index];
-                    catalog_builder.add_column(&Field::from(col));
+                    catalog_builder.add_column(&Field::from(&**col));
                 }
 
                 // `backfill_finished` column
@@ -228,7 +239,7 @@ impl StreamTableScan {
                 // pk columns
                 for col_order in self.core.primary_key() {
                     let col = &upstream_schema[col_order.column_index];
-                    catalog_builder.add_column(&Field::from(col));
+                    catalog_builder.add_column(&Field::from(&col.column_desc));
                 }
             }
             StreamScanType::Unspecified => {
@@ -334,7 +345,7 @@ impl StreamTableScan {
                     .iter()
                     .find(|c| c.column_id.get_id() == id)
                     .unwrap();
-                Field::from(col).to_prost()
+                Field::from(&col.column_desc).to_prost()
             })
             .collect_vec();
 
@@ -342,7 +353,7 @@ impl StreamTableScan {
 
         // TODO: snapshot read of upstream mview
         let batch_plan_node = BatchPlanNode {
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            table_desc: Some(self.core.table_catalog.table_desc().try_to_protobuf()?),
             column_ids: upstream_column_ids.clone(),
         };
 
@@ -393,19 +404,19 @@ impl StreamTableScan {
                     fields: snapshot_schema,
                     stream_key: vec![], // not used
                     input: vec![],
-                    append_only: true,
+                    stream_kind: PbStreamKind::AppendOnly as i32,
                 },
             ]
         };
 
         let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
-            table_id: self.core.table_desc.table_id.table_id,
+            table_id: self.core.table_catalog.id.table_id,
             stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
             output_indices,
             upstream_column_ids,
             // The table desc used by backfill executor
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            table_desc: Some(self.core.table_catalog.table_desc().try_to_protobuf()?),
             state_table: Some(catalog),
             arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
@@ -419,7 +430,7 @@ impl StreamTableScan {
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
-            append_only: self.append_only(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
         })
     }
 }

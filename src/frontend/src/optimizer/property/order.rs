@@ -36,6 +36,7 @@ impl Order {
     pub fn to_protobuf(&self) -> Vec<PbColumnOrder> {
         self.column_orders
             .iter()
+            .copied()
             .map(ColumnOrder::to_protobuf)
             .collect_vec()
     }

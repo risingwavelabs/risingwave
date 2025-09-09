@@ -133,6 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.top_n")
         .boxed(".stream_plan.StreamNode.node_body.hop_window")
         .boxed(".stream_plan.StreamNode.node_body.merge")
+        .boxed(".stream_plan.StreamNode.node_body.upstream_sink_union")
         .boxed(".stream_plan.StreamNode.node_body.exchange")
         .boxed(".stream_plan.StreamNode.node_body.stream_scan")
         .boxed(".stream_plan.StreamNode.node_body.batch_plan")
@@ -168,6 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.as_of_join")
         .boxed(".stream_plan.StreamNode.node_body.sync_log_store")
         .boxed(".stream_plan.StreamNode.node_body.materialized_exprs")
+        .boxed(".stream_plan.StreamNode.node_body.vector_index_write")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // Eq + Hash are for plan nodes to do common sub-plan detection.
@@ -256,6 +258,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(
             "hummock.TableWatermarks.EpochNewWatermarks",
             "#[derive(Eq)]",
+        )
+        .type_attribute(
+            "catalog.VectorIndexInfo",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "catalog.VectorIndexInfo.config",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "catalog.FlatIndexConfig",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "catalog.HnswFlatIndexConfig",
+            "#[derive(Eq, Hash)]",
         )
         // proto version enums
         .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")
