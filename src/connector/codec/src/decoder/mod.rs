@@ -34,10 +34,11 @@ pub enum AccessError {
         value: String,
     },
     #[error("Unsupported data type `{ty}`")]
-    UnsupportedType {
-        ty: String,
-        table_name: Option<String>,
-    },
+    UnsupportedType { ty: String },
+
+    /// CDC auto schema change specific error that may include table context
+    #[error("CDC auto schema change error: unsupported data type `{ty}` in table `{table_name}`")]
+    CdcAutoSchemaChangeError { ty: String, table_name: String },
 
     #[error("Unsupported additional column `{name}`")]
     UnsupportedAdditionalColumn { name: String },

@@ -211,14 +211,10 @@ pub fn parse_schema_change(
                 Some(ScalarRefImpl::Jsonb(jsonb)) => jsonb,
                 _ => unreachable!(""),
             };
-            let id = jsonb_access_field!(jsonb, "id", string);
-            println!("id: {}", id);
+            let id: String = jsonb_access_field!(jsonb, "id", string);
             let ty = jsonb_access_field!(jsonb, "type", string);
             // Try to extract table name from the JSON data
-            let table_name = jsonb_access_field!(jsonb, "id", string)
-                .trim_matches('"')
-                .to_owned();
-            println!("table_name: {}", table_name);
+            let table_name = id.trim_matches('"').to_owned();
             let ddl_type: TableChangeType = ty.as_str().into();
             if matches!(ddl_type, TableChangeType::Create | TableChangeType::Drop) {
                 tracing::debug!("skip table schema change for create/drop command");
@@ -243,17 +239,20 @@ pub fn parse_schema_change(
                                 DataType::Varchar
                             } else {
                                 match ty {
-                                    Some(ty) => pg_type_to_rw_type(&ty).map_err(|err| {
-                                        tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
-                                        AccessError::UnsupportedType {
-                                            ty: type_name.clone(),
-                                            table_name: Some(table_name.clone()),
+                                    Some(ty) => match pg_type_to_rw_type(&ty) {
+                                        Ok(data_type) => data_type,
+                                        Err(err) => {
+                                            tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
+                                            return Err(AccessError::CdcAutoSchemaChangeError {
+                                                ty: type_name,
+                                                table_name,
+                                            });
                                         }
-                                    })?,
+                                    },
                                     None => {
-                                        return Err(AccessError::UnsupportedType {
+                                        return Err(AccessError::CdcAutoSchemaChangeError {
                                             ty: type_name,
-                                            table_name: Some(table_name.clone()),
+                                            table_name,
                                         });
                                     }
                                 }
@@ -262,18 +261,21 @@ pub fn parse_schema_change(
                         ConnectorProperties::MysqlCdc(_) => {
                             let ty = type_name_to_mysql_type(type_name.as_str());
                             match ty {
-                                Some(ty) => mysql_type_to_rw_type(&ty).map_err(|err| {
-                                    tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
-                                    AccessError::UnsupportedType {
-                                        ty: type_name.clone(),
-                                        table_name: Some(table_name.clone()),
+                                Some(ty) => match mysql_type_to_rw_type(&ty) {
+                                    Ok(data_type) => data_type,
+                                    Err(err) => {
+                                        tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
+                                        return Err(AccessError::CdcAutoSchemaChangeError {
+                                            ty: type_name,
+                                            table_name,
+                                        });
                                     }
-                                })?,
+                                },
                                 None => {
-                                    Err(AccessError::UnsupportedType {
+                                    return Err(AccessError::CdcAutoSchemaChangeError {
                                         ty: type_name,
-                                        table_name: Some(table_name.clone()),
-                                    })?
+                                        table_name,
+                                    });
                                 }
                             }
                         }
