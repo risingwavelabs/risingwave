@@ -1,0 +1,21 @@
+# Test for internal_get_channel_delta_stats table function
+
+# Test with no parameters (default)
+statement ok
+SELECT * FROM internal_get_channel_delta_stats()
+
+# Test with parameters
+statement ok
+SELECT * FROM internal_get_channel_delta_stats(1234567890, 60)
+
+# Test with invalid number of arguments
+statement error
+SELECT * FROM internal_get_channel_delta_stats(1234567890)
+
+# Test with invalid argument types
+statement error
+SELECT * FROM internal_get_channel_delta_stats('invalid', 60)
+
+# Test schema of the result
+statement ok
+SELECT upstream_fragment_id, downstream_fragment_id, upstream_actor_count, backpressure_rate, recv_throughput, send_throughput FROM internal_get_channel_delta_stats()
