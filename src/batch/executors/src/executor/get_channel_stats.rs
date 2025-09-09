@@ -21,7 +21,7 @@ use risingwave_common::metrics_reader::MetricsReader;
 use risingwave_common::types::{DataType, F64, ScalarImpl};
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::monitor_service::{GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse};
+use risingwave_pb::monitor_service::GetChannelDeltaStatsRequest;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -210,10 +210,8 @@ impl BoxedExecutorBuilder for GetChannelStatsExecutor {
 
         let schema = Schema { fields };
 
-        // Create a MetricsReader from the context
-        // For now, we'll need to create a mock implementation since the context doesn't directly provide a MetricsReader
-        // In a real implementation, you would get the meta client from the context and create MetricsReaderImpl
-        let metrics_reader: Arc<dyn MetricsReader> = Arc::new(MockMetricsReader::new());
+        // Get the MetricsReader from the batch task context
+        let metrics_reader = source.context().metrics_reader();
 
         Ok(Box::new(Self::new(
             schema,
@@ -222,53 +220,5 @@ impl BoxedExecutorBuilder for GetChannelStatsExecutor {
             get_channel_stats_node.time_offset,
             metrics_reader,
         )))
-    }
-}
-
-/// Mock implementation of `MetricsReader` for testing/development purposes
-struct MockMetricsReader;
-
-impl MockMetricsReader {
-    fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait::async_trait]
-impl MetricsReader for MockMetricsReader {
-    async fn get_channel_delta_stats(
-        &self,
-        _request: GetChannelDeltaStatsRequest,
-    ) -> anyhow::Result<GetChannelDeltaStatsResponse> {
-        // Return mock data for now
-        // In a real implementation, this would make an RPC call to the meta node
-        Ok(GetChannelDeltaStatsResponse {
-            channel_delta_stats_entries: vec![
-                risingwave_pb::monitor_service::ChannelDeltaStatsEntry {
-                    upstream_fragment_id: 1,
-                    downstream_fragment_id: 2,
-                    channel_delta_stats_entry: Some(
-                        risingwave_pb::monitor_service::ChannelDeltaStats {
-                            actor_count: 2,
-                            backpressure_rate: 0.1,
-                            recv_throughput: 1000.0,
-                            send_throughput: 950.0,
-                        },
-                    ),
-                },
-                risingwave_pb::monitor_service::ChannelDeltaStatsEntry {
-                    upstream_fragment_id: 2,
-                    downstream_fragment_id: 3,
-                    channel_delta_stats_entry: Some(
-                        risingwave_pb::monitor_service::ChannelDeltaStats {
-                            actor_count: 1,
-                            backpressure_rate: 0.05,
-                            recv_throughput: 500.0,
-                            send_throughput: 480.0,
-                        },
-                    ),
-                },
-            ],
-        })
     }
 }

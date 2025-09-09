@@ -29,6 +29,7 @@ use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::metrics_reader::MetricsReaderImpl;
 use crate::session::SessionImpl;
 
 /// Batch task execution context in frontend.
@@ -107,6 +108,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn metrics_reader(&self) -> Arc<dyn MetricsReader> {
-        unimplemented!("metrics_reader not yet implemented in frontend context")
+        Arc::new(MetricsReaderImpl::new(self.session.env().meta_client_ref()))
     }
 }

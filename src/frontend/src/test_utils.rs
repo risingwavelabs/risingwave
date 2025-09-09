@@ -66,6 +66,7 @@ use risingwave_pb::meta::{
     EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
     RefreshRequest, RefreshResponse, SystemParams,
 };
+use risingwave_pb::monitor_service::{GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
@@ -1247,6 +1248,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
         Ok(RefreshResponse { status: None })
+    }
+
+    async fn get_channel_delta_stats(
+        &self,
+        _request: GetChannelDeltaStatsRequest,
+    ) -> RpcResult<GetChannelDeltaStatsResponse> {
+        Ok(GetChannelDeltaStatsResponse {
+            channel_delta_stats_entries: vec![],
+        })
     }
 }
 
