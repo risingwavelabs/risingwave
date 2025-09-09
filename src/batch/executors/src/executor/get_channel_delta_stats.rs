@@ -56,16 +56,10 @@ impl GetChannelDeltaStatsExecutor {
     }
 
     /// Generate channel stats data using the metrics reader
-    async fn generate_channel_stats(&self) -> Vec<Vec<Option<ScalarImpl>>> {
-        // Try to get real data from metrics reader if possible
-        if let Ok(stats) = self.fetch_channel_stats_from_metrics_reader().await {
-            println!("Using metrics reader data: {} rows", stats.len());
-            return stats;
-        }
-
-        // Fallback to mock data if metrics reader fails
-        println!("Using mock data");
-        self.generate_mock_channel_stats()
+    async fn generate_channel_stats(&self) -> Result<Vec<Vec<Option<ScalarImpl>>>> {
+        let stats = self.fetch_channel_stats_from_metrics_reader().await?;
+        println!("Using metrics reader data: {} rows", stats.len());
+        Ok(stats)
     }
 
     /// Fetch channel stats from metrics reader
@@ -101,41 +95,6 @@ impl GetChannelDeltaStatsExecutor {
         println!("Total rows generated: {}", rows.len());
         Ok(rows)
     }
-
-    /// Generate mock channel stats data for demonstration purposes
-    fn generate_mock_channel_stats(&self) -> Vec<Vec<Option<ScalarImpl>>> {
-        let mut rows = Vec::new();
-
-        // Generate some sample channel stats data
-        // In practice, this would come from the actual system catalog
-        let channels = vec![
-            (1, 2, 2, 0.1, 1000.0, 950.0),
-            (2, 3, 1, 0.05, 500.0, 480.0),
-            (3, 4, 3, 0.2, 750.0, 700.0),
-            (4, 5, 1, 0.0, 200.0, 200.0),
-        ];
-
-        for (
-            upstream_fragment_id,
-            downstream_fragment_id,
-            upstream_actor_count,
-            backpressure_rate,
-            recv_throughput,
-            send_throughput,
-        ) in channels
-        {
-            rows.push(vec![
-                Some(ScalarImpl::Int32(upstream_fragment_id)),
-                Some(ScalarImpl::Int32(downstream_fragment_id)),
-                Some(ScalarImpl::Int32(upstream_actor_count)),
-                Some(ScalarImpl::Float64(F64::from(backpressure_rate))),
-                Some(ScalarImpl::Float64(F64::from(recv_throughput))),
-                Some(ScalarImpl::Float64(F64::from(send_throughput))),
-            ]);
-        }
-
-        rows
-    }
 }
 
 impl Executor for GetChannelDeltaStatsExecutor {
@@ -158,7 +117,7 @@ impl GetChannelDeltaStatsExecutor {
         // 1. Read the channel stats from the meta node RPC.
         // 2. Render into rows.
 
-        let rows = self.generate_channel_stats().await;
+        let rows = self.generate_channel_stats().await?;
 
         if !rows.is_empty() {
             let mut array_builders = self.schema.create_array_builders(rows.len());
