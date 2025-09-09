@@ -201,6 +201,7 @@ stream_iceberg_sink_write_parquet_max_row_group_rows = 100000
 stream_default_enable_mem_preload_state_table = false
 stream_mem_preload_state_table_ids_whitelist = []
 stream_mem_preload_state_table_ids_blacklist = []
+stream_aggressive_noop_update_elimination = false
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5
