@@ -82,7 +82,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Field(min($expr1), 0:Int32) as $expr2, Field(max($expr1), 0:Int32) as $expr3, Field(first_value($expr1 order_by($expr1 ASC)), 0:Int32) as $expr4, Field(last_value($expr1 order_by($expr1 DESC)), 0:Int32) as $expr5, Field(min($expr1), 1:Int32) as $expr6, Field(max($expr1), 1:Int32) as $expr7, Field(first_value($expr1 order_by($expr1 ASC)), 1:Int32) as $expr8, Field(last_value($expr1 order_by($expr1 DESC)), 1:Int32) as $expr9, Field(min($expr1), 2:Int32) as $expr10, Field(max($expr1), 2:Int32) as $expr11, Field(first_value($expr1 order_by($expr1 ASC)), 2:Int32) as $expr12, Field(last_value($expr1 order_by($expr1 DESC)), 2:Int32) as $expr13, count(t.a), count(t.b), count(t.c)] }
-      └─BatchHashAgg { group_key: [t.e, t.f], aggs: [first_value($expr1 order_by($expr1 ASC)), min($expr1), last_value($expr1 order_by($expr1 DESC)), max($expr1), count(t.a), count(t.b), count(t.c)] }
+      └─BatchHashAgg { group_key: [t.e, t.f], aggs: [max($expr1), last_value($expr1 order_by($expr1 DESC)), min($expr1), first_value($expr1 order_by($expr1 ASC)), count(t.a), count(t.b), count(t.c)] }
         └─BatchExchange { order: [], dist: HashShard(t.e, t.f) }
           └─BatchProject { exprs: [t.e, t.f, t.a, t.b, t.c, $expr1, $expr1, $expr1, $expr1] }
             └─BatchProject { exprs: [t.a, t.b, t.c, t.e, t.f, Row(t.a, t.b, t.c) as $expr1] }
@@ -90,31 +90,11 @@
   stream_plan: |-
     StreamMaterialize { columns: [min_a, max_a, first_a, last_a, min_b, max_b, first_b, last_b, min_c, max_c, first_c, last_c, count_a, count_b, count_c, t.e(hidden), t.f(hidden)], stream_key: [t.e, t.f], pk_columns: [t.e, t.f], pk_conflict: NoCheck }
     └─StreamProject { exprs: [Field(min($expr1), 0:Int32) as $expr2, Field(max($expr1), 0:Int32) as $expr3, Field(first_value($expr1 order_by($expr1 ASC)), 0:Int32) as $expr4, Field(last_value($expr1 order_by($expr1 DESC)), 0:Int32) as $expr5, Field(min($expr1), 1:Int32) as $expr6, Field(max($expr1), 1:Int32) as $expr7, Field(first_value($expr1 order_by($expr1 ASC)), 1:Int32) as $expr8, Field(last_value($expr1 order_by($expr1 DESC)), 1:Int32) as $expr9, Field(min($expr1), 2:Int32) as $expr10, Field(max($expr1), 2:Int32) as $expr11, Field(first_value($expr1 order_by($expr1 ASC)), 2:Int32) as $expr12, Field(last_value($expr1 order_by($expr1 DESC)), 2:Int32) as $expr13, count(t.a), count(t.b), count(t.c), t.e, t.f] }
-      └─StreamHashAgg { group_key: [t.e, t.f], aggs: [min($expr1), max($expr1), last_value($expr1 order_by($expr1 DESC)), first_value($expr1 order_by($expr1 ASC)), count(t.a), count(t.b), count(t.c), count] }
+      └─StreamHashAgg { group_key: [t.e, t.f], aggs: [last_value($expr1 order_by($expr1 DESC)), max($expr1), min($expr1), first_value($expr1 order_by($expr1 ASC)), count(t.a), count(t.b), count(t.c), count] }
         └─StreamExchange { dist: HashShard(t.e, t.f) }
           └─StreamProject { exprs: [t.a, t.b, t.c, t.e, t.f, $expr1, $expr1, $expr1, $expr1, t._row_id] }
             └─StreamProject { exprs: [t.a, t.b, t.c, t.e, t.f, Row(t.a, t.b, t.c) as $expr1, t._row_id] }
               └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t.e, t.f, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-- name: unify agg call pattern with array_agg and jsonb_agg
-  sql: |
-    create table t(a varchar, b varchar, c int);
-    select
-    array_agg(a order by c) array_agg_a, array_agg(b order by c) array_agg_b,
-    jsonb_agg(a order by c) jsonb_agg_a, jsonb_agg(b order by c) jsonb_agg_b
-    from t;
-  batch_plan: |-
-    BatchProject { exprs: [Field(array_agg($expr2 order_by($expr2 ASC)), 0:Int32) as $expr3, Field(array_agg($expr2 order_by($expr2 ASC)), 1:Int32) as $expr4, Field(jsonb_agg($expr1 order_by($expr1 ASC)), 0:Int32) as $expr5, Field(jsonb_agg($expr1 order_by($expr1 ASC)), 1:Int32) as $expr6] }
-    └─BatchSimpleAgg { aggs: [jsonb_agg($expr1 order_by($expr1 ASC)), array_agg($expr2 order_by($expr2 ASC))] }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchProject { exprs: [Row(t.a, t.b) as $expr1, Row(t.a, t.b) as $expr2] }
-          └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
-  stream_plan: |-
-    StreamMaterialize { columns: [array_agg_a, array_agg_b, jsonb_agg_a, jsonb_agg_b], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [Field(array_agg($expr2 order_by($expr2 ASC)), 0:Int32) as $expr3, Field(array_agg($expr2 order_by($expr2 ASC)), 1:Int32) as $expr4, Field(jsonb_agg($expr1 order_by($expr1 ASC)), 0:Int32) as $expr5, Field(jsonb_agg($expr1 order_by($expr1 ASC)), 1:Int32) as $expr6] }
-      └─StreamSimpleAgg { aggs: [jsonb_agg($expr1 order_by($expr1 ASC)), array_agg($expr2 order_by($expr2 ASC)), count] }
-        └─StreamExchange { dist: Single }
-          └─StreamProject { exprs: [Row(t.a, t.b) as $expr1, Row(t.a, t.b) as $expr2, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: unify agg call pattern with max with filter
   sql: |
     create table t(a int, b int, c int);

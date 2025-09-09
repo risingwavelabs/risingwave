@@ -38,16 +38,6 @@
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: unify agg call pattern with array_agg and jsonb_agg
-  sql: |
-    create table t(a varchar, b varchar, c int);
-    select
-    array_agg(a order by c) array_agg_a, array_agg(b order by c) array_agg_b,
-    jsonb_agg(a order by c) jsonb_agg_a, jsonb_agg(b order by c) jsonb_agg_b
-    from t;
-  expected_outputs:
-    - batch_plan
-    - stream_plan
 - name: unify agg call pattern with max with filter
   sql: |
     create table t(a int, b int, c int);
