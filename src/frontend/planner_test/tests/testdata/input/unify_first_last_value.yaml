@@ -1,11 +1,11 @@
-- name: should not unify agg call pattern with first_value/last_value since their order by clauses are different
+- name: should not unify first_value/last_value since their order by clauses are different
   sql: |
     create table t(a int, b int, c int, d int);
     select first_value(b order by b) first_a, first_value(a order by a) first_b from t group by c;
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: unify agg call pattern with first_value, last_value, and mixed with count
+- name: unify first_value and last_value calls, mixed with count
   sql: |
     create table t(a int, b int, c int, d int, e int, f int);
     select
@@ -17,7 +17,7 @@
   expected_outputs:
     - batch_plan
     - stream_plan
-- name: unify agg call pattern with first_value with filter
+- name: unify first_value calls with different filters
   sql: |
     create table t(a int, b int, c int);
     select

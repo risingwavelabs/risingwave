@@ -343,7 +343,7 @@ static SIMPLIFY_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
         vec![
             AggGroupBySimplifyRule::create(),
             AggCallMergeRule::create(),
-            UnifySameAggCallPatternRule::create(),
+            UnifyFirstLastValueRule::create(),
         ],
         ApplyOrder::TopDown,
     )

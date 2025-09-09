@@ -245,8 +245,8 @@ mod apply_hop_window_transpose_rule;
 pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
-mod unify_same_agg_call_pattern_rule;
-pub use unify_same_agg_call_pattern_rule::*;
+mod unify_first_last_value_rule;
+pub use unify_first_last_value_rule::*;
 mod empty_agg_remove_rule;
 pub use empty_agg_remove_rule::*;
 mod add_logstore_rule;
@@ -354,7 +354,7 @@ macro_rules! for_all_rules {
             , { AggGroupBySimplifyRule }
             , { ApplyHopWindowTransposeRule }
             , { AggCallMergeRule }
-            , { UnifySameAggCallPatternRule }
+            , { UnifyFirstLastValueRule }
             , { ValuesExtractProjectRule }
             , { BatchPushLimitToScanRule }
             , { BatchIcebergPredicatePushDownRule }

@@ -23,10 +23,10 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{Agg, PlanAggCall};
 use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
 
-/// Unifies aggregation calls with the same pattern to reuse a single aggregation call with ROW construction.
+/// Unifies FIRST_VALUE and LAST_VALUE aggregation calls with the same ordering to reuse a single aggregation call with ROW construction.
 ///
 /// This rule is particularly beneficial for streaming queries as it reduces the number of states maintained.
-/// It supports `FIRST_VALUE` and `LAST_VALUE` aggregation functions that have the same ordering.
+/// It specifically targets `FIRST_VALUE` and `LAST_VALUE` aggregation functions that have identical ordering clauses.
 ///
 /// # Example transformation:
 ///
@@ -81,9 +81,9 @@ use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
 /// ```
 ///
 /// The key benefit: **4 aggregation states → 1 aggregation state** for streaming performance!
-pub struct UnifySameAggCallPatternRule {}
+pub struct UnifyFirstLastValueRule {}
 
-impl Rule<Logical> for UnifySameAggCallPatternRule {
+impl Rule<Logical> for UnifyFirstLastValueRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_logical_agg()?;
 
@@ -292,7 +292,7 @@ struct AggPattern {
     filter: crate::utils::Condition,
 }
 
-impl UnifySameAggCallPatternRule {
+impl UnifyFirstLastValueRule {
     pub fn create() -> BoxedRule {
         Box::new(Self {})
     }
@@ -300,8 +300,7 @@ impl UnifySameAggCallPatternRule {
     fn is_supported_agg_type(&self, agg_type: &AggType) -> bool {
         matches!(
             agg_type,
-            AggType::Builtin(PbAggKind::FirstValue)
-                | AggType::Builtin(PbAggKind::LastValue)
+            AggType::Builtin(PbAggKind::FirstValue) | AggType::Builtin(PbAggKind::LastValue)
         )
     }
 }
