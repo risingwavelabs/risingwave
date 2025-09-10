@@ -33,7 +33,7 @@ use risingwave_connector::source::cdc::{
 };
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
-use risingwave_meta_model::{SourceId, WorkerId};
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;

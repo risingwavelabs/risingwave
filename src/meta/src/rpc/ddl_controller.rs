@@ -1224,11 +1224,9 @@ impl DdlController {
                 )
             })
             .collect();
-        let dropped_actors = removed_actors.iter().map(|id| *id as _).collect();
         self.source_manager
             .apply_source_change(SourceChange::DropMv {
                 dropped_source_fragments,
-                dropped_actors,
             })
             .await;
 
