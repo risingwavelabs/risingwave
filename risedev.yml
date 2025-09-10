@@ -1198,6 +1198,9 @@ template:
     # Tempo used by this frontend instance
     provide-tempo: "tempo*"
 
+    # Prometheus nodes used by frontend for metrics queries
+    provide-prometheus: "prometheus*"
+
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
