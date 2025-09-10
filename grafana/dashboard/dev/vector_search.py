@@ -5,10 +5,12 @@ from . import section
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
-    meta_miss_filter = "type='meta_miss'"
-    meta_total_filter = "type='meta_total'"
-    data_miss_filter = "type='data_miss'"
-    data_total_filter = "type='data_total'"
+    meta_miss_filter = "type='file_meta_miss'"
+    meta_total_filter = "type='file_meta_total'"
+    data_miss_filter = "type='file_block_miss'"
+    data_total_filter = "type='file_block_total'"
+    hnsw_graph_miss_filter = "type='hnsw_graph_miss'"
+    hnsw_graph_total_filter = "type='hnsw_graph_total'"
 
     return [
         outer_panels.row_collapsed(
@@ -19,13 +21,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({table_metric('state_store_vector_object_request_counts')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id, type)",
-                            "{{table_id}} @ {{type}} - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('state_store_vector_object_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, type)",
-                            "total_meta_miss_count - {{%s}} @ {{%s}}"
+                            f"sum(rate({table_metric('state_store_vector_object_request_counts')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id, type, mode)",
+                            "{{table_id}} @ {{mode}} {{type}} - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -69,15 +66,20 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"(sum(rate({table_metric('state_store_vector_object_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) >= 0",
-                            "meta cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
+                            f"(sum(rate({table_metric('state_store_vector_object_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id,mode)) / (sum(rate({table_metric('state_store_vector_object_request_counts', meta_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id,mode)) >= 0",
+                            "meta cache miss ratio - {{table_id}} {{mode}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
-                            f"(sum(rate({table_metric('state_store_vector_object_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) >= 0",
-                            "block cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
+                            f"(sum(rate({table_metric('state_store_vector_object_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id,mode)) / (sum(rate({table_metric('state_store_vector_object_request_counts', data_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id,mode)) >= 0",
+                            "block cache miss ratio - {{table_id}} {{mode}} @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
+                        panels.target(
+                            f"(sum(rate({table_metric('state_store_vector_object_request_counts', hnsw_graph_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id,mode)) / (sum(rate({table_metric('state_store_vector_object_request_counts', hnsw_graph_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id,mode)) >= 0",
+                            "hnsw graph miss ratio - {{table_id}} {{mode}} @ {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
                     ],
                 ),
                 # todo: hitmap to measure block efficiency
@@ -124,6 +126,26 @@ def _(outer_panels: Panels):
                             "nearest - {{table_id}} [top_n={{top_n}}, ef_search={{ef_search}}] @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Read Stat",
+                    "Histogram of stats of reading the vector index.",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_vector_request_stats_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id,type,mode,top_n,ef))",
+                                f"p{legend}"
+                                + " - {{table_id}} {{type}} {{mode}} [top_n={{top_n}}, ef={{ef}}] @ {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                                ),
+                            [50, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id,type,mode,top_n,ef)(rate({table_metric('state_store_vector_request_stats_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id,type,mode,top_n,ef) (rate({table_metric('state_store_vector_request_stats_count')}[$__rate_interval])) > 0",
+                            "avg - {{table_id}} {{type}} {{mode}} [top_n={{top_n}}, ef={{ef}}] {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
                     ],
                 ),
             ],

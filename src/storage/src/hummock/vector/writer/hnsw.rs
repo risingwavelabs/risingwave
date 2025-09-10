@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::mem::take;
+use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use prost::Message;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use risingwave_common::catalog::TableId;
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::HummockObjectId;
@@ -26,9 +28,11 @@ use risingwave_hummock_sdk::vector_index::{
 };
 use risingwave_pb::hummock::PbHnswGraph;
 
-use crate::hummock::vector::file::FileVectorStore;
+use crate::hummock::vector::file::{FileVectorStore, FileVectorStoreCtx};
+use crate::hummock::vector::monitor::report_hnsw_stat;
 use crate::hummock::vector::writer::VectorObjectIdManagerRef;
 use crate::hummock::{HummockResult, SstableStoreRef};
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::Vector;
 use crate::vector::hnsw::{
@@ -36,12 +40,15 @@ use crate::vector::hnsw::{
 };
 
 pub(crate) struct HnswFlatIndexWriter {
+    table_id: TableId,
     measure: DistanceMeasurement,
     options: HnswBuilderOptions,
     sstable_store: SstableStoreRef,
     object_id_manager: VectorObjectIdManagerRef,
+    stats: Arc<HummockStateStoreMetrics>,
 
     vector_store: FileVectorStore,
+    ctx: FileVectorStoreCtx,
     next_pending_vector_id: usize,
     graph_builder: Option<HnswGraphBuilder>,
     unseal_vector_files: Vec<VectorFileInfo>,
@@ -51,22 +58,29 @@ pub(crate) struct HnswFlatIndexWriter {
 
 impl HnswFlatIndexWriter {
     pub(crate) async fn new(
+        table_id: TableId,
         index: &HnswFlatIndex,
         dimension: usize,
         measure: DistanceMeasurement,
         sstable_store: SstableStoreRef,
         object_id_manager: VectorObjectIdManagerRef,
+        stats: Arc<HummockStateStoreMetrics>,
         storage_opts: &StorageOpts,
     ) -> HummockResult<Self> {
+        let mut ctx = FileVectorStoreCtx::default();
         let graph_builder = if let Some(graph_file) = &index.graph_file {
             Some(HnswGraphBuilder::from_protobuf(
-                &*sstable_store.get_hnsw_graph(graph_file).await?,
+                &*sstable_store
+                    .get_hnsw_graph(graph_file, &mut ctx.stats)
+                    .await?,
                 index.config.m as _,
             ))
         } else {
             None
         };
+
         Ok(Self {
+            table_id,
             measure,
             options: HnswBuilderOptions {
                 m: index.config.m.try_into().unwrap(),
@@ -80,6 +94,7 @@ impl HnswFlatIndexWriter {
                 object_id_manager.clone(),
                 storage_opts,
             ),
+            ctx,
             sstable_store,
             object_id_manager,
             graph_builder,
@@ -87,6 +102,7 @@ impl HnswFlatIndexWriter {
             flushed_graph_file: None,
             rng: StdRng::from_os_rng(),
             next_pending_vector_id: index.vector_store_info.next_vector_id,
+            stats,
         })
     }
 
@@ -181,23 +197,37 @@ impl HnswFlatIndexWriter {
             .building_vectors
             .as_ref()
             .expect("for write");
+        let mut stats = Vec::with_capacity(
+            building_vectors.file_builder.next_vector_id() - self.next_pending_vector_id,
+        );
         for i in self.next_pending_vector_id..building_vectors.file_builder.next_vector_id() {
             let node = new_node(&self.options, &mut self.rng);
             if let Some(graph_builder) = &mut self.graph_builder {
                 dispatch_distance_measurement!(&self.measure, M, {
-                    insert_graph::<M>(
+                    let stat = insert_graph::<M, _>(
                         &self.vector_store,
+                        &mut self.ctx,
                         graph_builder,
                         node,
                         building_vectors.file_builder.get_vector(i).vec_ref(),
                         self.options.ef_construction,
                     )
                     .await?;
+                    stats.push(stat);
                 });
             } else {
                 self.graph_builder = Some(HnswGraphBuilder::first(node));
             }
         }
+        take(&mut self.ctx.stats).report(self.table_id, "hnsw_write", &self.stats);
+        report_hnsw_stat(
+            &self.stats,
+            self.table_id,
+            "hnsw_write",
+            self.options.m,
+            self.options.ef_construction,
+            stats,
+        );
         self.next_pending_vector_id = building_vectors.file_builder.next_vector_id();
         Ok(())
     }

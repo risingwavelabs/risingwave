@@ -51,6 +51,7 @@ pub struct HummockStateStoreMetrics {
     pub iter_slow_fetch_meta_cache_unhits: IntGauge,
 
     pub vector_object_request_counts: RelabeledGuardedIntCounterVec,
+    pub vector_request_stats: RelabeledGuardedHistogramVec,
 
     pub read_req_bloom_filter_positive_counts: RelabeledGuardedIntCounterVec,
     pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec,
@@ -235,14 +236,32 @@ impl HummockStateStoreMetrics {
         // ----- vector -----
         let vector_object_request_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_vector_object_request_counts",
-            "Total number of sst block requests that have been issued to sst store",
-            &["table_id", "type"],
+            "Metrics about vector object requests that have been issued",
+            &["table_id", "type", "mode"],
             registry
         )
         .unwrap();
         let vector_object_request_counts = RelabeledGuardedIntCounterVec::with_metric_level(
             MetricLevel::Critical,
             vector_object_request_counts,
+            metric_level,
+        );
+
+        let opts = histogram_opts!(
+            "state_store_vector_request_stats",
+            "Metrics about vector requests",
+            exponential_buckets(100.0, 10.0, 5).unwrap(),
+        );
+
+        let vector_request_stats = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "type", "mode", "top_n", "ef"],
+            registry
+        )
+        .unwrap();
+        let vector_request_stats = RelabeledGuardedHistogramVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_request_stats,
             metric_level,
         );
 
@@ -494,6 +513,7 @@ impl HummockStateStoreMetrics {
             iter_fetch_meta_cache_unhits,
             iter_slow_fetch_meta_cache_unhits,
             vector_object_request_counts,
+            vector_request_stats,
             read_req_bloom_filter_positive_counts,
             read_req_positive_but_non_exist_counts,
             read_req_check_bloom_filter_counts,
