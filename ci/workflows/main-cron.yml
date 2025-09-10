@@ -879,7 +879,7 @@ steps:
 
   - label: "release amd64"
     command: "ci/scripts/release.sh"
-    if: build.tag != null && build.pull_request == false
+    if: build.tag != null && build.pull_request.id == null
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
@@ -894,7 +894,7 @@ steps:
   - label: "release docker image: amd64"
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
-    if: build.tag != null && build.pull_request == false
+    if: build.tag != null && build.pull_request.id == null
     timeout_in_minutes: 60
     retry: *auto-retry
 
