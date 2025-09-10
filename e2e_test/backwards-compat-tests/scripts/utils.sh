@@ -117,7 +117,7 @@ get_old_version() {
   # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
   # against the Nth latest release candidate, where N > 1. N can be larger,
   # in case some old cluster did not upgrade.
-  if [[ -z $VERSION_OFFSET ]]; then
+  if [[ -z ${VERSION_OFFSET:-} ]]; then
     local VERSION_OFFSET=1
   fi
 
@@ -227,6 +227,12 @@ seed_old_cluster() {
   echo "--- TPCH TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/tpch-backwards-compat/validate_original.slt"
 
+  echo "--- SINK INTO TABLE TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/seed.slt"
+
+  echo "--- SINK INTO TABLE TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_original.slt"
+
   echo "--- KAFKA TEST: Seeding old cluster with data"
   create_kafka_topic
   seed_json_kafka
@@ -291,6 +297,9 @@ validate_new_cluster() {
 
   echo "--- TPCH TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/tpch-backwards-compat/validate_restart.slt"
+
+  echo "--- SINK INTO TABLE TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_restart.slt"
 
   echo "--- KAFKA TEST: Seeding new cluster with data"
   seed_json_kafka
