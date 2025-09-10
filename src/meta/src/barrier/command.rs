@@ -74,8 +74,8 @@ use crate::model::{
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
-    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, UpstreamSinkInfo,
-    build_actor_connector_splits,
+    JobReschedulePostUpdates, SourceSplitsDiscovered, SplitAssignment, ThrottleConfig,
+    UpstreamSinkInfo, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -252,6 +252,11 @@ impl StreamJobFragments {
                                         .worker_id()
                                         as WorkerId,
                                     vnode_bitmap: actor.vnode_bitmap.clone(),
+                                    splits: self
+                                        .actor_splits
+                                        .get(&actor.actor_id)
+                                        .cloned()
+                                        .unwrap_or_default(),
                                 },
                             )
                         })
@@ -360,7 +365,7 @@ pub enum Command {
     /// changed splits.
     SourceChangeSplit {
         split_assignment: SplitAssignment,
-        source_splits: HashMap<SourceId, Vec<SplitImpl>>,
+        source_splits: SourceSplitsDiscovered,
     },
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
@@ -428,7 +433,7 @@ impl std::fmt::Display for Command {
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
-            Command::SourceChangeSplit(_) => write!(f, "SourceChangeSplit"),
+            Command::SourceChangeSplit { .. } => write!(f, "SourceChangeSplit"),
             Command::Throttle(_) => write!(f, "Throttle"),
             Command::CreateSubscription {
                 subscription_id, ..
@@ -550,6 +555,11 @@ impl Command {
                                                         .0
                                                         .vnode_bitmap
                                                         .clone(),
+                                                    splits: reschedule
+                                                        .actor_splits
+                                                        .get(actor_id)
+                                                        .cloned()
+                                                        .unwrap_or_default(),
                                                 },
                                             )
                                         })
@@ -572,7 +582,7 @@ impl Command {
             ),
             Command::ReplaceStreamJob(plan) => Some(plan.fragment_changes()),
             Command::MergeSnapshotBackfillStreamingJobs(_) => None,
-            Command::SourceChangeSplit(_) => None,
+            Command::SourceChangeSplit { .. } => None,
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
@@ -840,10 +850,12 @@ impl Command {
                 }
             }
 
-            Command::SourceChangeSplit(change) => {
+            Command::SourceChangeSplit {
+                split_assignment, ..
+            } => {
                 let mut diff = HashMap::new();
 
-                for actor_splits in change.values() {
+                for actor_splits in split_assignment.values() {
                     diff.extend(actor_splits.clone());
                 }
 

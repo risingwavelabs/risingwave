@@ -44,13 +44,14 @@ pub use worker::create_source_worker;
 use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
 
 use crate::MetaResult;
-use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan};
-use crate::manager::MetadataManager;
+use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan, SharedActorInfos};
+use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
 
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
+pub type SourceSplitsDiscovered = HashMap<SourceId, Vec<SplitImpl>>;
 pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<u32, HashMap<String, String>>;
@@ -316,6 +317,7 @@ impl SourceManager {
         barrier_scheduler: BarrierScheduler,
         metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
+        env: MetaSrvEnv,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
@@ -501,14 +503,17 @@ impl SourceManager {
     /// The command will first updates `SourceExecutor`'s splits, and finally calls `Self::apply_source_change`
     /// to update states in `SourceManager`.
     async fn tick(&self) -> MetaResult<()> {
-        let split_assignment = {
+        let result = {
             let core_guard = self.core.lock().await;
             core_guard.reassign_splits().await?
         };
 
-        for (database_id, split_assignment) in split_assignment {
+        for (database_id, (split_assignment, source_splits)) in result {
             if !split_assignment.is_empty() {
-                let command = Command::SourceChangeSplit(split_assignment);
+                let command = Command::SourceChangeSplit {
+                    split_assignment,
+                    source_splits,
+                };
                 tracing::info!(command = ?command, "pushing down split assignment command");
                 self.barrier_scheduler
                     .run_command(database_id, command)
