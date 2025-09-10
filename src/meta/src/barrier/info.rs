@@ -22,6 +22,7 @@ use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
+use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
@@ -286,6 +287,7 @@ pub(crate) enum CommandFragmentChanges {
         new_actors: HashMap<ActorId, InflightActorInfo>,
         actor_update_vnode_bitmap: HashMap<ActorId, Bitmap>,
         to_remove: HashSet<ActorId>,
+        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
     RemoveFragment,
 }
@@ -451,6 +453,7 @@ impl InflightDatabaseInfo {
                     CommandFragmentChanges::Reschedule {
                         new_actors,
                         actor_update_vnode_bitmap,
+                        actor_splits,
                         ..
                     } => {
                         let info = self.fragment_mut(fragment_id);
@@ -465,6 +468,9 @@ impl InflightDatabaseInfo {
                             actors
                                 .try_insert(actor_id as _, actor)
                                 .expect("non-duplicate");
+                        }
+                        for (actor_id, splits) in actor_splits {
+                            actors.get_mut(&actor_id).expect("should exist").splits = splits;
                         }
                     }
                     CommandFragmentChanges::RemoveFragment => {}

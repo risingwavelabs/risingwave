@@ -575,6 +575,7 @@ impl Command {
                                     .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
                                     .collect(),
                                 to_remove: reschedule.removed_actors.iter().cloned().collect(),
+                                actor_splits: reschedule.actor_splits.clone(),
                             },
                         )
                     })

@@ -602,7 +602,6 @@ fn align_splits(
     aligned_actors
         .into_iter()
         .map(|(actor_id, upstream_actor_id)| {
-
             let Some(splits) = (match alignment_context {
                 SplitAlignmentContext::Stored(info) => {
                     let guard = info.read_guard();
