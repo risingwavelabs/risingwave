@@ -40,3 +40,22 @@ pub fn check_parquet_type_compatibility(
         user_type,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+
+    use super::*;
+
+    #[test]
+    fn test_parquet_type_compatibility() {
+        // Test compatible types
+        assert!(check_parquet_type_compatibility(&DataType::Int32, &DataType::Int32).unwrap());
+        assert!(check_parquet_type_compatibility(&DataType::Varchar, &DataType::Varchar).unwrap());
+        assert!(check_parquet_type_compatibility(&DataType::Float64, &DataType::Float64).unwrap());
+
+        // Test incompatible types
+        assert!(!check_parquet_type_compatibility(&DataType::Int32, &DataType::Varchar).unwrap());
+        assert!(!check_parquet_type_compatibility(&DataType::Float64, &DataType::Int32).unwrap());
+    }
+}
