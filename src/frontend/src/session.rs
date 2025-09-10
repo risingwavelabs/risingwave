@@ -189,6 +189,9 @@ pub(crate) struct FrontendEnv {
 
     /// Prometheus client for querying metrics.
     prometheus_client: Option<prometheus_http_query::Client>,
+
+    /// The additional selector used when querying Prometheus.
+    prometheus_selector: String,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -273,6 +276,7 @@ impl FrontendEnv {
             mem_context: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
             prometheus_client: None,
+            prometheus_selector: String::new(),
         }
     }
 
@@ -507,6 +511,9 @@ impl FrontendEnv {
             None
         };
 
+        // Initialize Prometheus selector
+        let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
+
         info!(
             "Frontend  total_memory: {} batch_memory: {}",
             convert(total_memory_bytes as _),
@@ -543,6 +550,7 @@ impl FrontendEnv {
                 compute_runtime,
                 mem_context,
                 prometheus_client,
+                prometheus_selector,
             },
             join_handles,
             shutdown_senders,
@@ -610,6 +618,11 @@ impl FrontendEnv {
     /// Get a reference to the Prometheus client if available.
     pub fn prometheus_client(&self) -> Option<&prometheus_http_query::Client> {
         self.prometheus_client.as_ref()
+    }
+
+    /// Get the Prometheus selector string.
+    pub fn prometheus_selector(&self) -> &str {
+        &self.prometheus_selector
     }
 
     pub fn server_address(&self) -> &HostAddr {
