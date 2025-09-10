@@ -2255,13 +2255,13 @@ where
         .all(txn)
         .await?;
 
-    if mview_fragment.len() != 1 {
-        return Err(anyhow::anyhow!(
+    let mview_fragment_len = mview_fragment.len();
+    if mview_fragment_len != 1 {
+        bail!(
             "expected exactly one mview fragment for table {}, found {}",
             table_id,
-            mview_fragment.len()
-        )
-        .into());
+            mview_fragment_len
+        );
     }
 
     let mview_fragment = mview_fragment.into_iter().next().unwrap();
