@@ -16,8 +16,9 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use prometheus_http_query;
-use risingwave_common::metrics_reader::{ChannelDeltaStatsResponse, MetricsReader};
-use risingwave_pb::monitor_service::ChannelDeltaStats;
+use risingwave_common::metrics_reader::{
+    ChannelDeltaStats, ChannelDeltaStatsEntry, ChannelDeltaStatsResponse, MetricsReader,
+};
 
 /// Implementation of `MetricsReader` that queries Prometheus directly.
 pub struct MetricsReaderImpl {
@@ -200,17 +201,13 @@ impl MetricsReader for MetricsReaderImpl {
         }
 
         // Convert HashMap to Vec<ChannelDeltaStatsEntry>
-        let channel_delta_stats_entries: Vec<
-            risingwave_pb::monitor_service::ChannelDeltaStatsEntry,
-        > = channel_data
+        let channel_delta_stats_entries: Vec<ChannelDeltaStatsEntry> = channel_data
             .into_iter()
-            .map(
-                |(key, stats)| risingwave_pb::monitor_service::ChannelDeltaStatsEntry {
-                    upstream_fragment_id: key.upstream_fragment_id,
-                    downstream_fragment_id: key.downstream_fragment_id,
-                    channel_delta_stats_entry: Some(stats),
-                },
-            )
+            .map(|(key, stats)| ChannelDeltaStatsEntry {
+                upstream_fragment_id: key.upstream_fragment_id,
+                downstream_fragment_id: key.downstream_fragment_id,
+                channel_delta_stats: stats,
+            })
             .collect();
 
         Ok(ChannelDeltaStatsResponse {

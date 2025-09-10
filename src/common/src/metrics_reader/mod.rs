@@ -13,7 +13,23 @@
 // limitations under the License.
 
 use anyhow::Result;
-use risingwave_pb::monitor_service::ChannelDeltaStatsEntry;
+
+/// Channel delta statistics for a specific channel.
+#[derive(Debug, Clone)]
+pub struct ChannelDeltaStats {
+    pub actor_count: u32,
+    pub backpressure_rate: f64,
+    pub recv_throughput: f64,
+    pub send_throughput: f64,
+}
+
+/// Entry containing channel delta statistics with fragment IDs.
+#[derive(Debug, Clone)]
+pub struct ChannelDeltaStatsEntry {
+    pub upstream_fragment_id: u32,
+    pub downstream_fragment_id: u32,
+    pub channel_delta_stats: ChannelDeltaStats,
+}
 
 /// Response type for channel delta statistics.
 #[derive(Debug, Clone)]

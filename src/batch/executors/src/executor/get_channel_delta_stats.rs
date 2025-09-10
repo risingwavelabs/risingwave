@@ -77,18 +77,17 @@ impl GetChannelDeltaStatsExecutor {
         // Convert response to rows
         let mut rows = Vec::new();
         for entry in response.channel_delta_stats_entries {
-            if let Some(stats) = entry.channel_delta_stats_entry.as_ref() {
-                let row = vec![
-                    Some(ScalarImpl::Int32(entry.upstream_fragment_id as i32)),
-                    Some(ScalarImpl::Int32(entry.downstream_fragment_id as i32)),
-                    Some(ScalarImpl::Int32(stats.actor_count as i32)),
-                    Some(ScalarImpl::Float64(F64::from(stats.backpressure_rate))),
-                    Some(ScalarImpl::Float64(F64::from(stats.recv_throughput))),
-                    Some(ScalarImpl::Float64(F64::from(stats.send_throughput))),
-                ];
-                println!("Generated row with {} columns: {:?}", row.len(), row);
-                rows.push(row);
-            }
+            let stats = &entry.channel_delta_stats;
+            let row = vec![
+                Some(ScalarImpl::Int32(entry.upstream_fragment_id as i32)),
+                Some(ScalarImpl::Int32(entry.downstream_fragment_id as i32)),
+                Some(ScalarImpl::Int32(stats.actor_count as i32)),
+                Some(ScalarImpl::Float64(F64::from(stats.backpressure_rate))),
+                Some(ScalarImpl::Float64(F64::from(stats.recv_throughput))),
+                Some(ScalarImpl::Float64(F64::from(stats.send_throughput))),
+            ];
+            println!("Generated row with {} columns: {:?}", row.len(), row);
+            rows.push(row);
         }
 
         println!("Total rows generated: {}", rows.len());
