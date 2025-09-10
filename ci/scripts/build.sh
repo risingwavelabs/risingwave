@@ -58,6 +58,7 @@ echo "--- Check link info"
 check_link_info "$profile"
 
 echo "--- Upload artifacts"
+
 echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && compress-and-upload-artifact ./{}-$profile"
 buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
 

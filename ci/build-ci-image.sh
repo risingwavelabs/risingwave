@@ -6,19 +6,25 @@ export DOCKER_BUILDKIT=1
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$DIR"
 
+
+: "${ACR_LOGIN_SERVER:?Set ACR_LOGIN_SERVER in environment}"
+: "${ACR_USERNAME:?Set ACR_USERNAME in environment}"
+: "${ACR_PASSWORD:?Set ACR_PASSWORD in environment}"
+
+
 cat ../rust-toolchain
 # shellcheck disable=SC2155
 
 # Import `BUILD_ENV_VERSION` from `.env`
 source .env
 
-export BUILD_TAG="public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION}"
+export BUILD_TAG="${ACR_LOGIN_SERVER}/${ACR_REPOSITORY}:${BUILD_ENV_VERSION}"
 
 echo "+++ Arch"
 arch
 
 echo "--- Docker login"
-aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/w1p7b4n3
+echo "${ACR_PASSWORD}" | docker login "${ACR_LOGIN_SERVER}" -u "${ACR_USERNAME}" --password-stdin
 
 echo "--- Check image existence"
 set +e
