@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::connector_common::{SslMode, create_pg_client};
 #[cfg(not(debug_assertions))]
@@ -462,12 +463,10 @@ impl ConnectorSourceWorker {
         .map_err(crate::MetaError::from)?;
 
         let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
-        let row = client.query_opt(query, &[&slot_name]).await.map_err(|e| {
-            anyhow::anyhow!(
-                "PostgreSQL query confirmed flush lsn error: {}",
-                e.as_report()
-            )
-        })?;
+        let row = client
+            .query_opt(query, &[&slot_name])
+            .await
+            .with_context(|| "PostgreSQL query confirmed flush lsn error")?;
 
         match row {
             Some(row) => {
