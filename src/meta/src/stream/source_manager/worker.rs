@@ -372,7 +372,7 @@ impl ConnectorSourceWorker {
                     if let Some(slot_name) = cdc_props.properties.get("slot.name") {
                         // Update metrics
                         metrics
-                            .pg_cdc_confirm_flush_lsn
+                            .pg_cdc_confirmed_flush_lsn
                             .with_guarded_label_values(&[&source_id.to_string(), slot_name])
                             .set(lsn as i64);
                         tracing::debug!(
