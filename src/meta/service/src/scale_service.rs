@@ -111,7 +111,7 @@ impl ScaleService for ScaleServiceImpl {
             })
             .collect();
 
-        let sources = self.metadata_manager.list_sources().await?;
+        let sources = self.metadata_manager.list_sources(true).await?;
         let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();
 
         Ok(Response::new(GetClusterInfoResponse {

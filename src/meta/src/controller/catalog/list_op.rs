@@ -188,9 +188,9 @@ impl CatalogController {
             .collect())
     }
 
-    pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
+    pub async fn list_sources(&self, display_credentials: bool) -> MetaResult<Vec<PbSource>> {
         let inner = self.inner.read().await;
-        inner.list_sources().await
+        inner.list_sources(display_credentials).await
     }
 
     // Return a hashmap to distinguish whether each source is shared or not.

@@ -319,7 +319,7 @@ impl SourceManager {
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
-            let sources = metadata_manager.list_sources().await?;
+            let sources = metadata_manager.list_sources(true).await?;
             for source in sources {
                 create_source_worker_async(source, &mut managed_sources, metrics.clone())?
             }

@@ -627,7 +627,7 @@ impl DiagnoseCommand {
         let sources = self
             .metadata_manager
             .catalog_controller
-            .list_sources()
+            .list_sources(false)
             .await?
             .into_iter()
             .map(|s| {

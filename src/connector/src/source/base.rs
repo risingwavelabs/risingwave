@@ -575,6 +575,22 @@ impl ConnectorProperties {
         )
     }
 
+    pub fn allow_display_props_source(
+        with_properties: &impl WithPropertiesExt,
+    ) -> crate::error::ConnectorResult<Vec<bool>> {
+        let connector = with_properties
+            .get_connector()
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
+            .to_lowercase();
+        let key_iter = with_properties.key_iter();
+        match_source_name_str!(
+            connector.as_str(),
+            PropType,
+            Ok(PropType::allow_display_props(key_iter)),
+            |other| bail!("connector '{}' is not supported", other)
+        )
+    }
+
     pub fn enable_drop_split(&self) -> bool {
         // enable split scale in just for Kinesis
         matches!(

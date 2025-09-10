@@ -254,7 +254,11 @@ pub(super) mod handlers {
     }
 
     pub async fn list_sources(Extension(srv): Extension<Service>) -> Result<Json<Vec<Source>>> {
-        let sources = srv.metadata_manager.list_sources().await.map_err(err)?;
+        let sources = srv
+            .metadata_manager
+            .list_sources(false)
+            .await
+            .map_err(err)?;
 
         Ok(Json(sources))
     }
