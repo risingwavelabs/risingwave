@@ -1550,7 +1550,7 @@ impl SessionManagerImpl {
                     } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
                         UserAuthenticator::OAuth {
                             metadata: auth_info.metadata.clone(),
-                            cluster_id: self.env.meta_client().cluster_id().to_string(),
+                            cluster_id: self.env.meta_client().cluster_id().to_owned(),
                         }
                     } else {
                         return Err(Box::new(Error::new(

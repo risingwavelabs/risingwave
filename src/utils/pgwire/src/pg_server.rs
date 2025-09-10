@@ -205,14 +205,29 @@ async fn validate_jwt(
     cluster_id: &str,
     metadata: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
-    let header = decode_header(jwt)?;
+    let _header = decode_header(jwt)?;
     let jwks: Jwks = reqwest::get(jwks_url).await?.json().await?;
+    validate_jwt_with_jwks(jwt, &jwks, issuer, cluster_id, metadata)
+}
+
+fn audience_from_cluster_id(cluster_id: &str) -> String {
+    format!("urn:risingwave:cluster:{}", cluster_id)
+}
+
+fn validate_jwt_with_jwks(
+    jwt: &str,
+    jwks: &Jwks,
+    issuer: &str,
+    cluster_id: &str,
+    metadata: &HashMap<String, String>,
+) -> Result<bool, BoxedError> {
+    let header = decode_header(jwt)?;
 
     // 1. Retrieve the kid from the header to find the right JWK in the JWK Set.
     let kid = header.kid.ok_or("JWT header missing 'kid' field")?;
     let jwk = jwks
         .keys
-        .into_iter()
+        .iter()
         .find(|k| k.kid == kid)
         .ok_or(format!("No matching key found in JWKS for kid: '{}'", kid))?;
 
@@ -225,7 +240,7 @@ async fn validate_jwt(
     let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
     let mut validation = Validation::new(header.alg);
     validation.set_issuer(&[issuer]);
-    validation.set_audience(&[cluster_id]); // JWT 'aud' claim must match cluster_id
+    validation.set_audience(&[audience_from_cluster_id(cluster_id)]); // JWT 'aud' claim must match cluster_id
     validation.set_required_spec_claims(&["exp", "iss", "aud"]);
     let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
 
@@ -589,5 +604,347 @@ mod tests {
             format!("host={} port={}", dir.path().to_str().unwrap(), port),
         )
         .await;
+    }
+
+    mod jwt_validation_tests {
+        use std::collections::HashMap;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        use base64::Engine;
+        use jsonwebtoken::{Algorithm, EncodingKey, Header};
+        use rsa::pkcs1::EncodeRsaPrivateKey;
+        use rsa::traits::PublicKeyParts;
+        use rsa::{RsaPrivateKey, RsaPublicKey};
+        use serde_json::json;
+
+        use crate::pg_server::{Jwk, Jwks, validate_jwt_with_jwks};
+
+        fn create_test_rsa_keys() -> (RsaPrivateKey, RsaPublicKey) {
+            let mut rng = rand::thread_rng();
+            let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("failed to generate a key");
+            let public_key = RsaPublicKey::from(&private_key);
+            (private_key, public_key)
+        }
+
+        fn create_test_jwks(public_key: &RsaPublicKey, kid: &str, alg: &str) -> Jwks {
+            let n = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(&public_key.n().to_bytes_be());
+            let e = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(&public_key.e().to_bytes_be());
+
+            Jwks {
+                keys: vec![Jwk {
+                    kid: kid.to_string(),
+                    alg: alg.to_string(),
+                    n,
+                    e,
+                }],
+            }
+        }
+
+        fn create_jwt_token(
+            private_key: &RsaPrivateKey,
+            kid: &str,
+            algorithm: Algorithm,
+            issuer: &str,
+            audience: Option<&str>,
+            exp: u64,
+            additional_claims: HashMap<String, serde_json::Value>,
+        ) -> String {
+            let mut header = Header::new(algorithm);
+            header.kid = Some(kid.to_string());
+
+            let mut claims = json!({
+                "iss": issuer,
+                "exp": exp,
+            });
+
+            if let Some(aud) = audience {
+                claims["aud"] = json!(aud);
+            }
+
+            for (key, value) in additional_claims {
+                claims[key] = value;
+            }
+
+            let encoding_key = EncodingKey::from_rsa_pem(
+                &private_key
+                    .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
+                    .unwrap()
+                    .as_bytes(),
+            )
+            .unwrap();
+
+            jsonwebtoken::encode(&header, &claims, &encoding_key).unwrap()
+        }
+
+        fn get_future_timestamp() -> u64 {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                + 3600 // 1 hour from now
+        }
+
+        fn get_past_timestamp() -> u64 {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 3600 // 1 hour ago
+        }
+
+        #[test]
+        fn test_jwt_with_invalid_audience() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let jwks = create_test_jwks(&public_key, "test-kid", "RS256");
+
+            let metadata = HashMap::new();
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "test-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                Some("urn:risingwave:cluster:wrong-cluster-id"),
+                get_future_timestamp(),
+                HashMap::new(),
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &metadata,
+            );
+
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains("InvalidAudience"));
+        }
+
+        #[test]
+        fn test_jwt_with_missing_audience() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let jwks = create_test_jwks(&public_key, "test-kid", "RS256");
+
+            let metadata = HashMap::new();
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "test-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                None, // No audience claim
+                get_future_timestamp(),
+                HashMap::new(),
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &metadata,
+            );
+
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains("Missing required claim: aud"));
+        }
+
+        #[test]
+        fn test_jwt_with_invalid_issuer() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let jwks = create_test_jwks(&public_key, "test-kid", "RS256");
+
+            let metadata = HashMap::new();
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "test-kid",
+                Algorithm::RS256,
+                "https://wrong-issuer.com",
+                Some("urn:risingwave:cluster:test-cluster-id"),
+                get_future_timestamp(),
+                HashMap::new(),
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &metadata,
+            );
+
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains("InvalidIssuer"));
+        }
+
+        #[test]
+        fn test_jwt_with_kid_not_found_in_jwks() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let jwks = create_test_jwks(&public_key, "different-kid", "RS256");
+
+            let metadata = HashMap::new();
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "missing-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                Some("urn:risingwave:cluster:test-cluster-id"),
+                get_future_timestamp(),
+                HashMap::new(),
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &metadata,
+            );
+
+            let error = result.unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("No matching key found in JWKS for kid: 'missing-kid'")
+            );
+        }
+
+        #[test]
+        fn test_jwt_with_expired_token() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let jwks = create_test_jwks(&public_key, "test-kid", "RS256");
+
+            let metadata = HashMap::new();
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "test-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                Some("urn:risingwave:cluster:test-cluster-id"),
+                get_past_timestamp(), // Expired token
+                HashMap::new(),
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &metadata,
+            );
+
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains("ExpiredSignature"));
+        }
+
+        #[test]
+        fn test_jwt_with_invalid_signature() {
+            let (_, public_key) = create_test_rsa_keys();
+            let (wrong_private_key, _) = create_test_rsa_keys(); // Different key pair
+            let jwks = create_test_jwks(&public_key, "test-kid", "RS256");
+
+            let metadata = HashMap::new();
+
+            // Sign with wrong private key
+            let jwt = create_jwt_token(
+                &wrong_private_key,
+                "test-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                Some("urn:risingwave:cluster:test-cluster-id"),
+                get_future_timestamp(),
+                HashMap::new(),
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &metadata,
+            );
+
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains("InvalidSignature"));
+        }
+
+        #[test]
+        fn test_metadata_validation_success() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let jwks = create_test_jwks(&public_key, "test-kid", "RS256");
+
+            let mut metadata = HashMap::new();
+            metadata.insert("role".to_string(), "admin".to_string());
+            metadata.insert("department".to_string(), "security".to_string());
+
+            let mut claims = HashMap::new();
+            claims.insert("role".to_string(), json!("admin"));
+            claims.insert("department".to_string(), json!("security"));
+            claims.insert("extra_claim".to_string(), json!("ignored")); // Extra claims are fine
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "test-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                Some("urn:risingwave:cluster:test-cluster-id"),
+                get_future_timestamp(),
+                claims,
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &metadata,
+            );
+
+            assert_eq!(result.unwrap(), true);
+        }
+
+        #[test]
+        fn test_metadata_validation_failure() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let jwks = create_test_jwks(&public_key, "test-kid", "RS256");
+
+            let mut metadata = HashMap::new();
+            metadata.insert("role".to_string(), "admin".to_string());
+            metadata.insert("department".to_string(), "security".to_string());
+
+            let mut claims = HashMap::new();
+            claims.insert("role".to_string(), json!("user")); // Wrong role
+            claims.insert("department".to_string(), json!("security"));
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "test-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                Some("urn:risingwave:cluster:test-cluster-id"),
+                get_future_timestamp(),
+                claims,
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &metadata,
+            );
+
+            let error = result.unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "metadata in jwt does not match with metadata declared with user"
+            );
+        }
     }
 }
