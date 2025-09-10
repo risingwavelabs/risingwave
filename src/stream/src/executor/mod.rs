@@ -119,6 +119,7 @@ mod row_merge;
 #[cfg(test)]
 mod integration_tests;
 mod sync_kv_log_store;
+#[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod utils;
 mod vector_index;
@@ -186,8 +187,9 @@ pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::source::cdc::{
-    CdcTableSnapshotSplitAssignment, build_actor_cdc_table_snapshot_splits,
-    build_pb_actor_cdc_table_snapshot_splits,
+    CdcTableSnapshotSplitAssignmentWithGeneration,
+    build_actor_cdc_table_snapshot_splits_with_generation,
+    build_pb_actor_cdc_table_snapshot_splits_with_generation,
 };
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
@@ -321,7 +323,7 @@ pub struct UpdateMutation {
     pub dropped_actors: HashSet<ActorId>,
     pub actor_splits: SplitAssignments,
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
-    pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignment,
+    pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub sink_add_columns: HashMap<SinkId, Vec<Field>>,
 }
 
@@ -337,7 +339,7 @@ pub struct AddMutation {
     pub subscriptions_to_add: Vec<(TableId, u32)>,
     /// nodes which should start backfill
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
-    pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignment,
+    pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
 }
 
@@ -808,9 +810,11 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
-                    actor_cdc_table_snapshot_splits.clone(),
-                ),
+                actor_cdc_table_snapshot_splits:
+                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                        actor_cdc_table_snapshot_splits.clone(),
+                    )
+                    .into(),
                 sink_add_columns: sink_add_columns
                     .iter()
                     .map(|(sink_id, add_columns)| {
@@ -855,9 +859,11 @@ impl Mutation {
                     })
                     .collect(),
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
-                actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
-                    actor_cdc_table_snapshot_splits.clone(),
-                ),
+                actor_cdc_table_snapshot_splits:
+                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                        actor_cdc_table_snapshot_splits.clone(),
+                    )
+                    .into(),
                 new_upstream_sinks: new_upstream_sinks
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
@@ -989,9 +995,13 @@ impl Mutation {
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
-                actor_cdc_table_snapshot_splits: build_actor_cdc_table_snapshot_splits(
-                    update.actor_cdc_table_snapshot_splits.clone(),
-                ),
+                actor_cdc_table_snapshot_splits:
+                    build_actor_cdc_table_snapshot_splits_with_generation(
+                        update
+                            .actor_cdc_table_snapshot_splits
+                            .clone()
+                            .unwrap_or_default(),
+                    ),
                 sink_add_columns: update
                     .sink_add_columns
                     .iter()
@@ -1041,9 +1051,12 @@ impl Mutation {
                     )
                     .collect(),
                 backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
-                actor_cdc_table_snapshot_splits: build_actor_cdc_table_snapshot_splits(
-                    add.actor_cdc_table_snapshot_splits.clone(),
-                ),
+                actor_cdc_table_snapshot_splits:
+                    build_actor_cdc_table_snapshot_splits_with_generation(
+                        add.actor_cdc_table_snapshot_splits
+                            .clone()
+                            .unwrap_or_default(),
+                    ),
                 new_upstream_sinks: add
                     .new_upstream_sinks
                     .iter()

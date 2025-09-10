@@ -333,6 +333,11 @@ impl TableScan {
             .collect();
         Schema { fields }
     }
+
+    // Check if the scan is cross-database
+    pub(crate) fn cross_database(&self) -> bool {
+        self.table_catalog.database_id != self.ctx().session_ctx().database_id()
+    }
 }
 
 impl GenericPlanNode for TableScan {

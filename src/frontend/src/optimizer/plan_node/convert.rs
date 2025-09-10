@@ -55,6 +55,10 @@ pub trait ToStream {
         let ret = self.to_stream(ctx)?;
         required_dist.streaming_enforce_if_not_satisfies(ret)
     }
+
+    fn try_better_locality(&self, _columns: &[usize]) -> Option<LogicalPlanRef> {
+        None
+    }
 }
 
 pub fn stream_enforce_eowc_requirement(

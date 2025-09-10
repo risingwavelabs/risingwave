@@ -41,6 +41,7 @@ pub struct BatchVectorSearchCore {
     pub index_table_id: TableId,
     pub info_column_desc: Vec<ColumnDesc>,
     pub vector_column_idx: usize,
+    pub hnsw_ef_search: Option<usize>,
     #[educe(Hash(ignore), Eq(ignore))]
     pub ctx: OptimizerContextRef,
 }
@@ -103,7 +104,7 @@ impl BatchVectorSearch {
 
 impl Distill for BatchVectorSearch {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let fields = vec![
+        let mut fields = vec![
             (
                 "schema",
                 Pretty::Array(self.schema().fields.iter().map(Pretty::debug).collect()),
@@ -125,6 +126,9 @@ impl Distill for BatchVectorSearch {
                 }),
             ),
         ];
+        if let Some(hnsw_ef_search) = self.core.hnsw_ef_search {
+            fields.push(("hnsw_ef_search", Pretty::debug(&hnsw_ef_search)));
+        }
         childless_record("BatchVectorSearch", fields)
     }
 }
@@ -156,6 +160,7 @@ impl ToBatchPb for BatchVectorSearch {
             vector_column_idx: self.core.vector_column_idx as _,
             top_n: self.core.top_n as _,
             distance_type: self.core.distance_type as _,
+            hnsw_ef_search: self.core.hnsw_ef_search.unwrap_or(0) as _,
         })
     }
 }

@@ -21,7 +21,7 @@ use super::agg_common::{
     build_agg_state_storages_from_proto, build_distinct_dedup_table_from_proto,
 };
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::aggregate::{AggExecutorArgs, SimpleAggExecutor, SimpleAggExecutorExtraArgs};
 
 pub struct SimpleAggExecutorBuilder;
@@ -40,19 +40,29 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .iter()
             .map(AggCall::from_protobuf)
             .try_collect()?;
-        let storages =
-            build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
-                .await;
+        let storages = build_agg_state_storages_from_proto(
+            node.get_agg_call_states(),
+            store.clone(),
+            None,
+            &params.actor_context.streaming_config,
+        )
+        .await;
         // disable sanity check so that old value is not required when updating states
-        let intermediate_state_table = StateTable::from_table_catalog(
+        let intermediate_state_table = StateTableBuilder::new(
             node.get_intermediate_state_table().unwrap(),
             store.clone(),
             None,
         )
+        .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+        .build()
         .await;
-        let distinct_dedup_tables =
-            build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
-                .await;
+        let distinct_dedup_tables = build_distinct_dedup_table_from_proto(
+            node.get_distinct_dedup_tables(),
+            store,
+            None,
+            &params.actor_context.streaming_config,
+        )
+        .await;
         let must_output_per_barrier = node.get_must_output_per_barrier();
 
         let exec = SimpleAggExecutor::new(AggExecutorArgs {

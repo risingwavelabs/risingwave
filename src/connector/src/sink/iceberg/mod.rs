@@ -575,11 +575,6 @@ impl Sink for IcebergSink {
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
-        if self.config.enable_compaction {
-            risingwave_common::license::Feature::IcebergCompaction
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
 
         let _ = self.create_and_validate_table().await?;
         Ok(())

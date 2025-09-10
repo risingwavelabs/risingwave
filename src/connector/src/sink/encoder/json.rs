@@ -313,7 +313,7 @@ fn datum_to_json_object(
             json!(vec)
         }
         (DataType::Vector(_), ScalarRefImpl::Vector(vector)) => {
-            let elems = vector.into_slice();
+            let elems = vector.as_raw_slice();
             let mut vec = Vec::with_capacity(elems.len());
             for v in elems {
                 let value = serde_json::Number::from_f64(*v as _)

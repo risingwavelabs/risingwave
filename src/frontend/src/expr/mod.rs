@@ -72,8 +72,8 @@ pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
 pub use window_function::WindowFunction;
 
-const EXPR_DEPTH_THRESHOLD: usize = 30;
-const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicated. \
+pub(crate) const EXPR_DEPTH_THRESHOLD: usize = 30;
+pub(crate) const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicated. \
 Consider simplifying or splitting the query if you encounter any issues.";
 
 /// the trait of bound expressions
@@ -578,11 +578,8 @@ impl ExprImpl {
         collector.correlated_indices
     }
 
-    /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
-    ///
-    /// The expression tree should only consist of literals and **pure** function calls.
-    pub fn is_const(&self) -> bool {
-        let only_literal_and_func = {
+    pub fn only_literal_and_func(&self) -> bool {
+        {
             struct HasOthers {
                 has_others: bool,
             }
@@ -637,11 +634,14 @@ impl ExprImpl {
             let mut visitor = HasOthers { has_others: false };
             visitor.visit_expr(self);
             !visitor.has_others
-        };
+        }
+    }
 
-        let is_pure = self.is_pure();
-
-        only_literal_and_func && is_pure
+    /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
+    ///
+    /// The expression tree should only consist of literals and **pure** function calls.
+    pub fn is_const(&self) -> bool {
+        self.only_literal_and_func() && self.is_pure()
     }
 
     /// Returns the `InputRefs` of an Equality predicate if it matches

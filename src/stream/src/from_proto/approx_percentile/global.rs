@@ -14,7 +14,7 @@
 
 use risingwave_pb::stream_plan::GlobalApproxPercentileNode;
 
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::GlobalApproxPercentileExecutor;
 use crate::from_proto::*;
 
@@ -37,9 +37,14 @@ impl ExecutorBuilder for GlobalApproxPercentileExecutorBuilder {
             .count_state_table
             .as_ref()
             .expect("count_state_table not provided");
-        let bucket_state_table =
-            StateTable::from_table_catalog(bucket_table, store.clone(), None).await;
-        let count_state_table = StateTable::from_table_catalog(count_table, store, None).await;
+        let bucket_state_table = StateTableBuilder::new(bucket_table, store.clone(), None)
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
+        let count_state_table = StateTableBuilder::new(count_table, store, None)
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
         let exec = GlobalApproxPercentileExecutor::new(
             params.actor_context,
             input,

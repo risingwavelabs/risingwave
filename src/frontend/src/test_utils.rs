@@ -46,8 +46,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    DdlProgress, PbTableJobType, ReplaceJobPlan, TableJobType, alter_name_request,
-    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
+    DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
+    alter_swap_rename_request, create_connection_request,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -56,6 +56,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -377,7 +378,6 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        _affected_table_change: Option<ReplaceJobPlan>,
         _dependencies: HashSet<ObjectId>,
         _if_not_exists: bool,
     ) -> Result<()> {
@@ -517,12 +517,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(
-        &self,
-        sink_id: u32,
-        cascade: bool,
-        _target_table_change: Option<ReplaceJobPlan>,
-    ) -> Result<()> {
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_owned(),
@@ -1181,6 +1176,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_rate_limits(&self) -> RpcResult<Vec<RateLimitInfo>> {
         Ok(vec![])
+    }
+
+    async fn list_cdc_progress(&self) -> RpcResult<HashMap<u32, PbCdcProgress>> {
+        Ok(HashMap::default())
     }
 
     async fn get_meta_store_endpoint(&self) -> RpcResult<String> {

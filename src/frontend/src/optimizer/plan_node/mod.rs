@@ -1083,6 +1083,7 @@ mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_union;
+mod stream_upstream_sink_union;
 mod stream_vector_index_write;
 pub mod utils;
 
@@ -1196,6 +1197,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
+pub use stream_upstream_sink_union::StreamUpstreamSinkUnion;
 pub use stream_values::StreamValues;
 pub use stream_vector_index_write::StreamVectorIndexWrite;
 pub use stream_watermark_filter::StreamWatermarkFilter;
@@ -1337,6 +1339,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, SyncLogStore }
             , { Stream, MaterializedExprs }
             , { Stream, VectorIndexWrite }
+            , { Stream, UpstreamSinkUnion }
             $(,$rest)*
         }
     };
