@@ -462,10 +462,12 @@ impl ConnectorSourceWorker {
         .map_err(crate::MetaError::from)?;
 
         let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
-        let row = client
-            .query_opt(query, &[&slot_name])
-            .await
-            .map_err(|e| anyhow::anyhow!("PostgreSQL query confirmed flush lsn error: {}", e.as_report()))?;
+        let row = client.query_opt(query, &[&slot_name]).await.map_err(|e| {
+            anyhow::anyhow!(
+                "PostgreSQL query confirmed flush lsn error: {}",
+                e.as_report()
+            )
+        })?;
 
         match row {
             Some(row) => {
