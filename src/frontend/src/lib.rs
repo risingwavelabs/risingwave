@@ -190,6 +190,12 @@ pub struct FrontendOpts {
     /// Optional, used for querying Prometheus metrics from the frontend.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     pub prometheus_endpoint: Option<String>,
+
+    /// The additional selector used when querying Prometheus.
+    ///
+    /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
+    #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
+    pub prometheus_selector: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
