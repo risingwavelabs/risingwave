@@ -81,7 +81,6 @@ impl GetChannelDeltaStatsExecutor {
             let row = vec![
                 Some(ScalarImpl::Int32(entry.upstream_fragment_id as i32)),
                 Some(ScalarImpl::Int32(entry.downstream_fragment_id as i32)),
-                Some(ScalarImpl::Int32(stats.actor_count as i32)),
                 Some(ScalarImpl::Float64(F64::from(stats.backpressure_rate))),
                 Some(ScalarImpl::Float64(F64::from(stats.recv_throughput))),
                 Some(ScalarImpl::Float64(F64::from(stats.send_throughput))),
@@ -159,7 +158,6 @@ impl BoxedExecutorBuilder for GetChannelDeltaStatsExecutor {
         let fields = vec![
             Field::new("upstream_fragment_id", DataType::Int32),
             Field::new("downstream_fragment_id", DataType::Int32),
-            Field::new("upstream_actor_count", DataType::Int32),
             Field::new("backpressure_rate", DataType::Float64),
             Field::new("recv_throughput", DataType::Float64),
             Field::new("send_throughput", DataType::Float64),
