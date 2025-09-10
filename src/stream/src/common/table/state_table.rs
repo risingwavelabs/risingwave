@@ -568,7 +568,6 @@ where
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
-    #[cfg(any(test, feature = "test"))]
     pub async fn from_table_catalog_inconsistent_op(
         table_catalog: &Table,
         store: S,

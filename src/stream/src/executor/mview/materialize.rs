@@ -718,8 +718,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 }
 
                 // Process collected rows for deletion
-                tracing::trace!(?rows_to_delete, "on_load_finish: rows to delete");
-                // let to_delete_chunk = StreamChunk::from_rows(rows, data_types)
                 for row in &rows_to_delete {
                     self.state_table.delete(row);
                 }
