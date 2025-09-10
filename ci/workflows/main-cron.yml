@@ -354,7 +354,7 @@ steps:
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 60
-    parallelism: 4
+    parallelism: 2
     retry: *auto-retry
   - label: "preload-memory recovery test (madsim)"
     key: "preload-memory-recovery-test-deterministic"
@@ -368,7 +368,7 @@ steps:
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 60
-    parallelism: 4
+    parallelism: 2
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
@@ -385,7 +385,7 @@ steps:
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 60
-    parallelism: 4
+    parallelism: 2
     retry: *auto-retry
 
   - label: "end-to-end iceberg test (release)"
