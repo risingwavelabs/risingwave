@@ -326,7 +326,7 @@ impl CatalogController {
     }
 
     pub fn compose_table_fragments(
-        shared_actor_infos: &SharedActorInfos,
+        _shared_actor_infos: &SharedActorInfos,
         table_id: u32,
         state: PbState,
         ctx: Option<PbStreamContext>,
