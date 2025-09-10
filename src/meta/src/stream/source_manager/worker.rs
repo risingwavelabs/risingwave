@@ -465,7 +465,7 @@ impl ConnectorSourceWorker {
         let row = client
             .query_opt(query, &[&slot_name])
             .await
-            .map_err(|e| anyhow::anyhow!("PostgreSQL query error: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("PostgreSQL query confirmed flush lsn error: {}", e.as_report()))?;
 
         match row {
             Some(row) => {
