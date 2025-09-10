@@ -35,6 +35,7 @@ use pgwire::pg_server::{
     UserAuthenticator,
 };
 use pgwire::types::{Format, FormatIterator};
+use prometheus_http_query;
 use rand::RngCore;
 use risingwave_batch::monitor::{BatchSpillMetrics, GLOBAL_BATCH_SPILL_METRICS};
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -185,6 +186,9 @@ pub(crate) struct FrontendEnv {
 
     /// address of the serverless backfill controller.
     serverless_backfill_controller_addr: String,
+
+    /// Prometheus client for querying metrics.
+    prometheus_client: Option<prometheus_http_query::Client>,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -268,6 +272,7 @@ impl FrontendEnv {
             compute_runtime,
             mem_context: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
+            prometheus_client: None,
         }
     }
 
@@ -486,6 +491,22 @@ impl FrontendEnv {
             batch_memory_limit as u64,
         );
 
+        // Initialize Prometheus client if endpoint is provided
+        let prometheus_client = if let Some(ref endpoint) = opts.prometheus_endpoint {
+            match prometheus_http_query::Client::try_from(endpoint.as_str()) {
+                Ok(client) => {
+                    info!("Prometheus client initialized with endpoint: {}", endpoint);
+                    Some(client)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize Prometheus client: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         info!(
             "Frontend  total_memory: {} batch_memory: {}",
             convert(total_memory_bytes as _),
@@ -521,6 +542,7 @@ impl FrontendEnv {
                 creating_streaming_job_tracker,
                 compute_runtime,
                 mem_context,
+                prometheus_client,
             },
             join_handles,
             shutdown_senders,
@@ -583,6 +605,11 @@ impl FrontendEnv {
 
     pub fn sbc_address(&self) -> &String {
         &self.serverless_backfill_controller_addr
+    }
+
+    /// Get a reference to the Prometheus client if available.
+    pub fn prometheus_client(&self) -> Option<&prometheus_http_query::Client> {
+        self.prometheus_client.as_ref()
     }
 
     pub fn server_address(&self) -> &HostAddr {

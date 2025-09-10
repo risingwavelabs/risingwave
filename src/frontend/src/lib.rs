@@ -185,6 +185,11 @@ pub struct FrontendOpts {
     /// Feature disabled by default.
     #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
     pub serverless_backfill_controller_addr: String,
+
+    /// Prometheus endpoint URL for querying metrics.
+    /// Optional, used for querying Prometheus metrics from the frontend.
+    #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
+    pub prometheus_endpoint: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
