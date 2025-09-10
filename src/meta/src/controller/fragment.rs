@@ -66,7 +66,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::barrier::SnapshotBackfillInfo;
+use crate::barrier::{SharedActorInfos, SnapshotBackfillInfo};
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
@@ -326,6 +326,7 @@ impl CatalogController {
     }
 
     pub fn compose_table_fragments(
+        shared_actor_infos: &SharedActorInfos,
         table_id: u32,
         state: PbState,
         ctx: Option<PbStreamContext>,
@@ -335,16 +336,30 @@ impl CatalogController {
         job_definition: Option<String>,
     ) -> MetaResult<StreamJobFragments> {
         let mut pb_fragments = BTreeMap::new();
-        let mut pb_actor_splits = HashMap::new();
+        let mut actor_splits = HashMap::new();
         let mut pb_actor_status = BTreeMap::new();
 
         for (fragment, actors) in fragments {
             let (fragment, fragment_actor_status, fragment_actor_splits) =
                 Self::compose_fragment(fragment, actors, job_definition.clone())?;
 
+            let fragment_actor_splits = {
+                let guard = shared_actor_infos.read_guard();
+                guard
+                    .get_fragment(fragment.fragment_id)
+                    .map(|info| {
+                        info.actors
+                            .iter()
+                            .map(|(actor_id, actor_info)| (*actor_id, actor_info.splits.clone()))
+                            .collect_vec()
+                    })
+                    .unwrap_or_default()
+            };
+
+            actor_splits.extend(fragment_actor_splits.into_iter());
             pb_fragments.insert(fragment.fragment_id, fragment);
 
-            pb_actor_splits.extend(build_actor_split_impls(&fragment_actor_splits));
+            // pb_actor_splits.extend(build_actor_split_impls(&fragment_actor_splits));
             pb_actor_status.extend(fragment_actor_status.into_iter());
         }
 
@@ -353,7 +368,7 @@ impl CatalogController {
             state: state as _,
             fragments: pb_fragments,
             actor_status: pb_actor_status,
-            actor_splits: pb_actor_splits,
+            actor_splits,
             ctx: ctx
                 .as_ref()
                 .map(StreamContext::from_protobuf)
@@ -630,6 +645,7 @@ impl CatalogController {
             .remove(&job_id);
 
         Self::compose_table_fragments(
+            self.env.shared_actor_infos(),
             job_id as _,
             job_info.job_status.into(),
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
@@ -856,6 +872,7 @@ impl CatalogController {
             table_fragments.insert(
                 job.job_id as ObjectId,
                 Self::compose_table_fragments(
+                    self.env.shared_actor_infos(),
                     job.job_id as _,
                     job.job_status.into(),
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),

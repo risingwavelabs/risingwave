@@ -466,7 +466,6 @@ impl ScaleController {
                     actor_id,
                     fragment_id,
                     status: _,
-                    splits: _,
                     worker_id,
                     vnode_bitmap,
                     expr_context,
