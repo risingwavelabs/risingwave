@@ -66,7 +66,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::barrier::SnapshotBackfillInfo;
+use crate::barrier::{SharedActorInfos, SnapshotBackfillInfo};
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
@@ -88,6 +88,7 @@ use crate::{MetaError, MetaResult};
 pub struct InflightActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<Bitmap>,
+    pub splits: Vec<SplitImpl>,
 }
 
 #[derive(Clone, Debug)]
@@ -325,6 +326,7 @@ impl CatalogController {
     }
 
     pub fn compose_table_fragments(
+        _shared_actor_infos: &SharedActorInfos,
         table_id: u32,
         state: PbState,
         ctx: Option<PbStreamContext>,
@@ -625,6 +627,7 @@ impl CatalogController {
             .remove(&job_id);
 
         Self::compose_table_fragments(
+            self.env.shared_actor_infos(),
             job_id as _,
             job_info.job_status.into(),
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
@@ -851,6 +854,7 @@ impl CatalogController {
             table_fragments.insert(
                 job.job_id as ObjectId,
                 Self::compose_table_fragments(
+                    self.env.shared_actor_infos(),
                     job.job_id as _,
                     job.job_status.into(),
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),
@@ -1102,6 +1106,7 @@ impl CatalogController {
                     ActorId,
                     WorkerId,
                     Option<VnodeBitmap>,
+                    Option<ConnectorSplits>,
                     FragmentId,
                     StreamNode,
                     I32Array,
@@ -1116,6 +1121,7 @@ impl CatalogController {
             .column(actor::Column::ActorId)
             .column(actor::Column::WorkerId)
             .column(actor::Column::VnodeBitmap)
+            .column(actor::Column::Splits)
             .column(fragment::Column::FragmentId)
             .column(fragment::Column::StreamNode)
             .column(fragment::Column::StateTableIds)
@@ -1136,6 +1142,7 @@ impl CatalogController {
             actor_id,
             worker_id,
             vnode_bitmap,
+            splits,
             fragment_id,
             node,
             state_table_ids,
@@ -1154,9 +1161,20 @@ impl CatalogController {
                 .into_iter()
                 .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
                 .collect();
+
             let actor_info = InflightActorInfo {
                 worker_id,
                 vnode_bitmap: vnode_bitmap.map(|bitmap| bitmap.to_protobuf().into()),
+                splits: splits
+                    .map(|connector_splits| {
+                        connector_splits
+                            .to_protobuf()
+                            .splits
+                            .iter()
+                            .map(|connector_split| SplitImpl::try_from(connector_split).unwrap())
+                            .collect_vec()
+                    })
+                    .unwrap_or_default(),
             };
             match fragment_infos.entry(fragment_id) {
                 Entry::Occupied(mut entry) => {
@@ -1403,6 +1421,36 @@ impl CatalogController {
                 })?;
             }
         }
+        txn.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn update_source_splits(
+        &self,
+        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        for (source_id, splits) in source_splits {
+            let model = source_splits::ActiveModel {
+                source_id: Set(*source_id as _),
+                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
+                    splits: splits.iter().map(Into::into).collect_vec(),
+                }))),
+            };
+
+            SourceSplits::insert(model)
+                .on_conflict(
+                    OnConflict::column(source_splits::Column::SourceId)
+                        .update_column(source_splits::Column::Splits)
+                        .to_owned(),
+                )
+                .exec(&txn) // Execute the query within the transaction
+                .await?;
+        }
+
         txn.commit().await?;
 
         Ok(())

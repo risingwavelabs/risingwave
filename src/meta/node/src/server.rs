@@ -470,6 +470,7 @@ pub async fn start_service_as_election_leader(
             barrier_scheduler.clone(),
             metadata_manager.clone(),
             meta_metrics.clone(),
+            env.clone(),
         )
         .await
         .unwrap(),

@@ -74,8 +74,11 @@ use crate::model::{
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
+
     JobReschedulePostUpdates, SplitAssignment, SplitState, ThrottleConfig, UpstreamSinkInfo,
     build_actor_connector_splits,
+
+    SourceSplitsDiscovered,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -252,6 +255,11 @@ impl StreamJobFragments {
                                         .worker_id()
                                         as WorkerId,
                                     vnode_bitmap: actor.vnode_bitmap.clone(),
+                                    splits: self
+                                        .actor_splits
+                                        .get(&actor.actor_id)
+                                        .cloned()
+                                        .unwrap_or_default(),
                                 },
                             )
                         })
@@ -547,6 +555,11 @@ impl Command {
                                                         .0
                                                         .vnode_bitmap
                                                         .clone(),
+                                                    splits: reschedule
+                                                        .actor_splits
+                                                        .get(actor_id)
+                                                        .cloned()
+                                                        .unwrap_or_default(),
                                                 },
                                             )
                                         })
@@ -562,6 +575,7 @@ impl Command {
                                     .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
                                     .collect(),
                                 to_remove: reschedule.removed_actors.iter().cloned().collect(),
+                                actor_splits: reschedule.actor_splits.clone(),
                             },
                         )
                     })
