@@ -33,7 +33,7 @@ use tracing::Instrument;
 
 use crate::executor::UpdateMutation;
 use crate::executor::backfill::cdc::cdc_backfill::{
-    build_reader_and_poll_upstream, start_confirm_flush_lsn_monitor, transform_upstream,
+    build_reader_and_poll_upstream, transform_upstream,
 };
 use crate::executor::backfill::cdc::state_v2::ParallelizedCdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
@@ -162,21 +162,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         let mut state_impl =
             ParallelizedCdcBackfillState::new(self.state_table, METADATA_STATE_LEN);
         let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
-
-        // Start background task to periodically query confirm_flush_lsn for PostgreSQL CDC
-        let streaming_metrics = self.actor_ctx.streaming_metrics.clone();
-        let source_id = self.actor_ctx.id;
-        let slot_name = self.properties.get("slot.name").cloned();
-        let external_table = self.external_table.clone();
-
-        if let Some(slot_name) = slot_name {
-            start_confirm_flush_lsn_monitor(
-                streaming_metrics,
-                source_id,
-                slot_name,
-                external_table,
-            );
-        }
 
         // Need reset on CDC table snapshot splits reschedule.
         'with_cdc_table_snapshot_splits: loop {

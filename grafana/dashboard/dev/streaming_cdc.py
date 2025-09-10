@@ -102,7 +102,7 @@ def _(outer_panels: Panels):
                                         "source_id {{source_id}} - JNI Commit Offset LSN",
                                     ),
                                     panels.target(
-                                        f"{metric('stream_pg_cdc_confirm_flush_lsn')}",
+                                        f"{metric('pg_cdc_confirm_flush_lsn')}",
                                                                                  "slot {{slot_name}} source_id {{source_id}} - Confirmed Flush LSN",
                                     ),
                                 ],

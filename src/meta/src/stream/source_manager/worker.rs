@@ -13,17 +13,17 @@
 // limitations under the License.
 
 use risingwave_connector::WithPropertiesExt;
+use risingwave_connector::connector_common::{SslMode, create_pg_client};
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
-use risingwave_connector::source::cdc::{CdcProperties, Postgres};
 use risingwave_connector::source::base::ConnectorProperties;
-use risingwave_connector::connector_common::{create_pg_client, SslMode};
+use risingwave_connector::source::cdc::{CdcProperties, Postgres};
 use tokio_postgres::types::PgLsn;
+
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
-
 
 // The key used to load `SplitImpl` directly from source properties.
 // When this key is present, the enumerator will only return the given ones
@@ -362,12 +362,11 @@ impl ConnectorSourceWorker {
                 .collect(),
         );
 
-        // Monitor PostgreSQL CDC confirmed flush LSN
+        // Monitor Upstream PostgreSQL CDC confirmed flush LSN
         if let ConnectorProperties::PostgresCdc(cdc_props) = &self.connector_properties {
             let source_id = self.source_id;
             let metrics = self.metrics.clone();
-            println!("这里查一次");
-            match Self::query_confirm_flush_lsn(cdc_props).await {
+            match Self::query_confirmed_flush_lsn(cdc_props).await {
                 Ok(Some(lsn)) => {
                     // Get slot name from properties
                     if let Some(slot_name) = cdc_props.properties.get("slot.name") {
@@ -390,10 +389,7 @@ impl ConnectorSourceWorker {
                     }
                 }
                 Ok(None) => {
-                    tracing::warn!(
-                        "No confirmed_flush_lsn found for source {}",
-                        source_id
-                    );
+                    tracing::warn!("No confirmed_flush_lsn found for source {}", source_id);
                 }
                 Err(e) => {
                     tracing::error!(
@@ -419,10 +415,9 @@ impl ConnectorSourceWorker {
     }
 
     /// Query confirmed flush LSN from PostgreSQL using a simple client connection
-    async fn query_confirm_flush_lsn(
+    async fn query_confirmed_flush_lsn(
         cdc_props: &CdcProperties<Postgres>,
     ) -> MetaResult<Option<u64>> {
-        println!("这里cdc_props是: {:?}", cdc_props);
         // Extract connection parameters from CDC properties
         let hostname = cdc_props
             .properties
@@ -444,25 +439,15 @@ impl ConnectorSourceWorker {
             .properties
             .get("database.name")
             .ok_or_else(|| anyhow::anyhow!("database.name not found in CDC properties"))?;
-        
-        // Parse SSL mode (default to disabled if not specified)
-        // SSLMode直接用Preferred，不从properties读取
+
         let ssl_mode = SslMode::Preferred;
-        
-        let ssl_root_cert = cdc_props
-            .properties
-            .get("database.ssl.root.cert")
-            .cloned();
-        
+
+        let ssl_root_cert = cdc_props.properties.get("database.ssl.root.cert").cloned();
+
         let slot_name = cdc_props
             .properties
             .get("slot.name")
             .ok_or_else(|| anyhow::anyhow!("slot.name not found in CDC properties"))?;
-        
-        println!("Connecting to PostgreSQL: host={}, port={}, user={}, database={}, slot={}", 
-                 hostname, port, user, database, slot_name);
-
-        println!("create pg client的参数：user={}, password={}, hostname={}, port={}, database={}, ssl_mode={}, ssl_root_cert={:?}", user, password, hostname, port, database, ssl_mode, ssl_root_cert);
         // Create PostgreSQL client
         let client = create_pg_client(
             user,
@@ -474,27 +459,24 @@ impl ConnectorSourceWorker {
             &ssl_root_cert,
         )
         .await
-        .map_err(|e| crate::MetaError::from(e))?;
+        .map_err(crate::MetaError::from)?;
 
-        // Query confirmed_flush_lsn - use string interpolation instead of parameterized query
-        let query = format!("SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '{}'", slot_name);
-        println!("Executing query: {}", query);
-        
-        let row = client.query_opt(&query, &[]).await
+        let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
+        let row = client
+            .query_opt(query, &[&slot_name])
+            .await
             .map_err(|e| anyhow::anyhow!("PostgreSQL query error: {}", e))?;
 
-            match row {
-                Some(row) => {
-                    let confirm_flush_lsn: Option<PgLsn> = row.get(0);
-                    Ok(confirm_flush_lsn.map(|lsn| lsn.into()))
-                }
-                None => {
-                    tracing::warn!("No replication slot found with name: {}", slot_name);
-                    Ok(None)
-                }
-
+        match row {
+            Some(row) => {
+                let confirm_flush_lsn: Option<PgLsn> = row.get(0);
+                Ok(confirm_flush_lsn.map(|lsn| lsn.into()))
             }
-       
+            None => {
+                tracing::warn!("No replication slot found with name: {}", slot_name);
+                Ok(None)
+            }
+        }
     }
 }
 

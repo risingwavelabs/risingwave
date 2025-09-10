@@ -168,7 +168,16 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-        println!("create pg client的参数：user={}, password={}, hostname={}, port={}, database={}, ssl_mode={}, ssl_root_cert={:?}", config.username, config.password, config.host, config.port, config.database, config.ssl_mode, config.ssl_root_cert);
+        println!(
+            "create pg client的参数：user={}, password={}, hostname={}, port={}, database={}, ssl_mode={}, ssl_root_cert={:?}",
+            config.username,
+            config.password,
+            config.host,
+            config.port,
+            config.database,
+            config.ssl_mode,
+            config.ssl_root_cert
+        );
         let client = create_pg_client(
             &config.username,
             &config.password,
@@ -180,10 +189,22 @@ impl PostgresExternalTableReader {
         )
         .await?;
         // 把 config 里的内容全部打印出来，方便调试
-        println!("PostgresExternalTableReader::new 传入的 ExternalTableConfig: {:?}", config);
-        println!("PostgresExternalTableReader::new 传入的 rw_schema: {:?}", rw_schema);
-        println!("PostgresExternalTableReader::new 传入的 pk_indices: {:?}", pk_indices);
-        println!("PostgresExternalTableReader::new 传入的 schema_table_name: {:?}", schema_table_name);
+        println!(
+            "PostgresExternalTableReader::new 传入的 ExternalTableConfig: {:?}",
+            config
+        );
+        println!(
+            "PostgresExternalTableReader::new 传入的 rw_schema: {:?}",
+            rw_schema
+        );
+        println!(
+            "PostgresExternalTableReader::new 传入的 pk_indices: {:?}",
+            pk_indices
+        );
+        println!(
+            "PostgresExternalTableReader::new 传入的 schema_table_name: {:?}",
+            schema_table_name
+        );
         let field_names = rw_schema
             .fields
             .iter()

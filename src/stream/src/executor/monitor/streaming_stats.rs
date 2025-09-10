@@ -217,7 +217,6 @@ pub struct StreamingMetrics {
     // PostgreSQL CDC LSN monitoring
     pub pg_cdc_state_table_lsn: LabelGuardedIntGaugeVec,
     pub pg_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
-    pub pg_cdc_confirm_flush_lsn: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -312,14 +311,6 @@ impl StreamingMetrics {
             "stream_pg_cdc_jni_commit_offset_lsn",
             "LSN value when JNI commit offset is called for PostgreSQL CDC",
             &["source_id"],
-            registry,
-        )
-        .unwrap();
-
-        let pg_cdc_confirm_flush_lsn = register_guarded_int_gauge_vec_with_registry!(
-            "stream_pg_cdc_confirm_flush_lsn",
-            "confirm_flush_lsn value from PostgreSQL replication slots",
-            &["source_id", "slot_name"],
             registry,
         )
         .unwrap();
@@ -1335,7 +1326,6 @@ impl StreamingMetrics {
             materialize_current_epoch,
             pg_cdc_state_table_lsn,
             pg_cdc_jni_commit_offset_lsn,
-            pg_cdc_confirm_flush_lsn,
         }
     }
 

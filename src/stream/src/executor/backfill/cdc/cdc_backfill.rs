@@ -51,70 +51,7 @@ use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
-/// Interval for querying `confirm_flush_lsn` from upstream PostgreSQL (5 minutes).
-pub const CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS: u64 = 3;
 
-/// Start background task to periodically query `confirm_flush_lsn` from upstream PostgreSQL
-pub fn start_confirm_flush_lsn_monitor(
-    streaming_metrics: Arc<StreamingMetrics>,
-    source_id: ActorId,
-    slot_name: String,
-    external_table: ExternalStorageTable,
-) {
-    println!("slot_name: {:?}", slot_name);
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
-            CONFIRM_FLUSH_LSN_QUERY_INTERVAL_SECS,
-        ));
-
-        // Create table reader once and reuse it
-        let reader = match external_table.create_table_reader().await {
-            Ok(reader) => reader,
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create table reader for confirmed_flush_lsn query: {}",
-                    e.as_report()
-                );
-                return;
-            }
-        };
-
-        // Only monitor confirmed_flush_lsn for PostgreSQL CDC
-        let pg_reader = match reader {
-            ExternalTableReaderImpl::Postgres(pg_reader) => pg_reader,
-            _ => {
-                tracing::info!(
-                    "Skipping confirmed_flush_lsn monitoring for non-PostgreSQL CDC source"
-                );
-                return;
-            }
-        };
-
-        loop {
-            interval.tick().await;
-
-            match pg_reader.query_confirm_flush_lsn(&slot_name).await {
-                Ok(Some(confirm_flush_lsn)) => {
-                    // Update metrics
-                    streaming_metrics
-                        .pg_cdc_confirm_flush_lsn
-                        .with_guarded_label_values(&[&source_id.to_string(), &slot_name])
-                        .set(confirm_flush_lsn as i64);
-                }
-                Ok(None) => {
-                    tracing::warn!("No confirmed_flush_lsn found for slot: {}", slot_name);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to query confirmed_flush_lsn for slot {}: {}",
-                        slot_name,
-                        e.as_report()
-                    );
-                }
-            }
-        }
-    });
-}
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -139,7 +76,6 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     metrics: CdcBackfillMetrics,
 
-    streaming_metrics: Arc<StreamingMetrics>,
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
@@ -171,7 +107,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             pk_indices.len() + METADATA_STATE_LEN,
         );
 
-        let cdc_metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
+        let metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
         Self {
             actor_ctx,
             external_table,
@@ -180,8 +116,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             output_columns,
             state_impl,
             progress,
-            metrics: cdc_metrics,
-            streaming_metrics: metrics,
+            metrics,
             rate_limit_rps,
             options,
             properties,
@@ -212,21 +147,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let upstream_table_name = self.external_table.qualified_table_name();
         let schema_table_name = self.external_table.schema_table_name().clone();
         let external_database_name = self.external_table.database_name().to_owned();
-
-        // Start background task to periodically query confirm_flush_lsn for PostgreSQL CDC
-        let streaming_metrics = self.streaming_metrics.clone();
-        let source_id = self.actor_ctx.id;
-        let slot_name = self.properties.get("slot.name").cloned();
-        let external_table = self.external_table.clone();
-
-        if let Some(slot_name) = slot_name {
-            start_confirm_flush_lsn_monitor(
-                streaming_metrics,
-                source_id,
-                slot_name,
-                external_table,
-            );
-        }
 
         let additional_columns = self
             .output_columns
