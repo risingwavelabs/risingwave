@@ -89,11 +89,9 @@ impl TableFunctionToInternalGetChannelDeltaStatsRule {
                 let offset_expr = &table_function.args[1];
 
                 let at_time = expr_impl_to_u64_fn(at_expr)?;
-                let time_offset = expr_impl_to_u64_fn(offset_expr)?.ok_or_else(|| {
-                    anyhow::anyhow!("Second argument 'offset' must be a constant value")
-                })?;
+                let time_offset = expr_impl_to_u64_fn(offset_expr)?;
 
-                (at_time, Some(time_offset))
+                (at_time, time_offset)
             }
             _ => {
                 bail!("internal_get_channel_delta_stats expects 0 or 2 arguments");
