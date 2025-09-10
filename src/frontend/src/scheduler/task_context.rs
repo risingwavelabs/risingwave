@@ -108,6 +108,9 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn metrics_reader(&self) -> Arc<dyn MetricsReader> {
-        Arc::new(MetricsReaderImpl::new(self.session.env().meta_client_ref()))
+        Arc::new(MetricsReaderImpl::new(
+            self.session.env().prometheus_client().cloned(),
+            self.session.env().prometheus_selector().to_owned(),
+        ))
     }
 }
