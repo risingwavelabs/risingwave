@@ -13,7 +13,13 @@
 // limitations under the License.
 
 use anyhow::Result;
-use risingwave_pb::monitor_service::{GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse};
+use risingwave_pb::monitor_service::ChannelDeltaStatsEntry;
+
+/// Response type for channel delta statistics.
+#[derive(Debug, Clone)]
+pub struct ChannelDeltaStatsResponse {
+    pub channel_delta_stats_entries: Vec<ChannelDeltaStatsEntry>,
+}
 
 /// Trait for reading metrics from the meta node via RPC calls.
 #[async_trait::async_trait]
@@ -21,12 +27,14 @@ pub trait MetricsReader: Send + Sync {
     /// Fetches channel delta statistics from the meta node.
     ///
     /// # Arguments
-    /// * `request` - The request containing time parameters for the metrics query
+    /// * `at` - Unix timestamp in seconds for the evaluation time. If None, defaults to current Prometheus server time.
+    /// * `time_offset` - Time offset for throughput and backpressure rate calculation in seconds. If None, defaults to 60s.
     ///
     /// # Returns
-    /// * `Result<GetChannelDeltaStatsResponse>` - The channel delta stats response or an error
+    /// * `Result<ChannelDeltaStatsResponse>` - The channel delta stats response or an error
     async fn get_channel_delta_stats(
         &self,
-        request: GetChannelDeltaStatsRequest,
-    ) -> Result<GetChannelDeltaStatsResponse>;
+        at: Option<i64>,
+        time_offset: Option<i64>,
+    ) -> Result<ChannelDeltaStatsResponse>;
 }

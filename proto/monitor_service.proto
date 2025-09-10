@@ -113,17 +113,6 @@ message ChannelDeltaStatsEntry {
   ChannelDeltaStats channel_delta_stats_entry = 3;
 }
 
-message GetChannelDeltaStatsResponse {
-  repeated ChannelDeltaStatsEntry channel_delta_stats_entries = 1;
-}
-
-message GetChannelDeltaStatsRequest {
-  /// Unix timestamp in seconds for the evaluation time. If not set, defaults to current Prometheus server time.
-  optional int64 at = 1;
-  /// Time offset for throughput and backpressure rate calculation in seconds. If not set, defaults to 60s.
-  optional int64 time_offset = 2;
-}
-
 message TieredCacheTracingRequest {
   bool enable = 1;
   optional uint32 record_hybrid_insert_threshold_ms = 2;
@@ -157,7 +146,6 @@ service MonitorService {
   rpc ListHeapProfiling(ListHeapProfilingRequest) returns (ListHeapProfilingResponse);
   rpc AnalyzeHeap(AnalyzeHeapRequest) returns (AnalyzeHeapResponse);
   rpc GetStreamingStats(GetStreamingStatsRequest) returns (GetStreamingStatsResponse);
-  rpc GetChannelDeltaStats(GetChannelDeltaStatsRequest) returns (GetChannelDeltaStatsResponse);
   rpc TieredCacheTracing(TieredCacheTracingRequest) returns (TieredCacheTracingResponse);
   rpc GetProfileStats(GetProfileStatsRequest) returns (GetProfileStatsResponse);
 }

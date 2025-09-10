@@ -29,8 +29,7 @@ use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats,
-    GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse, GetProfileStatsRequest,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
     GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
     HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
@@ -543,15 +542,6 @@ impl MonitorService for MonitorServiceImpl {
         }
 
         Ok(Response::new(TieredCacheTracingResponse::default()))
-    }
-
-    async fn get_channel_delta_stats(
-        &self,
-        _request: Request<GetChannelDeltaStatsRequest>,
-    ) -> Result<Response<GetChannelDeltaStatsResponse>, Status> {
-        Err(Status::unimplemented(
-            "Get Channel Delta Stats unimplemented in compute node",
-        ))
     }
 }
 
