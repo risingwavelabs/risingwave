@@ -38,6 +38,7 @@ pub use super::secret::Entity as Secret;
 pub use super::session_parameter::Entity as SessionParameter;
 pub use super::sink::Entity as Sink;
 pub use super::source::Entity as Source;
+pub use super::source_splits::Entity as SourceSplits;
 pub use super::streaming_job::Entity as StreamingJob;
 pub use super::subscription::Entity as Subscription;
 pub use super::system_parameter::Entity as SystemParameter;

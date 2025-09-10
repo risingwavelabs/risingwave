@@ -40,8 +40,8 @@ use tokio::sync::{Mutex, MutexGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
-pub use worker::create_source_worker;
 use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
+pub use worker::{SourceWorkerProperties, create_source_worker};
 
 use crate::MetaResult;
 use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan};
@@ -352,23 +352,8 @@ impl SourceManager {
                 )
             })
             .collect();
-        let actor_splits = metadata_manager
-            .catalog_controller
-            .load_actor_splits()
-            .await?
-            .into_iter()
-            .map(|(actor_id, splits)| {
-                (
-                    actor_id as ActorId,
-                    splits
-                        .to_protobuf()
-                        .splits
-                        .iter()
-                        .map(|split| SplitImpl::try_from(split).unwrap())
-                        .collect(),
-                )
-            })
-            .collect();
+
+        let actor_splits = Default::default();
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,
@@ -481,6 +466,22 @@ impl SourceManager {
     pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
         let core = self.core.lock().await;
         core.actor_splits.clone()
+    }
+
+    pub async fn list_sources_special_props(&self) -> HashMap<SourceId, SourceWorkerProperties> {
+        let core = self.core.lock().await;
+        core.managed_sources
+            .iter()
+            .map(|(source_id, handle)| {
+                (
+                    *source_id,
+                    SourceWorkerProperties {
+                        enable_drop_split: handle.enable_drop_split,
+                        enable_adaptive_splits: handle.enable_adaptive_splits,
+                    },
+                )
+            })
+            .collect()
     }
 
     pub async fn get_running_info(&self) -> SourceManagerRunningInfo {

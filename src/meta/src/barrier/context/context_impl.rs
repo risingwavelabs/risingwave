@@ -298,6 +298,7 @@ impl CommandContext {
                     }
                 }
 
+                println!("b22222");
                 // Do `post_collect_job_fragments` of the original streaming job in the end, so that in any previous failure,
                 // we won't mark the job as `Creating`, and then the job will be later clean by the recovery triggered by the returned error.
                 let CreateStreamingJobCommandInfo {
@@ -323,9 +324,7 @@ impl CommandContext {
                     .catalog_controller
                     .post_collect_job_fragments(
                         stream_job_fragments.stream_job_id().table_id as _,
-                        stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
-                        init_split_assignment,
                         new_sink_downstream,
                     )
                     .await?;
@@ -340,16 +339,16 @@ impl CommandContext {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
+
+                println!("b55555");
             }
-            Command::RescheduleFragment {
-                reschedules,
-                post_updates,
-                ..
-            } => {
+            Command::RescheduleFragment { reschedules, .. } => {
+                println!("before post collect");
                 barrier_manager_context
                     .scale_controller
-                    .post_apply_reschedule(reschedules, post_updates)
+                    .post_apply_reschedule(reschedules)
                     .await?;
+                println!("after post collect");
             }
 
             Command::ReplaceStreamJob(
@@ -369,9 +368,7 @@ impl CommandContext {
                     .catalog_controller
                     .post_collect_job_fragments(
                         new_fragments.stream_job_id.table_id as _,
-                        new_fragments.actor_ids(),
                         upstream_fragment_downstreams,
-                        init_split_assignment,
                         None,
                     )
                     .await?;
@@ -383,9 +380,7 @@ impl CommandContext {
                             .catalog_controller
                             .post_collect_job_fragments(
                                 sink.tmp_sink_id,
-                                sink.actor_status.keys().cloned().collect(),
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
-                                &Default::default(), // no split assignment
                                 None, // no replace plan
                             )
                             .await?;

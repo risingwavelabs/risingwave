@@ -29,7 +29,6 @@ use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::stream_plan::StreamNode;
 
@@ -132,6 +131,7 @@ impl Fragment {
     }
 
     /// Generate a reschedule plan for the fragment.
+    #[deprecated]
     pub fn reschedule(
         &self,
         remove: impl AsRef<[WorkerSlotId]>,
@@ -184,38 +184,39 @@ impl Fragment {
         f
     }
 
-    /// Generate a random reschedule plan for the fragment.
-    ///
-    /// Consumes `self` as the actor info will be stale after rescheduling.
-    pub fn random_reschedule(self) -> String {
-        let all_worker_slots = self.all_worker_slots();
-        let used_worker_slots = self.used_worker_slots();
-
-        let rng = &mut thread_rng();
-        let target_worker_slot_count = match self.inner.distribution_type() {
-            FragmentDistributionType::Unspecified => unreachable!(),
-            FragmentDistributionType::Single => 1,
-            FragmentDistributionType::Hash => rng.random_range(1..=all_worker_slots.len()),
-        };
-
-        let target_worker_slots: HashSet<_> = all_worker_slots
-            .into_iter()
-            .choose_multiple(rng, target_worker_slot_count)
-            .into_iter()
-            .collect();
-
-        let remove = used_worker_slots
-            .difference(&target_worker_slots)
-            .copied()
-            .collect_vec();
-
-        let add = target_worker_slots
-            .difference(&used_worker_slots)
-            .copied()
-            .collect_vec();
-
-        self.reschedule(remove, add)
-    }
+    // /// Generate a random reschedule plan for the fragment.
+    // ///
+    // /// Consumes `self` as the actor info will be stale after rescheduling.
+    // #[deprecated]
+    // pub fn random_reschedule(self) -> String {
+    //     let all_worker_slots = self.all_worker_slots();
+    //     let used_worker_slots = self.used_worker_slots();
+    //
+    //     let rng = &mut thread_rng();
+    //     let target_worker_slot_count = match self.inner.distribution_type() {
+    //         FragmentDistributionType::Unspecified => unreachable!(),
+    //         FragmentDistributionType::Single => 1,
+    //         FragmentDistributionType::Hash => rng.random_range(1..=all_worker_slots.len()),
+    //     };
+    //
+    //     let target_worker_slots: HashSet<_> = all_worker_slots
+    //         .into_iter()
+    //         .choose_multiple(rng, target_worker_slot_count)
+    //         .into_iter()
+    //         .collect();
+    //
+    //     let remove = used_worker_slots
+    //         .difference(&target_worker_slots)
+    //         .copied()
+    //         .collect_vec();
+    //
+    //     let add = target_worker_slots
+    //         .difference(&used_worker_slots)
+    //         .copied()
+    //         .collect_vec();
+    //
+    //     self.reschedule(remove, add)
+    // }
 
     pub fn all_worker_count(&self) -> HashMap<u32, usize> {
         self.r
@@ -248,6 +249,12 @@ impl Fragment {
             })
             .collect();
 
+        println!("actor to worker {:#?}", actor_to_worker);
+
+        println!(
+            "actors {:?}",
+            self.inner.actors.iter().map(|x| x.actor_id).collect_vec()
+        );
         self.inner
             .actors
             .iter()

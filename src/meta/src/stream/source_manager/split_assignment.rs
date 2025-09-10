@@ -327,7 +327,6 @@ impl SourceManagerCore {
                 let actors = match self
                     .metadata_manager
                     .get_running_actors_of_fragment(fragment_id)
-                    .await
                 {
                     Ok(actors) => {
                         if actors.is_empty() {
@@ -347,6 +346,8 @@ impl SourceManagerCore {
                     // The discover loop for this source is not ready yet; we'll wait for the next run
                     continue 'loop_source;
                 }
+
+                println!("discovered splits {:#?}", discovered_splits);
 
                 let prev_actor_splits: HashMap<_, _> = actors
                     .into_iter()
