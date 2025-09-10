@@ -41,7 +41,6 @@ use risingwave_pb::meta::{
     EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus, RefreshRequest,
     RefreshResponse,
 };
-use risingwave_pb::monitor_service::{GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
@@ -182,11 +181,6 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()>;
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
-
-    async fn get_channel_delta_stats(
-        &self,
-        request: GetChannelDeltaStatsRequest,
-    ) -> Result<GetChannelDeltaStatsResponse>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -460,12 +454,5 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.0.refresh(request).await
-    }
-
-    async fn get_channel_delta_stats(
-        &self,
-        request: GetChannelDeltaStatsRequest,
-    ) -> Result<GetChannelDeltaStatsResponse> {
-        self.0.get_channel_delta_stats(request).await
     }
 }

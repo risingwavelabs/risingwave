@@ -16,10 +16,8 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use prometheus_http_query;
-use risingwave_common::metrics_reader::MetricsReader;
-use risingwave_pb::monitor_service::{
-    ChannelDeltaStats, GetChannelDeltaStatsRequest, GetChannelDeltaStatsResponse,
-};
+use risingwave_common::metrics_reader::{ChannelDeltaStatsResponse, MetricsReader};
+use risingwave_pb::monitor_service::ChannelDeltaStats;
 
 /// Implementation of `MetricsReader` that queries Prometheus directly.
 pub struct MetricsReaderImpl {
@@ -44,8 +42,9 @@ impl MetricsReaderImpl {
 impl MetricsReader for MetricsReaderImpl {
     async fn get_channel_delta_stats(
         &self,
-        request: GetChannelDeltaStatsRequest,
-    ) -> Result<GetChannelDeltaStatsResponse> {
+        at: Option<i64>,
+        time_offset: Option<i64>,
+    ) -> Result<ChannelDeltaStatsResponse> {
         // Local structural type for channel identification
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         struct ChannelKey {
@@ -53,8 +52,8 @@ impl MetricsReader for MetricsReaderImpl {
             downstream_fragment_id: u32,
         }
 
-        let time_offset = request.time_offset.unwrap_or(60); // Default to 60 seconds if not provided
-        let at_time = request.at;
+        let time_offset = time_offset.unwrap_or(60); // Default to 60 seconds if not provided
+        let at_time = at;
 
         // Check if Prometheus client is available
         let prometheus_client = self
@@ -214,7 +213,7 @@ impl MetricsReader for MetricsReaderImpl {
             )
             .collect();
 
-        Ok(GetChannelDeltaStatsResponse {
+        Ok(ChannelDeltaStatsResponse {
             channel_delta_stats_entries,
         })
     }
@@ -222,20 +221,16 @@ impl MetricsReader for MetricsReaderImpl {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::monitor_service::GetChannelDeltaStatsRequest;
-
     #[tokio::test]
     async fn test_metrics_reader_impl_creation() {
-        // This test just verifies that we can create a GetChannelDeltaStatsRequest
+        // This test just verifies that we can create the parameters for get_channel_delta_stats
         // In a real test, you would need to provide a mock MetaClient
-        // For now, we'll just test that the request structure is correct
-        let request = GetChannelDeltaStatsRequest {
-            time_offset: 0,
-            at: Some(0),
-        };
+        // For now, we'll just test that the parameter structure is correct
+        let at = Some(0i64);
+        let time_offset = Some(60i64);
 
-        // Verify the request structure is correct
-        assert_eq!(request.time_offset, 0);
-        assert_eq!(request.at, Some(0));
+        // Verify the parameter structure is correct
+        assert_eq!(at, Some(0i64));
+        assert_eq!(time_offset, Some(60i64));
     }
 }

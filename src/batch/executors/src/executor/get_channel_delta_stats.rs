@@ -21,7 +21,6 @@ use risingwave_common::metrics_reader::MetricsReader;
 use risingwave_common::types::{DataType, F64, ScalarImpl};
 use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::monitor_service::GetChannelDeltaStatsRequest;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -66,14 +65,14 @@ impl GetChannelDeltaStatsExecutor {
     async fn fetch_channel_stats_from_metrics_reader(
         &self,
     ) -> Result<Vec<Vec<Option<ScalarImpl>>>> {
-        // Create request for channel delta stats
-        let request = GetChannelDeltaStatsRequest {
-            at: self.at_time.map(|t| t as i64),
-            time_offset: self.time_offset.map(|t| t as i64),
-        };
-
         // Fetch channel delta stats from meta node
-        let response = self.metrics_reader.get_channel_delta_stats(request).await?;
+        let response = self
+            .metrics_reader
+            .get_channel_delta_stats(
+                self.at_time.map(|t| t as i64),
+                self.time_offset.map(|t| t as i64),
+            )
+            .await?;
 
         // Convert response to rows
         let mut rows = Vec::new();
