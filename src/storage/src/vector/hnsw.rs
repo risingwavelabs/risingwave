@@ -16,6 +16,7 @@ use std::cmp::{max, min};
 use std::marker::PhantomData;
 
 use faiss::index::hnsw::Hnsw;
+use itertools::Itertools;
 use rand::Rng;
 use rand::distr::uniform::{UniformFloat, UniformSampler};
 use risingwave_pb::hummock::PbHnswGraph;
@@ -216,13 +217,25 @@ pub struct HnswGraphBuilder {
     /// entrypoint of the graph: Some(`entrypoint_vector_idx`)
     entrypoint: usize,
     nodes: Vec<VectorHnswNode>,
+    level_node_count: Vec<usize>,
+}
+
+fn recovery_level_count(entrypoint: usize, nodes: &[VectorHnswNode]) -> Vec<usize> {
+    let mut level_count = vec![0; nodes[entrypoint].num_levels()];
+    for node in nodes {
+        level_count[node.num_levels() - 1] += 1;
+    }
+    level_count
 }
 
 impl HnswGraphBuilder {
     pub(crate) fn first(node: VectorHnswNode) -> Self {
+        let nodes = vec![node];
+        let level_count = recovery_level_count(0, &nodes);
         Self {
             entrypoint: 0,
-            nodes: vec![node],
+            nodes,
+            level_node_count: level_count,
         }
     }
 
@@ -269,8 +282,17 @@ impl HnswGraphBuilder {
                     .collect();
                 VectorHnswNode { level_neighbours }
             })
-            .collect();
-        Self { entrypoint, nodes }
+            .collect_vec();
+        let level_count = recovery_level_count(entrypoint, &nodes);
+        Self {
+            entrypoint,
+            nodes,
+            level_node_count: level_count,
+        }
+    }
+
+    pub fn level_node_count(&self) -> &[usize] {
+        &self.level_node_count
     }
 }
 
@@ -385,11 +407,13 @@ impl<M: MeasureDistanceBuilder, R: Rng> HnswBuilder<InMemoryVectorStore, HnswGra
                 level_neighbours: level_neighbors,
             });
         }
+        let level_count = recovery_level_count(entry_point, &nodes);
         Self {
             options: self.options,
             graph: Some(HnswGraphBuilder {
                 entrypoint: entry_point,
                 nodes,
+                level_node_count: level_count,
             }),
             vector_store: self.vector_store,
             ctx: (),
@@ -519,7 +543,9 @@ pub(crate) async fn insert_graph<M: MeasureDistanceBuilder, S: VectorStore>(
         }
         if graph.nodes[entrypoint_index].num_levels() < node.num_levels() {
             graph.entrypoint = vector_index;
+            graph.level_node_count.resize(node.num_levels(), 0);
         }
+        graph.level_node_count[node.num_levels() - 1] += 1;
         graph.nodes.push(node);
         Ok(stats)
     }
@@ -1020,6 +1046,7 @@ mod tests {
             nodes: vec![VectorHnswNode {
                 level_neighbours: (0..3).map(|_| BoundedNearest::new(0)).collect(),
             }],
+            level_node_count: vec![0, 0, 1],
         };
 
         // Query doesn't matter; we just want to observe level calls.
@@ -1078,6 +1105,7 @@ mod tests {
             nodes: vec![VectorHnswNode {
                 level_neighbours: (0..4).map(|_| BoundedNearest::new(0)).collect(),
             }],
+            level_node_count: vec![0, 0, 0, 1],
         };
 
         assert_eq!(

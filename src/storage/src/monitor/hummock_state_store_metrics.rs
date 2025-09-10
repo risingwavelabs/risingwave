@@ -23,11 +23,12 @@ use prometheus::{
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
-    RelabeledHistogramVec, RelabeledMetricVec, UintGauge,
+    RelabeledGuardedIntGaugeVec, RelabeledHistogramVec, RelabeledMetricVec, UintGauge,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
 };
 use thiserror_ext::AsReport;
 use tracing::warn;
@@ -52,6 +53,9 @@ pub struct HummockStateStoreMetrics {
 
     pub vector_object_request_counts: RelabeledGuardedIntCounterVec,
     pub vector_request_stats: RelabeledGuardedHistogramVec,
+    pub vector_hnsw_graph_level_node_count: RelabeledGuardedIntGaugeVec,
+    pub vector_index_file_count: RelabeledGuardedIntGaugeVec,
+    pub vector_index_file_size: RelabeledGuardedIntGaugeVec,
 
     pub read_req_bloom_filter_positive_counts: RelabeledGuardedIntCounterVec,
     pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec,
@@ -262,6 +266,45 @@ impl HummockStateStoreMetrics {
         let vector_request_stats = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Critical,
             vector_request_stats,
+            metric_level,
+        );
+
+        let vector_hnsw_graph_level_node_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_vector_hnsw_graph_level_node_count",
+            "Number of nodes in each level of hnsw graph",
+            &["table_id", "level"],
+            registry
+        )
+        .unwrap();
+        let vector_hnsw_graph_level_node_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_hnsw_graph_level_node_count,
+            metric_level,
+        );
+
+        let vector_index_file_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_vector_index_file_count",
+            "Number of vector file",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+        let vector_index_file_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_index_file_count,
+            metric_level,
+        );
+
+        let vector_index_file_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_vector_index_file_size",
+            "total size of vector index file",
+            &["table_id", "type"],
+            registry
+        )
+        .unwrap();
+        let vector_index_file_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_index_file_size,
             metric_level,
         );
 
@@ -514,6 +557,9 @@ impl HummockStateStoreMetrics {
             iter_slow_fetch_meta_cache_unhits,
             vector_object_request_counts,
             vector_request_stats,
+            vector_hnsw_graph_level_node_count,
+            vector_index_file_count,
+            vector_index_file_size,
             read_req_bloom_filter_positive_counts,
             read_req_positive_but_non_exist_counts,
             read_req_check_bloom_filter_counts,

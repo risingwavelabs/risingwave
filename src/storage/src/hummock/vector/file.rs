@@ -556,6 +556,10 @@ impl FileVectorStore {
             Ok(None)
         }
     }
+
+    pub fn flushed_vector_files(&self) -> &[VectorFileInfo] {
+        &self.flushed_vector_files
+    }
 }
 
 impl VectorStore for FileVectorStore {

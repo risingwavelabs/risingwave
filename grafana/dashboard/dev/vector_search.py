@@ -148,6 +148,38 @@ def _(outer_panels: Panels):
                             ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Vector Index Count Stat",
+                    "count stats of vector index",
+                    [
+                        panels.target(
+                            f"sum({metric('state_store_vector_hnsw_graph_level_node_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id, level)",
+                            "{{table_id}} vector count level {{level}} - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({metric('state_store_vector_hnsw_graph_level_node_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id)",
+                            "{{table_id}} vector count total - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                        panels.target(
+                            f"sum({metric('state_store_vector_index_file_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id)",
+                            "{{table_id}} vector file total - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Vector Index File Stat",
+                    "file stats of vector index",
+                    [
+                        panels.target(
+                            f"sum({metric('state_store_vector_index_file_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id,type)",
+                            "{{table_id}} {{type}} - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
             ],
         )
     ]
