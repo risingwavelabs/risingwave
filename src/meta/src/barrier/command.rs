@@ -1305,7 +1305,11 @@ impl Command {
         control_stream_manager: &ControlStreamManager,
     ) -> Option<StreamJobActorsToCreate> {
         match self {
-            Command::CreateStreamingJob { info, .. } => {
+            Command::CreateStreamingJob { info, job_type, .. } => {
+                if let CreateStreamingJobType::SnapshotBackfill(_) = job_type {
+                    // for snapshot backfill, the actors to create is measured separately
+                    return None;
+                }
                 let actors_to_create = info.stream_job_fragments.actors_to_create();
                 let edges = edges.as_mut().expect("should exist");
                 Some(edges.collect_actors_to_create(actors_to_create))
