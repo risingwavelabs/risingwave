@@ -12,7 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::Result;
+
+/// Key for identifying a channel between fragments.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ChannelKey {
+    pub upstream_fragment_id: u32,
+    pub downstream_fragment_id: u32,
+}
+
+/// Channel delta statistics for a specific channel.
+#[derive(Debug, Clone)]
+pub struct ChannelDeltaStats {
+    pub backpressure_rate: f64,
+    pub recv_throughput: f64,
+    pub send_throughput: f64,
+}
 
 /// Entry containing channel delta statistics with fragment IDs.
 #[derive(Debug, Clone)]
@@ -34,10 +51,10 @@ pub trait MetricsReader: Send + Sync {
     /// * `time_offset` - Time offset for throughput and backpressure rate calculation in seconds. If None, defaults to 60s.
     ///
     /// # Returns
-    /// * `Result<Vec<ChannelDeltaStatsEntry>>` - The channel delta stats entries or an error
+    /// * `Result<HashMap<ChannelKey, ChannelDeltaStats>>` - The channel delta stats mapped by channel key or an error
     async fn get_channel_delta_stats(
         &self,
         at: Option<i64>,
         time_offset: Option<i64>,
-    ) -> Result<Vec<ChannelDeltaStatsEntry>>;
+    ) -> Result<HashMap<ChannelKey, ChannelDeltaStats>>;
 }

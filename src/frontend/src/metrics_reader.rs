@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use prometheus_http_query;
-use risingwave_common::metrics_reader::{ChannelDeltaStatsEntry, MetricsReader};
+use risingwave_common::metrics_reader::{ChannelDeltaStats, ChannelKey, MetricsReader};
 
 /// Implementation of `MetricsReader` that queries Prometheus directly.
 pub struct MetricsReaderImpl {
@@ -43,22 +43,7 @@ impl MetricsReader for MetricsReaderImpl {
         &self,
         at: Option<i64>,
         time_offset: Option<i64>,
-    ) -> Result<Vec<ChannelDeltaStatsEntry>> {
-        // Local structural type for channel identification
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-        struct ChannelKey {
-            upstream_fragment_id: u32,
-            downstream_fragment_id: u32,
-        }
-
-        // Local structural type for channel delta stats
-        #[derive(Debug, Clone)]
-        struct ChannelDeltaStats {
-            backpressure_rate: f64,
-            recv_throughput: f64,
-            send_throughput: f64,
-        }
-
+    ) -> Result<HashMap<ChannelKey, ChannelDeltaStats>> {
         let time_offset = time_offset.unwrap_or(60); // Default to 60 seconds if not provided
         let at_time = at;
 
@@ -196,19 +181,7 @@ impl MetricsReader for MetricsReaderImpl {
             }
         }
 
-        // Convert HashMap to Vec<ChannelDeltaStatsEntry>
-        let channel_delta_stats_entries: Vec<ChannelDeltaStatsEntry> = channel_data
-            .into_iter()
-            .map(|(key, stats)| ChannelDeltaStatsEntry {
-                upstream_fragment_id: key.upstream_fragment_id,
-                downstream_fragment_id: key.downstream_fragment_id,
-                backpressure_rate: stats.backpressure_rate,
-                recv_throughput: stats.recv_throughput,
-                send_throughput: stats.send_throughput,
-            })
-            .collect();
-
-        Ok(channel_delta_stats_entries)
+        Ok(channel_data)
     }
 }
 
