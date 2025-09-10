@@ -71,7 +71,8 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, get_sink_fragment_by_ids, resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings, get_sink_fragment_by_ids, has_table_been_migrated,
+    resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
@@ -1838,6 +1839,12 @@ impl CatalogController {
         }
 
         Ok(mview_fragment.into_iter().next().unwrap())
+    }
+
+    pub async fn has_table_been_migrated(&self, table_id: TableId) -> MetaResult<bool> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        has_table_been_migrated(&txn, table_id).await
     }
 }
 
