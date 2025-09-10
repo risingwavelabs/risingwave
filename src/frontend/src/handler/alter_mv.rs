@@ -162,10 +162,6 @@ async fn handle_alter_mv_bound(
 
     // Set some fields ourselves so that the meta service does not need to maintain them.
     table.id = original_catalog.id;
-    assert!(
-        table.incoming_sinks.is_empty(),
-        "materialized view should not have incoming sinks"
-    );
     table.vnode_count = VnodeCount::set(original_catalog.vnode_count());
 
     // TODO(alter-mv): check changes on dependencies

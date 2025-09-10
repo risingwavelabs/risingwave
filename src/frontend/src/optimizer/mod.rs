@@ -83,8 +83,8 @@ use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker, PlanTreeNode, Stream,
-    StreamExchange, StreamPlanRef, StreamUnion, StreamVectorIndexWrite, ToStream,
-    VisitExprsRecursive,
+    StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion, StreamVectorIndexWrite,
+    ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
@@ -537,7 +537,9 @@ impl LogicalPlanRoot {
             ))?;
         }
 
-        if ctx.session_ctx().config().streaming_enable_delta_join() {
+        if ctx.session_ctx().config().streaming_enable_delta_join()
+            && ctx.session_ctx().config().enable_index_selection()
+        {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
             plan = plan.optimize_by_rules(&OptimizationStage::new(
@@ -796,7 +798,16 @@ impl LogicalPlanRoot {
         };
 
         let with_external_source = source_catalog.is_some();
-        let union_inputs = if with_external_source {
+        let (dml_source_node, external_source_node) = if with_external_source {
+            let dummy_source_node = LogicalSource::new(
+                None,
+                columns.clone(),
+                row_id_index,
+                SourceNodeKind::CreateTable,
+                context.clone(),
+                None,
+            )
+            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
             let mut external_source_node = stream_plan.plan;
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
@@ -810,43 +821,24 @@ impl LogicalPlanRoot {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
             };
-
-            let dummy_source_node = LogicalSource::new(
-                None,
-                columns.clone(),
-                row_id_index,
-                SourceNodeKind::CreateTable,
-                context.clone(),
-                None,
-            )
-            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
-
-            let dml_node = inject_dml_node(
-                &columns,
-                append_only,
-                dummy_source_node,
-                &pk_column_indices,
-                kind,
-                column_descs,
-            )?;
-
-            vec![external_source_node, dml_node]
+            (dummy_source_node, Some(external_source_node))
         } else {
-            let dml_node = inject_dml_node(
-                &columns,
-                append_only,
-                stream_plan.plan,
-                &pk_column_indices,
-                kind,
-                column_descs,
-            )?;
-
-            vec![dml_node]
+            (stream_plan.plan, None)
         };
 
-        let dists = union_inputs
+        let dml_node = inject_dml_node(
+            &columns,
+            append_only,
+            dml_source_node,
+            &pk_column_indices,
+            kind,
+            column_descs,
+        )?;
+
+        let dists = external_source_node
             .iter()
             .map(|input| input.distribution())
+            .chain([dml_node.distribution()])
             .unique()
             .collect_vec();
 
@@ -861,13 +853,30 @@ impl LogicalPlanRoot {
             }
         };
 
+        let generated_column_exprs =
+            LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
+        let upstream_sink_union = StreamUpstreamSinkUnion::new(
+            context.clone(),
+            dml_node.schema(),
+            dml_node.stream_key(),
+            dist.clone(), // should always be the same as dist of `Union`
+            append_only,
+            row_id_index.is_none(),
+            generated_column_exprs,
+        );
+
+        let union_inputs = external_source_node
+            .into_iter()
+            .chain([dml_node, upstream_sink_union.into()])
+            .collect_vec();
+
         let mut stream_plan = StreamUnion::new_with_dist(
             Union {
                 all: true,
                 inputs: union_inputs,
                 source_col: None,
             },
-            dist.clone(),
+            dist,
         )
         .into();
 

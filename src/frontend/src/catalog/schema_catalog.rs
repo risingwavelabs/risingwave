@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -55,6 +55,8 @@ pub struct SchemaCatalog {
     source_by_id: HashMap<SourceId, Arc<SourceCatalog>>,
     sink_by_name: HashMap<String, Arc<SinkCatalog>>,
     sink_by_id: HashMap<SinkId, Arc<SinkCatalog>>,
+    /// reverted index of (`sink.target_table` -> `sink_id`s)
+    table_incoming_sinks: HashMap<TableId, HashSet<SinkId>>,
     subscription_by_name: HashMap<String, Arc<SubscriptionCatalog>>,
     subscription_by_id: HashMap<SubscriptionId, Arc<SubscriptionCatalog>>,
     index_by_name: HashMap<String, Arc<IndexCatalog>>,
@@ -286,6 +288,15 @@ impl SchemaCatalog {
                 .or_insert(vec![id]);
         }
 
+        if let Some(target_table) = sink_ref.target_table {
+            assert!(
+                self.table_incoming_sinks
+                    .entry(target_table)
+                    .or_default()
+                    .insert(sink_ref.id.sink_id)
+            );
+        }
+
         self.sink_by_name
             .try_insert(name, sink_ref.clone())
             .unwrap();
@@ -304,6 +315,16 @@ impl SchemaCatalog {
                     e.remove_entry();
                 }
             }
+            if let Some(target_table) = sink_ref.target_table {
+                let incoming_sinks = self
+                    .table_incoming_sinks
+                    .get_mut(&target_table)
+                    .expect("should exists");
+                assert!(incoming_sinks.remove(&sink_ref.id.sink_id));
+                if incoming_sinks.is_empty() {
+                    self.table_incoming_sinks.remove(&target_table);
+                }
+            }
         } else {
             tracing::warn!(
                 id,
@@ -319,6 +340,7 @@ impl SchemaCatalog {
         let sink_ref = Arc::new(sink);
 
         let old_sink = self.sink_by_id.get(&id).unwrap();
+        assert_eq!(sink_ref.target_table, old_sink.target_table);
         // check if the sink name gets updated.
         if old_sink.name != name
             && let Some(s) = self.sink_by_name.get(&old_sink.name)
@@ -329,6 +351,10 @@ impl SchemaCatalog {
 
         self.sink_by_name.insert(name, sink_ref.clone());
         self.sink_by_id.insert(id, sink_ref);
+    }
+
+    pub fn table_incoming_sinks(&self, table_id: TableId) -> Option<&HashSet<SinkId>> {
+        self.table_incoming_sinks.get(&table_id)
     }
 
     pub fn create_subscription(&mut self, prost: &PbSubscription) {
@@ -1058,6 +1084,7 @@ impl From<&PbSchema> for SchemaCatalog {
             source_by_id: HashMap::new(),
             sink_by_name: HashMap::new(),
             sink_by_id: HashMap::new(),
+            table_incoming_sinks: HashMap::new(),
             index_by_name: HashMap::new(),
             index_by_id: HashMap::new(),
             indexes_by_table_id: HashMap::new(),

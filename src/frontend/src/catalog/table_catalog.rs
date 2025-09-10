@@ -40,7 +40,7 @@ use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
 
 use super::purify::try_purify_table_source_create_sql_ast;
-use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
+use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
@@ -175,9 +175,6 @@ pub struct TableCatalog {
 
     /// description of table, set by `comment on`.
     pub description: Option<String>,
-
-    /// Incoming sinks, used for sink into table
-    pub incoming_sinks: Vec<SinkId>,
 
     pub created_at_cluster_version: Option<String>,
 
@@ -591,7 +588,8 @@ impl TableCatalog {
             stream_job_status: self.stream_job_status.to_proto().into(),
             create_type: self.create_type.to_proto().into(),
             description: self.description.clone(),
-            incoming_sinks: self.incoming_sinks.clone(),
+            #[expect(deprecated)]
+            incoming_sinks: vec![],
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             retention_seconds: self.retention_seconds,
@@ -823,7 +821,6 @@ impl From<PbTable> for TableCatalog {
             create_type: CreateType::from_proto(create_type),
             stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             description: tb.description,
-            incoming_sinks: tb.incoming_sinks.clone(),
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
             initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
             retention_seconds: tb.retention_seconds,
@@ -921,6 +918,7 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_owned()),
+            #[expect(deprecated)]
             incoming_sinks: vec![],
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
@@ -993,7 +991,6 @@ mod tests {
                 stream_job_status: StreamJobStatus::Created,
                 create_type: CreateType::Foreground,
                 description: Some("description".to_owned()),
-                incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
                 version_column_indices: Vec::new(),
