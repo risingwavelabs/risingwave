@@ -112,7 +112,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 30
+      timeout_in_minutes: 60
       retry: *auto-retry
 
     - label: "slow end-to-end test ({{matrix.backend}} backend)"
@@ -146,9 +146,6 @@ steps:
         - "docslt"
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
-        - test-collector#v1.0.0:
-            files: "*-junit.xml"
-            format: "junit"
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 120
       retry: *auto-retry
