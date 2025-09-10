@@ -605,8 +605,8 @@ fn align_splits(
             let Some(splits) = (match alignment_context {
                 SplitAlignmentContext::Stored(info) => {
                     let guard = info.read_guard();
-                    guard.get_fragment(upstream_source_fragment_id)
-                        .and_then(|fragment|fragment.actors.get(&upstream_actor_id)).map(|actor| actor.splits.clone())
+                    let actor_info = guard.iter_over_fragments().find_map(|(_, fragment_info)| fragment_info.actors.get(&upstream_actor_id));
+                    actor_info.map(|info| info.splits.clone())
                 }
                 SplitAlignmentContext::Pending(existing_assignment) => {
                     existing_assignment.get(&upstream_actor_id).cloned()
@@ -614,7 +614,6 @@ fn align_splits(
             }) else {
                 return Err(anyhow::anyhow!("upstream assignment not found, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, actor_id: {actor_id}, upstream_actor_id: {upstream_actor_id:?}"));
             };
-
 
             Ok((
                 actor_id,
