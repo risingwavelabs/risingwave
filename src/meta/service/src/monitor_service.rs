@@ -25,8 +25,6 @@ use tonic::{Request, Response, Status};
 pub struct MonitorServiceImpl {
     pub metadata_manager: MetadataManager,
     pub await_tree_reg: await_tree::Registry,
-    pub prometheus_client: Option<prometheus_http_query::Client>,
-    pub prometheus_selector: String,
 }
 
 #[tonic::async_trait]

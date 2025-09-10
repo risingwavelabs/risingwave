@@ -82,7 +82,7 @@ impl TableFunctionToInternalGetChannelDeltaStatsRule {
         ];
 
         // Extract parameters if provided
-        let (_at_time, _time_offset) = match table_function.args.len() {
+        let (at_time, time_offset) = match table_function.args.len() {
             0 => (None, None), // No default, let the service handle it
             2 => {
                 let at_expr = &table_function.args[0];
@@ -98,17 +98,12 @@ impl TableFunctionToInternalGetChannelDeltaStatsRule {
             }
         };
 
-        // TODO: In a real implementation, this would:
-        // 1. Call the dashboard API with the parameters
-        // 2. Parse the response to get channel stats
-        // 3. Convert the stats to rows in the LogicalGetChannelDeltaStats
-
-        // For now, create a LogicalGetChannelDeltaStats node
+        // Create a LogicalGetChannelDeltaStats node with the extracted parameters
         let plan = LogicalGetChannelDeltaStats::new(
             ctx.clone(),
             Schema::new(fields),
-            _at_time,
-            _time_offset,
+            at_time,
+            time_offset,
         );
         Ok(plan.into())
     }
