@@ -26,6 +26,7 @@ use iceberg::extract_iceberg_columns;
 mod protobuf;
 use protobuf::extract_protobuf_table_schema;
 pub mod nexmark;
+mod parquet;
 
 /// Resolves the schema of the source from external schema file.
 /// See <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
@@ -241,7 +242,7 @@ async fn bind_columns_from_source_for_non_cdc(
 
             None
         }
-        // For parquet format, this step is implemented in parquet parser.
+        // For parquet format, schema validation is done during type checking.
         (Format::Plain, Encode::Parquet) => None,
         (
             Format::Plain | Format::Upsert | Format::Maxwell | Format::Canal | Format::Debezium,

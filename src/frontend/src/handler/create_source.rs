@@ -24,7 +24,9 @@ use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
 use rand::Rng;
-use risingwave_common::array::arrow::{IcebergArrowConvert, arrow_schema_iceberg};
+use risingwave_common::array::arrow::{
+    IcebergArrowConvert, arrow_schema_iceberg, is_parquet_schema_match_source_schema,
+};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ColumnId, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
@@ -213,6 +215,24 @@ impl CreateSourceType {
     }
 }
 
+/// Check type compatibility for parquet sources using Arrow schema matching
+fn check_parquet_type_compatibility(parquet_type: &DataType, user_type: &DataType) -> Result<bool> {
+    // Convert parquet type to Arrow field for comparison
+    let arrow_field = IcebergArrowConvert
+        .to_arrow_field("dummy", parquet_type)
+        .map_err(|e| {
+            RwError::from(ProtocolError(format!(
+                "Failed to convert parquet type to arrow field: {}",
+                e
+            )))
+        })?;
+
+    Ok(is_parquet_schema_match_source_schema(
+        arrow_field.data_type(),
+        user_type,
+    ))
+}
+
 /// Bind columns from both source and sql defined.
 pub(crate) fn bind_all_columns(
     format_encode: &FormatEncodeOptions,
@@ -280,7 +300,17 @@ pub(crate) fn bind_all_columns(
                                 ))));
                             };
 
-                            if col_from_source.data_type() != col.data_type() {
+                            // For parquet sources, use specialized schema matching
+                            let types_match = if format_encode.encode == Encode::Parquet {
+                                check_parquet_type_compatibility(
+                                    col_from_source.data_type(),
+                                    col.data_type(),
+                                )?
+                            } else {
+                                col_from_source.data_type() == col.data_type()
+                            };
+
+                            if !types_match {
                                 return Err(RwError::from(ProtocolError(format!(
                                     "Data type mismatch for column \"{}\". \
                                      Defined in SQL as \"{}\", but found in the source as \"{}\"",
