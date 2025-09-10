@@ -16,9 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use prometheus_http_query;
-use risingwave_common::metrics_reader::{
-    ChannelDeltaStats, ChannelDeltaStatsEntry, ChannelDeltaStatsResponse, MetricsReader,
-};
+use risingwave_common::metrics_reader::{ChannelDeltaStatsEntry, MetricsReader};
 
 /// Implementation of `MetricsReader` that queries Prometheus directly.
 pub struct MetricsReaderImpl {
@@ -45,12 +43,20 @@ impl MetricsReader for MetricsReaderImpl {
         &self,
         at: Option<i64>,
         time_offset: Option<i64>,
-    ) -> Result<ChannelDeltaStatsResponse> {
+    ) -> Result<Vec<ChannelDeltaStatsEntry>> {
         // Local structural type for channel identification
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         struct ChannelKey {
             upstream_fragment_id: u32,
             downstream_fragment_id: u32,
+        }
+
+        // Local structural type for channel delta stats
+        #[derive(Debug, Clone)]
+        struct ChannelDeltaStats {
+            backpressure_rate: f64,
+            recv_throughput: f64,
+            send_throughput: f64,
         }
 
         let time_offset = time_offset.unwrap_or(60); // Default to 60 seconds if not provided
@@ -125,7 +131,6 @@ impl MetricsReader for MetricsReaderImpl {
                     channel_data
                         .entry(key)
                         .or_insert_with(|| ChannelDeltaStats {
-                            actor_count: 0,
                             backpressure_rate: 0.0,
                             recv_throughput: 0.0,
                             send_throughput: 0.0,
@@ -155,7 +160,6 @@ impl MetricsReader for MetricsReaderImpl {
                     channel_data
                         .entry(key)
                         .or_insert_with(|| ChannelDeltaStats {
-                            actor_count: 0,
                             backpressure_rate: 0.0,
                             recv_throughput: 0.0,
                             send_throughput: 0.0,
@@ -183,7 +187,6 @@ impl MetricsReader for MetricsReaderImpl {
                     channel_data
                         .entry(key)
                         .or_insert_with(|| ChannelDeltaStats {
-                            actor_count: 0,
                             backpressure_rate: 0.0,
                             recv_throughput: 0.0,
                             send_throughput: 0.0,
@@ -193,26 +196,19 @@ impl MetricsReader for MetricsReaderImpl {
             }
         }
 
-        // For now, we'll set actor_count to 0 as we don't have easy access to fragment stats
-        // In a full implementation, you might want to query fragment stats from compute nodes
-        // or maintain a mapping in the metadata manager
-        for channel_stats in channel_data.values_mut() {
-            channel_stats.actor_count = 0;
-        }
-
         // Convert HashMap to Vec<ChannelDeltaStatsEntry>
         let channel_delta_stats_entries: Vec<ChannelDeltaStatsEntry> = channel_data
             .into_iter()
             .map(|(key, stats)| ChannelDeltaStatsEntry {
                 upstream_fragment_id: key.upstream_fragment_id,
                 downstream_fragment_id: key.downstream_fragment_id,
-                channel_delta_stats: stats,
+                backpressure_rate: stats.backpressure_rate,
+                recv_throughput: stats.recv_throughput,
+                send_throughput: stats.send_throughput,
             })
             .collect();
 
-        Ok(ChannelDeltaStatsResponse {
-            channel_delta_stats_entries,
-        })
+        Ok(channel_delta_stats_entries)
     }
 }
 
