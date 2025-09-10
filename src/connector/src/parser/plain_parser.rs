@@ -134,6 +134,7 @@ impl PlainParser {
                     return match parse_schema_change(
                         &accessor,
                         self.source_ctx.source_id.into(),
+                        &self.source_ctx.source_name,
                         &self.source_ctx.connector_props,
                     ) {
                         Ok(schema_change) => Ok(ParseResult::SchemaChange(schema_change)),
@@ -149,8 +150,8 @@ impl PlainParser {
                                     let clean_table_name =
                                         table_name.trim_matches('"').replace("\".\"", ".");
                                     let fail_info = format!(
-                                        "Unsupported data type '{}' in table '{}'",
-                                        ty, clean_table_name
+                                        "Unsupported data type '{}' in source '{}' table '{}'",
+                                        ty, self.source_ctx.source_name, clean_table_name
                                     );
                                     // Build cdc_table_id: source_name.schema.table_name
                                     let cdc_table_id = format!(
@@ -162,8 +163,9 @@ impl PlainParser {
                                 }
                                 _ => {
                                     let fail_info = format!(
-                                        "Failed to parse schema change: {:?}",
-                                        err.as_report()
+                                        "Failed to parse schema change: {:?}, source: {}",
+                                        err.as_report(),
+                                        self.source_ctx.source_name
                                     );
                                     (fail_info, "".to_owned(), "".to_owned())
                                 }

@@ -191,6 +191,7 @@ macro_rules! jsonb_access_field {
 pub fn parse_schema_change(
     accessor: &impl Access,
     source_id: u32,
+    source_name: &str,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
@@ -213,7 +214,7 @@ pub fn parse_schema_change(
             };
             let id: String = jsonb_access_field!(jsonb, "id", string);
             let ty = jsonb_access_field!(jsonb, "type", string);
-            // Try to extract table name from the JSON data
+
             let table_name = id.trim_matches('"').to_owned();
             let ddl_type: TableChangeType = ty.as_str().into();
             if matches!(ddl_type, TableChangeType::Create | TableChangeType::Drop) {
@@ -245,14 +246,17 @@ pub fn parse_schema_change(
                                             tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
                                             return Err(AccessError::CdcAutoSchemaChangeError {
                                                 ty: type_name,
-                                                table_name,
+                                                table_name: format!(
+                                                    "{}.{}",
+                                                    source_name, table_name
+                                                ),
                                             });
                                         }
                                     },
                                     None => {
                                         return Err(AccessError::CdcAutoSchemaChangeError {
                                             ty: type_name,
-                                            table_name,
+                                            table_name: format!("{}.{}", source_name, table_name),
                                         });
                                     }
                                 }
@@ -267,14 +271,14 @@ pub fn parse_schema_change(
                                         tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
                                         return Err(AccessError::CdcAutoSchemaChangeError {
                                             ty: type_name,
-                                            table_name,
+                                            table_name: format!("{}.{}", source_name, table_name),
                                         });
                                     }
                                 },
                                 None => {
                                     return Err(AccessError::CdcAutoSchemaChangeError {
                                         ty: type_name,
-                                        table_name,
+                                        table_name: format!("{}.{}", source_name, table_name),
                                     });
                                 }
                             }
