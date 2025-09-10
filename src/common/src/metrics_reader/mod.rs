@@ -14,27 +14,14 @@
 
 use anyhow::Result;
 
-/// Channel delta statistics for a specific channel.
-#[derive(Debug, Clone)]
-pub struct ChannelDeltaStats {
-    pub actor_count: u32,
-    pub backpressure_rate: f64,
-    pub recv_throughput: f64,
-    pub send_throughput: f64,
-}
-
 /// Entry containing channel delta statistics with fragment IDs.
 #[derive(Debug, Clone)]
 pub struct ChannelDeltaStatsEntry {
     pub upstream_fragment_id: u32,
     pub downstream_fragment_id: u32,
-    pub channel_delta_stats: ChannelDeltaStats,
-}
-
-/// Response type for channel delta statistics.
-#[derive(Debug, Clone)]
-pub struct ChannelDeltaStatsResponse {
-    pub channel_delta_stats_entries: Vec<ChannelDeltaStatsEntry>,
+    pub backpressure_rate: f64,
+    pub recv_throughput: f64,
+    pub send_throughput: f64,
 }
 
 /// Trait for reading metrics from the meta node via RPC calls.
@@ -47,10 +34,10 @@ pub trait MetricsReader: Send + Sync {
     /// * `time_offset` - Time offset for throughput and backpressure rate calculation in seconds. If None, defaults to 60s.
     ///
     /// # Returns
-    /// * `Result<ChannelDeltaStatsResponse>` - The channel delta stats response or an error
+    /// * `Result<Vec<ChannelDeltaStatsEntry>>` - The channel delta stats entries or an error
     async fn get_channel_delta_stats(
         &self,
         at: Option<i64>,
         time_offset: Option<i64>,
-    ) -> Result<ChannelDeltaStatsResponse>;
+    ) -> Result<Vec<ChannelDeltaStatsEntry>>;
 }
