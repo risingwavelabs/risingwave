@@ -33,7 +33,7 @@ use risingwave_connector::source::cdc::{
 };
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::{SourceId, WorkerId};
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
@@ -358,7 +358,10 @@ pub enum Command {
 
     /// `SourceChangeSplit` generates a `Splits` barrier for pushing initialized splits or
     /// changed splits.
-    SourceChangeSplit(SplitAssignment),
+    SourceChangeSplit {
+        split_assignment: SplitAssignment,
+        source_splits: HashMap<SourceId, Vec<SplitImpl>>,
+    },
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.

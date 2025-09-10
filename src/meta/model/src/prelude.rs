@@ -48,3 +48,4 @@ pub use super::user_privilege::Entity as UserPrivilege;
 pub use super::view::Entity as View;
 pub use super::worker::Entity as Worker;
 pub use super::worker_property::Entity as WorkerProperty;
+pub use super::source_splits::Entity as SourceSplits;

@@ -31,15 +31,15 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, Fragment as FragmentModel, FragmentRelation, Sink, StreamingJob,
+    Actor, Fragment as FragmentModel, FragmentRelation, Sink, SourceSplits, StreamingJob,
 };
 use risingwave_meta_model::{
     ActorId, ConnectorSplits, DatabaseId, DispatcherType, ExprContext, FragmentId, I32Array,
     JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
     VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, object, sink, source,
-    streaming_job, table,
+    source_splits, streaming_job, table,
 };
-use risingwave_meta_model_migration::{Alias, ExprTrait, SelectStatement, SimpleExpr};
+use risingwave_meta_model_migration::{Alias, ExprTrait, OnConflict, SelectStatement, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
@@ -1407,6 +1407,36 @@ impl CatalogController {
                 })?;
             }
         }
+        txn.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn update_source_splits(
+        &self,
+        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        for (source_id, splits) in source_splits {
+            let model = source_splits::ActiveModel {
+                source_id: Set(*source_id as _),
+                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
+                    splits: splits.iter().map(Into::into).collect_vec(),
+                }))),
+            };
+
+            SourceSplits::insert(model)
+                .on_conflict(
+                    OnConflict::column(source_splits::Column::SourceId)
+                        .update_column(source_splits::Column::Splits)
+                        .to_owned(),
+                )
+                .exec(&txn) // Execute the query within the transaction
+                .await?;
+        }
+
         txn.commit().await?;
 
         Ok(())
