@@ -24,6 +24,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::{EpochPair, MAX_EPOCH};
 use risingwave_hummock_sdk::key::{
@@ -35,7 +36,6 @@ use thiserror_ext::AsReport;
 use tokio::task::yield_now;
 use tracing::error;
 
-use crate::dispatch_measurement;
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::hummock::utils::{
@@ -146,7 +146,7 @@ pub mod sled {
             create_dir_all("./.risingwave/sled").expect("should create");
             let path = tempfile::TempDir::new_in("./.risingwave/sled")
                 .expect("find temp dir")
-                .into_path();
+                .keep();
             Self::new(path)
         }
     }
@@ -756,7 +756,7 @@ impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
             );
             builder.finish()
         }
-        dispatch_measurement!(options.measure, MeasurementType, {
+        dispatch_distance_measurement!(options.measure, MeasurementType, {
             Ok(nearest_impl::<MeasurementType, O>(
                 &self.inner.vectors,
                 self.epoch,
@@ -991,7 +991,7 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
     pub fn new(inner: RangeKvStateStore<R>, option: NewLocalOptions) -> Self {
         Self {
             inner,
-            mem_table: MemTable::new(option.op_consistency_level.clone()),
+            mem_table: MemTable::new(option.table_id, option.op_consistency_level.clone()),
             epoch: None,
             table_id: option.table_id,
             op_consistency_level: option.op_consistency_level,
@@ -1128,6 +1128,7 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
                 KeyOp::Insert(value) => {
                     if let Some(sanity_check_read_snapshot) = &sanity_check_read_snapshot {
                         do_insert_sanity_check(
+                            self.table_id,
                             &key,
                             &value,
                             sanity_check_read_snapshot,
@@ -1141,6 +1142,7 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
                 KeyOp::Delete(old_value) => {
                     if let Some(sanity_check_read_snapshot) = &sanity_check_read_snapshot {
                         do_delete_sanity_check(
+                            self.table_id,
                             &key,
                             &old_value,
                             sanity_check_read_snapshot,
@@ -1154,6 +1156,7 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
                 KeyOp::Update((old_value, new_value)) => {
                     if let Some(sanity_check_read_snapshot) = &sanity_check_read_snapshot {
                         do_update_sanity_check(
+                            self.table_id,
                             &key,
                             &old_value,
                             &new_value,

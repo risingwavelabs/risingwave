@@ -864,9 +864,7 @@ mod tests {
                                             Literal {
                                                 data: Some(
                                                     Float64(
-                                                        OrderedFloat(
-                                                            0.5,
-                                                        ),
+                                                        0.5,
                                                     ),
                                                 ),
                                                 data_type: Some(
@@ -876,9 +874,7 @@ mod tests {
                                             Literal {
                                                 data: Some(
                                                     Float64(
-                                                        OrderedFloat(
-                                                            0.01,
-                                                        ),
+                                                        0.01,
                                                     ),
                                                 ),
                                                 data_type: Some(

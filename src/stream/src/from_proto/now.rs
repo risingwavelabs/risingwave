@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::{NowNode, PbNowModeGenerateSeries};
 use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Executor, NowExecutor, NowMode};
 use crate::task::ExecutorParams;
@@ -70,8 +70,10 @@ impl ExecutorBuilder for NowExecutorBuilder {
             NowMode::UpdateCurrent
         };
 
-        let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, store, None).await;
+        let state_table = StateTableBuilder::new(node.get_state_table()?, store, None)
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
         let barrier_interval_ms = params
             .env
             .system_params_manager_ref()

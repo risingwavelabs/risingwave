@@ -15,9 +15,12 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::object::PbObjectInfo;
+use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
+use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -33,6 +36,7 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
+use crate::model::FragmentDownstreamRelation;
 use crate::stream::SourceChange;
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
@@ -83,6 +87,11 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
         job.finish(&self.metadata_manager).await
+    }
+
+    #[await_tree::instrument("finish_cdc_table_backfill({job})")]
+    async fn finish_cdc_table_backfill(&self, job: TableId) -> MetaResult<()> {
+        self.env.cdc_table_backfill_tracker.complete_job(job).await
     }
 
     #[await_tree::instrument("new_control_stream({})", node.id)]
@@ -202,6 +211,32 @@ impl CommandContext {
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
+                let tables = barrier_manager_context
+                    .metadata_manager
+                    .catalog_controller
+                    .complete_dropped_tables(
+                        unregistered_state_table_ids
+                            .iter()
+                            .map(|id| id.table_id as _),
+                    )
+                    .await;
+                let objects = tables
+                    .into_iter()
+                    .map(|t| PbObject {
+                        object_info: Some(PbObjectInfo::Table(t)),
+                    })
+                    .collect();
+                let group = PbInfo::ObjectGroup(PbObjectGroup { objects });
+                barrier_manager_context
+                    .env
+                    .notification_manager()
+                    .notify_hummock(Operation::Delete, group.clone())
+                    .await;
+                barrier_manager_context
+                    .env
+                    .notification_manager()
+                    .notify_compactor(Operation::Delete, group)
+                    .await;
             }
             Command::ConnectorPropsChange(obj_id_map_props) => {
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
@@ -217,12 +252,8 @@ impl CommandContext {
                 job_type,
                 cross_db_snapshot_backfill_info,
             } => {
-                let mut replace_plan = None;
                 match job_type {
-                    CreateStreamingJobType::SinkIntoTable(plan) => {
-                        replace_plan = Some(plan);
-                    }
-                    CreateStreamingJobType::Normal => {
+                    CreateStreamingJobType::SinkIntoTable(_) | CreateStreamingJobType::Normal => {
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller
@@ -275,6 +306,18 @@ impl CommandContext {
                     init_split_assignment,
                     ..
                 } = info;
+                let new_sink_downstream =
+                    if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
+                        let new_downstreams = ctx.new_sink_downstream.clone();
+                        let new_downstreams = FragmentDownstreamRelation::from([(
+                            ctx.sink_fragment_id,
+                            vec![new_downstreams],
+                        )]);
+                        Some(new_downstreams)
+                    } else {
+                        None
+                    };
+
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
@@ -283,21 +326,9 @@ impl CommandContext {
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
-                        replace_plan,
+                        new_sink_downstream,
                     )
                     .await?;
-
-                if let Some(plan) = replace_plan {
-                    barrier_manager_context
-                        .source_manager
-                        .handle_replace_job(
-                            &plan.old_fragments,
-                            plan.new_fragments.stream_source_fragments(),
-                            init_split_assignment.clone(),
-                            plan,
-                        )
-                        .await;
-                }
 
                 let source_change = SourceChange::CreateJob {
                     added_source_fragments: stream_job_fragments.stream_source_fragments(),

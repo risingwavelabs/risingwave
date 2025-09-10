@@ -93,10 +93,12 @@ where
         }
     };
 
+    // Note: although we support empty(zero-field) struct and we allow `0` occurrences here, users
+    // still need to leave a whitespace between `<` and `>` to prevent it from being tokenized as `Neq`.
     delimited(
         Token::Lt,
         cut_err(separated(
-            1..,
+            0..,
             trace(
                 "struct_field",
                 seq! {

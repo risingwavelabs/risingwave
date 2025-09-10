@@ -135,6 +135,9 @@ pub struct ReleaseContext {
 
     pub(crate) removed_actors: HashSet<ActorId>,
     pub(crate) removed_fragments: HashSet<FragmentId>,
+
+    /// Removed sink fragment by target fragment.
+    pub(crate) removed_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
 }
 
 impl CatalogController {
@@ -990,18 +993,48 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_indexes` return all `CREATED` indexes.
+    /// `list_indexes` return all `CREATED` and `BACKGROUND` indexes.
     async fn list_indexes(&self) -> MetaResult<Vec<PbIndex>> {
         let index_objs = Index::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
+            )
             .all(&self.db)
             .await?;
 
+        let creating_indexes: HashSet<_> = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Creating)
+                    .and(
+                        streaming_job::Column::JobId
+                            .is_in(index_objs.iter().map(|(index, _)| index.index_id)),
+                    ),
+            )
+            .into_tuple::<IndexId>()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+
         Ok(index_objs
             .into_iter()
-            .map(|(index, obj)| ObjectModel(index, obj.unwrap()).into())
+            .map(|(index, obj)| {
+                let is_creating = creating_indexes.contains(&index.index_id);
+                let mut pb_index: PbIndex = ObjectModel(index, obj.unwrap()).into();
+                pb_index.stream_job_status = if is_creating {
+                    PbStreamJobStatus::Creating.into()
+                } else {
+                    PbStreamJobStatus::Created.into()
+                };
+                pb_index
+            })
             .collect())
     }
 

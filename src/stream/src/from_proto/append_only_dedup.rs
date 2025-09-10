@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::DedupNode;
 use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::{AppendOnlyDedupExecutor, Executor};
 use crate::task::ExecutorParams;
@@ -36,7 +36,10 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let table = node.get_state_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
+        let state_table = StateTableBuilder::new(table, store, vnodes)
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
         let exec = AppendOnlyDedupExecutor::new(
             params.actor_context,
             input,

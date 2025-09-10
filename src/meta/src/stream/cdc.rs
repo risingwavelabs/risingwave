@@ -20,12 +20,13 @@ use anyhow::Context;
 use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::external::{
-    CdcTableSnapshotSplitOption, CdcTableType, ExternalTableConfig, ExternalTableReader,
+    CdcTableSnapshotSplitOption, ExternalCdcTableType, ExternalTableConfig, ExternalTableReader,
     SchemaTableName,
 };
 use risingwave_connector::source::cdc::{CdcScanOptions, CdcTableSnapshotSplitAssignment};
@@ -63,7 +64,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
     } else {
         return Ok(());
     };
-    let table_type = CdcTableType::from_properties(&table_desc.connect_properties);
+    let table_type = ExternalCdcTableType::from_properties(&table_desc.connect_properties);
     // Filter out additional columns to construct the external table schema
     let table_schema: Schema = table_desc
         .columns
@@ -108,6 +109,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
             split_id: Set(split.split_id.to_owned()),
             left: Set(split.left_bound_inclusive.value_serialize()),
             right: Set(split.right_bound_exclusive.value_serialize()),
+            is_backfill_finished: Set(0),
         });
         if insert_batch.len() >= insert_batch_size as usize {
             cdc_table_snapshot_split::Entity::insert_many(std::mem::take(&mut insert_batch))
@@ -129,7 +131,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
 }
 
 /// Returns true if the fragment is CDC scan and has parallelized backfill enabled.
-fn is_parallelized_backfill_enabled_cdc_scan_fragment(fragment: &Fragment) -> bool {
+pub(crate) fn is_parallelized_backfill_enabled_cdc_scan_fragment(fragment: &Fragment) -> bool {
     let mut b = false;
     visit_stream_node_cont(&fragment.nodes, |node| {
         if let Some(NodeBody::StreamCdcScan(node)) = &node.node_body {
@@ -152,79 +154,6 @@ pub fn is_parallelized_backfill_enabled(node: &StreamCdcScanNode) -> bool {
 }
 
 pub(crate) async fn assign_cdc_table_snapshot_splits(
-    table_fragments: impl Iterator<Item = &StreamJobFragments>,
-    meta_store: &SqlMetaStore,
-) -> MetaResult<CdcTableSnapshotSplitAssignment> {
-    let mut assignments = HashMap::default();
-    for job in table_fragments {
-        let mut stream_scan_fragments = job
-            .fragments
-            .values()
-            .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
-            .collect_vec();
-        if stream_scan_fragments.is_empty() {
-            continue;
-        }
-        assert_eq!(stream_scan_fragments.len(), 1);
-        let stream_scan_fragment = stream_scan_fragments.swap_remove(0);
-        let assignment = assign_cdc_table_snapshot_splits_impl(
-            job.stream_job_id.table_id,
-            stream_scan_fragment
-                .actors
-                .iter()
-                .map(|a| a.actor_id)
-                .collect(),
-            meta_store,
-        )
-        .await?;
-        assignments.extend(assignment);
-    }
-    Ok(assignments)
-}
-
-pub(crate) async fn assign_cdc_table_snapshot_splits_pairs(
-    table_id_actor_ids: impl IntoIterator<Item = (u32, HashSet<u32>)>,
-    meta_store: &SqlMetaStore,
-) -> MetaResult<CdcTableSnapshotSplitAssignment> {
-    let mut assignments = HashMap::default();
-    for (table_id, actor_ids) in table_id_actor_ids {
-        assignments
-            .extend(assign_cdc_table_snapshot_splits_impl(table_id, actor_ids, meta_store).await?);
-    }
-    Ok(assignments)
-}
-
-pub(crate) async fn assign_cdc_table_snapshot_splits_impl(
-    table_id: u32,
-    actor_ids: HashSet<u32>,
-    meta_store: &SqlMetaStore,
-) -> MetaResult<CdcTableSnapshotSplitAssignment> {
-    if actor_ids.is_empty() {
-        return Err(anyhow::anyhow!("Expect at least 1 actor, 0 was found.").into());
-    }
-    let mut assignments = HashMap::default();
-    let splits = try_get_cdc_table_snapshot_splits(table_id, meta_store).await?;
-    if splits.is_empty() {
-        return Err(
-            anyhow::anyhow!("Expect at least 1 CDC table snapshot splits, 0 was found.").into(),
-        );
-    }
-    let splits_per_actor = splits.len().div_ceil(actor_ids.len());
-    for (actor_id, splits) in actor_ids.iter().copied().zip_eq_debug(
-        splits
-            .into_iter()
-            .chunks(splits_per_actor)
-            .into_iter()
-            .map(|c| c.collect_vec())
-            .chain(iter::repeat(Vec::default()))
-            .take(actor_ids.len()),
-    ) {
-        assignments.insert(actor_id, splits);
-    }
-    Ok(assignments)
-}
-
-pub(crate) async fn assign_cdc_table_snapshot_splits_for_replace_table(
     original_table_id: u32,
     job: &StreamJobFragments,
     meta_store: &SqlMetaStore,
@@ -244,7 +173,7 @@ pub(crate) async fn assign_cdc_table_snapshot_splits_for_replace_table(
         stream_scan_fragments.len()
     );
     let stream_scan_fragment = stream_scan_fragments.swap_remove(0);
-    let assignment = assign_cdc_table_snapshot_splits_impl(
+    assign_cdc_table_snapshot_splits_impl(
         original_table_id,
         stream_scan_fragment
             .actors
@@ -252,9 +181,71 @@ pub(crate) async fn assign_cdc_table_snapshot_splits_for_replace_table(
             .map(|a| a.actor_id)
             .collect(),
         meta_store,
+        None,
     )
-    .await?;
-    Ok(assignment)
+    .await
+}
+
+pub(crate) async fn assign_cdc_table_snapshot_splits_pairs(
+    table_id_actor_ids: impl IntoIterator<Item = (u32, HashSet<u32>)>,
+    meta_store: &SqlMetaStore,
+    completed_cdc_job_ids: HashSet<u32>,
+) -> MetaResult<CdcTableSnapshotSplitAssignment> {
+    let mut assignments = HashMap::default();
+    for (table_id, actor_ids) in table_id_actor_ids {
+        assignments.extend(
+            assign_cdc_table_snapshot_splits_impl(
+                table_id,
+                actor_ids,
+                meta_store,
+                Some(&completed_cdc_job_ids),
+            )
+            .await?,
+        );
+    }
+    Ok(assignments)
+}
+
+pub(crate) async fn assign_cdc_table_snapshot_splits_impl(
+    table_id: u32,
+    actor_ids: HashSet<u32>,
+    meta_store: &SqlMetaStore,
+    completed_cdc_job_ids: Option<&HashSet<u32>>,
+) -> MetaResult<CdcTableSnapshotSplitAssignment> {
+    if actor_ids.is_empty() {
+        return Err(anyhow::anyhow!("Expect at least 1 actor, 0 was found.").into());
+    }
+    // Try to avoid meta store access in try_get_cdc_table_snapshot_splits.
+    let splits = if let Some(completed_cdc_job_ids) = completed_cdc_job_ids
+        && completed_cdc_job_ids.contains(&table_id)
+    {
+        vec![single_merged_split()]
+    } else {
+        try_get_cdc_table_snapshot_splits(table_id, meta_store).await?
+    };
+    if splits.is_empty() {
+        return Err(
+            anyhow::anyhow!("Expect at least 1 CDC table snapshot splits, 0 was found.").into(),
+        );
+    }
+    let splits_per_actor = splits.len().div_ceil(actor_ids.len());
+    let mut assignments: HashMap<
+        u32,
+        Vec<risingwave_connector::source::CdcTableSnapshotSplitCommon<Vec<u8>>>,
+        _,
+    > = HashMap::default();
+    for (actor_id, splits) in actor_ids.iter().copied().zip_eq_debug(
+        splits
+            .into_iter()
+            .chunks(splits_per_actor)
+            .into_iter()
+            .map(|c| c.collect_vec())
+            .chain(iter::repeat(Vec::default()))
+            .take(actor_ids.len()),
+    ) {
+        assignments.insert(actor_id, splits);
+    }
+    Ok(assignments)
 }
 
 pub async fn try_get_cdc_table_snapshot_splits(
@@ -262,12 +253,13 @@ pub async fn try_get_cdc_table_snapshot_splits(
     meta_store: &SqlMetaStore,
 ) -> MetaResult<Vec<CdcTableSnapshotSplitRaw>> {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
-    let splits: Vec<(i64, Vec<u8>, Vec<u8>)> = cdc_table_snapshot_split::Entity::find()
+    let splits: Vec<(i64, Vec<u8>, Vec<u8>, i16)> = cdc_table_snapshot_split::Entity::find()
         .select_only()
         .columns([
             cdc_table_snapshot_split::Column::SplitId,
             cdc_table_snapshot_split::Column::Left,
             cdc_table_snapshot_split::Column::Right,
+            cdc_table_snapshot_split::Column::IsBackfillFinished,
         ])
         .filter(
             cdc_table_snapshot_split::Column::TableId
@@ -276,13 +268,32 @@ pub async fn try_get_cdc_table_snapshot_splits(
         .into_tuple()
         .all(&meta_store.conn)
         .await?;
+    let split_completed_count = splits
+        .iter()
+        .filter(|(_, _, _, is_backfill_finished)| *is_backfill_finished == 1)
+        .count();
+    assert!(
+        split_completed_count <= 1,
+        "split_completed_count = {}",
+        split_completed_count
+    );
+    let is_backfill_finished = split_completed_count == 1;
+    if is_backfill_finished && splits.len() != 1 {
+        // CdcTableBackfillTracker::complete_job rewrites splits in a transaction.
+        // This error should only happen when the meta store reads uncommitted data.
+        tracing::error!(table_id, ?splits, "unexpected split count");
+        bail!(
+            "unexpected split count: table_id={table_id}, split_total_count={}, split_completed_count={split_completed_count}",
+            splits.len()
+        );
+    }
     let splits: Vec<_> = splits
         .into_iter()
         // The try_init_parallel_cdc_table_snapshot_splits ensures that split with a larger split_id will always have a larger left bound.
         // Assigning consecutive splits to the same actor enables potential optimization in CDC backfill executor.
-        .sorted_by_key(|(split_id, _, _)| *split_id)
+        .sorted_by_key(|(split_id, _, _, _)| *split_id)
         .map(
-            |(split_id, left_bound_inclusive, right_bound_exclusive)| CdcTableSnapshotSplitRaw {
+            |(split_id, left_bound_inclusive, right_bound_exclusive, _)| CdcTableSnapshotSplitRaw {
                 split_id,
                 left_bound_inclusive,
                 right_bound_exclusive,
@@ -290,4 +301,13 @@ pub async fn try_get_cdc_table_snapshot_splits(
         )
         .collect();
     Ok(splits)
+}
+
+fn single_merged_split() -> CdcTableSnapshotSplitRaw {
+    CdcTableSnapshotSplitRaw {
+        // TODO(zw): remove magic number
+        split_id: 1,
+        left_bound_inclusive: OwnedRow::new(vec![None]).value_serialize(),
+        right_bound_exclusive: OwnedRow::new(vec![None]).value_serialize(),
+    }
 }

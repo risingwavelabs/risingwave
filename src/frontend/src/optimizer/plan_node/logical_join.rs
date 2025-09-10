@@ -286,26 +286,35 @@ impl LogicalJoin {
             result_plan = Some(lookup_join);
         }
 
-        let indexes = logical_scan.table_indexes();
-        for index in indexes {
-            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                let index_scan: PlanRef = index_scan.into();
-                let that = self.clone_with_left_right(self.left(), index_scan.clone());
-                let mut new_batch_join = batch_join.clone();
-                new_batch_join.right = index_scan.to_batch().expect("index scan failed to batch");
+        if self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .enable_index_selection()
+        {
+            let indexes = logical_scan.table_indexes();
+            for index in indexes {
+                if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                    let index_scan: PlanRef = index_scan.into();
+                    let that = self.clone_with_left_right(self.left(), index_scan.clone());
+                    let mut new_batch_join = batch_join.clone();
+                    new_batch_join.right =
+                        index_scan.to_batch().expect("index scan failed to batch");
 
-                // Lookup covered index.
-                if let Some(lookup_join) =
-                    that.to_batch_lookup_join(predicate.clone(), new_batch_join)?
-                {
-                    match &result_plan {
-                        None => result_plan = Some(lookup_join),
-                        Some(prev_lookup_join) => {
-                            // Prefer to choose lookup join with longer lookup prefix len.
-                            if prev_lookup_join.lookup_prefix_len()
-                                < lookup_join.lookup_prefix_len()
-                            {
-                                result_plan = Some(lookup_join)
+                    // Lookup covered index.
+                    if let Some(lookup_join) =
+                        that.to_batch_lookup_join(predicate.clone(), new_batch_join)?
+                    {
+                        match &result_plan {
+                            None => result_plan = Some(lookup_join),
+                            Some(prev_lookup_join) => {
+                                // Prefer to choose lookup join with longer lookup prefix len.
+                                if prev_lookup_join.lookup_prefix_len()
+                                    < lookup_join.lookup_prefix_len()
+                                {
+                                    result_plan = Some(lookup_join)
+                                }
                             }
                         }
                     }
@@ -322,6 +331,21 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         logical_join: generic::Join<BatchPlanRef>,
     ) -> Result<Option<BatchLookupJoin>> {
+        let logical_scan: &LogicalScan =
+            if let Some(logical_scan) = self.core.right.as_logical_scan() {
+                logical_scan
+            } else {
+                return Ok(None);
+            };
+        Self::gen_batch_lookup_join(logical_scan, predicate, logical_join, self.is_asof_join())
+    }
+
+    pub fn gen_batch_lookup_join(
+        logical_scan: &LogicalScan,
+        predicate: EqJoinPredicate,
+        logical_join: generic::Join<BatchPlanRef>,
+        is_as_of: bool,
+    ) -> Result<Option<BatchLookupJoin>> {
         match logical_join.join_type {
             JoinType::Inner
             | JoinType::LeftOuter
@@ -332,13 +356,6 @@ impl LogicalJoin {
             _ => return Ok(None),
         };
 
-        let right = self.right();
-        // Lookup Join only supports basic tables on the join's right side.
-        let logical_scan: &LogicalScan = if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan
-        } else {
-            return Ok(None);
-        };
         let table = logical_scan.table();
         let output_column_ids = logical_scan.output_column_ids();
 
@@ -459,8 +476,7 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        let asof_desc = self
-            .is_asof_join()
+        let asof_desc = is_as_of
             .then(|| {
                 Self::get_inequality_desc_from_predicate(
                     predicate.other_cond().clone(),
@@ -884,30 +900,36 @@ impl LogicalJoin {
     ) -> Result<(StreamPlanRef, StreamPlanRef)> {
         use super::stream::prelude::*;
 
-        let mut right = self.right().to_stream_with_dist_required(
+        let lhs_join_key_idx = self.eq_indexes().into_iter().map(|(l, _)| l).collect_vec();
+        let rhs_join_key_idx = self.eq_indexes().into_iter().map(|(_, r)| r).collect_vec();
+
+        let logical_right = self
+            .right()
+            .try_better_locality(&rhs_join_key_idx)
+            .unwrap_or_else(|| self.right());
+        let mut right = logical_right.to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
             ctx,
         )?;
-        let logical_left = self.left();
+        let logical_left = self
+            .left()
+            .try_better_locality(&lhs_join_key_idx)
+            .unwrap_or_else(|| self.left());
 
         let r2l =
             predicate.r2l_eq_columns_mapping(logical_left.schema().len(), right.schema().len());
         let l2r =
             predicate.l2r_eq_columns_mapping(logical_left.schema().len(), right.schema().len());
-
         let mut left;
         let right_dist = right.distribution();
         match right_dist {
             Distribution::HashShard(_) => {
                 let left_dist = r2l
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
-                left = self
-                    .core
-                    .left
-                    .to_stream_with_dist_required(&left_dist, ctx)?;
+                left = logical_left.to_stream_with_dist_required(&left_dist, ctx)?;
             }
             Distribution::UpstreamHashShard(_, _) => {
-                left = self.core.left.to_stream_with_dist_required(
+                left = logical_left.to_stream_with_dist_required(
                     &RequiredDist::shard_by_key(
                         self.left().schema().len(),
                         &predicate.left_eq_indexes(),
@@ -1031,21 +1053,30 @@ impl LogicalJoin {
         {
             return result_plan.map(|x| x.into());
         }
-        let indexes = logical_scan.table_indexes();
-        for index in indexes {
-            // Use index table
-            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                let index_scan: PlanRef = index_scan.into();
-                let that = self.clone_with_left_right(self.left(), index_scan.clone());
-                if let Ok(temporal_join) = that.to_stream_temporal_join(predicate.clone(), ctx) {
-                    match &result_plan {
-                        Err(_) => result_plan = Ok(temporal_join),
-                        Ok(prev_temporal_join) => {
-                            // Prefer to the temporal join with a longer lookup prefix len.
-                            if prev_temporal_join.eq_join_predicate().eq_indexes().len()
-                                < temporal_join.eq_join_predicate().eq_indexes().len()
-                            {
-                                result_plan = Ok(temporal_join)
+        if self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .enable_index_selection()
+        {
+            let indexes = logical_scan.table_indexes();
+            for index in indexes {
+                // Use index table
+                if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                    let index_scan: PlanRef = index_scan.into();
+                    let that = self.clone_with_left_right(self.left(), index_scan.clone());
+                    if let Ok(temporal_join) = that.to_stream_temporal_join(predicate.clone(), ctx)
+                    {
+                        match &result_plan {
+                            Err(_) => result_plan = Ok(temporal_join),
+                            Ok(prev_temporal_join) => {
+                                // Prefer to the temporal join with a longer lookup prefix len.
+                                if prev_temporal_join.eq_join_predicate().eq_indexes().len()
+                                    < temporal_join.eq_join_predicate().eq_indexes().len()
+                                {
+                                    result_plan = Ok(temporal_join)
+                                }
                             }
                         }
                     }
@@ -1129,7 +1160,14 @@ impl LogicalJoin {
                 }
             })
             .collect_vec();
+
         // Use UpstreamOnly chain type
+        if new_scan.cross_database() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires the lookup table to be in the same database as the stream source table".into(),
+                "Please ensure both tables are in the same database".into(),
+            )));
+        }
         let new_stream_table_scan =
             StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
         Ok((
@@ -1212,7 +1250,16 @@ impl LogicalJoin {
             RequiredDist::hash_shard(&left_dist_key)
         };
 
-        let left = self.left().to_stream(ctx)?;
+        let lhs_join_key_idx = predicate
+            .eq_indexes()
+            .into_iter()
+            .map(|(l, _)| l)
+            .collect_vec();
+        let logical_left = self
+            .left()
+            .try_better_locality(&lhs_join_key_idx)
+            .unwrap_or_else(|| self.left());
+        let left = logical_left.to_stream(ctx)?;
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.stream_enforce(left);
 

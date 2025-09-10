@@ -1,0 +1,93 @@
+control substitution on
+
+statement ok
+create secret lakekeeper_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+# Test lakekeeper catalog connection using the warehouse created by risedev
+statement ok
+create connection lakekeeper_catalog_conn
+with (
+    type = 'iceberg',
+    catalog.type = 'rest',
+    catalog.uri = 'http://127.0.0.1:8181/catalog/',
+    warehouse.path = 'risingwave-warehouse',
+    s3.access.key = secret lakekeeper_secret,
+    s3.secret.key = secret lakekeeper_secret,
+    s3.path.style.access = 'true',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1'
+);
+
+statement ok
+set iceberg_engine_connection = 'public.lakekeeper_catalog_conn';
+
+statement ok
+create table t_cow(a int primary key, b int)
+with(
+    commit_checkpoint_interval = 1,
+    snapshot_expiration_max_age_millis = 0,
+    write_mode = 'copy-on-write'
+) engine = iceberg;
+
+statement ok
+insert into t_cow values (1, 1), (2, 2);
+
+statement ok
+flush;
+
+sleep 5s
+
+# without VACUUM, the old version is still visible
+query ?? rowsort
+select * from t_cow;
+----
+
+statement ok
+VACUUM FULL t_cow;
+
+query ?? rowsort
+select * from t_cow;
+----
+1 1
+2 2
+
+statement ok
+update t_cow set b = 22 where b = 2;
+
+statement ok
+flush;
+
+sleep 5s
+
+# without VACUUM, the old version is still visible
+query ?? rowsort
+select * from t_cow;
+----
+1 1
+2 2
+
+statement ok
+VACUUM FULL t_cow;
+
+query ?? rowsort
+select * from t_cow;
+----
+1 1
+2 22
+
+# since we set snapshot_expiration_max_age_millis = 0 and there are 2 branches for cow table, after vacuum, only 2 snapshot should be kept.
+query ?
+select count(*) from rw_iceberg_snapshots where schema_name = 'public' and source_name = '__iceberg_source_t_cow';
+----
+2
+
+statement ok
+DROP TABLE t_cow;
+
+statement ok
+DROP CONNECTION lakekeeper_catalog_conn;
+
+statement ok
+DROP SECRET lakekeeper_secret;
