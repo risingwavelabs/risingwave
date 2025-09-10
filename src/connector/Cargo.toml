@@ -234,5 +234,9 @@ harness = false
 name = "json_vs_plain_parser"
 harness = false
 
+[[bench]]
+name = "protobuf_bench"
+harness = false
+
 [lints]
 workspace = true
