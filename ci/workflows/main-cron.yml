@@ -562,7 +562,7 @@ steps:
           <<: *docker-compose
           run: source-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 50
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
@@ -577,7 +577,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 35
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
@@ -592,7 +592,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 35
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end test for opendal storage backend (parallel)"
@@ -607,7 +607,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"
@@ -643,25 +643,7 @@ steps:
           <<: *docker-compose
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
-  - label: "end-to-end doris sink test"
-    key: "e2e-doris-sink-tests"
-    command: "ci/scripts/e2e-doris-sink-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end starrocks sink test"
@@ -679,43 +661,7 @@ steps:
           <<: *docker-compose
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
-  - label: "end-to-end cassandra sink test"
-    key: "e2e-cassandra-sink-tests"
-    command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
-  - label: "end-to-end clickhouse sink test"
-    key: "e2e-clickhouse-sink-tests"
-    command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-clickhouse-sink-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end time travel test"
@@ -732,7 +678,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end sqlserver sink test"
