@@ -83,7 +83,8 @@ StreamMaterialize { columns: [id, name, age, created_at, data], stream_key: [id]
 ├── stream key: [ id ]
 └── StreamFilter { predicate: IsNotNull(name) } { output: [ id, name, age, created_at, data ], stream key: [] }
     └── StreamUnion { all: true } { output: [ id, name, age, created_at, data ], stream key: [] }
-        └── MergeExecutor { output: [ id, name, age, created_at, data ], stream key: [] }
+        ├── MergeExecutor { output: [ id, name, age, created_at, data ], stream key: [] }
+        └── StreamUpstreamSinkUnion { output: [ id, name, age, created_at, data ], stream key: [] }
 (empty)
 Fragment % (Actor %)
 StreamDml { columns: [id, name, age, created_at, data] } { output: [ id, name, age, created_at, data ], stream key: [] }
