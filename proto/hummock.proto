@@ -1038,3 +1038,42 @@ message BranchedObject {
   // Compaction group id the SST belongs to.
   uint64 compaction_group_id = 3;
 }
+
+message Vector {
+  repeated float values = 1;
+}
+
+message InitIndexRequest {
+  uint32 dimension = 1;
+  common.DistanceType distance_type = 2;
+  catalog.HnswFlatIndexConfig config = 3;
+}
+
+message InitIndexResponse {
+}
+
+message InsertVectorsRequest {
+  repeated Vector insert_vectors = 1;
+  bool is_finished = 2;
+}
+
+message InsertVectorsResponse {}
+
+message QueryVectorsRequest {
+  repeated Vector query_vectors = 1;
+  uint32 top_n = 2;
+  uint32 ef_search = 3;
+}
+
+message QueryVectorsResponse {
+  message NearestNeighbors {
+    repeated uint64 vector_ids = 1;
+  }
+  repeated NearestNeighbors results = 1;
+}
+
+service VectorIndexService {
+  rpc InitIndex(InitIndexRequest) returns (InitIndexResponse);
+  rpc InsertVectors(InsertVectorsRequest) returns (InsertVectorsResponse);
+  rpc QueryVectors(QueryVectorsRequest) returns (QueryVectorsResponse);
+}

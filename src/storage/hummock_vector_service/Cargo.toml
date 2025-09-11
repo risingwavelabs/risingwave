@@ -1,0 +1,39 @@
+[package]
+name = "risingwave_hummock_vector_service"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+bytes = "1"
+clap = { workspace = true }
+foyer = { workspace = true }
+risingwave_backup = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
+risingwave_common_service = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_expr = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_hummock_trace = { workspace = true }
+risingwave_object_store = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
+risingwave_storage = { workspace = true }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+] }
+tonic = { workspace = true }
+
+
+[lints]
+workspace = true
