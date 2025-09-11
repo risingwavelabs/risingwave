@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -991,19 +990,16 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
 
-                            // Record metrics for JNI commit offset
-                            if let WaitCheckpointTask::CommitCdcOffset(Some((split_id, offset))) =
-                                &task
-                                && let Ok(source_id) = u64::from_str(split_id.as_ref())
-                                && let Some(lsn_value) = extract_pg_cdc_lsn(offset)
-                            {
-                                self.metrics
-                                    .pg_cdc_jni_commit_offset_lsn
-                                    .with_guarded_label_values(&[&source_id.to_string()])
-                                    .set(lsn_value as i64);
-                            }
-
-                            task.run().await;
+                            // Run task with callback to record LSN after successful commit
+                            task.run_with_on_commit_success(|source_id: u64, offset| {
+                                if let Some(lsn_value) = extract_pg_cdc_lsn(offset) {
+                                    self.metrics
+                                        .pg_cdc_jni_commit_offset_lsn
+                                        .with_guarded_label_values(&[&source_id.to_string()])
+                                        .set(lsn_value as i64);
+                                }
+                            })
+                            .await;
                         }
                         Err(e) => {
                             tracing::error!(
