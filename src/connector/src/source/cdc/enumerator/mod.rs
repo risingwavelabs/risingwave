@@ -154,7 +154,7 @@ where
 }
 
 impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
-    /// PostgreSQL CDC specific `on_tick`· implementatio
+    /// PostgreSQL CDC specific `on_tick`· implementation.
     async fn on_tick_postgres_cdc(&mut self) -> ConnectorResult<()> {
         // Query confirmed flush LSN and update metrics
         match self.query_confirmed_flush_lsn().await {
