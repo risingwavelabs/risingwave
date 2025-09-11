@@ -38,7 +38,6 @@ pub struct DeleteExecutor {
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
-    #[expect(dead_code)]
     chunk_size: usize,
     schema: Schema,
     identity: String,
