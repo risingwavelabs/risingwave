@@ -1674,6 +1674,28 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn add_cdc_auto_schema_change_fail_event(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) -> Result<()> {
+        let event = event_log::EventAutoSchemaChangeFail {
+            table_id,
+            table_name,
+            cdc_table_id,
+            upstream_ddl,
+            fail_info,
+        };
+        let req = AddEventLogRequest {
+            event: Some(add_event_log_request::Event::AutoSchemaChangeFail(event)),
+        };
+        self.inner.add_event_log(req).await?;
+        Ok(())
+    }
+
     pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
         let req = CancelCompactTaskRequest {
             task_id,
