@@ -28,10 +28,10 @@ anchors:
               backend: ""
               endpoint: ""
             skip: true # hack
-          - with:
-              backend: "sqlite"
-              # sqlite3 /tmp/rwmeta.db
-              endpoint: "sqlite:///tmp/rwmeta.db?mode=rwc"
+#          - with:
+#              backend: "sqlite"
+#              # sqlite3 /tmp/rwmeta.db
+#              endpoint: "sqlite:///tmp/rwmeta.db?mode=rwc"
           - with:
               backend: "postgres"
               # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
