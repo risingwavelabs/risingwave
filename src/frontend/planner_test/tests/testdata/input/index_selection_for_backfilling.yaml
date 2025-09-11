@@ -179,3 +179,27 @@
     select a, count(*) from t where ts + interval '1 hour' > now() group by a;
   expected_outputs:
     - stream_plan
+- name: Index selection for backfilling with hop window
+  sql: |
+    create table t (a int, b int, c int, ts timestamp);
+    create index idx_a on t(a);
+    create index idx_ts on t(ts);
+     select count(*) from hop(t, ts, interval '1' minute, interval '5' minute) group by ts;
+  expected_outputs:
+    - stream_plan
+- name: Index selection for backfilling with hop window
+  sql: |
+    create table t (a int, b int, c int, ts timestamp);
+    create index idx_a on t(a);
+    create index idx_ts on t(ts);
+     select count(*) from hop(t, ts, interval '1' minute, interval '5' minute) group by a;
+  expected_outputs:
+    - stream_plan
+- name: Index selection for backfilling with hop window
+  sql: |
+    create table t (a int, b int, c int, ts timestamp);
+    create index idx_a on t(a);
+    create index idx_ts on t(ts);
+     select count(*) from hop(t, ts, interval '1' minute, interval '5' minute) group by window_start;
+  expected_outputs:
+    - stream_plan
