@@ -733,6 +733,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                 if merge_complete {
                     tracing::info!("merge sort completed");
+                    if let Some(b) = pending_barrier.take() {
+                        yield Message::Barrier(b);
+                    }
                     break 'stage_2;
                 }
 
