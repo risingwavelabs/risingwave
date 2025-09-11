@@ -45,7 +45,7 @@ struct Inner {
 
     /// Whether there are likely no-op updates in the output chunks, so that eliminating them with
     /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
-    noop_update_hint: bool,
+    eliminate_noop_updates: bool,
 }
 
 impl ProjectExecutor {
@@ -58,6 +58,11 @@ impl ProjectExecutor {
         noop_update_hint: bool,
     ) -> Self {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
+        let eliminate_noop_updates = noop_update_hint
+            || ctx
+                .streaming_config
+                .developer
+                .aggressive_noop_update_elimination;
         Self {
             input,
             inner: Inner {
@@ -67,7 +72,7 @@ impl ProjectExecutor {
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 is_paused: false,
-                noop_update_hint,
+                eliminate_noop_updates,
             },
         }
     }
@@ -111,7 +116,7 @@ impl Inner {
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let mut new_chunk = apply_project_exprs(&self.exprs, chunk).await?;
-        if self.noop_update_hint {
+        if self.eliminate_noop_updates {
             new_chunk = new_chunk.eliminate_adjacent_noop_update();
         }
         Ok(Some(new_chunk))
