@@ -15,21 +15,18 @@
 use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
-use prometheus_http_query;
+use prometheus_http_query::Client as PrometheusClient;
 use risingwave_common::metrics_reader::{ChannelDeltaStats, ChannelKey, MetricsReader};
 
 /// Implementation of `MetricsReader` that queries Prometheus directly.
 pub struct MetricsReaderImpl {
-    prometheus_client: Option<prometheus_http_query::Client>,
+    prometheus_client: Option<PrometheusClient>,
     prometheus_selector: String,
 }
 
 impl MetricsReaderImpl {
     /// Creates a new `MetricsReaderImpl` with the given Prometheus client and selector.
-    pub fn new(
-        prometheus_client: Option<prometheus_http_query::Client>,
-        prometheus_selector: String,
-    ) -> Self {
+    pub fn new(prometheus_client: Option<PrometheusClient>, prometheus_selector: String) -> Self {
         Self {
             prometheus_client,
             prometheus_selector,
