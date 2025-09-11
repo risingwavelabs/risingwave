@@ -657,7 +657,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict_behavior: 0,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint: 1,
             version: None,
             watermark_indices: vec![],
@@ -668,7 +668,8 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
             description: None,
-            incoming_sinks: vec![],
+            #[expect(deprecated)]
+            incoming_sinks: Default::default(),
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             cdc_table_id: None,

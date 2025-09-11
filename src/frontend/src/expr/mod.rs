@@ -72,8 +72,8 @@ pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
 pub use window_function::WindowFunction;
 
-const EXPR_DEPTH_THRESHOLD: usize = 30;
-const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicated. \
+pub(crate) const EXPR_DEPTH_THRESHOLD: usize = 30;
+pub(crate) const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicated. \
 Consider simplifying or splitting the query if you encounter any issues.";
 
 /// the trait of bound expressions

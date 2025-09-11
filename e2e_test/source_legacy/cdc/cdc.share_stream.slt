@@ -123,7 +123,7 @@ query TT
 select distribution_type,flags from rw_fragments order by fragment_id;
 ----
 SINGLE {SOURCE}
-HASH {MVIEW}
+HASH {MVIEW,UPSTREAM_SINK_UNION}
 SINGLE {STREAM_SCAN}
 SINGLE {CDC_FILTER}
 HASH {SOURCE,DML}

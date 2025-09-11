@@ -155,7 +155,7 @@ criterion = { version = "0.5", features = ["async_futures"] }
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
-foyer = { version = "0.19.0", features = ["serde", "tracing", "nightly"] }
+foyer = { version = "0.19.2", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.8", default-features = false, features = ["std"] }
 hashbrown = { version = "0.15", features = [
@@ -258,6 +258,7 @@ sea-orm = { version = "~1.1", features = [
     "with-uuid",
 ] }
 sea-orm-migration = "~1.1"
+serde = { version = "1", features = ["derive"] }
 smallvec = "1.15"
 sqlx = { version = "0.8.2", default-features = false, features = [
     "bigdecimal",

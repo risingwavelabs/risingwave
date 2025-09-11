@@ -987,18 +987,18 @@ impl DatabaseCheckpointControl {
             (None, vec![])
         };
 
-        for table_to_cancel in command
+        for job_to_cancel in command
             .as_ref()
-            .map(Command::tables_to_drop)
+            .map(Command::jobs_to_drop)
             .into_iter()
             .flatten()
         {
             if self
                 .creating_streaming_job_controls
-                .contains_key(&table_to_cancel)
+                .contains_key(&job_to_cancel)
             {
                 warn!(
-                    table_id = table_to_cancel.table_id,
+                    job_id = job_to_cancel.table_id,
                     "ignore cancel command on creating streaming job"
                 );
                 for notifier in notifiers {

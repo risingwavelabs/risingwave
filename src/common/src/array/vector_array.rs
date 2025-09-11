@@ -400,6 +400,8 @@ impl<'a> ScalarRef<'a> for VectorRef<'a> {
 }
 
 impl<'a> VectorRef<'a> {
+    /// Create a `VectorRef` from a slice of `VectorItemType` without checking the elements in the slice
+    /// is invalid, such as `inf` and `nan`.
     pub fn from_slice_unchecked(inner: &'a [VectorItemType]) -> Self {
         Self { inner }
     }

@@ -52,6 +52,8 @@ pub struct VectorIndexNearestExecutor<S: StateStore> {
     top_n: usize,
     measure: DistanceMeasurement,
     deserializer: BasicDeserializer,
+
+    hnsw_ef_search: usize,
 }
 
 pub struct VectorIndexNearestExecutorBuilder {}
@@ -114,6 +116,7 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
                     .unwrap()
                     .into(),
                 deserializer,
+                hnsw_ef_search: vector_index_nearest_node.hnsw_ef_search as usize,
             }))
         })
     }
@@ -145,6 +148,7 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             top_n,
             measure,
             deserializer,
+            hnsw_ef_search,
             ..
         } = *self;
 
@@ -176,7 +180,11 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
                     let row_results: Vec<Result<StructValue>> = read_snapshot
                         .nearest(
                             vector.to_owned_scalar(),
-                            VectorNearestOptions { top_n, measure },
+                            VectorNearestOptions {
+                                top_n,
+                                measure,
+                                hnsw_ef_search,
+                            },
                             move |_vec, distance, value| {
                                 let mut values =
                                     Vec::with_capacity(deserializer.data_types().len() + 1);

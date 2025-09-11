@@ -31,6 +31,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTra
 
 use crate::MetaResult;
 use crate::controller::SqlMetaStore;
+use crate::controller::fragment::FragmentTypeMaskExt;
 
 pub type CdcTableBackfillTrackerRef = Arc<CdcTableBackfillTracker>;
 
@@ -298,7 +299,7 @@ impl CdcTableBackfillTrackerInner {
 }
 
 async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, (u64, bool)>> {
-    let split_progress: Vec<(i32, i64, i64)> = cdc_table_snapshot_split::Entity::find()
+    let split_progress: Vec<(i32, i64, i16)> = cdc_table_snapshot_split::Entity::find()
         .select_only()
         .column(cdc_table_snapshot_split::Column::TableId)
         .column_as(
@@ -306,7 +307,9 @@ async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, 
             "split_total_count",
         )
         .column_as(
-            cdc_table_snapshot_split::Column::IsBackfillFinished.sum(),
+            // The sum of PG and MySQL behaves differently in terms of returning type and casting.
+            // Should use sum here but currently use max instead to work around compatibility issue.
+            cdc_table_snapshot_split::Column::IsBackfillFinished.max(),
             "split_completed_count",
         )
         .group_by(cdc_table_snapshot_split::Column::TableId)
@@ -348,13 +351,14 @@ async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, 
 async fn load_cdc_fragment_table_mapping(
     meta_store: &SqlMetaStore,
 ) -> MetaResult<HashMap<u32, u32>> {
+    use risingwave_common::catalog::FragmentTypeMask;
     use risingwave_meta_model::prelude::Fragment as FragmentModel;
-    let stream_cdc_scan_flag = FragmentTypeFlag::StreamCdcScan as i32;
-    let fragment_type_mask = stream_cdc_scan_flag;
     let fragment_jobs: Vec<(FragmentId, ObjectId)> = FragmentModel::find()
         .select_only()
         .columns([fragment::Column::FragmentId, fragment::Column::JobId])
-        .filter(fragment::Column::FragmentTypeMask.eq(fragment_type_mask))
+        .filter(FragmentTypeMask::intersects(
+            FragmentTypeFlag::StreamCdcScan,
+        ))
         .into_tuple()
         .all(&meta_store.conn)
         .await?;

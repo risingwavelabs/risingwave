@@ -102,6 +102,27 @@ impl CatalogController {
         }
     }
 
+    pub async fn get_user_created_table_by_ids(
+        &self,
+        table_ids: Vec<TableId>,
+    ) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(
+                table::Column::TableId
+                    .is_in(table_ids.clone())
+                    .and(table::Column::TableType.eq(TableType::Table)),
+            )
+            .all(&inner.db)
+            .await?;
+        let tables = table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect();
+        Ok(tables)
+    }
+
     pub async fn get_table_by_ids(
         &self,
         table_ids: Vec<TableId>,
@@ -139,6 +160,19 @@ impl CatalogController {
             .to_protobuf()
             .into_iter()
             .map(|col| col.into())
+            .collect())
+    }
+
+    pub async fn get_table_incoming_sinks(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
+        let inner = self.inner.read().await;
+        let sink_objs = Sink::find()
+            .find_also_related(Object)
+            .filter(sink::Column::TargetTable.eq(table_id))
+            .all(&inner.db)
+            .await?;
+        Ok(sink_objs
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
             .collect())
     }
 
@@ -504,5 +538,20 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?)
+    }
+
+    pub async fn get_streaming_job_status(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<JobStatus> {
+        let inner = self.inner.read().await;
+        let status = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .column(streaming_job::Column::JobStatus)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+        Ok(status)
     }
 }
