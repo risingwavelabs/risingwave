@@ -412,6 +412,49 @@ impl ToStream for LogicalProjectSet {
         let core = self.core.clone_with_input(new_input);
         Ok(StreamProjectSet::new(core).into())
     }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+
+        let input_columns = columns
+            .iter()
+            .map(|&col| {
+                // First try the original o2i mapping for direct InputRef
+                if let Some(input_col) = self.core.o2i_col_mapping().try_map(col) {
+                    return Some(input_col);
+                }
+
+                // For ProjectSet, column 0 is the projected_row_id (synthetic column)
+                // so we can't map it to input. Only handle columns from the select_list.
+                if col == 0 {
+                    return None;
+                }
+
+                let expr = &self.select_list()[col - 1];
+
+                // Skip table functions as they generate new data and don't have direct locality
+                if expr.has_table_function() {
+                    return None;
+                }
+
+                // Check if it's a pure function with single InputRef
+                if expr.is_pure() {
+                    let input_refs = expr.collect_input_refs(self.input().schema().len());
+                    // Check if expression references exactly one input column
+                    if input_refs.count_ones(..) == 1 {
+                        return input_refs.ones().next();
+                    }
+                }
+
+                None
+            })
+            .collect::<Option<Vec<usize>>>()?;
+
+        let new_input = self.input().try_better_locality(&input_columns)?;
+        Some(self.clone_with_input(new_input).into())
+    }
 }
 
 #[cfg(test)]
