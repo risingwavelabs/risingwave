@@ -25,7 +25,7 @@ use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::{CdcBackfillExecutor, ExternalStorageTable, ParallelizedCdcBackfillExecutor};
 use crate::task::cdc_progress::CdcProgressReporter;
 
@@ -110,8 +110,10 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         if scan_options.is_parallelized_backfill() {
             // Set state table's vnodes to None to allow splits to be assigned to any actors, without following vnode constraints.
             let vnodes = None;
-            let state_table =
-                StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
+            let state_table = StateTableBuilder::new(node.get_state_table()?, state_store, vnodes)
+                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .build()
+                .await;
             let progress = CdcProgressReporter::new(params.local_barrier_manager.clone());
             let exec = ParallelizedCdcBackfillExecutor::new(
                 params.actor_context.clone(),
@@ -131,8 +133,10 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             let vnodes = params.vnode_bitmap.map(Arc::new);
             // cdc backfill should be singleton, so vnodes must be None.
             assert_eq!(None, vnodes);
-            let state_table =
-                StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
+            let state_table = StateTableBuilder::new(node.get_state_table()?, state_store, vnodes)
+                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .build()
+                .await;
             let exec = CdcBackfillExecutor::new(
                 params.actor_context.clone(),
                 external_table,

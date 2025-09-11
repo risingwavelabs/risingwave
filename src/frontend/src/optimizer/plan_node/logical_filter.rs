@@ -217,6 +217,12 @@ impl ToStream for LogicalFilter {
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((filter.into(), out_col_change))
     }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        self.input()
+            .try_better_locality(columns)
+            .map(|better_input| self.clone_with_input(better_input).into())
+    }
 }
 
 #[cfg(test)]

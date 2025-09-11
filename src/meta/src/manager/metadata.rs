@@ -484,15 +484,15 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
+    pub async fn get_table_catalog_by_ids(&self, ids: &[u32]) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
-            .get_table_by_ids(ids.into_iter().map(|id| id as _).collect(), false)
+            .get_table_by_ids(ids.iter().map(|id| *id as _).collect(), false)
             .await
     }
 
-    pub async fn get_sink_catalog_by_ids(&self, ids: &[u32]) -> MetaResult<Vec<PbSink>> {
+    pub async fn get_table_incoming_sinks(&self, table_id: u32) -> MetaResult<Vec<PbSink>> {
         self.catalog_controller
-            .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
+            .get_table_incoming_sinks(table_id as _)
             .await
     }
 

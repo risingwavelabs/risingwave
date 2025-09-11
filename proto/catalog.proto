@@ -486,7 +486,7 @@ message Table {
   optional string description = 33;
 
   // This field is used to mark the the sink into this table.
-  repeated uint32 incoming_sinks = 34;
+  repeated uint32 incoming_sinks = 34 [deprecated = true];
 
   // Cluster version (tracked by git commit) when initialized/created
   optional string initialized_at_cluster_version = 35;
