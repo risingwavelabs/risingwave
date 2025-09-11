@@ -15,6 +15,10 @@ acraddr="${ACR_LOGIN_SERVER}/risingwave"
 arch="$(uname -m)"
 CARGO_PROFILE=${CARGO_PROFILE:-production}
 
+echo "$ORIGINAL_IMAGE_TAG"
+echo "$NEW_IMAGE_TAG"
+echo "$BUILDKITE_COMMIT"
+
 echo "--- Docker login"
 echo "$ACR_PASSWORD" | docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" --password-stdin
 

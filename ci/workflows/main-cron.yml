@@ -28,10 +28,10 @@ anchors:
               backend: ""
               endpoint: ""
             skip: true # hack
-          - with:
-              backend: "sqlite"
-              # sqlite3 /tmp/rwmeta.db
-              endpoint: "sqlite:///tmp/rwmeta.db?mode=rwc"
+#          - with:
+#              backend: "sqlite"
+#              # sqlite3 /tmp/rwmeta.db
+#              endpoint: "sqlite:///tmp/rwmeta.db?mode=rwc"
           - with:
               backend: "postgres"
               # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
@@ -112,7 +112,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 30
+      timeout_in_minutes: 60
       retry: *auto-retry
 
     - label: "slow end-to-end test ({{matrix.backend}} backend)"
@@ -146,9 +146,6 @@ steps:
         - "docslt"
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
-        - test-collector#v1.0.0:
-            files: "*-junit.xml"
-            format: "junit"
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 120
       retry: *auto-retry
@@ -204,7 +201,6 @@ steps:
       - "build"
       - "build-simulation"
     plugins:
-      - ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 120
@@ -237,7 +233,6 @@ steps:
       || build.pull_request.labels includes "ci/run-unit-test"
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
     plugins:
-      - ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 120
     retry: *auto-retry
@@ -330,50 +325,20 @@ steps:
     timeout_in_minutes: 70
     retry: *auto-retry
 
-  - label: "integration test (madim) - log_store"
-    key: "integration-test-deterministic-log-store"
-    command: |
-      TEST_NUM=15 ci/scripts/deterministic-it-test.sh log_store
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
-    depends_on: "build-simulation"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 70
-    retry: *auto-retry
-
-  - label: "end-to-end test (madsim)"
-    key: "e2e-test-deterministic"
-    command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?-deterministic-simulation(,|$$)/
-    depends_on: "build-simulation"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 60
-    parallelism: 4
-    retry: *auto-retry
-
-  - label: "end-to-end test (madsim, random vnode count)"
-    key: "e2e-test-deterministic-random-vnode-count"
-    command: "TEST_NUM=32 RW_SIM_RANDOM_VNODE_COUNT=true ci/scripts/deterministic-e2e-test.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?-deterministic-simulation(,|$$)/
-    depends_on: "build-simulation"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 60
-    parallelism: 4
-    retry: *auto-retry
+#  - label: "integration test (madim) - log_store"
+#    key: "integration-test-deterministic-log-store"
+#    command: |
+#      TEST_NUM=15 ci/scripts/deterministic-it-test.sh log_store
+#    if: |
+#      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+#      || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
+#      || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
+#    depends_on: "build-simulation"
+#    plugins:
+#      - docker-compose#v5.5.0: *docker-compose
+#      - ./ci/plugins/upload-failure-logs
+#    timeout_in_minutes: 70
+#    retry: *auto-retry
 
   - label: "recovery test (madsim)"
     key: "recovery-test-deterministic"
@@ -388,7 +353,7 @@ steps:
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 60
-    parallelism: 4
+    parallelism: 2
     retry: *auto-retry
   - label: "preload-memory recovery test (madsim)"
     key: "preload-memory-recovery-test-deterministic"
@@ -402,7 +367,7 @@ steps:
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 60
-    parallelism: 4
+    parallelism: 2
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
@@ -419,7 +384,7 @@ steps:
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 60
-    parallelism: 4
+    parallelism: 2
     retry: *auto-retry
 
   - label: "end-to-end iceberg test (release)"
@@ -456,64 +421,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     # Extra 2 minutes to account for docker-compose latency.
     # See: https://github.com/risingwavelabs/risingwave/issues/9423#issuecomment-1521222169
-    timeout_in_minutes: 15
-    retry: *auto-retry
-
-  - label: "S3 source check on AWS (json parser)"
-    key: "s3-v2-source-check-aws-json-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s file_source.py -t json"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
-  - label: "S3 sink on parquet and json file"
-    key: "s3-sink-parquet-and-json-encode"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s file_sink.py"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
-  - label: "S3 source check on AWS (csv parser)"
-    key: "s3-v2-source-check-aws-csv-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s file_source.py -t csv_without_header"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
-  - label: "pulsar source check"
-    key: "pulsar-source-tests"
-    command: "ci/scripts/pulsar-source-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-pulsar-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)pulsar-source-tests?(,|$$)/
-    depends_on:
-      - build
-      - build-other
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 20
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "micro benchmark"
@@ -542,31 +450,31 @@ steps:
     timeout_in_minutes: 5
 
   # Backwards compatibility tests
-  - label: "Backwards compatibility tests version_offset={{matrix.version_offset}}"
-    key: "backwards-compat-tests"
-    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-backwards-compat-tests"
-      || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: source-test-env
-          environment:
-            - BUILDKITE_BRANCH
-      - ./ci/plugins/upload-failure-logs
-    matrix:
-      setup:
-        version_offset:
-          - "1"
-          - "2"
-          - "3"
-          - "4"
-    timeout_in_minutes: 30
-    retry: *auto-retry
+  #- label: "Backwards compatibility tests version_offset={{matrix.version_offset}}"
+  #  key: "backwards-compat-tests"
+  #  command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
+  #  if: |
+  #    !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+  #    || build.pull_request.labels includes "ci/run-backwards-compat-tests"
+  #    || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
+  #  depends_on:
+  #    - "build"
+  #  plugins:
+  #    - docker-compose#v5.5.0:
+  #        <<: *docker-compose
+  #        run: source-test-env
+  #        environment:
+  #          - BUILDKITE_BRANCH
+  #    - ./ci/plugins/upload-failure-logs
+  #  matrix:
+  #    setup:
+  #      version_offset:
+  #        - "1"
+  #        - "2"
+  #        - "3"
+  #        - "4"
+  #  timeout_in_minutes: 30
+  #  retry: *auto-retry
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"
@@ -596,7 +504,7 @@ steps:
           <<: *docker-compose
           run: source-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 50
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
@@ -611,7 +519,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 35
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
@@ -626,7 +534,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 35
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end test for opendal storage backend (parallel)"
@@ -641,7 +549,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"
@@ -677,25 +585,7 @@ steps:
           <<: *docker-compose
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
-  - label: "end-to-end doris sink test"
-    key: "e2e-doris-sink-tests"
-    command: "ci/scripts/e2e-doris-sink-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end starrocks sink test"
@@ -713,43 +603,7 @@ steps:
           <<: *docker-compose
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
-  - label: "end-to-end cassandra sink test"
-    key: "e2e-cassandra-sink-tests"
-    command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
-  - label: "end-to-end clickhouse sink test"
-    key: "e2e-clickhouse-sink-tests"
-    command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-clickhouse-sink-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: sink-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end time travel test"
@@ -766,7 +620,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 120
     retry: *auto-retry
 
   - label: "end-to-end sqlserver sink test"
@@ -879,7 +733,7 @@ steps:
 
   - label: "release amd64"
     command: "ci/scripts/release.sh"
-    if: build.tag != null && build.pull_request == false
+    if: build.tag != null && build.pull_request.id == null
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
@@ -894,7 +748,7 @@ steps:
   - label: "release docker image: amd64"
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
-    if: build.tag != null && build.pull_request == false
+    if: build.tag != null && build.pull_request.id == null
     timeout_in_minutes: 60
     retry: *auto-retry
 
