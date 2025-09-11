@@ -248,8 +248,7 @@
     StreamMaterialize { columns: [a, b, c, idx_a.t._row_id(hidden), rank], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY idx_a.a ORDER BY idx_a.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─StreamGroupTopN { order: [idx_a.b ASC], limit: 1, offset: 0, group_key: [idx_a.a] }
-        └─StreamExchange { dist: HashShard(idx_a.a) }
-          └─StreamTableScan { table: idx_a, columns: [idx_a.a, idx_a.b, idx_a.c, idx_a.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_a.t._row_id], pk: [a, t._row_id], dist: UpstreamHashShard(idx_a.a) }
+        └─StreamTableScan { table: idx_a, columns: [idx_a.a, idx_a.b, idx_a.c, idx_a.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [idx_a.t._row_id], pk: [a, t._row_id], dist: UpstreamHashShard(idx_a.a) }
 - sql: |
     create table t(a int, b int, c int) append only;
     select distinct on(a) * from t ;
