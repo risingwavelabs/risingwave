@@ -35,7 +35,7 @@ use pgwire::pg_server::{
     UserAuthenticator,
 };
 use pgwire::types::{Format, FormatIterator};
-use prometheus_http_query;
+use prometheus_http_query::Client as PrometheusClient;
 use rand::RngCore;
 use risingwave_batch::monitor::{BatchSpillMetrics, GLOBAL_BATCH_SPILL_METRICS};
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -188,7 +188,7 @@ pub(crate) struct FrontendEnv {
     serverless_backfill_controller_addr: String,
 
     /// Prometheus client for querying metrics.
-    prometheus_client: Option<prometheus_http_query::Client>,
+    prometheus_client: Option<PrometheusClient>,
 
     /// The additional selector used when querying Prometheus.
     prometheus_selector: String,
@@ -497,7 +497,7 @@ impl FrontendEnv {
 
         // Initialize Prometheus client if endpoint is provided
         let prometheus_client = if let Some(ref endpoint) = opts.prometheus_endpoint {
-            match prometheus_http_query::Client::try_from(endpoint.as_str()) {
+            match PrometheusClient::try_from(endpoint.as_str()) {
                 Ok(client) => {
                     info!("Prometheus client initialized with endpoint: {}", endpoint);
                     Some(client)
@@ -616,7 +616,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the Prometheus client if available.
-    pub fn prometheus_client(&self) -> Option<&prometheus_http_query::Client> {
+    pub fn prometheus_client(&self) -> Option<&PrometheusClient> {
         self.prometheus_client.as_ref()
     }
 
