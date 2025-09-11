@@ -233,7 +233,6 @@ steps:
       || build.pull_request.labels includes "ci/run-unit-test"
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
     plugins:
-      - ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 120
     retry: *auto-retry
