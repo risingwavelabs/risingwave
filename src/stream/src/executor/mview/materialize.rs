@@ -709,7 +709,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     None => {
                                         // Merge stream finished
                                         merge_complete = true;
-                                        break;
                                     }
                                 }
                             }
