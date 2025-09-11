@@ -64,6 +64,18 @@
 - sql: |
     create table t (a int, b int, c int);
     create index idx_a on t(a);
+    select count(*) from t where c > 1 group by a + 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [count, $expr1(hidden)], stream_key: [$expr1], pk_columns: [$expr1], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [count, $expr1] }
+      └─StreamHashAgg { group_key: [$expr1], aggs: [count] }
+        └─StreamExchange { dist: HashShard($expr1) }
+          └─StreamProject { exprs: [(idx_a.a + 1:Int32) as $expr1, idx_a.t._row_id] }
+            └─StreamFilter { predicate: (idx_a.c > 1:Int32) }
+              └─StreamTableScan { table: idx_a, columns: [idx_a.a, idx_a.t._row_id, idx_a.c], stream_scan_type: ArrangementBackfill, stream_key: [idx_a.t._row_id], pk: [a, t._row_id], dist: UpstreamHashShard(idx_a.a) }
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
     create index idx_bc on t(b, c desc);
     select RANK() OVER (PARTITION BY a ORDER BY b) as rank from t;
   stream_plan: |-
