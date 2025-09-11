@@ -79,7 +79,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-postgres = "0.7"
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }

@@ -12505,7 +12505,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
- "tokio-postgres",
  "tokio-retry",
  "tokio-stream 0.1.15",
  "tower 0.5.2",

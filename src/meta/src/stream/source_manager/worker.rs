@@ -14,13 +14,10 @@
 
 use anyhow::Context;
 use risingwave_connector::WithPropertiesExt;
-use risingwave_connector::connector_common::{SslMode, create_pg_client};
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
 use risingwave_connector::source::base::ConnectorProperties;
-use risingwave_connector::source::cdc::{CdcProperties, Postgres};
-use tokio_postgres::types::PgLsn;
 
 use super::*;
 
@@ -362,44 +359,13 @@ impl ConnectorSourceWorker {
                 .map(|split| (split.id(), split))
                 .collect(),
         );
-
-        // Monitor Upstream PostgreSQL CDC confirmed flush LSN
-        if let ConnectorProperties::PostgresCdc(cdc_props) = &self.connector_properties {
-            let source_id = self.source_id;
-            let metrics = self.metrics.clone();
-            match Self::query_confirmed_flush_lsn(cdc_props).await {
-                Ok(Some(lsn)) => {
-                    // Get slot name from properties
-                    if let Some(slot_name) = cdc_props.properties.get("slot.name") {
-                        // Update metrics
-                        metrics
-                            .pg_cdc_confirmed_flush_lsn
-                            .with_guarded_label_values(&[&source_id.to_string(), slot_name])
-                            .set(lsn as i64);
-                        tracing::debug!(
-                            "Updated confirm_flush_lsn for source {} slot {}: {}",
-                            source_id,
-                            slot_name,
-                            lsn
-                        );
-                    } else {
-                        tracing::warn!(
-                            "slot.name not found in CDC properties for source {}",
-                            source_id
-                        );
-                    }
-                }
-                Ok(None) => {
-                    tracing::warn!("No confirmed_flush_lsn found for source {}", source_id);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to query confirmed_flush_lsn for source {}: {}",
-                        source_id,
-                        e.as_report()
-                    );
-                }
-            }
+        // Call enumerator's `on_tick` method for monitoring tasks
+        if let Err(e) = self.enumerator.on_tick().await {
+            tracing::error!(
+                "Failed to execute enumerator `on_tick` for source {}: {}",
+                self.source_id,
+                e.as_report()
+            );
         }
 
         Ok(())
@@ -413,71 +379,6 @@ impl ConnectorSourceWorker {
     async fn finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> MetaResult<()> {
         self.enumerator.on_finish_backfill(fragment_ids).await?;
         Ok(())
-    }
-
-    /// Query confirmed flush LSN from PostgreSQL using a simple client connection
-    async fn query_confirmed_flush_lsn(
-        cdc_props: &CdcProperties<Postgres>,
-    ) -> MetaResult<Option<u64>> {
-        // Extract connection parameters from CDC properties
-        let hostname = cdc_props
-            .properties
-            .get("hostname")
-            .ok_or_else(|| anyhow::anyhow!("hostname not found in CDC properties"))?;
-        let port = cdc_props
-            .properties
-            .get("port")
-            .ok_or_else(|| anyhow::anyhow!("port not found in CDC properties"))?;
-        let user = cdc_props
-            .properties
-            .get("username")
-            .ok_or_else(|| anyhow::anyhow!("username not found in CDC properties"))?;
-        let password = cdc_props
-            .properties
-            .get("password")
-            .ok_or_else(|| anyhow::anyhow!("password not found in CDC properties"))?;
-        let database = cdc_props
-            .properties
-            .get("database.name")
-            .ok_or_else(|| anyhow::anyhow!("database.name not found in CDC properties"))?;
-
-        let ssl_mode = SslMode::Preferred;
-
-        let ssl_root_cert = cdc_props.properties.get("database.ssl.root.cert").cloned();
-
-        let slot_name = cdc_props
-            .properties
-            .get("slot.name")
-            .ok_or_else(|| anyhow::anyhow!("slot.name not found in CDC properties"))?;
-        // Create PostgreSQL client
-        let client = create_pg_client(
-            user,
-            password,
-            hostname,
-            port,
-            database,
-            &ssl_mode,
-            &ssl_root_cert,
-        )
-        .await
-        .map_err(crate::MetaError::from)?;
-
-        let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
-        let row = client
-            .query_opt(query, &[&slot_name])
-            .await
-            .with_context(|| "PostgreSQL query confirmed flush lsn error")?;
-
-        match row {
-            Some(row) => {
-                let confirm_flush_lsn: Option<PgLsn> = row.get(0);
-                Ok(confirm_flush_lsn.map(|lsn| lsn.into()))
-            }
-            None => {
-                tracing::warn!("No replication slot found with name: {}", slot_name);
-                Ok(None)
-            }
-        }
     }
 }
 

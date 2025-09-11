@@ -185,8 +185,6 @@ pub struct MetaMetrics {
     /// supervisor for which source is still up.
     pub source_is_up: LabelGuardedIntGaugeVec,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
-    /// PostgreSQL CDC confirmed flush LSN monitoring
-    pub pg_cdc_confirmed_flush_lsn: LabelGuardedIntGaugeVec,
 
     // ********************************** Fragment ************************************
     /// A dummy gauge metrics with its label to be the mapping from actor id to fragment id
@@ -645,14 +643,6 @@ impl MetaMetrics {
         .unwrap();
         let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::default());
 
-        let pg_cdc_confirmed_flush_lsn = register_guarded_int_gauge_vec_with_registry!(
-            "pg_cdc_confirmed_flush_lsn",
-            "PostgreSQL CDC confirmed flush LSN",
-            &["source_id", "slot_name"],
-            registry
-        )
-        .unwrap();
-
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
             "Mapping from actor id to (fragment id, compute node)",
@@ -884,7 +874,6 @@ impl MetaMetrics {
             object_store_metric,
             source_is_up,
             source_enumerator_metrics,
-            pg_cdc_confirmed_flush_lsn,
             actor_info,
             table_info,
             sink_info,
