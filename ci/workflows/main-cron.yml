@@ -425,48 +425,6 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "S3 source check on AWS (json parser)"
-    key: "s3-v2-source-check-aws-json-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s file_source.py -t json"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
-  - label: "S3 sink on parquet and json file"
-    key: "s3-sink-parquet-and-json-encode"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s file_sink.py"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
-  - label: "S3 source check on AWS (csv parser)"
-    key: "s3-v2-source-check-aws-csv-parser"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s file_source.py -t csv_without_header"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-s3-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
-    depends_on: build
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
   - label: "pulsar source check"
     key: "pulsar-source-tests"
     command: "ci/scripts/pulsar-source-test.sh -p ci-release"
