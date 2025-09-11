@@ -90,6 +90,22 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))
     }
 
+    pub async fn get_table_by_associate_source_id(
+        &self,
+        associated_source_id: SourceId,
+    ) -> MetaResult<PbTable> {
+        let inner = self.inner.read().await;
+        Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::OptionalAssociatedSourceId.eq(associated_source_id))
+            .one(&inner.db)
+            .await?
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found("table associated source", associated_source_id)
+            })
+    }
+
     pub async fn get_table_by_id(&self, table_id: TableId) -> MetaResult<PbTable> {
         let inner = self.inner.read().await;
         let table_obj = Table::find_by_id(table_id)

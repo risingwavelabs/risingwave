@@ -133,8 +133,15 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
                 // For refreshable batch sources, associated_source_id is the table_id
                 let associated_source_id = TableId::new(associated_source_id);
-                // FIXME: handle this more gracefully
-                let table_id = TableId::new(associated_source_id.table_id() - 1);
+                // Use a proper lookup to get the table_id associated with the source_id
+                let table_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_table_by_associate_source_id(associated_source_id.table_id() as _)
+                    .await
+                    .context("Failed to get table id for source")?
+                    .id
+                    .into();
 
                 // Find the database ID for this table
                 let database_id = self

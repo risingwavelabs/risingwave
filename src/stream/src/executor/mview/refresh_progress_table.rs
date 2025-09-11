@@ -243,7 +243,6 @@ impl<S: StateStore> RefreshProgressTable<S> {
     /// Parse `OwnedRow` from storage to `RefreshProgressEntry`
     /// New schema: | vnode | `current_pos`... | `is_completed` | `processed_rows` |
     /// Note: The length depends on the primary key length of upstream table
-    #[allow(dead_code)]
     fn parse_row_to_entry(&self, row: &impl Row, pk_len: usize) -> Option<RefreshProgressEntry> {
         let datums = row.iter().collect::<Vec<_>>();
         let expected_len = 1 + pk_len + 2; // vnode + pk_fields + is_completed + processed_rows

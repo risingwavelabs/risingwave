@@ -54,6 +54,7 @@ use crate::{MetaError, MetaResult};
 /// - completion flag,
 /// - processed row count,
 /// - last checkpoint epoch.
+///
 /// The executor initializes entries on `RefreshStart`, updates them during merge, and loads them at startup to resume from the last checkpoint.
 ///
 /// ## Barrier Coordination and Completion
@@ -65,7 +66,7 @@ use crate::{MetaError, MetaResult};
 /// - update `refresh_state` to `Idle`,
 /// - schedule/handle `LoadFinish`,
 /// - drive cleanup work reliably after the storage version commit.
-
+///
 /// Manager responsible for handling refresh operations on refreshable tables
 pub struct RefreshManager {
     metadata_manager: MetadataManager,
