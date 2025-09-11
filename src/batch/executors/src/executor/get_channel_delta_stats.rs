@@ -57,7 +57,6 @@ impl GetChannelDeltaStatsExecutor {
     /// Generate channel stats data using the metrics reader
     async fn generate_channel_stats(&self) -> Result<Vec<Vec<Option<ScalarImpl>>>> {
         let stats = self.fetch_channel_stats_from_metrics_reader().await?;
-        println!("Using metrics reader data: {} rows", stats.len());
         Ok(stats)
     }
 
@@ -84,11 +83,9 @@ impl GetChannelDeltaStatsExecutor {
                 Some(ScalarImpl::Float64(F64::from(stats.recv_throughput))),
                 Some(ScalarImpl::Float64(F64::from(stats.send_throughput))),
             ];
-            println!("Generated row with {} columns: {:?}", row.len(), row);
             rows.push(row);
         }
 
-        println!("Total rows generated: {}", rows.len());
         Ok(rows)
     }
 }

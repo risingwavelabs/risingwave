@@ -27,6 +27,7 @@ use crate::optimizer::rule::{ApplyResult, FallibleRule};
 /// Helper function to extract a constant u64 value from an `ExprImpl`.
 /// Returns `Ok(Some(value))` if the expression can be folded to a constant u64,
 /// `Ok(None)` if the expression is null, or an error if folding fails.
+/// Negative values are rejected as they are not valid for time parameters.
 fn expr_impl_to_u64_fn(arg: &crate::expr::ExprImpl) -> anyhow::Result<Option<u64>> {
     match arg.try_fold_const() {
         Some(Ok(value)) => {
@@ -34,9 +35,36 @@ fn expr_impl_to_u64_fn(arg: &crate::expr::ExprImpl) -> anyhow::Result<Option<u64
                 return Ok(None);
             };
             match scalar {
-                ScalarImpl::Int16(value) => Ok(Some(value as u64)),
-                ScalarImpl::Int32(value) => Ok(Some(value as u64)),
-                ScalarImpl::Int64(value) => Ok(Some(value as u64)),
+                ScalarImpl::Int16(value) => {
+                    if value < 0 {
+                        Err(anyhow::anyhow!(
+                            "Time parameter cannot be negative, got {}",
+                            value
+                        ))
+                    } else {
+                        Ok(Some(value as u64))
+                    }
+                }
+                ScalarImpl::Int32(value) => {
+                    if value < 0 {
+                        Err(anyhow::anyhow!(
+                            "Time parameter cannot be negative, got {}",
+                            value
+                        ))
+                    } else {
+                        Ok(Some(value as u64))
+                    }
+                }
+                ScalarImpl::Int64(value) => {
+                    if value < 0 {
+                        Err(anyhow::anyhow!(
+                            "Time parameter cannot be negative, got {}",
+                            value
+                        ))
+                    } else {
+                        Ok(Some(value as u64))
+                    }
+                }
                 _ => Err(anyhow::anyhow!(
                     "Expected int16, int32, or int64, got {:?}",
                     scalar
