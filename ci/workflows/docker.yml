@@ -12,26 +12,12 @@ steps:
     if: build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
-            GITHUB_TOKEN: github-token
     retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
     if: build.env("SKIP_TARGET_AARCH64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-aarch64"
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
-            GITHUB_TOKEN: github-token
     agents:
       queue: "linux-arm64"
     retry: *auto-retry
@@ -42,12 +28,6 @@ steps:
       - "build-amd64"
       - "build-aarch64"
     key: "multi-arch-image-create-push"
-    plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
   - label: "pre build binary: amd64"
@@ -71,9 +51,6 @@ steps:
     if: build.env("SKIP_TARGET_AARCH64") != "true"
     command: "ci/scripts/release.sh"
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GITHUB_TOKEN: github-token
       - docker-compose#v5.5.0:
           run: release-env-arm
           config: ci/docker-compose.yml
@@ -93,11 +70,6 @@ steps:
     depends_on:
       - "multi-arch-image-create-push"
     plugins:
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
   - label: "generate notification step"
