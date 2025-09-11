@@ -537,7 +537,9 @@ impl LogicalPlanRoot {
             ))?;
         }
 
-        if ctx.session_ctx().config().streaming_enable_delta_join() {
+        if ctx.session_ctx().config().streaming_enable_delta_join()
+            && ctx.session_ctx().config().enable_index_selection()
+        {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
             plan = plan.optimize_by_rules(&OptimizationStage::new(

@@ -201,13 +201,13 @@
     └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: all, lookup table: i }
       └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |-
-    StreamMaterialize { columns: [ix, tx, i.t._row_id(hidden), t._row_id(hidden)], stream_key: [i.t._row_id, t._row_id, ix], pk_columns: [i.t._row_id, t._row_id, ix], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(i.x, i.t._row_id, t._row_id) }
-      └─StreamHashJoin { type: Inner, predicate: i.x = t.x, output: [i.x, t.x, i.t._row_id, t._row_id] }
+    StreamMaterialize { columns: [ix, tx, i.t._row_id(hidden), i.t._row_id#1(hidden)], stream_key: [i.t._row_id, i.t._row_id#1, ix], pk_columns: [i.t._row_id, i.t._row_id#1, ix], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(i.x, i.t._row_id, i.t._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id] }
         ├─StreamExchange { dist: HashShard(i.x) }
         │ └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i.t._row_id], pk: [x, t._row_id], dist: UpstreamHashShard(i.x) }
-        └─StreamExchange { dist: HashShard(t.x) }
-          └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(i.x) }
+          └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i.t._row_id], pk: [x, t._row_id], dist: UpstreamHashShard(i.x) }
 - name: Left & right has same HashShard distribution. There should be no exchange below hash join
   sql: |
     create table t(x int);

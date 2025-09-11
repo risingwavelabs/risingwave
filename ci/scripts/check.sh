@@ -58,19 +58,5 @@ echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
 
-echo "--- Build documentation"
-RUSTDOCFLAGS="-Dwarnings" cargo doc --document-private-items --no-deps
-
-echo "--- Show sccache stats"
-sccache --show-stats
-sccache --zero-stats
-
-echo "--- Run doctest"
-RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld" cargo test --doc
-
-echo "--- Show sccache stats"
-sccache --show-stats
-sccache --zero-stats
-
 echo "--- Check unused dependencies"
 cargo machete

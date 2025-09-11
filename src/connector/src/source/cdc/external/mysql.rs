@@ -89,7 +89,8 @@ impl MySqlExternalTable {
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
             .ssl_mode(match config.ssl_mode {
-                SslMode::Disabled | SslMode::Preferred => sqlx::mysql::MySqlSslMode::Disabled,
+                SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
+                SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
                 SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
                 _ => {
                     return Err(anyhow!("unsupported SSL mode").into());
@@ -102,13 +103,11 @@ impl MySqlExternalTable {
         // discover system version first
         let system_info = schema_discovery.discover_system().await?;
         schema_discovery.query = SchemaQueryBuilder::new(system_info.clone());
-
         let schema = Alias::new(config.database.as_str()).into_iden();
         let table = Alias::new(config.table.as_str()).into_iden();
         let columns = schema_discovery
             .discover_columns(schema, table, &system_info)
             .await?;
-
         let mut column_descs = vec![];
         let mut pk_names = vec![];
         for col in columns {
@@ -147,7 +146,6 @@ impl MySqlExternalTable {
         if pk_names.is_empty() {
             return Err(anyhow!("MySQL table doesn't define the primary key").into());
         }
-
         Ok(Self {
             column_descs,
             pk_names,

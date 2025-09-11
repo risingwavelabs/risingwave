@@ -130,6 +130,25 @@ impl CatalogController {
             removed_objects.extend(removed_sink_objs);
         }
 
+        for obj in &removed_objects {
+            if obj.obj_type == ObjectType::Sink {
+                let sink = Sink::find_by_id(obj.oid)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
+
+                if let Some(target_table) = sink.target_table
+                    && !removed_object_ids.contains(&target_table)
+                    && !has_table_been_migrated(&txn, target_table).await?
+                {
+                    return Err(anyhow::anyhow!(
+                        "Dropping sink into table is not allowed for unmigrated table {}. Please migrate it first.",
+                        target_table
+                    ).into());
+                }
+            }
+        }
+
         // 1. Detect when an Iceberg table is part of the dependencies.
         // 2. Drop database with iceberg tables in it is not supported.
         if object_type != ObjectType::Table || drop_database {

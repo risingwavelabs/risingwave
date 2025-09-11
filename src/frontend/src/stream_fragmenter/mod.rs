@@ -476,6 +476,12 @@ fn build_fragment(
                     .add(FragmentTypeFlag::VectorIndexWrite);
             }
 
+            NodeBody::UpstreamSinkUnion(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::UpstreamSinkUnion);
+            }
+
             _ => {}
         };
 
