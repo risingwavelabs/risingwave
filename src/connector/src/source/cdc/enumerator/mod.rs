@@ -55,7 +55,7 @@ pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
 #[async_trait]
 impl<T: CdcSourceTypeTrait> SplitEnumerator for DebeziumSplitEnumerator<T>
 where
-    Self: ListCdcSplits<CdcSourceType = T> + CdcOnTick,
+    Self: ListCdcSplits<CdcSourceType = T> + CdcMonitor,
 {
     type Properties = CdcProperties<T>;
     type Split = DebeziumCdcSplit<T>;
@@ -146,13 +146,12 @@ where
     }
 
     async fn on_tick(&mut self) -> ConnectorResult<()> {
-        self.on_tick_cdc().await
+        self.monitor_cdc().await
     }
 }
 
 impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
-    /// PostgreSQL CDC specific `on_tick`· implementation.
-    async fn on_tick_postgres_cdc(&mut self) -> ConnectorResult<()> {
+    async fn monitor_postgres_confirmed_flush_lsn(&mut self) -> ConnectorResult<()> {
         // Query confirmed flush LSN and update metrics
         match self.query_confirmed_flush_lsn().await {
             Ok(Some((lsn, slot_name))) => {
@@ -259,15 +258,15 @@ pub trait ListCdcSplits {
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>>;
 }
 
-/// Trait for CDC-specific `on_tick` behavior
+/// Trait for CDC-specific monitoring behavior
 #[async_trait]
-pub trait CdcOnTick {
-    async fn on_tick_cdc(&mut self) -> ConnectorResult<()>;
+pub trait CdcMonitor {
+    async fn monitor_cdc(&mut self) -> ConnectorResult<()>;
 }
 
 #[async_trait]
-impl<T: CdcSourceTypeTrait> CdcOnTick for DebeziumSplitEnumerator<T> {
-    default async fn on_tick_cdc(&mut self) -> ConnectorResult<()> {
+impl<T: CdcSourceTypeTrait> CdcMonitor for DebeziumSplitEnumerator<T> {
+    default async fn monitor_cdc(&mut self) -> ConnectorResult<()> {
         Ok(())
     }
 }
@@ -299,10 +298,10 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Postgres> {
 }
 
 #[async_trait]
-impl CdcOnTick for DebeziumSplitEnumerator<Postgres> {
-    async fn on_tick_cdc(&mut self) -> ConnectorResult<()> {
+impl CdcMonitor for DebeziumSplitEnumerator<Postgres> {
+    async fn monitor_cdc(&mut self) -> ConnectorResult<()> {
         // For PostgreSQL CDC, query the upstream Postgres confirmed flush lsn and monitor it.
-        self.on_tick_postgres_cdc().await?;
+        self.monitor_postgres_confirmed_flush_lsn().await?;
         Ok(())
     }
 }

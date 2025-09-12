@@ -160,7 +160,7 @@ impl<T: CdcSourceTypeTrait> EnforceSecret for CdcProperties<T> {} // todo: enfor
 impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
 where
     DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = crate::error::ConnectorError> + Into<SplitImpl>,
-    DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T> + enumerator::CdcOnTick,
+    DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T> + enumerator::CdcMonitor,
 {
     type Split = DebeziumCdcSplit<T>;
     type SplitEnumerator = DebeziumSplitEnumerator<T>;
