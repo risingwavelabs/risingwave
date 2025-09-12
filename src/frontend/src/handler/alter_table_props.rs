@@ -74,9 +74,6 @@ pub async fn handle_alter_iceberg_table_props(
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
         let (table, schema_name) =
             reader.get_table_by_name(db_name, schema_path, &real_table_name, false)?;
-        if sink.target_table.is_some() {
-            bail!("ALTER iceberg table config is not for sink into table")
-        }
         session.check_privilege_for_drop_alter(schema_name, &**sink)?;
         session.check_privilege_for_drop_alter(schema_name, &**source)?;
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
