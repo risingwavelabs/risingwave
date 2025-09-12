@@ -30,7 +30,7 @@ pub async fn handle_alter_table_props(
     changed_props: Vec<SqlOption>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let original_table = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let (original_table, _) = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
     match original_table.engine() {
         risingwave_common::catalog::Engine::Hummock => {
             handle_alter_table_connector_props(handler_args, table_name, changed_props).await
@@ -50,7 +50,7 @@ pub async fn handle_alter_iceberg_table_props(
     let db_name = &session.database();
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
-    let original_table = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let (original_table, _) = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
     let (sink_id, source_id, table_id) = if let Some(sink_name) = original_table.iceberg_sink_name()
         && let Some(source_name) = original_table.iceberg_source_name()
     {
