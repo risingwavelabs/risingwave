@@ -22,9 +22,9 @@ use crate::error::Result;
 struct RwTableStats {
     #[primary_key]
     id: i32,
-    total_key_count: i64,
-    total_key_size: i64,
-    total_value_size: i64,
+    storage_key_count: i64,
+    storage_key_size_uncompressed: i64,
+    storage_value_size_uncompressed: i64,
 }
 
 #[system_catalog(table, "rw_catalog.rw_table_stats")]
@@ -35,9 +35,9 @@ fn read_table_stats(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTableStats>> 
     for (id, stats) in &table_stats.table_stats {
         rows.push(RwTableStats {
             id: *id as i32,
-            total_key_count: stats.total_key_count,
-            total_key_size: stats.total_key_size,
-            total_value_size: stats.total_value_size,
+            storage_key_count: stats.total_key_count,
+            storage_key_size_uncompressed: stats.total_key_size,
+            storage_value_size_uncompressed: stats.total_value_size,
         });
     }
     Ok(rows)

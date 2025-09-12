@@ -34,12 +34,12 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_kilobytes(
-                    "Materialized View Size",
+                    "Estimated Materialized View Size (before compression)",
                     "The storage size of each materialized view",
                     [
                         panels.target(
                             f"{metric('storage_materialized_view_stats', mv_total_size_filter)}/1024",
-                            "{{metric}}, mv id - {{table_id}} ",
+                            "mv id - {{table_id}} ",
                         ),
                     ],
                 ),
