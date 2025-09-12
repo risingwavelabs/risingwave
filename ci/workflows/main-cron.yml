@@ -150,6 +150,46 @@ steps:
       timeout_in_minutes: 120
       retry: *auto-retry
 
+  - group: "end-to-end connector test (release)"
+    steps:
+    - label: "end-to-end source test ({{matrix.backend}} backend)"
+      key: "e2e-test-release-source"
+      <<: *sql-backend
+      command: "ci/scripts/e2e-source-test.sh -p ci-release"
+      if: |
+        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-e2e-source-tests"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      depends_on:
+        - "build"
+        - "build-other"
+      plugins:
+        - docker-compose#v5.5.0:
+            <<: *docker-compose
+            run: source-test-env
+        - ./ci/plugins/upload-failure-logs
+      timeout_in_minutes: 120
+      retry: *auto-retry
+
+    - label: "end-to-end sink test ({{matrix.backend}} backend)"
+      key: "e2e-test-release-sink"
+      <<: *sql-backend
+      command: "ci/scripts/e2e-sink-test.sh -p ci-release"
+      if: |
+        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-e2e-sink-tests"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
+      depends_on:
+        - "build"
+        - "build-other"
+      plugins:
+        - docker-compose#v5.5.0:
+            <<: *docker-compose-standard
+            run: sink-test-env
+        - ./ci/plugins/upload-failure-logs
+      timeout_in_minutes: 120
+      retry: *auto-retry
+      
   - label: "fuzz test"
     key: "fuzz-test"
     command: "ci/scripts/cron-fuzz-test.sh -p ci-release"
