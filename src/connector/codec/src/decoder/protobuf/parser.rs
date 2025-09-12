@@ -73,6 +73,9 @@ fn detect_loop_and_push(
 }
 
 /// Converts a protobuf message field to a datum.
+///
+/// We will get the protobuf value from the message by checking the field descriptor and correctly
+/// handling presence, then call [`from_protobuf_value`].
 pub fn from_protobuf_message_field<'a>(
     field_desc: &FieldDescriptor,
     message: &'a DynamicMessage,
