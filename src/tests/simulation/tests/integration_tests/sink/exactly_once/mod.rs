@@ -68,7 +68,7 @@ async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>) -> Result<()> {
 
     let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
         internal_tables
-            .into_iter()
+            .iter()
             .filter_map(|(_, table_name)| table_name.strip_prefix(table_name_prefix))
             .filter(|name| name.contains("sink"))
             .collect_vec(),
