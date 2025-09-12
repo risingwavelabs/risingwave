@@ -92,7 +92,7 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, MAX_SNAPSHOTS_NUM,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
     SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     parse_partition_by_exprs,
@@ -1937,6 +1937,19 @@ pub async fn create_iceberg_engine_table(
             WRITE_MODE.to_owned(),
             ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
         );
+    }
+
+    if let Some(max_snapshots_num) = handler_args.with_options.get(MAX_SNAPSHOTS_NUM) {
+        let max_snapshots_num = max_snapshots_num.parse::<u32>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "max_snapshots_num must be a positive integer: {}",
+                max_snapshots_num
+            ))
+        })?;
+        if max_snapshots_num == 0 {
+            bail!("max_snapshots_num must be a positive integer: 0");
+        }
+        sink_with.insert(MAX_SNAPSHOTS_NUM.to_owned(), max_snapshots_num.to_string());
     }
 
     let partition_by = handler_args
