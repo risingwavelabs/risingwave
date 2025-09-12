@@ -27,6 +27,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
+use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
 
 use crate::connector_common::{SslMode, create_pg_client};
@@ -181,7 +182,7 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
                 tracing::error!(
                     "Failed to query confirmed_flush_lsn for source {}: {}",
                     self.source_id,
-                    e
+                    e.as_report()
                 );
             }
         }
@@ -231,13 +232,15 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
             &ssl_root_cert,
         )
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to create PostgreSQL client: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to create PostgreSQL client: {}", e.as_report()))?;
 
         let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
-        let row = client
-            .query_opt(query, &[&slot_name])
-            .await
-            .map_err(|e| anyhow::anyhow!("PostgreSQL query confirmed flush lsn error: {}", e))?;
+        let row = client.query_opt(query, &[&slot_name]).await.map_err(|e| {
+            anyhow::anyhow!(
+                "PostgreSQL query confirmed flush lsn error: {}",
+                e.as_report()
+            )
+        })?;
 
         match row {
             Some(row) => {
