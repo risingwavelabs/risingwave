@@ -249,36 +249,6 @@ steps:
     timeout_in_minutes: 120
     retry: *auto-retry
 
-  - label: "recovery test (madsim)"
-    key: "recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
-    depends_on: "build-simulation"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      # Only upload zipped files, otherwise the logs is too much.
-      - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 60
-    parallelism: 2
-    retry: *auto-retry
-  - label: "preload-memory recovery test (madsim)"
-    key: "preload-memory-recovery-test-deterministic"
-    command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-preload-memory-tests"
-    depends_on: "build-simulation"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      # Only upload zipped files, otherwise the logs is too much.
-      - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 60
-    parallelism: 2
-    retry: *auto-retry
-
   # Ddl statements will randomly run with background_ddl.
   - label: "background_ddl, arrangement_backfill recovery test (madsim)"
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
