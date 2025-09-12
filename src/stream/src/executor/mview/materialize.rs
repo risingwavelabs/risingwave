@@ -647,7 +647,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             'stage_2: loop {
                 // if the upstream is finished, it is still possible to go into 'stage_2 loop
                 let Some(refresh_args) = self.refresh_args.as_mut() else {
-                    tracing::info!(actor_id = %self.actor_context.id, "actor is not refreshing, skipping sort merge stage");
                     break 'stage_2;
                 };
                 tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Starting table replacement operation");
