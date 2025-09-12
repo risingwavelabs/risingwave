@@ -1421,7 +1421,11 @@ impl ToStream for LogicalAgg {
             }
         }
         let eowc = ctx.emit_on_window_close();
-        let stream_input = self.input().to_stream(ctx)?;
+        let input = self
+            .input()
+            .try_better_locality(&self.group_key().to_vec())
+            .unwrap_or_else(|| self.input());
+        let stream_input = input.to_stream(ctx)?;
 
         // Use Dedup operator, if possible.
         if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
@@ -1508,16 +1512,19 @@ impl ToStream for LogicalAgg {
         } else {
             // a `count(*)` is appended, should project the output
             assert_eq!(self.agg_calls().len() + 1, n_final_agg_calls);
-            Ok(StreamProject::new(generic::Project::with_out_col_idx(
+
+            let mut project = StreamProject::new(generic::Project::with_out_col_idx(
                 plan,
                 0..self.schema().len(),
-            ))
+            ));
             // If there's no agg call, then `count(*)` will be the only column in the output besides keys.
             // Since it'll be pruned immediately in `StreamProject`, the update records are likely to be
             // no-op. So we set the hint to instruct the executor to eliminate them.
             // See https://github.com/risingwavelabs/risingwave/issues/17030.
-            .with_noop_update_hint(self.agg_calls().is_empty())
-            .into())
+            if self.agg_calls().is_empty() {
+                project = project.with_noop_update_hint(true);
+            }
+            Ok(project.into())
         }
     }
 

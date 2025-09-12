@@ -133,7 +133,16 @@ impl IcebergCompactionHandle {
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
         let task_type: TaskType = match param.sink_type {
-            SinkType::AppendOnly | SinkType::ForceAppendOnly => TaskType::SmallDataFileCompaction,
+            SinkType::AppendOnly | SinkType::ForceAppendOnly => {
+                if risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .is_ok()
+                {
+                    TaskType::SmallDataFileCompaction
+                } else {
+                    TaskType::FullCompaction
+                }
+            }
 
             _ => TaskType::FullCompaction,
         };

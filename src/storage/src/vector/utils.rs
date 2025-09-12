@@ -66,8 +66,21 @@ pub struct DistanceHeap<I, const MAX_HEAP: bool>(BinaryHeap<HeapNode<I, MAX_HEAP
 pub type MaxDistanceHeap<I> = DistanceHeap<I, true>;
 pub type MinDistanceHeap<I> = DistanceHeap<I, false>;
 
+fn non_zero_capacity(capacity: usize) -> usize {
+    if capacity == 0 {
+        if cfg!(debug_assertions) {
+            panic!("unexpected 0 capacity");
+        } else {
+            1
+        }
+    } else {
+        capacity
+    }
+}
+
 impl<I, const MAX_HEAP: bool> DistanceHeap<I, MAX_HEAP> {
     pub fn with_capacity(capacity: usize) -> Self {
+        let capacity = non_zero_capacity(capacity);
         Self(BinaryHeap::with_capacity(capacity))
     }
 
@@ -107,6 +120,8 @@ impl<I> BoundedNearest<I> {
         get_item: impl FnOnce() -> I,
     ) -> Option<(VectorDistance, I)> {
         if self.heap.0.len() >= self.capacity {
+            // we have restricted that `capacity` cannot be 0, so
+            // when `heap.len() >= capacity`, the heap must be non-empty.
             let mut top = self.heap.0.peek_mut().expect("non-empty");
             if top.distance > distance {
                 let prev_node = replace(
@@ -169,6 +184,7 @@ impl<I> BoundedNearest<I> {
     }
 
     pub fn resize(&mut self, new_capacity: usize) {
+        let new_capacity = non_zero_capacity(new_capacity);
         self.capacity = new_capacity;
         while self.heap.0.len() > new_capacity {
             self.heap.pop();

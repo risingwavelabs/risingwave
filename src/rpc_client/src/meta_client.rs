@@ -476,14 +476,12 @@ impl MetaClient {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
-            affected_table_change,
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
         };
@@ -826,17 +824,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_sink(
-        &self,
-        sink_id: u32,
-        cascade: bool,
-        affected_table_change: Option<ReplaceJobPlan>,
-    ) -> Result<WaitVersion> {
-        let request = DropSinkRequest {
-            sink_id,
-            cascade,
-            affected_table_change,
-        };
+    pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp
             .version
@@ -1708,6 +1697,28 @@ impl MetaClient {
         };
         let req = AddEventLogRequest {
             event: Some(add_event_log_request::Event::SinkFail(event)),
+        };
+        self.inner.add_event_log(req).await?;
+        Ok(())
+    }
+
+    pub async fn add_cdc_auto_schema_change_fail_event(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) -> Result<()> {
+        let event = event_log::EventAutoSchemaChangeFail {
+            table_id,
+            table_name,
+            cdc_table_id,
+            upstream_ddl,
+            fail_info,
+        };
+        let req = AddEventLogRequest {
+            event: Some(add_event_log_request::Event::AutoSchemaChangeFail(event)),
         };
         self.inner.add_event_log(req).await?;
         Ok(())
