@@ -357,6 +357,29 @@ fn datum_to_json_object(
                 }
             }
         }
+        (DataType::Map(map_type), ScalarRefImpl::Map(map_ref)) => {
+            let mut map = Map::new();
+            for (key_ref, value_datum_ref) in map_ref.iter() {
+                let key_string = match key_ref {
+                    // Convert integer keys to strings for JSON compatibility (following DuckDB behavior)
+                    ScalarRefImpl::Int16(v) => v.to_string(),
+                    ScalarRefImpl::Int32(v) => v.to_string(), 
+                    ScalarRefImpl::Int64(v) => v.to_string(),
+                    ScalarRefImpl::Utf8(s) => s.to_string(),
+                    _ => {
+                        return Err(ArrayError::internal(format!(
+                            "datum_to_json_object: unsupported map key type: {:?}",
+                            key_ref
+                        )));
+                    }
+                };
+                
+                let value_field = Field::unnamed(map_type.value().clone());
+                let value_json = datum_to_json_object(&value_field, value_datum_ref, config)?;
+                map.insert(key_string, value_json);
+            }
+            json!(map)
+        }
         // TODO(map): support map
         (data_type, scalar_ref) => {
             return Err(ArrayError::internal(format!(
@@ -449,8 +472,9 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::array::ArrayBuilder;
     use risingwave_common::types::{
-        Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
+        Date, Decimal, Interval, MapType, MapValue, Scalar, ScalarImpl, ScalarRefImpl, StructRef, StructType, StructValue, Time,
         Timestamp,
     };
 
@@ -810,5 +834,153 @@ mod tests {
                 .to_string();
         let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"string"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
         assert_eq!(schema, ans);
+    }
+
+    #[test]
+    fn test_to_json_map_type() {
+        use risingwave_common::array::{StructArrayBuilder};
+        use risingwave_common::types::ListValue;
+        
+        let config = JsonEncoderConfig {
+            time_handling_mode: TimeHandlingMode::Milli,
+            date_handling_mode: DateHandlingMode::FromCe,
+            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::None,
+            jsonb_handling_mode: JsonbHandlingMode::String,
+        };
+
+        // Test map with string keys
+        let string_map_type = MapType::from_kv(DataType::Varchar, DataType::Int32);
+        let struct_type = MapType::struct_type_for_map(DataType::Varchar, DataType::Int32);
+        
+        // Create a map with some entries: {"key1": 42, "key2": 123}
+        let mut struct_builder = StructArrayBuilder::with_type(2, DataType::Struct(struct_type.clone()));
+        
+        // Add first entry: ("key1", 42)
+        struct_builder.append(Some(StructValue::new(vec![
+            Some(ScalarImpl::Utf8("key1".to_string().into())),
+            Some(42i32.to_scalar_value()),
+        ]).as_scalar_ref()));
+        
+        // Add second entry: ("key2", 123) 
+        struct_builder.append(Some(StructValue::new(vec![
+            Some(ScalarImpl::Utf8("key2".to_string().into())),
+            Some(123i32.to_scalar_value()),
+        ]).as_scalar_ref()));
+        
+        let struct_array = struct_builder.finish();
+        let list_value = ListValue::new(struct_array.into());
+        let map_value = MapValue::from_entries(list_value);
+        
+        let result = datum_to_json_object(
+            &Field {
+                data_type: DataType::Map(string_map_type),
+                name: "test_map".into(),
+            },
+            Some(ScalarRefImpl::Map(map_value.as_scalar_ref())),
+            &config,
+        )
+        .unwrap();
+        
+        let expected = json!({"key1": 42, "key2": 123});
+        assert_eq!(result, expected);
+
+        // Test map with integer keys (should be converted to strings)
+        let int_map_type = MapType::from_kv(DataType::Int32, DataType::Varchar);
+        let int_struct_type = MapType::struct_type_for_map(DataType::Int32, DataType::Varchar);
+        
+        // Create a map with some entries: {1: "hello", 2: "world"}
+        let mut int_struct_builder = StructArrayBuilder::with_type(2, DataType::Struct(int_struct_type.clone()));
+        
+        // Add first entry: (1, "hello")
+        int_struct_builder.append(Some(StructValue::new(vec![
+            Some(1i32.to_scalar_value()),
+            Some(ScalarImpl::Utf8("hello".to_string().into())),
+        ]).as_scalar_ref()));
+        
+        // Add second entry: (2, "world")
+        int_struct_builder.append(Some(StructValue::new(vec![
+            Some(2i32.to_scalar_value()),
+            Some(ScalarImpl::Utf8("world".to_string().into())),
+        ]).as_scalar_ref()));
+        
+        let int_struct_array = int_struct_builder.finish();
+        let int_list_value = ListValue::new(int_struct_array.into());
+        let int_map_value = MapValue::from_entries(int_list_value);
+        
+        let int_result = datum_to_json_object(
+            &Field {
+                data_type: DataType::Map(int_map_type),
+                name: "test_int_map".into(),
+            },
+            Some(ScalarRefImpl::Map(int_map_value.as_scalar_ref())),
+            &config,
+        )
+        .unwrap();
+        
+        let int_expected = json!({"1": "hello", "2": "world"});
+        assert_eq!(int_result, int_expected);
+
+        // Test map with Int16 keys
+        let int16_map_type = MapType::from_kv(DataType::Int16, DataType::Boolean);
+        let int16_struct_type = MapType::struct_type_for_map(DataType::Int16, DataType::Boolean);
+        
+        let mut int16_struct_builder = StructArrayBuilder::with_type(2, DataType::Struct(int16_struct_type.clone()));
+        
+        int16_struct_builder.append(Some(StructValue::new(vec![
+            Some(10i16.to_scalar_value()),
+            Some(true.to_scalar_value()),
+        ]).as_scalar_ref()));
+        
+        int16_struct_builder.append(Some(StructValue::new(vec![
+            Some(20i16.to_scalar_value()),
+            Some(false.to_scalar_value()),
+        ]).as_scalar_ref()));
+        
+        let int16_struct_array = int16_struct_builder.finish();
+        let int16_list_value = ListValue::new(int16_struct_array.into());
+        let int16_map_value = MapValue::from_entries(int16_list_value);
+        
+        let int16_result = datum_to_json_object(
+            &Field {
+                data_type: DataType::Map(int16_map_type),
+                name: "test_int16_map".into(),
+            },
+            Some(ScalarRefImpl::Map(int16_map_value.as_scalar_ref())),
+            &config,
+        )
+        .unwrap();
+        
+        let int16_expected = json!({"10": true, "20": false});
+        assert_eq!(int16_result, int16_expected);
+
+        // Test map with Int64 keys
+        let int64_map_type = MapType::from_kv(DataType::Int64, DataType::Varchar);
+        let int64_struct_type = MapType::struct_type_for_map(DataType::Int64, DataType::Varchar);
+        
+        let mut int64_struct_builder = StructArrayBuilder::with_type(1, DataType::Struct(int64_struct_type.clone()));
+        
+        int64_struct_builder.append(Some(StructValue::new(vec![
+            Some(9223372036854775807i64.to_scalar_value()), // i64::MAX
+            Some(ScalarImpl::Utf8("test".to_string().into())),
+        ]).as_scalar_ref()));
+        
+        let int64_struct_array = int64_struct_builder.finish();
+        let int64_list_value = ListValue::new(int64_struct_array.into());
+        let int64_map_value = MapValue::from_entries(int64_list_value);
+        
+        let int64_result = datum_to_json_object(
+            &Field {
+                data_type: DataType::Map(int64_map_type),
+                name: "test_int64_map".into(),
+            },
+            Some(ScalarRefImpl::Map(int64_map_value.as_scalar_ref())),
+            &config,
+        )
+        .unwrap();
+        
+        let int64_expected = json!({"9223372036854775807": "test"});
+        assert_eq!(int64_result, int64_expected);
     }
 }
