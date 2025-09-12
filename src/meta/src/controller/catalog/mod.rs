@@ -821,6 +821,7 @@ pub struct CatalogStats {
     pub function_num: u64,
     pub streaming_job_num: u64,
     pub actor_num: u64,
+    pub database_num: u64,
 }
 
 impl CatalogControllerInner {
