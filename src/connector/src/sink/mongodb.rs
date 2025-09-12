@@ -28,7 +28,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::Row;
 use risingwave_common::types::ScalarRefImpl;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;

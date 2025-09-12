@@ -49,7 +49,7 @@ use prost_types::{
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use tokio::sync::mpsc;

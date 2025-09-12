@@ -26,7 +26,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 use write_chunk_future::{DynamoDbPayloadWriter, WriteChunkFuture};
