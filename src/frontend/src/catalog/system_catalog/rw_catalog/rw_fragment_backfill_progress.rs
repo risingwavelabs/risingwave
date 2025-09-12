@@ -27,16 +27,16 @@ table_backfill_progress as (select
   progress.fragment_id,
   scan_info.backfill_target_relation_id,
   case when scan_info.backfill_type = 'SNAPSHOT_BACKFILL' AND progress.min_epoch > scan_info.backfill_epoch
-  then concat('100% (', stats.total_key_count, '/', stats.total_key_count, ')')
+  then concat('100% (', stats.storage_key_count, '/', stats.storage_key_count, ')')
   else
     concat(
-      coalesce(progress.current_row_count::numeric / stats.total_key_count::numeric * 100, 0),
+      coalesce(progress.current_row_count::numeric / stats.storage_key_count::numeric * 100, 0),
       '%',
       ' ',
       '(',
       coalesce(progress.current_row_count, 0),
       '/',
-      stats.total_key_count,
+      stats.storage_key_count,
       ')'
     )
   end as progress

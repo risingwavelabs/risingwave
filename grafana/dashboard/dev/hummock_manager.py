@@ -86,36 +86,36 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_kilobytes(
-                    "Table Size",
+                    "Estimated Table Size (before compression)",
                     "",
                     [
                         panels.target(
                             f"{table_metric('storage_version_stats', total_key_size_filter)}/1024",
-                            "table{{table_id}} {{metric}}",
+                            "table{{table_id}} storage key size",
                         ),
                         panels.target(
                             f"{table_metric('storage_version_stats', total_value_size_filter)}/1024",
-                            "table{{table_id}} {{metric}}",
+                            "table{{table_id}} storage value size",
                         ),
                     ],
                 ),
                 panels.timeseries_kilobytes(
-                    "Materialized View Size",
+                    "Estimated Materialized View Size (before compression)",
                     "",
                     [
                         panels.target(
                             f"{table_metric('storage_materialized_view_stats', mv_total_size_filter)}/1024",
-                            "{{metric}}, mv id - {{table_id}} ",
+                            "mv id - {{table_id}} ",
                         ),
                     ],
                 ),
                 panels.timeseries_count(
-                    "Table KV Count",
-                    "",
+                    "Estimated Table Storage Key Count",
+                    "The estimated number of storage keys for each table. Note that this is not the same as the number of rows in the table, since a storage key may be stale (i.e. overwritten or deleted in later versions), and thus not counted in the number of rows.",
                     [
                         panels.target(
                             f"{table_metric('storage_version_stats', total_key_count_filter)}",
-                            "table{{table_id}} {{metric}}",
+                            "table{{table_id}} storage key count",
                         ),
                     ],
                 ),
