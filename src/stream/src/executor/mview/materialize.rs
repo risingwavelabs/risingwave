@@ -832,7 +832,58 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             tracing::warn!(chunk = %chunk.to_pretty(), "chunk is ignored during merge phase");
                         }
                         Message::Barrier(b) if !b.is_checkpoint() => {
+                            // handle barrier
+                            // If a downstream mv depends on the current table, we need to do conflict check again.
+                            if !self.may_have_downstream
+                                && b.has_more_downstream_fragments(self.actor_context.id)
+                            {
+                                self.may_have_downstream = true;
+                            }
+                            Self::may_update_depended_subscriptions(
+                                &mut self.depended_subscription_ids,
+                                &b,
+                                mv_table_id,
+                            );
+                            let op_consistency_level = get_op_consistency_level(
+                                self.conflict_behavior,
+                                self.may_have_downstream,
+                                &self.depended_subscription_ids,
+                            );
+                            let post_commit = self
+                                .state_table
+                                .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
+                                .await?;
+                            if !post_commit.inner().is_consistent_op() {
+                                assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
+                            }
+
+                            let update_vnode_bitmap =
+                                b.as_update_vnode_bitmap(self.actor_context.id);
+
+                            // Commit staging table for refreshable materialized views
+                            let staging_post_commit =
+                                refresh_args.staging_table.commit(b.epoch).await?;
+                            let progress_post_commit =
+                                refresh_args.progress_table.commit(b.epoch).await?;
+
                             yield Message::Barrier(b);
+
+                            // Update the vnode bitmap for the state table if asked.
+                            if let Some((_, cache_may_stale)) = post_commit
+                                .post_yield_barrier(update_vnode_bitmap.clone())
+                                .await?
+                                && cache_may_stale
+                            {
+                                self.materialize_cache.lru_cache.clear();
+                            }
+
+                            // Handle staging table post commit
+                            staging_post_commit
+                                .post_yield_barrier(update_vnode_bitmap.clone())
+                                .await?;
+                            progress_post_commit
+                                .post_yield_barrier(update_vnode_bitmap)
+                                .await?;
                         }
                         Message::Barrier(b) => {
                             let staging_table_id = refresh_args.staging_table.table_id();
