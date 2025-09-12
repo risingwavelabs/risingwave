@@ -238,7 +238,6 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-
         let client = create_pg_client(
             &config.username,
             &config.password,
@@ -249,7 +248,6 @@ impl PostgresExternalTableReader {
             &config.ssl_root_cert,
         )
         .await?;
-
         let field_names = rw_schema
             .fields
             .iter()

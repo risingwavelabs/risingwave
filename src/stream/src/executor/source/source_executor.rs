@@ -34,6 +34,7 @@ use risingwave_connector::source::{
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
+use serde_json;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
@@ -51,6 +52,29 @@ use crate::task::LocalBarrierManager;
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
 pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+
+/// Extract offset value from CDC split
+///
+/// This function extracts the offset value from CDC split.
+/// For Postgres CDC, the offset is LSN.
+fn extract_split_offset(split: &SplitImpl) -> Option<u64> {
+    match split {
+        SplitImpl::PostgresCdc(pg_split) => {
+            let offset_str = pg_split.start_offset().as_ref()?;
+            extract_pg_cdc_lsn_from_offset(offset_str)
+        }
+        _ => None,
+    }
+}
+
+/// This function parses the offset JSON and extracts the LSN value from the sourceOffset.lsn field.
+/// Returns Some(lsn) if the LSN is found and can be parsed as u64, None otherwise.
+fn extract_pg_cdc_lsn_from_offset(offset_str: &str) -> Option<u64> {
+    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+    let source_offset = offset.get("sourceOffset")?;
+    let lsn = source_offset.get("lsn")?;
+    lsn.as_u64()
+}
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -115,6 +139,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn spawn_wait_checkpoint_worker(
         core: &StreamSourceCore<S>,
         source_reader: SourceReader,
+        metrics: Arc<StreamingMetrics>,
     ) -> StreamExecutorResult<Option<WaitCheckpointTaskBuilder>> {
         let Some(initial_task) = source_reader.create_wait_checkpoint_task().await? else {
             return Ok(None);
@@ -124,6 +149,7 @@ impl<S: StateStore> SourceExecutor<S> {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table().state_store().clone(),
             table_id: core.split_state_store.state_table().table_id().into(),
+            metrics,
         };
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
@@ -429,6 +455,19 @@ impl<S: StateStore> SourceExecutor<S> {
 
         if !cache.is_empty() {
             tracing::debug!(state = ?cache, "take snapshot");
+
+            // Record LSN metrics for PostgreSQL CDC sources before moving cache
+            let source_id = core.source_id.to_string();
+            for split_impl in &cache {
+                // Extract offset for CDC using type-safe matching
+                if let Some(state_table_lsn_value) = extract_split_offset(split_impl) {
+                    self.metrics
+                        .pg_cdc_state_table_lsn
+                        .with_guarded_label_values(&[&source_id])
+                        .set(state_table_lsn_value as i64);
+                }
+            }
+
             core.split_state_store.set_states(cache).await?;
         }
 
@@ -490,8 +529,12 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let mut wait_checkpoint_task_builder =
-            Self::spawn_wait_checkpoint_worker(&core, source_desc.source.clone()).await?;
+        let mut wait_checkpoint_task_builder = Self::spawn_wait_checkpoint_worker(
+            &core,
+            source_desc.source.clone(),
+            self.metrics.clone(),
+        )
+        .await?;
 
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
@@ -930,6 +973,7 @@ struct WaitCheckpointWorker<S: StateStore> {
     wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,
     table_id: TableId,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> WaitCheckpointWorker<S> {
@@ -953,7 +997,17 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
-                            task.run().await;
+
+                            // Run task with callback to record LSN after successful commit
+                            task.run_with_on_commit_success(|source_id: u64, offset| {
+                                if let Some(lsn_value) = extract_pg_cdc_lsn_from_offset(offset) {
+                                    self.metrics
+                                        .pg_cdc_jni_commit_offset_lsn
+                                        .with_guarded_label_values(&[&source_id.to_string()])
+                                        .set(lsn_value as i64);
+                                }
+                            })
+                            .await;
                         }
                         Err(e) => {
                             tracing::error!(

@@ -123,6 +123,16 @@ pub enum WaitCheckpointTask {
 
 impl WaitCheckpointTask {
     pub async fn run(self) {
+        self.run_with_on_commit_success(|_source_id, _offset| {
+            // Default implementation: no action on commit success
+        })
+        .await;
+    }
+
+    pub async fn run_with_on_commit_success<F>(self, mut on_commit_success: F)
+    where
+        F: FnMut(u64, &str),
+    {
         use std::str::FromStr;
         match self {
             WaitCheckpointTask::CommitCdcOffset(updated_offset) => {
@@ -130,7 +140,10 @@ impl WaitCheckpointTask {
                     let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
                     // notify cdc connector to commit offset
                     match cdc::jni_source::commit_cdc_offset(source_id, offset.clone()) {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            // Execute callback after successful commit
+                            on_commit_success(source_id, &offset);
+                        }
                         Err(e) => {
                             tracing::error!(
                                 error = %e.as_report(),

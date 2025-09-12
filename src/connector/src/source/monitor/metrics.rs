@@ -29,6 +29,8 @@ use crate::source::kafka::stats::RdKafkaStats;
 #[derive(Debug, Clone)]
 pub struct EnumeratorMetrics {
     pub high_watermark: LabelGuardedIntGaugeVec,
+    /// PostgreSQL CDC confirmed flush LSN monitoring
+    pub pg_cdc_confirmed_flush_lsn: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
@@ -43,7 +45,19 @@ impl EnumeratorMetrics {
             registry,
         )
         .unwrap();
-        EnumeratorMetrics { high_watermark }
+
+        let pg_cdc_confirmed_flush_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "pg_cdc_confirmed_flush_lsn",
+            "PostgreSQL CDC confirmed flush LSN",
+            &["source_id", "slot_name"],
+            registry,
+        )
+        .unwrap();
+
+        EnumeratorMetrics {
+            high_watermark,
+            pg_cdc_confirmed_flush_lsn,
+        }
     }
 
     pub fn unused() -> Self {

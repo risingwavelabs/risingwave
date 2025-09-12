@@ -234,6 +234,12 @@ pub trait SplitEnumerator: Sized + Send {
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
         Ok(())
     }
+    /// Called after `worker.tick()` execution to perform periodic operations,
+    /// such as monitoring upstream PostgreSQL `confirmed_flush_lsn`, etc.
+    /// This can be extended to support more periodic operations in the future.
+    async fn on_tick(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type SourceContextRef = Arc<SourceContext>;
@@ -245,10 +251,11 @@ pub trait AnySplitEnumerator: Send {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
+    async fn on_tick(&mut self) -> Result<()>;
 }
 
 #[async_trait]
-impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
+impl<T: SplitEnumerator<Split: Into<SplitImpl>> + 'static> AnySplitEnumerator for T {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
         SplitEnumerator::list_splits(self)
             .await
@@ -261,6 +268,10 @@ impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
 
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
         SplitEnumerator::on_finish_backfill(self, _fragment_ids).await
+    }
+
+    async fn on_tick(&mut self) -> Result<()> {
+        SplitEnumerator::on_tick(self).await
     }
 }
 
