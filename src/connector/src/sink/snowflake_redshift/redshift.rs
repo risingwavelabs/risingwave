@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use bytes::BytesMut;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
@@ -41,22 +41,21 @@ use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::file_sink::opendal_sink::FileSink;
 use crate::sink::file_sink::s3::{S3Common, S3Sink};
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
-use crate::sink::remote::CoordinatedRemoteSinkWriter;
 use crate::sink::snowflake_redshift::file_manager_util::{
     delete_row_by_sink_id_and_end_epoch, get_file_paths_by_sink_id, insert_file_paths_with_sink_id,
 };
 use crate::sink::snowflake_redshift::{
-    __OP, __ROW_ID, AugmentedChunk, SnowflakeRedshiftSinkS3Writer, build_opendal_writer_path,
+    __OP, __ROW_ID, ConnectorType, SnowflakeRedshiftSinkJdbcWriter, SnowflakeRedshiftSinkS3Writer,
+    build_opendal_writer_path,
 };
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam,
-    SinkWriterMetrics,
 };
 
 pub const REDSHIFT_SINK: &str = "redshift";
 
-fn build_full_table_name(schema_name: Option<&str>, table_name: &str) -> String {
+pub fn build_full_table_name(schema_name: Option<&str>, table_name: &str) -> String {
     if let Some(schema_name) = schema_name {
         format!(r#""{}"."{}""#, schema_name, table_name)
     } else {
@@ -287,7 +286,7 @@ impl Sink for RedshiftSink {
 
 pub enum RedShiftSinkWriter {
     S3(SnowflakeRedshiftSinkS3Writer),
-    Jdbc(RedShiftSinkJdbcWriter),
+    Jdbc(SnowflakeRedshiftSinkJdbcWriter),
 }
 
 impl RedShiftSinkWriter {
@@ -311,8 +310,17 @@ impl RedShiftSinkWriter {
             )?;
             Ok(Self::S3(s3_writer))
         } else {
-            let jdbc_writer =
-                RedShiftSinkJdbcWriter::new(config, is_append_only, writer_param, param).await?;
+            let jdbc_writer = SnowflakeRedshiftSinkJdbcWriter::new(
+                None,
+                config.schema.as_deref(),
+                &config.table,
+                config.cdc_table.as_deref(),
+                ConnectorType::Redshift,
+                is_append_only,
+                writer_param,
+                param,
+            )
+            .await?;
             Ok(Self::Jdbc(jdbc_writer))
         }
     }
@@ -363,97 +371,6 @@ impl SinkWriter for RedShiftSinkWriter {
         } else {
             Ok(())
         }
-    }
-}
-
-pub struct RedShiftSinkJdbcWriter {
-    augmented_row: AugmentedChunk,
-    jdbc_sink_writer: CoordinatedRemoteSinkWriter,
-}
-
-impl RedShiftSinkJdbcWriter {
-    pub async fn new(
-        config: RedShiftConfig,
-        is_append_only: bool,
-        writer_param: super::SinkWriterParam,
-        mut param: SinkParam,
-    ) -> Result<Self> {
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        let column_descs = &mut param.columns;
-        param.properties.remove("create_table_if_not_exists");
-        param.properties.remove("write.target.interval.seconds");
-        param
-            .properties
-            .remove("write.intermediate.interval.seconds");
-
-        let full_table_name = if is_append_only {
-            config.table
-        } else {
-            let max_column_id = column_descs
-                .iter()
-                .map(|column| column.column_id.get_id())
-                .max()
-                .unwrap_or(0);
-            (*column_descs).push(ColumnDesc::named(
-                __ROW_ID,
-                ColumnId::new(max_column_id + 1),
-                DataType::Varchar,
-            ));
-            (*column_descs).push(ColumnDesc::named(
-                __OP,
-                ColumnId::new(max_column_id + 2),
-                DataType::Int32,
-            ));
-            config.cdc_table.ok_or_else(|| {
-                SinkError::Config(anyhow!(
-                    "intermediate.table.name is required for non-append-only sink"
-                ))
-            })?
-        };
-        param.properties.remove("intermediate.table.name");
-        param.properties.remove("table.name");
-        param.properties.remove("with_s3");
-        if let Some(schema_name) = param.properties.remove("schema") {
-            param
-                .properties
-                .insert("schema.name".to_owned(), schema_name);
-        }
-        param
-            .properties
-            .insert("table.name".to_owned(), full_table_name.clone());
-        param
-            .properties
-            .insert("type".to_owned(), "append-only".to_owned());
-
-        let jdbc_sink_writer =
-            CoordinatedRemoteSinkWriter::new(param.clone(), metrics.clone()).await?;
-        Ok(Self {
-            augmented_row: AugmentedChunk::new(0, is_append_only),
-            jdbc_sink_writer,
-        })
-    }
-
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.augmented_row.reset_epoch(epoch);
-        self.jdbc_sink_writer.begin_epoch(epoch).await?;
-        Ok(())
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        let chunk = self.augmented_row.augmented_chunk(chunk)?;
-        self.jdbc_sink_writer.write_batch(chunk).await?;
-        Ok(())
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        self.jdbc_sink_writer.barrier(is_checkpoint).await?;
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        // TODO: abort should clean up all the data written in this epoch.
-        self.jdbc_sink_writer.abort().await?;
-        Ok(())
     }
 }
 
@@ -611,7 +528,7 @@ impl RedshiftSinkCommitter {
                 _ = merge_timer.tick(), if merge_into_sql.is_some() => {
                     if let Some(sql) = &merge_into_sql && let Err(e) = client.execute_sql_sync(sql.clone()).await {
                             tracing::warn!("Failed to execute periodic query for table {}: {}", config.table, e);
-                        
+
                     }
                 },
                 _ = copy_timer.tick(), if need_copy_into => {

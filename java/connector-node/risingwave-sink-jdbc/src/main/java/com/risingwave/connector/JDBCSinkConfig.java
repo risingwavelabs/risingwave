@@ -18,8 +18,10 @@ package com.risingwave.connector;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.risingwave.connector.api.sink.CommonSinkConfig;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class JDBCSinkConfig extends CommonSinkConfig {
     private String jdbcUrl;
 

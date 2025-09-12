@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
 use sea_orm::DatabaseConnection;
@@ -37,17 +37,16 @@ use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
 use crate::sink::file_sink::s3::S3Common;
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
-use crate::sink::remote::CoordinatedRemoteSinkWriter;
-use crate::sink::snowflake_redshift::{AugmentedChunk, SnowflakeRedshiftSinkS3Writer};
+use crate::sink::snowflake_redshift::{
+    __OP, __ROW_ID, ConnectorType, SnowflakeRedshiftSinkJdbcWriter, SnowflakeRedshiftSinkS3Writer,
+};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkCommitCoordinator,
-    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
+    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterParam,
 };
 
 pub const SNOWFLAKE_SINK_V2: &str = "snowflake_v2";
-pub const SNOWFLAKE_SINK_ROW_ID: &str = "__row_id";
-pub const SNOWFLAKE_SINK_OP: &str = "__op";
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
@@ -373,7 +372,7 @@ impl Sink for SnowflakeV2Sink {
 
 pub enum SnowflakeSinkWriter {
     S3(SnowflakeRedshiftSinkS3Writer),
-    Jdbc(SnowflakeSinkJdbcWriter),
+    Jdbc(SnowflakeRedshiftSinkJdbcWriter),
 }
 
 impl SnowflakeSinkWriter {
@@ -399,8 +398,17 @@ impl SnowflakeSinkWriter {
             )?;
             Ok(Self::S3(s3_writer))
         } else {
-            let jdbc_writer =
-                SnowflakeSinkJdbcWriter::new(config, is_append_only, writer_param, param).await?;
+            let jdbc_writer = SnowflakeRedshiftSinkJdbcWriter::new(
+                config.snowflake_database.as_deref(),
+                config.snowflake_schema.as_deref(),
+                &config.snowflake_target_table_name.unwrap_or_default(),
+                config.snowflake_cdc_table_name.as_deref(),
+                ConnectorType::Snowflake,
+                is_append_only,
+                writer_param,
+                param,
+            )
+            .await?;
             Ok(Self::Jdbc(jdbc_writer))
         }
     }
@@ -448,119 +456,6 @@ impl SinkWriter for SnowflakeSinkWriter {
         } else {
             Ok(())
         }
-    }
-}
-
-pub struct SnowflakeSinkJdbcWriter {
-    augmented_row: AugmentedChunk,
-    jdbc_sink_writer: CoordinatedRemoteSinkWriter,
-}
-
-impl SnowflakeSinkJdbcWriter {
-    pub async fn new(
-        config: SnowflakeV2Config,
-        is_append_only: bool,
-        writer_param: SinkWriterParam,
-        mut param: SinkParam,
-    ) -> Result<Self> {
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        let properties = &param.properties;
-        let column_descs = &mut param.columns;
-        let full_table_name = if is_append_only {
-            format!(
-                r#""{}"."{}"."{}""#,
-                config.snowflake_database.clone().unwrap_or_default(),
-                config.snowflake_schema.clone().unwrap_or_default(),
-                config
-                    .snowflake_target_table_name
-                    .clone()
-                    .unwrap_or_default()
-            )
-        } else {
-            let max_column_id = column_descs
-                .iter()
-                .map(|column| column.column_id.get_id())
-                .max()
-                .unwrap_or(0);
-            (*column_descs).push(ColumnDesc::named(
-                SNOWFLAKE_SINK_ROW_ID,
-                ColumnId::new(max_column_id + 1),
-                DataType::Varchar,
-            ));
-            (*column_descs).push(ColumnDesc::named(
-                SNOWFLAKE_SINK_OP,
-                ColumnId::new(max_column_id + 2),
-                DataType::Int32,
-            ));
-            format!(
-                r#""{}"."{}"."{}""#,
-                config.snowflake_database.clone().unwrap_or_default(),
-                config.snowflake_schema.clone().unwrap_or_default(),
-                config.snowflake_cdc_table_name.clone().unwrap_or_default()
-            )
-        };
-        let new_properties = BTreeMap::from([
-            ("table.name".to_owned(), full_table_name),
-            ("connector".to_owned(), "snowflake_v2".to_owned()),
-            (
-                "jdbc.url".to_owned(),
-                config.jdbc_url.clone().unwrap_or_default(),
-            ),
-            ("type".to_owned(), "append-only".to_owned()),
-            (
-                "user".to_owned(),
-                config.username.clone().unwrap_or_default(),
-            ),
-            (
-                "password".to_owned(),
-                config.password.clone().unwrap_or_default(),
-            ),
-            (
-                "primary_key".to_owned(),
-                properties.get("primary_key").cloned().unwrap_or_default(),
-            ),
-            (
-                "schema.name".to_owned(),
-                config.snowflake_schema.clone().unwrap_or_default(),
-            ),
-            (
-                "database.name".to_owned(),
-                config.snowflake_database.clone().unwrap_or_default(),
-            ),
-        ]);
-        param.properties = new_properties;
-
-        let jdbc_sink_writer =
-            CoordinatedRemoteSinkWriter::new(param.clone(), metrics.clone()).await?;
-        Ok(Self {
-            augmented_row: AugmentedChunk::new(0, is_append_only),
-            jdbc_sink_writer,
-        })
-    }
-}
-
-impl SnowflakeSinkJdbcWriter {
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.augmented_row.reset_epoch(epoch);
-        self.jdbc_sink_writer.begin_epoch(epoch).await?;
-        Ok(())
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        let chunk = self.augmented_row.augmented_chunk(chunk)?;
-        self.jdbc_sink_writer.write_batch(chunk).await?;
-        Ok(())
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        self.jdbc_sink_writer.barrier(is_checkpoint).await?;
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        // TODO: abort should clean up all the data written in this epoch.
-        self.jdbc_sink_writer.abort().await?;
-        Ok(())
     }
 }
 
@@ -867,8 +762,8 @@ fn build_create_table_sql(
         })
         .collect::<Result<Vec<String>>>()?;
     if need_op_and_row_id {
-        columns.push(format!(r#""{}" STRING"#, SNOWFLAKE_SINK_ROW_ID));
-        columns.push(format!(r#""{}" INT"#, SNOWFLAKE_SINK_OP));
+        columns.push(format!(r#""{}" STRING"#, __ROW_ID));
+        columns.push(format!(r#""{}" INT"#, __OP));
     }
     let columns_str = columns.join(", ");
     Ok(format!(
@@ -1075,8 +970,8 @@ END;"#,
         all_column_names_set_str = all_column_names_set_str,
         all_column_names_str = all_column_names_str,
         all_column_names_insert_str = all_column_names_insert_str,
-        snowflake_sink_row_id = SNOWFLAKE_SINK_ROW_ID,
-        snowflake_sink_op = SNOWFLAKE_SINK_OP,
+        snowflake_sink_row_id = __ROW_ID,
+        snowflake_sink_op = __OP,
     )
 }
 
