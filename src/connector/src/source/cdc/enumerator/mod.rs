@@ -55,7 +55,7 @@ pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
 #[async_trait]
 impl<T: CdcSourceTypeTrait> SplitEnumerator for DebeziumSplitEnumerator<T>
 where
-    Self: ListCdcSplits<CdcSourceType = T>,
+    Self: ListCdcSplits<CdcSourceType = T> + CdcOnTick,
 {
     type Properties = CdcProperties<T>;
     type Split = DebeziumCdcSplit<T>;
@@ -146,11 +146,7 @@ where
     }
 
     async fn on_tick(&mut self) -> ConnectorResult<()> {
-        // For Postgres CDC, query the upstream Postgres confirmed flush lsn and monitor it.
-        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Postgres>() {
-            self.on_tick_postgres_cdc().await?;
-        }
-        Ok(())
+        self.on_tick_cdc().await
     }
 }
 
@@ -263,6 +259,19 @@ pub trait ListCdcSplits {
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>>;
 }
 
+/// Trait for CDC-specific `on_tick` behavior
+#[async_trait]
+pub trait CdcOnTick {
+    async fn on_tick_cdc(&mut self) -> ConnectorResult<()>;
+}
+
+#[async_trait]
+impl<T: CdcSourceTypeTrait> CdcOnTick for DebeziumSplitEnumerator<T> {
+    default async fn on_tick_cdc(&mut self) -> ConnectorResult<()> {
+        Ok(())
+    }
+}
+
 impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
     type CdcSourceType = Mysql;
 
@@ -289,6 +298,15 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Postgres> {
     }
 }
 
+#[async_trait]
+impl CdcOnTick for DebeziumSplitEnumerator<Postgres> {
+    async fn on_tick_cdc(&mut self) -> ConnectorResult<()> {
+        // For PostgreSQL CDC, query the upstream Postgres confirmed flush lsn and monitor it.
+        self.on_tick_postgres_cdc().await?;
+        Ok(())
+    }
+}
+
 impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
     type CdcSourceType = Citus;
 
@@ -306,6 +324,7 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
             .collect_vec()
     }
 }
+
 impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
     type CdcSourceType = Mongodb;
 
