@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
+
 use risingwave_common::cast::str_to_bool;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256, ScalarImpl, Time, Timestamp, Timestamptz, UInt256,
@@ -194,6 +196,8 @@ impl ByteStreamSourceParser for CsvParser {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use risingwave_common::array::Op;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Int256, ScalarImpl, ToOwnedDatum, UInt256};
