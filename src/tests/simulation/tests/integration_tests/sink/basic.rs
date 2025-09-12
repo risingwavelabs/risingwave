@@ -52,7 +52,7 @@ async fn basic_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Resul
 
     let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
         internal_tables
-            .into_iter()
+            .iter()
             .filter_map(|(_, table_name)| table_name.strip_prefix(table_name_prefix))
             .filter(|name| name.contains("sink"))
             .collect_vec(),
