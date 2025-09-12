@@ -328,7 +328,7 @@ impl ToStream for LogicalTopN {
                 .try_better_locality(self.group_key())
                 .unwrap_or_else(|| self.input());
             let input = logical_input.to_stream(ctx)?;
-            let input = RequiredDist::hash_shard(self.group_key())
+            let input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
                 .streaming_enforce_if_not_satisfies(input)?;
             let core = self.core.clone_with_input(input);
             StreamGroupTopN::new(core, None)?.into()
