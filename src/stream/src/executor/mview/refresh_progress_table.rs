@@ -102,7 +102,9 @@ impl<S: StateStore> RefreshProgressTable<S> {
                     VirtualNode::from_index(vnode).to_datum(),
                 ]))
                 .await?;
-            if let Some(entry) = self.parse_row_to_entry(&row, self.pk_len) {
+            if row.is_some()
+                && let Some(entry) = self.parse_row_to_entry(&row, self.pk_len)
+            {
                 self.cache.insert(entry.vnode, entry);
                 loaded_count += 1;
             }
@@ -249,10 +251,11 @@ impl<S: StateStore> RefreshProgressTable<S> {
 
         if datums.len() != expected_len {
             tracing::warn!(
-                "Row length mismatch: got {}, expected {} (pk_len={})",
+                "Row length mismatch: got {}, expected {} (pk_len={}), row: {:?}",
                 datums.len(),
                 expected_len,
-                pk_len
+                pk_len,
+                row,
             );
             return None;
         }

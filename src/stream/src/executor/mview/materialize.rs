@@ -709,7 +709,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     None => {
                                         // Merge stream finished
                                         merge_complete = true;
-                                        break;
+
+                                        // If the merge stream finished, we need to wait for the next barrier to commit states
                                     }
                                 }
                             }
@@ -732,119 +733,84 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     yield Message::Chunk(to_delete_chunk);
                 }
 
-                if merge_complete {
+                // Handle barrier when available
+                let barrier_to_process = if merge_complete {
+                    // Case 1: Merge stream finished within an epoch
+                    // Wait for next epoch to commit states
                     tracing::info!("merge sort completed");
                     if let Some(b) = pending_barrier.take() {
-                        // Need to commit tables for the pending barrier before yielding
-                        // If a downstream mv depends on the current table, we need to do conflict check again.
-                        if !self.may_have_downstream
-                            && b.has_more_downstream_fragments(self.actor_context.id)
-                        {
-                            self.may_have_downstream = true;
-                        }
-                        Self::may_update_depended_subscriptions(
-                            &mut self.depended_subscription_ids,
-                            &b,
-                            mv_table_id,
-                        );
-                        let update_vnode_bitmap = b.as_update_vnode_bitmap(self.actor_context.id);
-                        let op_consistency_level = get_op_consistency_level(
-                            self.conflict_behavior,
-                            self.may_have_downstream,
-                            &self.depended_subscription_ids,
-                        );
-                        let post_commit = self
-                            .state_table
-                            .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
-                            .await?;
-
-                        // Commit staging table and progress table
-                        let staging_post_commit =
-                            refresh_args.staging_table.commit(b.epoch).await?;
-                        let progress_post_commit =
-                            refresh_args.progress_table.commit(b.epoch).await?;
-
-                        yield Message::Barrier(b);
-
-                        // Update the vnode bitmap for the state table if asked.
-                        if let Some((_, cache_may_stale)) = post_commit
-                            .post_yield_barrier(update_vnode_bitmap.clone())
-                            .await?
-                            && cache_may_stale
-                        {
-                            self.materialize_cache.lru_cache.clear();
-                        }
-
-                        // Handle staging table post commit
-                        staging_post_commit
-                            .post_yield_barrier(update_vnode_bitmap.clone())
-                            .await?;
-                        progress_post_commit
-                            .post_yield_barrier(update_vnode_bitmap.clone())
-                            .await?;
+                        Some(b) // Process the pending barrier before exiting
+                    } else {
+                        break 'stage_2; // No pending barrier, exit directly
                     }
-                    break 'stage_2;
-                }
-
-                let Some(b) = pending_barrier else {
-                    tracing::info!("unexpected: no pending barrier");
-                    continue;
+                } else {
+                    // Case 2: Merge stream spans across barriers
+                    // Commit at each barrier arrival
+                    let Some(b) = pending_barrier.take() else {
+                        tracing::info!("unexpected: no pending barrier");
+                        continue;
+                    };
+                    Some(b)
                 };
 
-                // handle barrier
-                // If a downstream mv depends on the current table, we need to do conflict check again.
-                if !self.may_have_downstream
-                    && b.has_more_downstream_fragments(self.actor_context.id)
-                {
-                    self.may_have_downstream = true;
+                if let Some(b) = barrier_to_process {
+                    // Common barrier processing logic for both cases
+                    if !self.may_have_downstream
+                        && b.has_more_downstream_fragments(self.actor_context.id)
+                    {
+                        self.may_have_downstream = true;
+                    }
+                    Self::may_update_depended_subscriptions(
+                        &mut self.depended_subscription_ids,
+                        &b,
+                        mv_table_id,
+                    );
+                    let op_consistency_level = get_op_consistency_level(
+                        self.conflict_behavior,
+                        self.may_have_downstream,
+                        &self.depended_subscription_ids,
+                    );
+
+                    // Commit all tables
+                    let post_commit = self
+                        .state_table
+                        .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
+                        .await?;
+                    let staging_post_commit = refresh_args.staging_table.commit(b.epoch).await?;
+                    let progress_post_commit = refresh_args.progress_table.commit(b.epoch).await?;
+
+                    if !post_commit.inner().is_consistent_op() {
+                        assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
+                    }
+
+                    let update_vnode_bitmap = b.as_update_vnode_bitmap(self.actor_context.id);
+                    let b_epoch = b.epoch;
+                    yield Message::Barrier(b);
+
+                    // Post-barrier processing
+                    if let Some((_, cache_may_stale)) = post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?
+                        && cache_may_stale
+                    {
+                        self.materialize_cache.lru_cache.clear();
+                    }
+
+                    staging_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?;
+                    progress_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?;
+
+                    self.metrics
+                        .materialize_current_epoch
+                        .set(b_epoch.curr as i64);
+
+                    if merge_complete {
+                        break 'stage_2;
+                    }
                 }
-                Self::may_update_depended_subscriptions(
-                    &mut self.depended_subscription_ids,
-                    &b,
-                    mv_table_id,
-                );
-                let op_consistency_level = get_op_consistency_level(
-                    self.conflict_behavior,
-                    self.may_have_downstream,
-                    &self.depended_subscription_ids,
-                );
-                let post_commit = self
-                    .state_table
-                    .commit_may_switch_consistent_op(b.epoch, op_consistency_level)
-                    .await?;
-                if !post_commit.inner().is_consistent_op() {
-                    assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
-                }
-
-                let update_vnode_bitmap = b.as_update_vnode_bitmap(self.actor_context.id);
-
-                // Commit staging table for refreshable materialized views
-                let staging_post_commit = refresh_args.staging_table.commit(b.epoch).await?;
-                let progress_post_commit = refresh_args.progress_table.commit(b.epoch).await?;
-
-                let b_epoch = b.epoch;
-                yield Message::Barrier(b);
-
-                // Update the vnode bitmap for the state table if asked.
-                if let Some((_, cache_may_stale)) = post_commit
-                    .post_yield_barrier(update_vnode_bitmap.clone())
-                    .await?
-                    && cache_may_stale
-                {
-                    self.materialize_cache.lru_cache.clear();
-                }
-
-                // Handle staging table post commit
-                staging_post_commit
-                    .post_yield_barrier(update_vnode_bitmap.clone())
-                    .await?;
-                progress_post_commit
-                    .post_yield_barrier(update_vnode_bitmap.clone())
-                    .await?;
-
-                self.metrics
-                    .materialize_current_epoch
-                    .set(b_epoch.curr as i64);
 
                 // handle barrier finished, go back to 'merge_sort_loop
             }
@@ -1058,6 +1024,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                 // Advance main iterator
                 processed_rows += 1;
+                tracing::info!(
+                    "set progress table: vnode = {:?}, processed_rows = {:?}",
+                    vnode,
+                    processed_rows
+                );
                 progress_table.set_progress(
                     vnode,
                     Some(

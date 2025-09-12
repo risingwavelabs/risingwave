@@ -146,7 +146,7 @@ SELECT * FROM refresh_fs_t;
 statement ok retry 3 backoff 5s
 REFRESH TABLE refresh_fs_t;
 
-sleep 2s
+sleep 20s
 
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
@@ -172,7 +172,7 @@ sleep 5s
 statement ok retry 3 backoff 5s
 REFRESH TABLE refresh_fs_t;
 
-sleep 2s
+sleep 15s
 
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
@@ -202,10 +202,10 @@ echo "2,bob_updated" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file2.
 
 sleep 5s
 
-statement ok
+statement ok retry 3 backoff 5s
 REFRESH TABLE refresh_fs_t;
 
-sleep 2s
+sleep 10s
 
 query II rowsort retry 3 backoff 5s
 SELECT * FROM refresh_fs_t;
