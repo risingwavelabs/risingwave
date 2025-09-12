@@ -43,15 +43,14 @@ async fn basic_test_inner(is_decouple: bool, test_type: TestSinkType) -> Result<
     session.run(CREATE_SINK).await?;
     test_sink.wait_initial_parallelism(6).await?;
 
-    let internal_tables = session.run("show internal tables").await?;
+    let internal_tables = session.show_internal_tables().await?;
 
     let table_name_prefix = "__internal_test_sink_";
 
     let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
         internal_tables
-            .split("\n")
-            .filter_map(|line| line.split_whitespace().nth(1)) // skip schema name
-            .filter_map(|table_name| table_name.strip_prefix(table_name_prefix))
+            .into_iter()
+            .filter_map(|(_, table_name)| table_name.strip_prefix(table_name_prefix))
             .filter(|name| name.contains("sink"))
             .collect_vec(),
     )
