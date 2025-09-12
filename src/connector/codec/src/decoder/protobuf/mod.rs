@@ -13,14 +13,12 @@
 // limitations under the License.
 
 pub mod parser;
-use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use parser::from_protobuf_value;
 use prost_reflect::{DynamicMessage, ReflectMessage};
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{DataType, DatumCow, ToOwnedDatum};
+use risingwave_common::types::{DataType, DatumCow};
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessResult, uncategorized};
@@ -60,16 +58,11 @@ impl Access for ProtobufAccess<'_> {
                 }
             })?;
 
-        match self.message.get_field(&field_desc) {
-            Cow::Borrowed(value) => {
-                from_protobuf_value(&field_desc, value, type_expected, self.messages_as_jsonb)
-            }
-
-            // `Owned` variant occurs only if there's no such field and the default value is returned.
-            Cow::Owned(value) => {
-                from_protobuf_value(&field_desc, &value, type_expected, self.messages_as_jsonb)
-                    .map(|d| d.to_owned_datum().into())
-            }
-        }
+        parser::from_protobuf_message_field(
+            &field_desc,
+            &self.message,
+            type_expected,
+            self.messages_as_jsonb,
+        )
     }
 }
