@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
+
 use risingwave_common::cast::str_to_bool;
-use risingwave_common::types::{DataType, Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
+use risingwave_common::types::{
+    DataType, Date, Decimal, Int256, ScalarImpl, Time, Timestamp, Timestamptz, UInt256,
+};
 
 use super::unified::{AccessError, AccessResult};
 use super::{ByteStreamSourceParser, CsvProperties};
@@ -98,6 +102,23 @@ impl CsvParser {
             DataType::Time => parse!(v, Time)?.into(),
             DataType::Timestamp => parse!(v, Timestamp)?.into(),
             DataType::Timestamptz => parse!(v, Timestamptz)?.into(),
+            // 256-bit integers: accept decimal or 0x-prefixed hex
+            DataType::Int256 => Int256::from_str(&v)
+                .or_else(|_| Int256::from_str_prefixed(&v))
+                .map(ScalarImpl::Int256)
+                .map_err(|_| AccessError::TypeError {
+                    expected: "rw_int256".to_owned(),
+                    got: "string".to_owned(),
+                    value: v.clone(),
+                })?,
+            DataType::UInt256 => UInt256::from_str(&v)
+                .or_else(|_| UInt256::from_str_prefixed(&v))
+                .map(ScalarImpl::UInt256)
+                .map_err(|_| AccessError::TypeError {
+                    expected: "rw_uint256".to_owned(),
+                    got: "string".to_owned(),
+                    value: v.clone(),
+                })?,
             _ => {
                 return Err(AccessError::UnsupportedType {
                     ty: dtype.to_string(),
@@ -175,9 +196,11 @@ impl ByteStreamSourceParser for CsvParser {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use risingwave_common::array::Op;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, ToOwnedDatum};
+    use risingwave_common::types::{DataType, Int256, ScalarImpl, ToOwnedDatum, UInt256};
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
@@ -448,5 +471,39 @@ mod tests {
         assert!(CsvParser::parse_string(&DataType::Boolean, "f1".to_owned()).is_err());
         assert!(CsvParser::parse_string(&DataType::Boolean, "false1".to_owned()).is_err());
         assert!(CsvParser::parse_string(&DataType::Boolean, "TRUE1".to_owned()).is_err());
+    }
+
+    #[test]
+    fn test_parse_uint256_decimal_and_hex() {
+        // decimal
+        let dec_str = "123456789012345678901234567890".to_owned();
+        let got = CsvParser::parse_string(&DataType::UInt256, dec_str.clone()).unwrap();
+        let expect = Some(ScalarImpl::UInt256(UInt256::from_str(&dec_str).unwrap()));
+        assert_eq!(got, expect);
+
+        // hex (0x2a == 42)
+        let hex_str = "0x2a".to_owned();
+        let got = CsvParser::parse_string(&DataType::UInt256, hex_str.clone()).unwrap();
+        let expect = Some(ScalarImpl::UInt256(
+            UInt256::from_str_prefixed(&hex_str).unwrap(),
+        ));
+        assert_eq!(got, expect);
+    }
+
+    #[test]
+    fn test_parse_int256_decimal_and_hex() {
+        // negative decimal
+        let dec_str = "-12345678901234567890".to_owned();
+        let got = CsvParser::parse_string(&DataType::Int256, dec_str.clone()).unwrap();
+        let expect = Some(ScalarImpl::Int256(Int256::from_str(&dec_str).unwrap()));
+        assert_eq!(got, expect);
+
+        // positive hex (0x2a == 42)
+        let hex_str = "0x2a".to_owned();
+        let got = CsvParser::parse_string(&DataType::Int256, hex_str.clone()).unwrap();
+        let expect = Some(ScalarImpl::Int256(
+            Int256::from_str_prefixed(&hex_str).unwrap(),
+        ));
+        assert_eq!(got, expect);
     }
 }

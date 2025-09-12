@@ -63,23 +63,24 @@ fn test_func_sig_map() {
     let expected = expect_test::expect![[r#"
         [
             "cast(anyarray) -> anyarray/character varying",
-            "cast(bigint) -> character varying/double precision/integer/numeric/real/rw_int256/serial/smallint",
+            "cast(bigint) -> character varying/double precision/integer/numeric/real/rw_int256/rw_uint256/serial/smallint",
             "cast(boolean) -> character varying/integer",
-            "cast(character varying) -> anyarray/bigint/boolean/bytea/character varying/date/double precision/integer/interval/jsonb/numeric/real/rw_int256/smallint/time without time zone/timestamp without time zone/vector",
+            "cast(character varying) -> anyarray/bigint/boolean/bytea/character varying/date/double precision/integer/interval/jsonb/numeric/real/rw_int256/rw_uint256/smallint/time without time zone/timestamp without time zone/vector",
             "cast(date) -> character varying/timestamp without time zone",
             "cast(double precision) -> bigint/character varying/integer/numeric/real/smallint",
-            "cast(integer) -> bigint/boolean/character varying/double precision/numeric/real/rw_int256/smallint",
+            "cast(integer) -> bigint/boolean/character varying/double precision/numeric/real/rw_int256/rw_uint256/smallint",
             "cast(interval) -> character varying/time without time zone",
             "cast(jsonb) -> bigint/boolean/character varying/double precision/integer/numeric/real/smallint",
-            "cast(numeric) -> bigint/character varying/double precision/integer/real/smallint",
+            "cast(numeric) -> bigint/character varying/double precision/integer/real/rw_int256/rw_uint256/smallint",
             "cast(real) -> bigint/character varying/double precision/integer/numeric/smallint",
             "cast(rw_int256) -> character varying/double precision",
-            "cast(smallint) -> bigint/character varying/double precision/integer/numeric/real/rw_int256",
+            "cast(rw_uint256) -> character varying/double precision",
+            "cast(smallint) -> bigint/character varying/double precision/integer/numeric/real/rw_int256/rw_uint256",
             "cast(time without time zone) -> character varying/interval",
             "cast(timestamp without time zone) -> character varying/date/time without time zone",
             "cast(vector) -> character varying/real[]",
-            "greatest() -> bigint/boolean/bytea/character varying/date/double precision/integer/interval/numeric/real/rw_int256/serial/smallint/time without time zone/timestamp with time zone/timestamp without time zone",
-            "least() -> bigint/boolean/bytea/character varying/date/double precision/integer/interval/numeric/real/rw_int256/serial/smallint/time without time zone/timestamp with time zone/timestamp without time zone",
+            "greatest() -> bigint/boolean/bytea/character varying/date/double precision/integer/interval/numeric/real/rw_int256/rw_uint256/serial/smallint/time without time zone/timestamp with time zone/timestamp without time zone",
+            "least() -> bigint/boolean/bytea/character varying/date/double precision/integer/interval/numeric/real/rw_int256/rw_uint256/serial/smallint/time without time zone/timestamp with time zone/timestamp without time zone",
         ]
     "#]];
     expected.assert_debug_eq(&duplicated);

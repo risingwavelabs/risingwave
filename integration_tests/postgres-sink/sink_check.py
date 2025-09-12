@@ -2,7 +2,7 @@ import sys
 import subprocess
 
 
-relations = ['target_count', 'data_types', 'pg_all_data_types']
+relations = ['target_count', 'data_types', 'pg_all_data_types', 'numeric256_types']
 
 failed_cases = []
 for rel in relations:
@@ -13,7 +13,10 @@ for rel in relations:
         ["docker", "compose", "exec", "postgres", "bash", "-c", command])
     rows = int(rows.decode('utf-8').strip())
     print(f"{rows} rows in {rel}")
-    if rows < 1:
+    # Special case for numeric256_types which should have exactly 7 rows
+    if rel == 'numeric256_types' and rows != 7:
+        failed_cases.append(f"{rel} (expected 7 rows, got {rows})")
+    elif rel != 'numeric256_types' and rows < 1:
         failed_cases.append(rel)
 
 if len(failed_cases) != 0:
