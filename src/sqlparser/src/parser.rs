@@ -3846,16 +3846,33 @@ impl Parser<'_> {
 
     /// Parse a copy statement
     pub fn parse_copy(&mut self) -> ModalResult<Statement> {
-        let table_name = self.parse_object_name()?;
-        let columns = self.parse_parenthesized_column_list(Optional)?;
-        self.expect_keywords(&[Keyword::FROM, Keyword::STDIN])?;
-        self.expect_token(&Token::SemiColon)?;
-        let values = self.parse_tsv();
-        Ok(Statement::Copy {
-            table_name,
-            columns,
-            values,
-        })
+        let entity = if self.consume_token(&Token::LParen) {
+            let query = self.parse_query()?;
+            self.expect_token(&Token::RParen)?;
+            CopyEntity::Query(query.into())
+        } else {
+            let table_name = self.parse_object_name()?;
+            let columns = self.parse_parenthesized_column_list(Optional)?;
+            CopyEntity::Table {
+                table_name,
+                columns,
+            }
+        };
+
+        let target = if self.parse_keywords(&[Keyword::FROM, Keyword::STDIN]) {
+            self.expect_token(&Token::SemiColon)?;
+            let values = self.parse_tsv();
+            CopyTarget::Stdin { values }
+        } else if self.parse_keywords(&[Keyword::TO, Keyword::STDOUT]) {
+            if !self.consume_token(&Token::EOF) {
+                self.expect_token(&Token::SemiColon)?;
+            }
+            CopyTarget::Stdout
+        } else {
+            return self.expected("FROM STDIN or TO STDOUT");
+        };
+
+        Ok(Statement::Copy { entity, target })
     }
 
     /// Parse a tab separated values in

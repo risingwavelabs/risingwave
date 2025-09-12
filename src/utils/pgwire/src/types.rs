@@ -84,6 +84,13 @@ impl Format {
             )),
         }
     }
+
+    pub fn to_i8(self) -> i8 {
+        match self {
+            Format::Binary => 1,
+            Format::Text => 0,
+        }
+    }
 }
 
 /// FormatIterator used to generate formats of actual length given the provided format.
