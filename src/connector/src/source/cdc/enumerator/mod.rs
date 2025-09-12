@@ -324,7 +324,6 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
             .collect_vec()
     }
 }
-
 impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
     type CdcSourceType = Mongodb;
 

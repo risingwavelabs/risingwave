@@ -53,11 +53,23 @@ use crate::task::LocalBarrierManager;
 /// some latencies in network and cost in meta.
 pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
-/// Extract LSN value from PostgreSQL CDC offset JSON string
+/// Extract offset value from CDC split
 ///
+/// This function extracts the offset value from CDC split.
+/// For Postgres CDC, the offset is LSN.
+fn extract_split_offset(split: &SplitImpl) -> Option<u64> {
+    match split {
+        SplitImpl::PostgresCdc(pg_split) => {
+            let offset_str = pg_split.start_offset().as_ref()?;
+            extract_pg_cdc_lsn_from_offset(offset_str)
+        }
+        _ => None,
+    }
+}
+
 /// This function parses the offset JSON and extracts the LSN value from the sourceOffset.lsn field.
 /// Returns Some(lsn) if the LSN is found and can be parsed as u64, None otherwise.
-fn extract_pg_cdc_lsn(offset_str: &str) -> Option<u64> {
+fn extract_pg_cdc_lsn_from_offset(offset_str: &str) -> Option<u64> {
     let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
     let source_offset = offset.get("sourceOffset")?;
     let lsn = source_offset.get("lsn")?;
@@ -448,15 +460,12 @@ impl<S: StateStore> SourceExecutor<S> {
             // Record LSN metrics for PostgreSQL CDC sources before moving cache
             let source_id = core.source_id.to_string();
             for split_impl in &cache {
-                if split_impl.is_cdc_split() {
-                    let start_offset = split_impl.get_cdc_split_offset();
-                    // Parse the offset to extract LSN for PostgreSQL CDC
-                    if let Some(state_table_lsn_value) = extract_pg_cdc_lsn(&start_offset) {
-                        self.metrics
-                            .pg_cdc_state_table_lsn
-                            .with_guarded_label_values(&[&source_id])
-                            .set(state_table_lsn_value as i64);
-                    }
+                // Extract offset for CDC using type-safe matching
+                if let Some(state_table_lsn_value) = extract_split_offset(split_impl) {
+                    self.metrics
+                        .pg_cdc_state_table_lsn
+                        .with_guarded_label_values(&[&source_id])
+                        .set(state_table_lsn_value as i64);
                 }
             }
 
@@ -992,7 +1001,7 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 
                             // Run task with callback to record LSN after successful commit
                             task.run_with_on_commit_success(|source_id: u64, offset| {
-                                if let Some(lsn_value) = extract_pg_cdc_lsn(offset) {
+                                if let Some(lsn_value) = extract_pg_cdc_lsn_from_offset(offset) {
                                     self.metrics
                                         .pg_cdc_jni_commit_offset_lsn
                                         .with_guarded_label_values(&[&source_id.to_string()])
