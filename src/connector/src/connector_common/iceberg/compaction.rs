@@ -20,4 +20,6 @@ pub struct IcebergSinkCompactionUpdate {
 
     // configuration
     pub compaction_interval: u64,
+
+    pub force_compaction: bool,
 }
