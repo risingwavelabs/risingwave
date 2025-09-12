@@ -232,15 +232,13 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
             &ssl_root_cert,
         )
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to create PostgreSQL client: {}", e.as_report()))?;
+        .context("Failed to create PostgreSQL client")?;
 
         let query = "SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = $1";
-        let row = client.query_opt(query, &[&slot_name]).await.map_err(|e| {
-            anyhow::anyhow!(
-                "PostgreSQL query confirmed flush lsn error: {}",
-                e.as_report()
-            )
-        })?;
+        let row = client
+            .query_opt(query, &[&slot_name])
+            .await
+            .context("PostgreSQL query confirmed flush lsn error")?;
 
         match row {
             Some(row) => {
