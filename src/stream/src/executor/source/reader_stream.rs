@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
@@ -229,13 +230,19 @@ impl StreamReaderBuilder {
                 if is_initial_build {
                     return Err(StreamExecutorError::connector_error(e));
                 } else {
-                    tracing::warn!(
+                    tracing::error!(
                         error = %e.as_report(),
                         source_name = self.source_name,
                         source_id = self.source_id.table_id,
                         actor_id = self.actor_ctx.id,
                         "build stream source reader error, retry in 1s"
                     );
+                    GLOBAL_ERROR_METRICS.user_source_error.report([
+                        e.variant_name().to_owned(),
+                        self.source_id.table_id.to_string(),
+                        self.source_name.to_owned(),
+                        self.actor_ctx.fragment_id.to_string(),
+                    ]);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue 'build_consume_loop;
                 }
@@ -258,13 +265,19 @@ impl StreamReaderBuilder {
                         yield (msg, latest_splits_info.clone());
                     }
                     Err(e) => {
-                        tracing::warn!(
+                        tracing::error!(
                             error = %e.as_report(),
                             source_name = self.source_name,
                             source_id = self.source_id.table_id,
                             actor_id = self.actor_ctx.id,
                             "stream source reader error"
                         );
+                        GLOBAL_ERROR_METRICS.user_source_error.report([
+                            e.variant_name().to_owned(),
+                            self.source_id.table_id.to_string(),
+                            self.source_name.to_owned(),
+                            self.actor_ctx.fragment_id.to_string(),
+                        ]);
                         is_error = true;
                         break 'consume;
                     }
