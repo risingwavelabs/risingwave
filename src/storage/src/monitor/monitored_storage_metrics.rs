@@ -18,8 +18,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use prometheus::{
-    Histogram, Registry, exponential_buckets, histogram_opts, linear_buckets,
-    register_histogram_with_registry,
+    Histogram, HistogramVec, Registry, exponential_buckets, histogram_opts, linear_buckets,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -55,6 +55,9 @@ pub struct MonitoredStorageMetrics {
 
     // [table_id, op_type]
     pub iter_log_op_type_counts: LabelGuardedIntCounterVec,
+
+    // [table_id, top_n, ef_search]
+    pub vector_nearest_duration: HistogramVec,
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
@@ -252,6 +255,18 @@ impl MonitoredStorageMetrics {
         );
         let sync_size = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let vector_nearest_duration_opts = histogram_opts!(
+            "state_store_vector_nearest_duration",
+            "Total latency of vector nearest that have been issued to state store",
+            state_store_read_time_buckets.clone(),
+        );
+        let vector_nearest_duration = register_histogram_vec_with_registry!(
+            vector_nearest_duration_opts,
+            &["table_id", "top_n", "ef_search"],
+            registry
+        )
+        .unwrap();
+
         Self {
             get_duration,
             get_key_size,
@@ -263,6 +278,7 @@ impl MonitoredStorageMetrics {
             iter_counts,
             iter_in_progress_counts,
             iter_log_op_type_counts,
+            vector_nearest_duration,
             sync_duration,
             sync_size,
         }

@@ -213,8 +213,20 @@ impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<O>,
     ) -> impl StorageFuture<'_, Vec<O>> {
-        // TODO: monitor
-        self.inner.nearest(vec, options, on_nearest_item_fn)
+        async move {
+            let labels = [
+                self.table_id().table_id.to_string(),
+                options.top_n.to_string(),
+                options.hnsw_ef_search.to_string(),
+            ];
+            let start_time = Instant::now();
+            let ret = self.inner.nearest(vec, options, on_nearest_item_fn).await?;
+            self.storage_metrics
+                .vector_nearest_duration
+                .with_label_values(&labels.each_ref().map(|s| s.as_str()))
+                .observe(start_time.elapsed().as_secs_f64());
+            Ok(ret)
+        }
     }
 }
 
