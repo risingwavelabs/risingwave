@@ -135,7 +135,10 @@ impl MaterializedInputState {
                 PbAggKind::StringAgg
                 | PbAggKind::ArrayAgg
                 | PbAggKind::JsonbAgg
-                | PbAggKind::JsonbObjectAgg,
+                | PbAggKind::JsonbObjectAgg
+                | PbAggKind::PercentileCont
+                | PbAggKind::PercentileDisc
+                | PbAggKind::Mode,
             )
             | AggType::WrapScalar(_) => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
