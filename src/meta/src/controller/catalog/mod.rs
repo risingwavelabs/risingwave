@@ -33,8 +33,8 @@ use risingwave_common::catalog::{
 use risingwave_common::current_cluster_version;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
-use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::cdc::build_cdc_table_id;
+use risingwave_connector::source::{ConnectorProperties, UPSTREAM_SOURCE_KEY};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
@@ -78,7 +78,7 @@ use super::utils::{
     rename_relation_refer,
 };
 use crate::controller::ObjectModel;
-use crate::controller::catalog::util::update_internal_tables;
+use crate::controller::catalog::util::{redact_source_props, update_internal_tables};
 use crate::controller::utils::*;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, MetaSrvEnv, NotificationVersion,
@@ -702,7 +702,7 @@ impl CatalogControllerInner {
         let databases = self.list_databases().await?;
         let schemas = self.list_schemas().await?;
         let tables = self.list_tables().await?;
-        let sources = self.list_sources().await?;
+        let sources = self.list_sources(true).await?;
         let sinks = self.list_sinks().await?;
         let subscriptions = self.list_subscriptions().await?;
         let indexes = self.list_indexes().await?;
@@ -886,7 +886,7 @@ impl CatalogControllerInner {
     }
 
     /// `list_sources` return all sources and `CREATED` ones if contains any streaming jobs.
-    async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
+    async fn list_sources(&self, display_credentials: bool) -> MetaResult<Vec<PbSource>> {
         let mut source_objs = Source::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
@@ -921,7 +921,13 @@ impl CatalogControllerInner {
 
         Ok(source_objs
             .into_iter()
-            .map(|(source, obj)| ObjectModel(source, obj.unwrap()).into())
+            .map(|(mut source, obj)| {
+                if !display_credentials {
+                    source.with_properties = redact_source_props(&source.with_properties);
+                }
+
+                ObjectModel(source, obj.unwrap()).into()
+            })
             .collect())
     }
 

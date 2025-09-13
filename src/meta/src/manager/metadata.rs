@@ -385,8 +385,10 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
-        self.catalog_controller.list_sources().await
+    pub async fn list_sources(&self, display_credentials: bool) -> MetaResult<Vec<PbSource>> {
+        self.catalog_controller
+            .list_sources(display_credentials)
+            .await
     }
 
     pub async fn post_apply_reschedules(
