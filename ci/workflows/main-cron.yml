@@ -910,6 +910,23 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "e2e internal_get_channel_delta_stats test with monitoring"
+    key: "e2e-metrics-reader-tests"
+    command: "ci/scripts/e2e-metrics-reader-tests.sh"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-metrics-reader-tests"
+      || build.pull_request.labels includes "ci/run-e2e-monitoring-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-metrics-reader-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-monitoring-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
   - label: "connector node integration test Java {{matrix.java_version}}"
     key: "connector-node-integration-test"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
