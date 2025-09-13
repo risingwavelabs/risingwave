@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::from_coroutine;
 use std::ops::Range;
+
+use tracing::warn;
 
 use super::RowRef;
 use super::data_chunk_iter::DataChunkRefIter;
 use super::stream_record::Record;
 use crate::array::{Op, StreamChunk};
+use crate::row::RowExt;
 
 impl StreamChunk {
     /// Return an iterator on stream records of this stream chunk.
@@ -28,11 +32,94 @@ impl StreamChunk {
         }
     }
 
+    fn consistent_pk_update<'a>(
+        rows: impl Iterator<Item = (Op, RowRef<'a>)> + 'a,
+        pk_indices: &'a [usize],
+    ) -> impl Iterator<Item = (Op, RowRef<'a>)> + 'a {
+        from_coroutine(
+            #[coroutine]
+            move || {
+                let mut update_delete_buffer = None;
+                for (op, row) in rows {
+                    match op {
+                        Op::Delete | Op::Insert => {
+                            yield (op, row);
+                        }
+                        Op::UpdateDelete => {
+                            if let Some(prev_update_delete) = update_delete_buffer.replace(row) {
+                                if cfg!(debug_assertions) {
+                                    panic!(
+                                        "receiving two consecutive update deletes: {:?} {:?}",
+                                        prev_update_delete, row
+                                    );
+                                } else {
+                                    warn!(
+                                        ?prev_update_delete,
+                                        ?row,
+                                        "receiving two consecutive update deletes"
+                                    );
+                                }
+                                yield (Op::Delete, prev_update_delete);
+                            }
+                        }
+                        Op::UpdateInsert => {
+                            #[expect(clippy::collapsible_else_if)]
+                            if let Some(prev_update_delete) = update_delete_buffer.take() {
+                                if row.project(pk_indices) == prev_update_delete.project(pk_indices)
+                                {
+                                    yield (Op::UpdateDelete, prev_update_delete);
+                                    yield (Op::UpdateInsert, row);
+                                } else {
+                                    // handle the UpdateDelete as Delete if pk does not match with `UpdateInsert`
+                                    yield (Op::Delete, prev_update_delete);
+                                    yield (Op::Insert, row);
+                                }
+                            } else {
+                                if cfg!(debug_assertions) {
+                                    panic!(
+                                        "no UpdateDelete before UpdateInsert in a chunk: {:?}",
+                                        row,
+                                    );
+                                } else {
+                                    warn!(?row, "no UpdateDelete before UpdateInsert in a chunk");
+                                    yield (Op::Insert, row);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(prev_update_delete) = update_delete_buffer {
+                    if cfg!(debug_assertions) {
+                        panic!(
+                            "no UpdateInsert after UpdateDelete in a chunk: {:?}",
+                            prev_update_delete
+                        );
+                    } else {
+                        warn!(
+                            ?prev_update_delete,
+                            "no UpdateInsert after UpdateDelete in a chunk"
+                        );
+                    }
+                    // handle the UpdateDelete as Delete if there is no subsequent UpdateInsert in the same chunk
+                    yield (Op::Delete, prev_update_delete);
+                }
+            },
+        )
+    }
+
     /// Return an iterator on rows of this stream chunk.
     ///
     /// Should consider using [`StreamChunk::records`] if possible.
     pub fn rows(&self) -> impl Iterator<Item = (Op, RowRef<'_>)> {
         self.rows_in(0..self.capacity())
+    }
+
+    pub fn rows_with_consistent_pk_update<'a>(
+        &'a self,
+        pk_indices: &'a [usize],
+    ) -> impl Iterator<Item = (Op, RowRef<'a>)> + 'a {
+        Self::consistent_pk_update(self.rows(), pk_indices)
     }
 
     /// Return an iterator on rows of this stream chunk in a range.
