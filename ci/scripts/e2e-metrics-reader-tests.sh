@@ -28,7 +28,7 @@ echo "Test completed successfully!"
 # echo "Prometheus is available at: http://127.0.0.1:9500"
 # echo "Grafana is available at: http://127.0.0.1:3001"
 # echo "Press Ctrl+C to stop the cluster and exit."
-# 
+#
 # # Wait for user interrupt
 # trap './risedev k' INT
 # while true; do
