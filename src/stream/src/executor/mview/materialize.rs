@@ -47,6 +47,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{
     StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
 };
+use crate::executor::error::ErrorKind;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::mview::RefreshProgressTable;
 use crate::executor::prelude::*;
@@ -641,6 +642,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 };
 
                 yield msg;
+            }
+
+            if self.refresh_args.is_none() || !goto_stage2 {
+                return Err(StreamExecutorError::from(ErrorKind::Uncategorized(
+                    anyhow::anyhow!(
+                        "unexpected: input stream terminated with no batch source triggered"
+                    ),
+                )));
             }
 
             // stage 2 - merging and deleting
