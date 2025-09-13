@@ -911,13 +911,13 @@ steps:
     retry: *auto-retry
 
   - label: "e2e internal_get_channel_delta_stats test with monitoring"
-    key: "e2e-metrics-reader-tests"
-    command: "ci/scripts/e2e-metrics-reader-tests.sh"
+    key: "e2e-monitoring-tests"
+    command: "ci/scripts/e2e-monitoring-tests.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-metrics-reader-tests"
       || build.pull_request.labels includes "ci/run-e2e-monitoring-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-metrics-reader-tests?(,|$$)/
+      || build.pull_request.labels includes "ci/run-e2e-monitoring-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-monitoring-tests?(,|$$)/
       || build.env("CI_STEPS") =~ /(^|,)e2e-monitoring-tests?(,|$$)/
     depends_on:
       - "build"

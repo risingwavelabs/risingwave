@@ -69,18 +69,20 @@ labels:
   - ".*fs_fetch.*"
   - ".*fs_list.*"
 
-- label: "ci/run-e2e-metrics-reader-tests"
-  files:
-  - "src\\/frontend\\/src\\/metrics_reader\\.rs"
-  - "src\\/batch\\/executors\\/src\\/executor\\/get_channel_delta_stats\\.rs"
-  - "src\\/frontend\\/src\\/optimizer\\/rule\\/table_function_to_internal_get_channel_delta_stats\\.rs"
-  - "e2e_test\\/table_function\\/internal_get_channel_delta_stats\\.slt"
-  - "ci\\/scripts\\/e2e-metrics-reader-tests\\.sh"
 - label: "ci/run-e2e-monitoring-tests"
   files:
+  # internal_get_channel_delta_stats()
   - "src\\/frontend\\/src\\/metrics_reader\\.rs"
   - "src\\/batch\\/executors\\/src\\/executor\\/get_channel_delta_stats\\.rs"
   - "src\\/frontend\\/src\\/optimizer\\/rule\\/table_function_to_internal_get_channel_delta_stats\\.rs"
   - "e2e_test\\/table_function\\/internal_get_channel_delta_stats\\.slt"
-  - "ci\\/scripts\\/e2e-metrics-reader-tests\\.sh"
-  - "risedev\\.yml"
+  - "ci\\/scripts\\/e2e-monitoring-tests\\.sh"
+
+- label: "ci/main-cron/run-selected"
+  files:
+  # internal_get_channel_delta_stats()
+  - "src\\/frontend\\/src\\/metrics_reader\\.rs"
+  - "src\\/batch\\/executors\\/src\\/executor\\/get_channel_delta_stats\\.rs"
+  - "src\\/frontend\\/src\\/optimizer\\/rule\\/table_function_to_internal_get_channel_delta_stats\\.rs"
+  - "e2e_test\\/table_function\\/internal_get_channel_delta_stats\\.slt"
+  - "ci\\/scripts\\/e2e-monitoring-tests\\.sh"
