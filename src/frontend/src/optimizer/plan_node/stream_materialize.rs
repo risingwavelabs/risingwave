@@ -15,6 +15,7 @@
 use std::assert_matches::assert_matches;
 use std::num::NonZeroU32;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
@@ -22,6 +23,7 @@ use risingwave_common::catalog::{
     TableId,
 };
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::PbWebhookSourceInfo;
@@ -51,10 +53,20 @@ pub struct StreamMaterialize {
     /// Child of Materialize plan
     input: PlanRef,
     table: TableCatalog,
+    /// For refreshable tables, staging table for collecting new data during refresh
+    staging_table: Option<TableCatalog>,
 }
 
 impl StreamMaterialize {
     pub fn new(input: PlanRef, table: TableCatalog) -> Result<Self> {
+        Self::new_with_staging(input, table, None)
+    }
+
+    pub fn new_with_staging(
+        input: PlanRef,
+        table: TableCatalog,
+        staging_table: Option<TableCatalog>,
+    ) -> Result<Self> {
         let kind = match table.conflict_behavior() {
             ConflictBehavior::NoCheck => {
                 reject_upsert_input!(input, "Materialize without conflict handling")
@@ -80,8 +92,12 @@ impl StreamMaterialize {
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
-
-        Ok(Self { base, input, table })
+        Ok(Self {
+            base,
+            input,
+            table,
+            staging_table,
+        })
     }
 
     /// Create a materialize node, for `MATERIALIZED VIEW` and `INDEX`.
@@ -173,27 +189,41 @@ impl StreamMaterialize {
 
         let table = Self::derive_table_catalog(
             input.clone(),
-            name,
+            name.clone(),
             database_id,
             schema_id,
-            user_order_by,
-            columns,
-            definition,
+            user_order_by.clone(),
+            columns.clone(),
+            definition.clone(),
             conflict_behavior,
             version_column_indices,
-            Some(pk_column_indices),
+            Some(pk_column_indices.clone()),
             row_id_index,
             TableType::Table,
-            Some(version),
+            Some(version.clone()),
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
             CreateType::Foreground,
-            webhook_info,
+            webhook_info.clone(),
             engine,
             refreshable,
         )?;
 
-        Self::new(input, table)
+        // For refreshable tables, create a staging table
+        let staging_table = if refreshable {
+            Some(Self::derive_staging_table_catalog(table.clone()))
+        } else {
+            None
+        };
+
+        tracing::info!(
+            table_name = %name,
+            refreshable = %refreshable,
+            has_staging_table = %staging_table.is_some(),
+            "Creating StreamMaterialize with staging table info"
+        );
+
+        Self::new_with_staging(input, table, staging_table)
     }
 
     /// Rewrite the input to satisfy the required distribution if necessary, according to the type.
@@ -350,10 +380,62 @@ impl StreamMaterialize {
         })
     }
 
+    /// The staging table is a pk-only table.
+    fn derive_staging_table_catalog(mut table_catalog: TableCatalog) -> TableCatalog {
+        tracing::info!(
+            table_name = %table_catalog.name,
+            "Creating staging table for refreshable table"
+        );
+
+        assert!(table_catalog.row_id_index.is_none());
+        assert!(table_catalog.retention_seconds.is_none());
+        assert!(table_catalog.refreshable);
+
+        // only keep pk columns
+        let mut pk_col_indices = vec![];
+        let mut pk_cols = vec![];
+        for (i, col) in table_catalog.columns.iter().enumerate() {
+            if table_catalog.pk.iter().any(|pk| pk.column_index == i) {
+                pk_col_indices.push(i);
+                pk_cols.push(col.clone());
+            }
+        }
+        let mapping =
+            ColIndexMapping::with_remaining_columns(&pk_col_indices, table_catalog.columns.len());
+
+        table_catalog.value_indices = (0..pk_cols.len()).collect();
+        table_catalog.columns = pk_cols;
+        table_catalog.pk = table_catalog
+            .pk
+            .iter()
+            .map(|pk| ColumnOrder::new(mapping.map(pk.column_index), pk.order_type))
+            .collect();
+        table_catalog.stream_key = mapping.try_map_all(table_catalog.stream_key).unwrap();
+        table_catalog.vnode_col_index = table_catalog.vnode_col_index.map(|i| mapping.map(i));
+        table_catalog.dist_key_in_pk = mapping.try_map_all(table_catalog.dist_key_in_pk).unwrap();
+        table_catalog.distribution_key =
+            mapping.try_map_all(table_catalog.distribution_key).unwrap();
+        table_catalog.table_type = TableType::Internal;
+        table_catalog.watermark_columns = FixedBitSet::new();
+
+        table_catalog.retention_seconds = None;
+        table_catalog.row_id_index = None;
+        table_catalog.dml_fragment_id = None;
+        table_catalog.refreshable = false;
+
+        table_catalog
+    }
+
     /// Get a reference to the stream materialize's table.
     #[must_use]
     pub fn table(&self) -> &TableCatalog {
         &self.table
+    }
+
+    /// Get a reference to the stream materialize's staging table.
+    #[must_use]
+    pub fn staging_table(&self) -> Option<&TableCatalog> {
+        self.staging_table.as_ref()
     }
 
     pub fn name(&self) -> &str {
@@ -407,7 +489,8 @@ impl PlanTreeNodeUnary<Stream> for StreamMaterialize {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let new = Self::new(input, self.table().clone()).unwrap();
+        let new = Self::new_with_staging(input, self.table().clone(), self.staging_table.clone())
+            .unwrap();
         new.base
             .schema()
             .fields
@@ -424,14 +507,34 @@ impl PlanTreeNodeUnary<Stream> for StreamMaterialize {
 impl_plan_tree_node_for_unary! { Stream, StreamMaterialize }
 
 impl StreamNode for StreamMaterialize {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
+
+        tracing::info!(
+            table_name = %self.table().name(),
+            refreshable = %self.table().refreshable,
+            has_staging_table = %self.staging_table.is_some(),
+            staging_table_name = ?self.staging_table.as_ref().map(|t| &t.name),
+            "Converting StreamMaterialize to protobuf"
+        );
+
+        let staging_table_prost = self.staging_table.clone().map(|t| {
+            let prost = t.with_id(state.gen_table_id_wrapped()).to_prost();
+            tracing::info!(
+                staging_table_id = %prost.id,
+                staging_table_name = %prost.name,
+                "Staging table converted to protobuf"
+            );
+            prost
+        });
 
         PbNodeBody::Materialize(Box::new(MaterializeNode {
             // Do not fill `table` and `table_id` here to avoid duplication. It will be filled by
             // meta service after global information is generated.
             table_id: 0,
             table: None,
+            // Pass staging table catalog if available for refreshable tables
+            staging_table: staging_table_prost,
 
             column_orders: self
                 .table()

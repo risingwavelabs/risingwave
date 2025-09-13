@@ -239,7 +239,7 @@ async fn init_metadata_for_replay(
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint.parse()?, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint.parse()?, WorkerType::RiseCtl, advertise_addr, Default::default(), Arc::new(meta_config.clone())) => {
             (meta_client, _) = ret;
         },
     }
@@ -254,7 +254,7 @@ async fn init_metadata_for_replay(
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
-        &meta_config,
+        Arc::new(meta_config.clone()),
     )
     .await;
     new_meta_client.activate(advertise_addr).await.unwrap();
@@ -288,7 +288,7 @@ async fn pull_version_deltas(
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
-        &MetaConfig::default(),
+        Arc::new(MetaConfig::default()),
     )
     .await;
     let worker_id = meta_client.worker_id();
@@ -337,7 +337,7 @@ async fn start_replay(
         WorkerType::RiseCtl,
         &advertise_addr,
         Default::default(),
-        &config.meta,
+        Arc::new(config.meta.clone()),
     )
     .await;
     let worker_id = meta_client.worker_id();

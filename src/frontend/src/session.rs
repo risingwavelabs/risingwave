@@ -307,7 +307,7 @@ impl FrontendEnv {
                 internal_rpc_host_addr: internal_rpc_host_addr.to_string(),
                 ..Default::default()
             },
-            &config.meta,
+            Arc::new(config.meta.clone()),
         )
         .await;
 

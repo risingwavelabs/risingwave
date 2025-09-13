@@ -86,6 +86,10 @@ message BarrierCompleteResponse {
   repeated uint32 load_finished_source_ids = 11;
   map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
   repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
+  // Used for truncating tables in storage layer.
+  // MaterializeExecutor reports the tables to truncate, and then
+  // meta will apply truncate operation in next commit epoch.
+  repeated uint32 truncate_tables = 14;
 }
 
 message StreamingControlStreamRequest {

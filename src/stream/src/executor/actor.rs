@@ -42,7 +42,7 @@ use super::StreamConsumer;
 use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
 use crate::error::StreamResult;
-use crate::task::{ActorId, FragmentId, LocalBarrierManager};
+use crate::task::{ActorId, FragmentId, LocalBarrierManager, StreamEnvironment};
 
 /// Shared by all operators of an actor.
 pub struct ActorContext {
@@ -68,6 +68,8 @@ pub struct ActorContext {
     pub meta_client: Option<MetaClient>,
 
     pub streaming_config: Arc<StreamingConfig>,
+
+    pub stream_env: StreamEnvironment,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -89,9 +91,11 @@ impl ActorContext {
             initial_upstream_actors: Default::default(),
             meta_client: None,
             streaming_config: Arc::new(StreamingConfig::default()),
+            stream_env: StreamEnvironment::for_test(),
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         stream_actor: &BuildActorInfo,
         fragment_id: FragmentId,
@@ -100,6 +104,7 @@ impl ActorContext {
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         meta_client: Option<MetaClient>,
         streaming_config: Arc<StreamingConfig>,
+        stream_env: StreamEnvironment,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
@@ -118,6 +123,7 @@ impl ActorContext {
             initial_upstream_actors: stream_actor.fragment_upstreams.clone(),
             meta_client,
             streaming_config,
+            stream_env,
         })
     }
 

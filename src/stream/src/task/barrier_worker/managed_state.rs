@@ -69,6 +69,7 @@ enum ManagedBarrierStateInner {
         create_mview_progress: Vec<PbCreateMviewProgress>,
         load_finished_source_ids: Vec<u32>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+        truncate_tables: Vec<u32>,
     },
 }
 
@@ -322,6 +323,9 @@ pub(crate) struct PartialGraphManagedBarrierState {
 
     pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
 
+    /// Record the tables to truncate for each epoch of concurrent checkpoints.
+    pub(crate) truncate_tables: HashMap<u64, HashSet<u32>>,
+
     state_store: StateStoreImpl,
 
     streaming_metrics: Arc<StreamingMetrics>,
@@ -343,6 +347,7 @@ impl PartialGraphManagedBarrierState {
             create_mview_progress: Default::default(),
             load_finished_source_ids: Default::default(),
             cdc_table_backfill_progress: Default::default(),
+            truncate_tables: Default::default(),
             state_store,
             streaming_metrics,
         }
@@ -970,6 +975,13 @@ impl DatabaseManagedBarrierState {
                         associated_source_id,
                     );
                 }
+                LocalBarrierEvent::ReportTruncateTable {
+                    epoch,
+                    actor_id,
+                    table_id,
+                } => {
+                    self.report_truncate_table(epoch, actor_id, table_id);
+                }
                 LocalBarrierEvent::RegisterBarrierSender {
                     actor_id,
                     barrier_sender,
@@ -1041,13 +1053,7 @@ impl DatabaseManagedBarrierState {
         &mut self,
         partial_graph_id: PartialGraphId,
         prev_epoch: u64,
-    ) -> (
-        Barrier,
-        Option<HashSet<TableId>>,
-        Vec<PbCreateMviewProgress>,
-        Vec<u32>,
-        Vec<PbCdcTableBackfillProgress>,
-    ) {
+    ) -> BarrierToComplete {
         self.graph_states
             .get_mut(&partial_graph_id)
             .expect("should exist")
@@ -1110,6 +1116,28 @@ impl DatabaseManagedBarrierState {
             );
         }
     }
+
+    /// Report that a table should be truncated for a specific epoch
+    pub(super) fn report_truncate_table(
+        &mut self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+    ) {
+        // Find the correct partial graph state by matching the actor's partial graph id
+        if let Some(actor_state) = self.actor_states.get(&actor_id)
+            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
+            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
+        {
+            graph_state
+                .truncate_tables
+                .entry(epoch.curr)
+                .or_default()
+                .insert(table_id);
+        } else {
+            warn!(?epoch, actor_id, table_id, "ignore truncate table");
+        }
+    }
 }
 
 impl PartialGraphManagedBarrierState {
@@ -1154,12 +1182,20 @@ impl PartialGraphManagedBarrierState {
                 .map(|(actor, state)| state.to_pb(actor, barrier_state.barrier.epoch.curr))
                 .collect();
 
+            let truncate_tables = self
+                .truncate_tables
+                .remove(&barrier_state.barrier.epoch.curr)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+
             let prev_state = replace(
                 &mut barrier_state.inner,
                 ManagedBarrierStateInner::AllCollected {
                     create_mview_progress,
                     load_finished_source_ids,
                     cdc_table_backfill_progress,
+                    truncate_tables,
                 },
             );
 
@@ -1175,17 +1211,7 @@ impl PartialGraphManagedBarrierState {
         None
     }
 
-    #[allow(clippy::type_complexity)]
-    fn pop_barrier_to_complete(
-        &mut self,
-        prev_epoch: u64,
-    ) -> (
-        Barrier,
-        Option<HashSet<TableId>>,
-        Vec<PbCreateMviewProgress>,
-        Vec<u32>,
-        Vec<PbCdcTableBackfillProgress>,
-    ) {
+    fn pop_barrier_to_complete(&mut self, prev_epoch: u64) -> BarrierToComplete {
         let (popped_prev_epoch, barrier_state) = self
             .epoch_barrier_state_map
             .pop_first()
@@ -1193,21 +1219,37 @@ impl PartialGraphManagedBarrierState {
 
         assert_eq!(prev_epoch, popped_prev_epoch);
 
-        let (create_mview_progress, load_finished_source_ids, cdc_table_backfill_progress) = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected {
+        let (
             create_mview_progress,
             load_finished_source_ids,
             cdc_table_backfill_progress,
+            truncate_tables,
+        ) = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected {
+            create_mview_progress,
+            load_finished_source_ids,
+            cdc_table_backfill_progress,
+            truncate_tables,
         } => {
-            (create_mview_progress, load_finished_source_ids, cdc_table_backfill_progress)
+            (create_mview_progress, load_finished_source_ids, cdc_table_backfill_progress, truncate_tables)
         });
-        (
-            barrier_state.barrier,
-            barrier_state.table_ids,
+        BarrierToComplete {
+            barrier: barrier_state.barrier,
+            table_ids: barrier_state.table_ids,
             create_mview_progress,
             load_finished_source_ids,
             cdc_table_backfill_progress,
-        )
+            truncate_tables,
+        }
     }
+}
+
+pub(crate) struct BarrierToComplete {
+    pub barrier: Barrier,
+    pub table_ids: Option<HashSet<TableId>>,
+    pub create_mview_progress: Vec<PbCreateMviewProgress>,
+    pub load_finished_source_ids: Vec<u32>,
+    pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+    pub truncate_tables: Vec<u32>,
 }
 
 impl PartialGraphManagedBarrierState {
