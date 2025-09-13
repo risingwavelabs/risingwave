@@ -123,6 +123,7 @@ pub enum AlterTableOperation {
     },
     /// `DROP CONNECTOR`
     DropConnector,
+
     /// `ALTER CONNECTOR WITH (<connector_props>)`
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
