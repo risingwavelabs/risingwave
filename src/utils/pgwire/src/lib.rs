@@ -24,6 +24,7 @@
 
 pub mod error;
 pub mod error_or_notice;
+pub mod ldap_auth;
 pub mod memory_manager;
 pub mod net;
 pub mod pg_extended;
