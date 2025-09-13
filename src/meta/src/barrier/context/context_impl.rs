@@ -192,15 +192,19 @@ impl CommandContext {
 
             Command::Resume => {}
 
-            Command::SourceChangeSplit(split_assignment) => {
+            Command::SourceChangeSplit {
+                split_assignment,
+                source_splits,
+            } => {
                 barrier_manager_context
                     .metadata_manager
                     .update_actor_splits_by_split_assignment(split_assignment)
                     .await?;
+
                 barrier_manager_context
-                    .source_manager
-                    .apply_source_change(SourceChange::SplitChange(split_assignment.clone()))
-                    .await;
+                    .metadata_manager
+                    .update_source_splits(source_splits)
+                    .await?;
             }
 
             Command::DropStreamingJobs {
@@ -333,7 +337,6 @@ impl CommandContext {
                 let source_change = SourceChange::CreateJob {
                     added_source_fragments: stream_job_fragments.stream_source_fragments(),
                     added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
-                    split_assignment: init_split_assignment.clone(),
                 };
 
                 barrier_manager_context
@@ -398,7 +401,6 @@ impl CommandContext {
                     .handle_replace_job(
                         old_fragments,
                         new_fragments.stream_source_fragments(),
-                        init_split_assignment.clone(),
                         replace_plan,
                     )
                     .await;

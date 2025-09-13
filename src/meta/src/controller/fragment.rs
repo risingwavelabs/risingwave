@@ -31,15 +31,15 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, Fragment as FragmentModel, FragmentRelation, Sink, StreamingJob,
+    Actor, Fragment as FragmentModel, FragmentRelation, Sink, SourceSplits, StreamingJob,
 };
 use risingwave_meta_model::{
     ActorId, ConnectorSplits, DatabaseId, DispatcherType, ExprContext, FragmentId, I32Array,
     JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
     VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, object, sink, source,
-    streaming_job, table,
+    source_splits, streaming_job, table,
 };
-use risingwave_meta_model_migration::{Alias, ExprTrait, SelectStatement, SimpleExpr};
+use risingwave_meta_model_migration::{Alias, ExprTrait, OnConflict, SelectStatement, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
@@ -66,7 +66,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::barrier::SnapshotBackfillInfo;
+use crate::barrier::{SharedActorInfos, SnapshotBackfillInfo};
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
@@ -88,6 +88,7 @@ use crate::{MetaError, MetaResult};
 pub struct InflightActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<Bitmap>,
+    pub splits: Vec<SplitImpl>,
 }
 
 #[derive(Clone, Debug)]
@@ -325,6 +326,7 @@ impl CatalogController {
     }
 
     pub fn compose_table_fragments(
+        _shared_actor_infos: &SharedActorInfos,
         table_id: u32,
         state: PbState,
         ctx: Option<PbStreamContext>,
@@ -342,7 +344,6 @@ impl CatalogController {
                 Self::compose_fragment(fragment, actors, job_definition.clone())?;
 
             pb_fragments.insert(fragment.fragment_id, fragment);
-
             pb_actor_splits.extend(build_actor_split_impls(&fragment_actor_splits));
             pb_actor_status.extend(fragment_actor_status.into_iter());
         }
@@ -629,6 +630,7 @@ impl CatalogController {
             .remove(&job_id);
 
         Self::compose_table_fragments(
+            self.env.shared_actor_infos(),
             job_id as _,
             job_info.job_status.into(),
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
@@ -855,6 +857,7 @@ impl CatalogController {
             table_fragments.insert(
                 job.job_id as ObjectId,
                 Self::compose_table_fragments(
+                    self.env.shared_actor_infos(),
                     job.job_id as _,
                     job.job_status.into(),
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),
@@ -1106,6 +1109,7 @@ impl CatalogController {
                     ActorId,
                     WorkerId,
                     Option<VnodeBitmap>,
+                    Option<ConnectorSplits>,
                     FragmentId,
                     StreamNode,
                     I32Array,
@@ -1120,6 +1124,7 @@ impl CatalogController {
             .column(actor::Column::ActorId)
             .column(actor::Column::WorkerId)
             .column(actor::Column::VnodeBitmap)
+            .column(actor::Column::Splits)
             .column(fragment::Column::FragmentId)
             .column(fragment::Column::StreamNode)
             .column(fragment::Column::StateTableIds)
@@ -1140,6 +1145,7 @@ impl CatalogController {
             actor_id,
             worker_id,
             vnode_bitmap,
+            splits,
             fragment_id,
             node,
             state_table_ids,
@@ -1158,9 +1164,20 @@ impl CatalogController {
                 .into_iter()
                 .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
                 .collect();
+
             let actor_info = InflightActorInfo {
                 worker_id,
                 vnode_bitmap: vnode_bitmap.map(|bitmap| bitmap.to_protobuf().into()),
+                splits: splits
+                    .map(|connector_splits| {
+                        connector_splits
+                            .to_protobuf()
+                            .splits
+                            .iter()
+                            .map(|connector_split| SplitImpl::try_from(connector_split).unwrap())
+                            .collect_vec()
+                    })
+                    .unwrap_or_default(),
             };
             match fragment_infos.entry(fragment_id) {
                 Entry::Occupied(mut entry) => {
@@ -1407,6 +1424,36 @@ impl CatalogController {
                 })?;
             }
         }
+        txn.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn update_source_splits(
+        &self,
+        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        for (source_id, splits) in source_splits {
+            let model = source_splits::ActiveModel {
+                source_id: Set(*source_id as _),
+                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
+                    splits: splits.iter().map(Into::into).collect_vec(),
+                }))),
+            };
+
+            SourceSplits::insert(model)
+                .on_conflict(
+                    OnConflict::column(source_splits::Column::SourceId)
+                        .update_column(source_splits::Column::Splits)
+                        .to_owned(),
+                )
+                .exec(&txn) // Execute the query within the transaction
+                .await?;
+        }
+
         txn.commit().await?;
 
         Ok(())
