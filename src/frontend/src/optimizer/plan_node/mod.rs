@@ -1079,6 +1079,7 @@ mod logical_postgres_query;
 mod batch_vector_search;
 mod logical_mysql_query;
 mod logical_vector_search;
+mod logical_correlated_vector_search;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
@@ -1158,6 +1159,7 @@ pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use logical_vector_search::LogicalVectorSearch;
+pub use logical_correlated_vector_search::LogicalCorrelatedVectorSearch;
 pub use stream_asof_join::StreamAsOfJoin;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_changelog::StreamChangeLog;
@@ -1264,6 +1266,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
             , { Logical, VectorSearch }
+            , { Logical, CorrelatedVectorSearch }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }

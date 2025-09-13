@@ -143,10 +143,6 @@ impl LogicalVectorSearch {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
-
-    pub(crate) fn i2o_mapping(&self) -> ColIndexMapping {
-        self.core.i2o_mapping()
-    }
 }
 
 impl_plan_tree_node_for_unary! { Logical, LogicalVectorSearch }
