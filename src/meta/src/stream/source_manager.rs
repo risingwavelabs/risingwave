@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
+use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::panic_if_debug;
@@ -51,6 +52,7 @@ use crate::rpc::metrics::MetaMetrics;
 
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
+pub type SourceSplitsDiscovered = HashMap<SourceId, Vec<SplitImpl>>;
 pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<u32, HashMap<String, String>>;
@@ -445,7 +447,26 @@ impl SourceManager {
     #[await_tree::instrument("apply_source_change({source_change})")]
     pub async fn apply_source_change(&self, source_change: SourceChange) {
         let mut core = self.core.lock().await;
+
+        let dropped_source = if let SourceChange::DropSource { dropped_source_ids } = &source_change
+        {
+            dropped_source_ids.clone()
+        } else {
+            vec![]
+        };
+
         core.apply_source_change(source_change);
+
+        if let Err(e) = core
+            .metadata_manager
+            .drop_source_splits(&dropped_source)
+            .await
+        {
+            tracing::error!(
+                error = %e.as_report(),
+                "failed to drop source splits from meta store",
+            );
+        }
     }
 
     /// create and register connector worker for source.
@@ -457,7 +478,17 @@ impl SourceManager {
             let handle = create_source_worker(source, self.metrics.clone())
                 .await
                 .context("failed to create source worker")?;
-            e.insert(handle);
+
+            let handle_ref = e.insert(handle);
+            let discovered_splits = handle_ref.splits.lock().await.splits.clone();
+
+            if let Some(splits) = discovered_splits {
+                let source_splits =
+                    HashMap::from([(source.get_id() as _, splits.into_values().collect_vec())]);
+                core.metadata_manager
+                    .update_source_splits(&source_splits)
+                    .await?;
+            }
         } else {
             tracing::warn!("source {} already registered", source.get_id());
         }
@@ -469,13 +500,24 @@ impl SourceManager {
         &self,
         source_id: SourceId,
         handle: ConnectorSourceWorkerHandle,
-    ) {
+    ) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         if let Entry::Vacant(e) = core.managed_sources.entry(source_id) {
-            e.insert(handle);
+            let handle_ref = e.insert(handle);
+            let discovered_splits = handle_ref.splits.lock().await.splits.clone();
+
+            if let Some(splits) = discovered_splits {
+                let source_splits =
+                    HashMap::from([(source_id as _, splits.into_values().collect_vec())]);
+                core.metadata_manager
+                    .update_source_splits(&source_splits)
+                    .await?;
+            }
         } else {
             tracing::warn!("source {} already registered", source_id);
         }
+
+        Ok(())
     }
 
     pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
@@ -506,9 +548,12 @@ impl SourceManager {
             core_guard.reassign_splits().await?
         };
 
-        for (database_id, split_assignment) in split_assignment {
-            if !split_assignment.is_empty() {
-                let command = Command::SourceChangeSplit(split_assignment);
+        for (database_id, (assignment, source_splits)) in split_assignment {
+            if !assignment.is_empty() {
+                let command = Command::SourceChangeSplit {
+                    assignment,
+                    source_splits,
+                };
                 tracing::info!(command = ?command, "pushing down split assignment command");
                 self.barrier_scheduler
                     .run_command(database_id, command)

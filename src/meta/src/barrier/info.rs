@@ -549,7 +549,7 @@ impl InflightDatabaseInfo {
                 | Command::DropStreamingJobs { .. }
                 | Command::MergeSnapshotBackfillStreamingJobs(_)
                 | Command::RescheduleFragment { .. }
-                | Command::SourceChangeSplit(_)
+                | Command::SourceChangeSplit { .. }
                 | Command::Throttle(_)
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }

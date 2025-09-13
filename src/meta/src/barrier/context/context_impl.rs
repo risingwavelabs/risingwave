@@ -192,14 +192,23 @@ impl CommandContext {
 
             Command::Resume => {}
 
-            Command::SourceChangeSplit(split_assignment) => {
+            Command::SourceChangeSplit {
+                assignment,
+                source_splits,
+            } => {
                 barrier_manager_context
                     .metadata_manager
-                    .update_actor_splits_by_split_assignment(split_assignment)
+                    .update_actor_splits_by_split_assignment(assignment)
                     .await?;
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_source_splits(source_splits)
+                    .await?;
+
                 barrier_manager_context
                     .source_manager
-                    .apply_source_change(SourceChange::SplitChange(split_assignment.clone()))
+                    .apply_source_change(SourceChange::SplitChange(assignment.clone()))
                     .await;
             }
 

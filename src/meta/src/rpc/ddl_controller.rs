@@ -553,7 +553,7 @@ impl DdlController {
             .await?;
         self.source_manager
             .register_source_with_handle(source_id, handle)
-            .await;
+            .await?;
         Ok(version)
     }
 

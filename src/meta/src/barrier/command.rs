@@ -74,8 +74,8 @@ use crate::model::{
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
-    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, UpstreamSinkInfo,
-    build_actor_connector_splits,
+    JobReschedulePostUpdates, SourceSplitsDiscovered, SplitAssignment, ThrottleConfig,
+    UpstreamSinkInfo, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -358,7 +358,10 @@ pub enum Command {
 
     /// `SourceChangeSplit` generates a `Splits` barrier for pushing initialized splits or
     /// changed splits.
-    SourceChangeSplit(SplitAssignment),
+    SourceChangeSplit {
+        assignment: SplitAssignment,
+        source_splits: SourceSplitsDiscovered,
+    },
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
@@ -425,7 +428,7 @@ impl std::fmt::Display for Command {
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
-            Command::SourceChangeSplit(_) => write!(f, "SourceChangeSplit"),
+            Command::SourceChangeSplit { .. } => write!(f, "SourceChangeSplit"),
             Command::Throttle(_) => write!(f, "Throttle"),
             Command::CreateSubscription {
                 subscription_id, ..
@@ -569,7 +572,7 @@ impl Command {
             ),
             Command::ReplaceStreamJob(plan) => Some(plan.fragment_changes()),
             Command::MergeSnapshotBackfillStreamingJobs(_) => None,
-            Command::SourceChangeSplit(_) => None,
+            Command::SourceChangeSplit { .. } => None,
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
@@ -837,10 +840,10 @@ impl Command {
                 }
             }
 
-            Command::SourceChangeSplit(change) => {
+            Command::SourceChangeSplit { assignment, .. } => {
                 let mut diff = HashMap::new();
 
-                for actor_splits in change.values() {
+                for actor_splits in assignment.values() {
                     diff.extend(actor_splits.clone());
                 }
 
