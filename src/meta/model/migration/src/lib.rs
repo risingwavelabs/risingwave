@@ -52,6 +52,9 @@ mod m20250819_014448_add_version_column_indices_to_table;
 mod m20250820_120000_add_cdc_table_type;
 mod m20250821_081110_cdc_table_snapshot_splits_add_column;
 mod m20250905_144810_deprecate_table_incoming_sinks;
+
+// todo: rename to older date
+mod m20250806_120000_add_refresh_fields;
 mod utils;
 
 pub struct Migrator;
@@ -142,6 +145,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250820_120000_add_cdc_table_type::Migration),
             Box::new(m20250821_081110_cdc_table_snapshot_splits_add_column::Migration),
             Box::new(m20250905_144810_deprecate_table_incoming_sinks::Migration),
+            Box::new(m20250806_120000_add_refresh_fields::Migration),
         ]
     }
 }

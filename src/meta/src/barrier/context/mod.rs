@@ -85,6 +85,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         &self,
         load_finished_source_ids: Vec<u32>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
+    fn handle_refresh_finished_table_ids(
+        &self,
+        refresh_finished_table_ids: Vec<u32>,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {

@@ -138,7 +138,7 @@ pub struct MetaClient {
     worker_type: WorkerType,
     host_addr: HostAddr,
     inner: GrpcMetaClient,
-    meta_config: MetaConfig,
+    meta_config: Arc<MetaConfig>,
     cluster_id: String,
     shutting_down: Arc<AtomicBool>,
 }
@@ -264,7 +264,7 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         property: Property,
-        meta_config: &MetaConfig,
+        meta_config: Arc<MetaConfig>,
     ) -> (Self, SystemParamsReader) {
         let ret =
             Self::register_new_inner(addr_strategy, worker_type, addr, property, meta_config).await;
@@ -283,7 +283,7 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         property: Property,
-        meta_config: &MetaConfig,
+        meta_config: Arc<MetaConfig>,
     ) -> Result<(Self, SystemParamsReader)> {
         tracing::info!("register meta client using strategy: {}", addr_strategy);
 
@@ -339,7 +339,7 @@ impl MetaClient {
             worker_type,
             host_addr: addr.clone(),
             inner: grpc_meta_client,
-            meta_config: meta_config.to_owned(),
+            meta_config: meta_config.clone(),
             cluster_id: add_worker_resp.cluster_id,
             shutting_down: Arc::new(false.into()),
         };
@@ -2039,7 +2039,7 @@ struct MetaMemberManagement {
     core_ref: Arc<RwLock<GrpcMetaClientCore>>,
     members: Either<MetaMemberClient, MetaMemberGroup>,
     current_leader: http::Uri,
-    meta_config: MetaConfig,
+    meta_config: Arc<MetaConfig>,
 }
 
 impl MetaMemberManagement {
@@ -2166,7 +2166,7 @@ impl GrpcMetaClient {
         init_leader_addr: http::Uri,
         members: Either<MetaMemberClient, MetaMemberGroup>,
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
-        meta_config: MetaConfig,
+        meta_config: Arc<MetaConfig>,
     ) -> Result<()> {
         let core_ref: Arc<RwLock<GrpcMetaClientCore>> = self.core.clone();
         let current_leader = init_leader_addr;
@@ -2235,7 +2235,7 @@ impl GrpcMetaClient {
     }
 
     /// Connect to the meta server from `addrs`.
-    pub async fn new(strategy: &MetaAddressStrategy, config: MetaConfig) -> Result<Self> {
+    pub async fn new(strategy: &MetaAddressStrategy, config: Arc<MetaConfig>) -> Result<Self> {
         let (channel, addr) = match strategy {
             MetaAddressStrategy::LoadBalance(addr) => {
                 Self::try_build_rpc_channel(vec![addr.clone()]).await
@@ -2262,7 +2262,7 @@ impl GrpcMetaClient {
             }
         };
 
-        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config)?;
+        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config.clone())?;
 
         client.force_refresh_leader().await?;
 

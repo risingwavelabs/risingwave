@@ -282,6 +282,12 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .0
                 .cdc_table_type
                 .map(|cdc_type| PbCdcTableType::from(cdc_type) as i32),
+            refresh_state: Some(risingwave_pb::catalog::RefreshState::from(
+                value
+                    .0
+                    .refresh_state
+                    .unwrap_or(risingwave_meta_model::table::RefreshState::Idle),
+            ) as i32),
         }
     }
 }

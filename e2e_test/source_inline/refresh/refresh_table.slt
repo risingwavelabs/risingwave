@@ -1,0 +1,355 @@
+# Test cases for refreshable table functionality using batch_posix_fs connector
+# This test validates the REFRESH TABLE command and covers insert, update, delete scenarios
+
+control substitution on
+
+# Setup test directory and initial test files
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_table_tmp && mkdir -p ./e2e_test/source_inline/refresh/refresh_table_tmp
+
+system ok
+echo "1,alice" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file1.csv
+
+system ok
+echo "2,bob" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file2.csv
+
+# ----
+# Test 1: Create refreshable table and initial load (must have PRIMARY KEY)
+
+# Test refreshing non-existent table
+statement error
+REFRESH TABLE non_existent_table;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Catalog error
+  2: table not found: non_existent_table
+
+
+# Test refreshing a non-refreshable table
+statement ok
+CREATE TABLE non_refreshable_t (v1 int) WITH (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    fields.v1.end = '10'
+) FORMAT NATIVE ENCODE NATIVE;
+
+statement error
+REFRESH TABLE non_refreshable_t;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Table 'public.non_refreshable_t' is not refreshable. Only tables created with REFRESHABLE flag support manual refresh.
+
+
+statement ok
+DROP TABLE non_refreshable_t;
+
+# ----
+# refreshable table without PRIMARY KEY
+statement error
+CREATE TABLE no_pk_refresh_t (id int, name varchar) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Bind error: Refreshable tables must have a PRIMARY KEY. Please define a primary key for the table.
+
+
+statement error
+CREATE SOURCE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Bind error: can't CREATE SOURCE with refreshable batch connector
+
+Hint: use CREATE TABLE instead
+
+
+statement ok
+CREATE TABLE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+
+statement ok
+create materialized view refresh_fs_t_mv as select * from refresh_fs_t;
+
+statement ok
+CREATE TABLE refresh_fs_t_on_conflict_ignore (id int PRIMARY KEY, name varchar)
+ON CONFLICT IGNORE
+WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    match_pattern = '*.csv'
+)
+FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+
+statement ok
+CREATE TABLE refresh_fs_t_complex (id int PRIMARY KEY, name varchar, ts timestamptz AS proctime(), x int as id+1) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+
+sleep 2s
+
+# Initial load should read existing files
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice
+2 bob
+
+
+# should keep consistent with upstream table
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice
+2 bob
+
+
+# ----
+# Test 2: Add new files and refresh (INSERT scenario)
+system ok
+echo "3,charlie" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file3.csv
+
+system ok
+echo "4,david" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new_file.csv
+
+sleep 2s
+
+# won't see new data after load finish, before next refresh
+query II rowsort
+SELECT * FROM refresh_fs_t;
+----
+1 alice
+2 bob
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_fs_t;
+
+sleep 20s
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice
+2 bob
+3 charlie
+4 david
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice
+2 bob
+3 charlie
+4 david
+
+
+sleep 5s
+
+# Test refresh without any external changes
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_fs_t;
+
+sleep 15s
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice
+2 bob
+3 charlie
+4 david
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice
+2 bob
+3 charlie
+4 david
+
+
+# ----
+# Test 3: Modify existing file content (UPDATE scenario)
+system ok
+echo "1,alice_updated" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file1.csv
+
+system ok
+echo "2,bob_updated" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file2.csv
+
+sleep 5s
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_fs_t;
+
+sleep 10s
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice_updated
+2 bob_updated
+3 charlie
+4 david
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice_updated
+2 bob_updated
+3 charlie
+4 david
+
+
+# ----
+# Test 4: Remove files (DELETE scenario)
+system ok
+rm ./e2e_test/source_inline/refresh/refresh_table_tmp/file3.csv
+
+system ok
+rm ./e2e_test/source_inline/refresh/refresh_table_tmp/new_file.csv
+
+sleep 5s
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+sleep 2s
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice_updated
+2 bob_updated
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+1 alice_updated
+2 bob_updated
+
+
+# ----
+# Test 5: Mixed operations - add, update, delete simultaneously
+system ok
+echo "1,alice_final" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file1.csv
+
+system ok
+rm ./e2e_test/source_inline/refresh/refresh_table_tmp/file2.csv
+
+system ok
+echo "5,eve" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file5.csv
+
+system ok
+echo "6,frank" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file6.csv
+
+# Test on conflict behavior (default is overwrite)
+system ok
+echo "6,frank_updated" >> ./e2e_test/source_inline/refresh/refresh_table_tmp/file6.csv
+
+sleep 5s
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+statement ok
+REFRESH TABLE refresh_fs_t_on_conflict_ignore;
+
+sleep 2s
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice_final
+5 eve
+6 frank_updated
+
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t_on_conflict_ignore;
+----
+1 alice
+5 eve
+6 frank
+
+# ----
+# Test 6: Empty directory (all files deleted)
+system ok
+rm ./e2e_test/source_inline/refresh/refresh_table_tmp/*.csv
+
+sleep 5s
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+sleep 2s
+
+
+statement count 0 retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+
+# ----
+# Test 7: Re-populate after empty
+system ok
+echo "7,grace" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new1.csv
+
+system ok
+echo "8,henry" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new2.csv
+
+sleep 5s
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+sleep 2s
+
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+7 grace
+8 henry
+
+
+query II rowsort retry 3 backoff 1s
+SELECT * FROM refresh_fs_t_mv;
+----
+7 grace
+8 henry
+
+
+# ----
+# Cleanup
+statement ok
+DROP TABLE refresh_fs_t cascade;
+
+statement ok
+DROP TABLE refresh_fs_t_on_conflict_ignore;
+
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_table_tmp

@@ -14,7 +14,9 @@
 
 use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::system_param::{OverrideValidate, Validate};
+use risingwave_meta_model::table::RefreshState;
 use sea_orm::DatabaseTransaction;
+use thiserror_ext::AsReport;
 
 use super::*;
 
@@ -893,5 +895,40 @@ impl CatalogController {
             )
             .await;
         Ok((version, database))
+    }
+
+    /// Set the refresh state of a table
+    pub async fn set_table_refresh_state(
+        &self,
+        table_id: TableId,
+        new_state: RefreshState,
+    ) -> MetaResult<bool> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        // It is okay to update refresh state unconditionally because the check is done in `validate_refreshable_table` inside `RefreshManager`.
+        let active_model = table::ActiveModel {
+            table_id: Set(table_id),
+            refresh_state: Set(Some(new_state)),
+            ..Default::default()
+        };
+        if let Err(e) = active_model.update(&txn).await {
+            tracing::warn!(
+                "Failed to update table refresh state for table {}: {}",
+                table_id,
+                e.as_report()
+            );
+            let t = Table::find_by_id(table_id).all(&txn).await;
+            tracing::info!(table = ?t, "Table found");
+        }
+        txn.commit().await?;
+
+        tracing::debug!(
+            table_id = %table_id,
+            new_state = ?new_state,
+            "Updated table refresh state"
+        );
+
+        Ok(true)
     }
 }

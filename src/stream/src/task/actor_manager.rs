@@ -414,6 +414,7 @@ impl StreamActorManager {
                 related_subscriptions,
                 self.env.meta_client().clone(),
                 streaming_config,
+                self.env.clone(),
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();
