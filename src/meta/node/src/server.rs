@@ -406,6 +406,7 @@ pub async fn start_service_as_election_leader(
         prometheus_client.clone(),
         prometheus_selector.clone(),
         opts.redact_sql_option_keywords.clone(),
+        env.system_params_manager_impl_ref().clone(),
     ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
