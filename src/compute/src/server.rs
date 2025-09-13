@@ -135,6 +135,12 @@ pub async fn compute_node_serve(
         &config.meta,
     )
     .await;
+    // TODO(shutdown): remove this as there's no need to gracefully shutdown the sub-tasks.
+    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
+    sub_tasks.push(MetaClient::start_heartbeat_loop(
+        meta_client.clone(),
+        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+    ));
 
     let state_store_url = system_params.state_store();
 
@@ -173,8 +179,6 @@ pub async fn compute_node_serve(
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
 
-    // TODO(shutdown): remove this as there's no need to gracefully shutdown the sub-tasks.
-    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
@@ -283,11 +287,6 @@ pub async fn compute_node_serve(
                 .await;
         });
     }
-
-    sub_tasks.push(MetaClient::start_heartbeat_loop(
-        meta_client.clone(),
-        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-    ));
 
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new(
