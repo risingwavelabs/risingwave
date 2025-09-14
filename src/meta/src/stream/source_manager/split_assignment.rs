@@ -437,7 +437,6 @@ impl SourceManagerCore {
                     .iter()
                     .any(|fragment_id| assignment.contains_key(fragment_id))
                     && let Some(splits) = source_splits_discovered.get(source_id)
-                    && !source_splits.contains_key(source_id)
                 {
                     source_splits.insert(*source_id, splits.clone());
                 }

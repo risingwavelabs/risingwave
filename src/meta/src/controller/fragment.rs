@@ -1854,23 +1854,24 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        for (source_id, splits) in source_splits {
-            let model = source_splits::ActiveModel {
+        let models: Vec<source_splits::ActiveModel> = source_splits
+            .iter()
+            .map(|(source_id, splits)| source_splits::ActiveModel {
                 source_id: Set(*source_id as _),
                 splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
                     splits: splits.iter().map(Into::into).collect_vec(),
                 }))),
-            };
+            })
+            .collect();
 
-            SourceSplits::insert(model)
-                .on_conflict(
-                    OnConflict::column(source_splits::Column::SourceId)
-                        .update_column(source_splits::Column::Splits)
-                        .to_owned(),
-                )
-                .exec(&txn) // Execute the query within the transaction
-                .await?;
-        }
+        SourceSplits::insert_many(models)
+            .on_conflict(
+                OnConflict::column(source_splits::Column::SourceId)
+                    .update_column(source_splits::Column::Splits)
+                    .to_owned(),
+            )
+            .exec(&txn)
+            .await?;
 
         txn.commit().await?;
 
