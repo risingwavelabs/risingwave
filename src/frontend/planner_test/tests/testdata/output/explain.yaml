@@ -55,8 +55,7 @@
             "schema": [
               {
                 "dataType": {
-                  "typeName": "INT32",
-                  "isNullable": true
+                  "typeName": "INT32"
                 },
                 "name": "1:Int32"
               }
