@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 
 use super::generic::GenericPlanRef;
@@ -136,7 +137,6 @@ impl ToStream for LogicalGetChannelDeltaStats {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        // Not implementing streaming for this node as requested
-        unimplemented!("Streaming not implemented for LogicalGetChannelDeltaStats")
+        bail_not_implemented!("Streaming not implemented for LogicalGetChannelDeltaStats")
     }
 }

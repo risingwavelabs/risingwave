@@ -21,6 +21,9 @@ use risingwave_common::metrics_reader::{ChannelDeltaStats, ChannelKey, MetricsRe
 /// Default time offset in seconds for metrics queries
 const DEFAULT_TIME_OFFSET_SECONDS: i64 = 60;
 
+/// Conversion factor from nanoseconds to seconds
+const NANOSECONDS_TO_SECONDS: f64 = 1_000_000_000.0;
+
 /// Implementation of `MetricsReader` that queries Prometheus directly.
 pub struct MetricsReaderImpl {
     prometheus_client: Option<PrometheusClient>,
@@ -176,7 +179,7 @@ impl MetricsReader for MetricsReaderImpl {
                             recv_throughput: 0.0,
                             send_throughput: 0.0,
                         })
-                        .backpressure_rate = sample.sample().value() / 1_000_000_000.0; // Convert ns to seconds
+                        .backpressure_rate = sample.sample().value() / NANOSECONDS_TO_SECONDS;
                 }
             }
         }
