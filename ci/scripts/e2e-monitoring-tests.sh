@@ -1,8 +1,29 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+
+while getopts 'p:m:' opt; do
+    case ${opt} in
+        p )
+            profile=$OPTARG
+            ;;
+        m )
+            mode=$OPTARG
+            ;;
+        \? )
+            echo "Invalid Option: -$OPTARG" 1>&2
+            exit 1
+            ;;
+        : )
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
+            ;;
+    esac
+done
+shift $((OPTIND -1))
+
 source ci/scripts/common.sh
-download_and_prepare_rw ci-3cn-1fe-with-monitoring common
+
+download_and_prepare_rw "$profile" common
 
 # Test script for internal_get_channel_delta_stats table function with monitoring
 # This script starts a RisingWave cluster with Prometheus monitoring and runs the SLT test
