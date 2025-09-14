@@ -18,6 +18,9 @@ use anyhow::{Result, anyhow};
 use prometheus_http_query::Client as PrometheusClient;
 use risingwave_common::metrics_reader::{ChannelDeltaStats, ChannelKey, MetricsReader};
 
+/// Default time offset in seconds for metrics queries
+const DEFAULT_TIME_OFFSET_SECONDS: i64 = 60;
+
 /// Implementation of `MetricsReader` that queries Prometheus directly.
 pub struct MetricsReaderImpl {
     prometheus_client: Option<PrometheusClient>,
@@ -41,7 +44,7 @@ impl MetricsReader for MetricsReaderImpl {
         at: Option<i64>,
         time_offset: Option<i64>,
     ) -> Result<HashMap<ChannelKey, ChannelDeltaStats>> {
-        let time_offset = time_offset.unwrap_or(60); // Default to 60 seconds if not provided
+        let time_offset = time_offset.unwrap_or(DEFAULT_TIME_OFFSET_SECONDS);
         let at_time = at;
 
         // Check if Prometheus client is available

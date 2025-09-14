@@ -19,4 +19,3 @@ SELECT * FROM internal_get_channel_delta_stats('invalid', 60)
 # Test schema of the result
 statement ok
 SELECT upstream_fragment_id, downstream_fragment_id, backpressure_rate, recv_throughput, send_throughput FROM internal_get_channel_delta_stats()
-e
