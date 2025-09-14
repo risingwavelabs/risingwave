@@ -18,6 +18,12 @@ use itertools::Itertools;
 use super::*;
 use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
 
+#[derive(Debug, Clone)]
+pub struct SplitState {
+    pub split_assignment: SplitAssignment,
+    pub discovered_source_splits: DiscoveredSourceSplits,
+}
+
 impl SourceManager {
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
     ///
@@ -311,9 +317,7 @@ impl SourceManagerCore {
     ///
     /// `self.actor_splits` will not be updated. It will be updated by `Self::apply_source_change`,
     /// after the mutation barrier has been collected.
-    pub async fn reassign_splits(
-        &self,
-    ) -> MetaResult<HashMap<DatabaseId, (SplitAssignment, SourceSplitsDiscovered)>> {
+    pub async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitState>> {
         let mut split_assignment: SplitAssignment = HashMap::new();
         let mut source_splits_discovered = HashMap::new();
 
@@ -439,7 +443,13 @@ impl SourceManagerCore {
                 }
             }
 
-            result.insert(database_id, (assignment, source_splits));
+            result.insert(
+                database_id,
+                SplitState {
+                    split_assignment: assignment,
+                    discovered_source_splits: source_splits,
+                },
+            );
         }
 
         Ok(result)

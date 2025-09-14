@@ -37,7 +37,7 @@ use crate::barrier::{
 };
 use crate::hummock::CommitEpochInfo;
 use crate::model::FragmentDownstreamRelation;
-use crate::stream::SourceChange;
+use crate::stream::{SourceChange, SplitState};
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     #[await_tree::instrument]
@@ -192,10 +192,10 @@ impl CommandContext {
 
             Command::Resume => {}
 
-            Command::SourceChangeSplit {
-                assignment,
-                source_splits,
-            } => {
+            Command::SourceChangeSplit(SplitState {
+                split_assignment: assignment,
+                discovered_source_splits: source_splits,
+            }) => {
                 barrier_manager_context
                     .metadata_manager
                     .update_actor_splits_by_split_assignment(assignment)

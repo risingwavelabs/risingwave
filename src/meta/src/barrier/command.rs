@@ -74,8 +74,8 @@ use crate::model::{
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
-    JobReschedulePostUpdates, SourceSplitsDiscovered, SplitAssignment, ThrottleConfig,
-    UpstreamSinkInfo, build_actor_connector_splits,
+    JobReschedulePostUpdates, SplitAssignment, SplitState, ThrottleConfig, UpstreamSinkInfo,
+    build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -358,10 +358,7 @@ pub enum Command {
 
     /// `SourceChangeSplit` generates a `Splits` barrier for pushing initialized splits or
     /// changed splits.
-    SourceChangeSplit {
-        assignment: SplitAssignment,
-        source_splits: SourceSplitsDiscovered,
-    },
+    SourceChangeSplit(SplitState),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
@@ -840,10 +837,12 @@ impl Command {
                 }
             }
 
-            Command::SourceChangeSplit { assignment, .. } => {
+            Command::SourceChangeSplit(SplitState {
+                split_assignment, ..
+            }) => {
                 let mut diff = HashMap::new();
 
-                for actor_splits in assignment.values() {
+                for actor_splits in split_assignment.values() {
                     diff.extend(actor_splits.clone());
                 }
 
