@@ -112,8 +112,8 @@ function download_and_prepare_rw() {
     echo "download_and_prepare_rw: missing argument env"
     exit 1
   fi
-  # env is either common, source, or iceberg
-  if [ "$2" != "common" ] && [ "$2" != "source" ] && [ "$2" != "iceberg" ]; then
+  # env is either common, source, iceberg, or monitoring
+  if [ "$2" != "common" ] && [ "$2" != "source" ] && [ "$2" != "iceberg" ] && [ "$2" != "monitoring" ]; then
     echo "download_and_prepare_rw: invalid argument env"
     exit 1
   fi
@@ -141,6 +141,8 @@ function download_and_prepare_rw() {
     cp ci/risedev-components.ci.source.env risedev-components.user.env
   elif [ "$env" = "iceberg" ]; then
     cp ci/risedev-components.ci.iceberg.env risedev-components.user.env
+  elif [ "$env" = "monitoring" ]; then
+    cp ci/risedev-components.ci.monitoring.env risedev-components.user.env
   fi
 
   echo -e "\033[33mPrepare RiseDev dev cluster\033[0m"

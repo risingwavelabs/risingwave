@@ -23,7 +23,7 @@ shift $((OPTIND -1))
 
 source ci/scripts/common.sh
 
-download_and_prepare_rw "$profile" common
+download_and_prepare_rw "$profile" monitoring
 
 # Test script for internal_get_channel_delta_stats table function with monitoring
 # This script starts a RisingWave cluster with Prometheus monitoring and runs the SLT test
