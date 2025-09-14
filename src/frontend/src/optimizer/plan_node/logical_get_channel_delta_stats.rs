@@ -129,8 +129,7 @@ impl ToStream for LogicalGetChannelDeltaStats {
         &self,
         _ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
-        // Not implementing streaming for this node as requested
-        unimplemented!("Streaming not implemented for LogicalGetChannelDeltaStats")
+        bail_not_implemented!("Streaming not implemented for LogicalGetChannelDeltaStats")
     }
 
     fn logical_rewrite_for_stream(
