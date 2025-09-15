@@ -565,6 +565,41 @@ impl LogicalScan {
 
         None
     }
+
+    /// Notify user about the recommended index
+    fn notice_recommended_index(&self, columns: &[usize]) {
+        let table_column_indices = columns
+            .iter()
+            .map(|&col| self.output_col_idx()[col])
+            .collect_vec();
+
+        let primary_key_columns: Vec<usize> = self
+            .primary_key()
+            .iter()
+            .map(|col_order| col_order.column_index)
+            .collect();
+
+        if primary_key_columns == table_column_indices {
+            // Don't recommend an index that's identical to the primary key
+            return;
+        }
+
+        let column_names = table_column_indices
+            .iter()
+            .map(|&col| self.table().columns[col].name.clone())
+            .collect_vec();
+        let index_columns = column_names
+            .iter()
+            .map(|col| "\"".to_owned() + &col + "\"")
+            .join(", ");
+
+        self.core.ctx().warn_to_user(format!(
+            "To speed up the backfilling, consider creating an index: CREATE INDEX \"{}\" ON \"{}\" ({})",
+            "__recommended_idx_of_".to_owned() + self.table_name() + "_" + &column_names.join("_"),
+            self.table_name(),
+            index_columns
+        ));
+    }
 }
 
 impl ToBatch for LogicalScan {
@@ -692,9 +727,12 @@ impl ToStream for LogicalScan {
         if columns.is_empty() {
             return None;
         }
+
         if self.table_indexes().is_empty() {
+            self.notice_recommended_index(&columns);
             return None;
         }
+
         let orders = if columns.len() <= 3 {
             OrderType::all()
         } else {
@@ -722,6 +760,8 @@ impl ToStream for LogicalScan {
                 }
             }
         }
+
+        self.notice_recommended_index(&columns);
         None
     }
 }
