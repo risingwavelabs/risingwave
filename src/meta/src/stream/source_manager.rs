@@ -463,26 +463,7 @@ impl SourceManager {
     #[await_tree::instrument("apply_source_change({source_change})")]
     pub async fn apply_source_change(&self, source_change: SourceChange) {
         let mut core = self.core.lock().await;
-
-        let dropped_source = if let SourceChange::DropSource { dropped_source_ids } = &source_change
-        {
-            dropped_source_ids.clone()
-        } else {
-            vec![]
-        };
-
         core.apply_source_change(source_change);
-
-        if let Err(e) = core
-            .metadata_manager
-            .drop_source_splits(&dropped_source)
-            .await
-        {
-            tracing::error!(
-                error = %e.as_report(),
-                "failed to drop source splits from meta store",
-            );
-        }
     }
 
     /// create and register connector worker for source.

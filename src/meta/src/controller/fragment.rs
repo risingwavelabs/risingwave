@@ -1870,21 +1870,11 @@ impl CatalogController {
                     .update_column(source_splits::Column::Splits)
                     .to_owned(),
             )
+            .do_nothing()
             .exec(&txn)
             .await?;
 
         txn.commit().await?;
-
-        Ok(())
-    }
-
-    pub async fn drop_source_splits(&self, source_ids: &[SourceId]) -> MetaResult<()> {
-        let inner = self.inner.read().await;
-
-        SourceSplits::delete_many()
-            .filter(source_splits::Column::SourceId.is_in(source_ids.to_vec()))
-            .exec(&inner.db)
-            .await?;
 
         Ok(())
     }

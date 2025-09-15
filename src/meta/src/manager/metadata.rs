@@ -839,11 +839,6 @@ impl MetadataManager {
             .update_source_splits(source_splits)
             .await
     }
-
-    #[await_tree::instrument]
-    pub async fn drop_source_splits(&self, source_ids: &[SourceId]) -> MetaResult<()> {
-        self.catalog_controller.drop_source_splits(source_ids).await
-    }
 }
 
 impl MetadataManager {
