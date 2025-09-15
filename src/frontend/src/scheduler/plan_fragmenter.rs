@@ -996,6 +996,7 @@ impl BatchPlanFragmenter {
         } else if let Some(info) = Self::collect_stage_file_scan(root.clone())? {
             file_scan_info = Some(info);
         } else if Self::collect_stage_vector_search(root.clone()) {
+            let todo = 0;
             has_vector_search = true;
         }
 

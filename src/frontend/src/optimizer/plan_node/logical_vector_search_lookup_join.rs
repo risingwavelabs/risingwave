@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::array::VECTOR_DISTANCE_TYPE;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_pb::catalog::vector_index_info;
 use risingwave_pb::common::PbDistanceType;
 
 use crate::OptimizerContextRef;
@@ -27,47 +29,50 @@ use crate::optimizer::plan_node::generic::{
 };
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, *};
+use crate::optimizer::plan_node::batch_vector_search::BatchVectorSearchCore;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct CorrelatedVectorSearchCore {
+struct VectorSearchLookupJoinCore {
     top_n: u64,
     distance_type: PbDistanceType,
 
-    base: PlanRef,
-    base_vector_col_idx: usize,
+    input: PlanRef,
+    input_vector_col_idx: usize,
     lookup: PlanRef,
     lookup_vector: ExprImpl,
 
     /// The indices of lookup that will be included in the output.
     /// The index of distance column is `lookup_output_indices.len()`
     lookup_output_indices: Vec<usize>,
+    include_distance: bool,
 }
 
-impl CorrelatedVectorSearchCore {
-    pub(crate) fn clone_with_input(&self, base: PlanRef, lookup: PlanRef) -> Self {
+impl VectorSearchLookupJoinCore {
+    pub(crate) fn clone_with_input(&self, input: PlanRef, lookup: PlanRef) -> Self {
         Self {
             top_n: self.top_n,
             distance_type: self.distance_type,
-            base,
-            base_vector_col_idx: self.base_vector_col_idx,
+            input,
+            input_vector_col_idx: self.input_vector_col_idx,
             lookup,
             lookup_vector: self.lookup_vector.clone(),
             lookup_output_indices: self.lookup_output_indices.clone(),
+            include_distance: self.include_distance,
         }
     }
 }
 
-impl GenericPlanNode for CorrelatedVectorSearchCore {
+impl GenericPlanNode for VectorSearchLookupJoinCore {
     fn functional_dependency(&self) -> FunctionalDependencySet {
         // TODO: include dependency of array_agg column
-        FunctionalDependencySet::new(self.base.schema().len() + 1)
+        FunctionalDependencySet::new(self.input.schema().len() + 1)
     }
 
     fn schema(&self) -> Schema {
         let fields = self
-            .base
+            .input
             .schema()
             .fields
             .iter()
@@ -75,12 +80,18 @@ impl GenericPlanNode for CorrelatedVectorSearchCore {
             .chain([Field::new(
                 "array",
                 DataType::List(
-                    DataType::Struct(StructType::new(self.lookup_output_indices.iter().map(
-                        |i| {
-                            let field = &self.lookup.schema().fields[*i];
-                            (field.name.clone(), field.data_type.clone())
-                        },
-                    )))
+                    DataType::Struct(StructType::new(
+                        self.lookup_output_indices
+                            .iter()
+                            .map(|i| {
+                                let field = &self.lookup.schema().fields[*i];
+                                (field.name.clone(), field.data_type.clone())
+                            })
+                            .chain(
+                                self.include_distance
+                                    .then(|| ("vector_distance".to_owned(), VECTOR_DISTANCE_TYPE)),
+                            ),
+                    ))
                     .into(),
                 ),
             )])
@@ -90,53 +101,55 @@ impl GenericPlanNode for CorrelatedVectorSearchCore {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        self.base.stream_key().map(|key| key.to_vec())
+        self.input.stream_key().map(|key| key.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        self.base.ctx()
+        self.input.ctx()
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LogicalCorrelatedVectorSearch {
+pub struct LogicalVectorSearchLookupJoin {
     pub base: PlanBase<Logical>,
-    core: CorrelatedVectorSearchCore,
+    core: VectorSearchLookupJoinCore,
 }
 
-impl LogicalCorrelatedVectorSearch {
+impl LogicalVectorSearchLookupJoin {
     pub(crate) fn new(
         top_n: u64,
         distance_type: PbDistanceType,
-        base: PlanRef,
-        base_vector_col_idx: usize,
+        input: PlanRef,
+        input_vector_col_idx: usize,
         lookup: PlanRef,
         lookup_vector: ExprImpl,
         lookup_output_indices: Vec<usize>,
+        include_distance: bool,
     ) -> Self {
-        let core = CorrelatedVectorSearchCore {
+        let core = VectorSearchLookupJoinCore {
             top_n,
             distance_type,
-            base,
-            base_vector_col_idx,
+            input,
+            input_vector_col_idx,
             lookup,
             lookup_vector,
             lookup_output_indices,
+            include_distance,
         };
         Self::with_core(core)
     }
 
-    fn with_core(core: CorrelatedVectorSearchCore) -> Self {
+    fn with_core(core: VectorSearchLookupJoinCore) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 }
 
-impl_plan_tree_node_for_binary! { Logical, LogicalCorrelatedVectorSearch }
+impl_plan_tree_node_for_binary! { Logical, LogicalVectorSearchLookupJoin }
 
-impl PlanTreeNodeBinary<Logical> for LogicalCorrelatedVectorSearch {
+impl PlanTreeNodeBinary<Logical> for LogicalVectorSearchLookupJoin {
     fn left(&self) -> PlanRef {
-        self.core.base.clone()
+        self.core.input.clone()
     }
 
     fn right(&self) -> PlanRef {
@@ -149,15 +162,15 @@ impl PlanTreeNodeBinary<Logical> for LogicalCorrelatedVectorSearch {
     }
 }
 
-impl Distill for LogicalCorrelatedVectorSearch {
+impl Distill for LogicalVectorSearchLookupJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 4 } else { 6 });
         vec.push(("distance_type", Pretty::debug(&self.core.distance_type)));
         vec.push(("top_n", Pretty::debug(&self.core.top_n)));
         vec.push((
-            "base_vector",
-            Pretty::debug(&self.core.base.schema()[self.core.base_vector_col_idx]),
+            "input_vector",
+            Pretty::debug(&self.core.input.schema()[self.core.input_vector_col_idx]),
         ));
 
         vec.push((
@@ -181,43 +194,47 @@ impl Distill for LogicalCorrelatedVectorSearch {
                         .collect(),
                 ),
             ));
+            vec.push((
+                "include_distance",
+                Pretty::debug(&self.core.include_distance),
+            ));
         }
 
-        childless_record("LogicalCorrelatedVectorSearch", vec)
+        childless_record("LogicalVectorSearchLookupJoin", vec)
     }
 }
 
-impl ColPrunable for LogicalCorrelatedVectorSearch {
+impl ColPrunable for LogicalVectorSearchLookupJoin {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let (project_exprs, mut required_cols) =
             ensure_sorted_required_cols(required_cols, self.base.schema());
         assert!(required_cols.is_sorted());
         if let Some(last_col) = required_cols.last()
-            && *last_col == self.core.base.schema().len()
+            && *last_col == self.core.input.schema().len()
         {
             // pop the array_agg column, since we only prune base input
             required_cols.pop();
-            let output_vector = required_cols.contains(&self.core.base_vector_col_idx);
+            let output_vector = required_cols.contains(&self.core.input_vector_col_idx);
             if !output_vector {
                 // include vector column in the input
-                required_cols.push(self.core.base_vector_col_idx);
+                required_cols.push(self.core.input_vector_col_idx);
             }
 
-            let new_base = self.core.base.prune_col(&required_cols, ctx);
+            let new_input = self.core.input.prune_col(&required_cols, ctx);
             let mut core = self
                 .core
-                .clone_with_input(new_base, self.core.lookup.clone());
+                .clone_with_input(new_input, self.core.lookup.clone());
 
-            core.base_vector_col_idx = ColIndexMapping::with_remaining_columns(
+            core.input_vector_col_idx = ColIndexMapping::with_remaining_columns(
                 &required_cols,
-                self.core.base.schema().len(),
+                self.core.input.schema().len(),
             )
-            .map(self.core.base_vector_col_idx);
+            .map(self.core.input_vector_col_idx);
             let vector_search = Self::with_core(core).into();
             let input = if output_vector {
                 vector_search
             } else {
-                // prune the vector column in the end of base, and include the array_agg column
+                // prune the vector column in the end of input, and include the array_agg column
                 LogicalProject::with_out_col_idx(
                     vector_search,
                     (0..required_cols.len() - 1).chain([required_cols.len()]),
@@ -228,37 +245,37 @@ impl ColPrunable for LogicalCorrelatedVectorSearch {
             LogicalProject::create(input, project_exprs)
         } else {
             // the array_agg column is pruned, no need to lookup
-            let input = self.core.base.prune_col(&required_cols, ctx);
+            let input = self.core.input.prune_col(&required_cols, ctx);
             LogicalProject::create(input, project_exprs)
         }
     }
 }
 
-impl ExprRewritable<Logical> for LogicalCorrelatedVectorSearch {}
+impl ExprRewritable<Logical> for LogicalVectorSearchLookupJoin {}
 
-impl ExprVisitable for LogicalCorrelatedVectorSearch {}
+impl ExprVisitable for LogicalVectorSearchLookupJoin {}
 
-impl PredicatePushdown for LogicalCorrelatedVectorSearch {
+impl PredicatePushdown for LogicalVectorSearchLookupJoin {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // TODO: push down to base when possible
-        let base = self
+        // TODO: push down to input when possible
+        let input = self
             .core
-            .base
+            .input
             .predicate_pushdown(Condition::true_cond(), ctx);
         let lookup = self
             .core
             .lookup
             .predicate_pushdown(Condition::true_cond(), ctx);
-        let core = self.core.clone_with_input(base, lookup);
+        let core = self.core.clone_with_input(input, lookup);
         LogicalFilter::create(Self::with_core(core).into(), predicate)
     }
 }
 
-impl ToStream for LogicalCorrelatedVectorSearch {
+impl ToStream for LogicalVectorSearchLookupJoin {
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
@@ -271,8 +288,55 @@ impl ToStream for LogicalCorrelatedVectorSearch {
     }
 }
 
-impl ToBatch for LogicalCorrelatedVectorSearch {
-    fn to_batch(&self) -> crate::error::Result<BatchPlanRef> {
+impl ToBatch for LogicalVectorSearchLookupJoin {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
+        if let Some(scan) = self.core.lookup.as_logical_scan()
+            && let Some((
+                            index,
+                            covered_table_cols_idx,
+                            non_covered_table_cols_idx,
+                            primary_table_col_in_output,
+                        )) = LogicalVectorSearch::resolve_vector_index_lookup(
+            scan,
+            &self.core.lookup_vector,
+            self.core.distance_type,
+            &self.core.lookup_output_indices,
+        )
+            && non_covered_table_cols_idx.is_empty()
+            && self.core.include_distance // TODO: allow not include distance
+            && index.included_info_columns.len() == covered_table_cols_idx.len()
+            && primary_table_col_in_output.iter().enumerate().all(|(output_idx, (covered, idx_in_index_info_columns))| {
+            assert!(*covered);
+            output_idx == *idx_in_index_info_columns
+        }) {
+            let todo = 0;
+            let hnsw_ef_search = match index.vector_index_info.config.as_ref().unwrap() {
+                vector_index_info::Config::Flat(_) => None,
+                vector_index_info::Config::HnswFlat(_) => Some(
+                    self.core
+                        .ctx()
+                        .session_ctx()
+                        .config()
+                        .batch_hnsw_ef_search(),
+                ),
+            };
+            let core = BatchVectorSearchCore {
+                input: self.core.input.to_batch()?,
+                top_n: self.core.top_n,
+                distance_type: self.core.distance_type,
+                index_name: index.index_table.name.clone(),
+                index_table_id: index.index_table.id,
+                info_column_desc: index.index_table.columns
+                    [1..=index.included_info_columns.len()]
+                    .iter()
+                    .map(|col| col.column_desc.clone())
+                    .collect(),
+                vector_column_idx: self.core.input_vector_col_idx,
+                hnsw_ef_search,
+                ctx: self.core.ctx(),
+            };
+            return Ok(BatchVectorSearch::with_core(core).into())
+        }
         let todo = 0;
         Ok(BatchValues::new(LogicalValues::new(
             vec![],

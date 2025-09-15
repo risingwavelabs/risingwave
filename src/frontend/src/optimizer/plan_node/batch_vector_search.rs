@@ -87,10 +87,12 @@ pub struct BatchVectorSearch {
 
 impl BatchVectorSearch {
     pub(super) fn with_core(core: BatchVectorSearchCore) -> Self {
+        let todo = 0;
         Self::with_core_inner(core, Distribution::Single)
     }
 
     fn with_core_someshard(core: BatchVectorSearchCore) -> Self {
+        let todo = 0;
         Self::with_core_inner(core, Distribution::SomeShard)
     }
 

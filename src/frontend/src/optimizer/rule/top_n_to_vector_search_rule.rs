@@ -24,11 +24,12 @@ use crate::expr::{Expr, ExprImpl, ExprType, InputRef};
 use crate::optimizer::LogicalPlanRef;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
 use crate::optimizer::plan_node::{
-    LogicalCorrelatedVectorSearch, LogicalPlanRef as PlanRef, LogicalProject, LogicalTopN,
-    LogicalVectorSearch, PlanTreeNodeBinary, PlanTreeNodeUnary,
+    LogicalPlanNodeType, LogicalPlanRef as PlanRef, LogicalProject, LogicalTopN,
+    LogicalVectorSearch, LogicalVectorSearchLookupJoin, PlanTreeNodeBinary, PlanTreeNodeUnary,
 };
 use crate::optimizer::rule::prelude::*;
 use crate::optimizer::rule::{BoxedRule, PbAggKind, ProjectMergeRule, Rule};
+use crate::utils::IndexColumnExprValidator;
 
 pub struct TopNToVectorSearchRule;
 
@@ -190,7 +191,7 @@ impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
             return None;
         }
         let correlated_id = apply.correlated_id();
-        let base = apply.left();
+        let input = apply.left();
 
         // match pattern LogicalProject { exprs: [[Coalesce(array_agg($expr1 order_by($expr2 ASC)), ARRAY[]) as $expr3] }
         let right = apply.right();
@@ -234,48 +235,92 @@ impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
             return None;
         };
         let [array_agg_input]: &[_; 1] = array_agg_input;
-        let Ok(array_agg_order) = array_agg.order_by.as_slice().try_into() else {
-            return None;
+
+        let ((top_n, distance_type, left, right, lookup_input), project_exprs) = {
+            let mut prev_proj_exprs: Option<Vec<_>> = None;
+            let mut input = agg.input();
+            loop {
+                match input.node_type() {
+                    LogicalPlanNodeType::LogicalProject => {
+                        let proj = input.as_logical_project().expect("checked node type");
+                        prev_proj_exprs = Some(if let Some(prev_proj_exprs) = prev_proj_exprs {
+                            ProjectMergeRule::merge_project_exprs(
+                                prev_proj_exprs.as_slice(),
+                                proj.exprs(),
+                                false,
+                            )?
+                        } else {
+                            proj.exprs().clone()
+                        });
+                        input = proj.input();
+                    }
+                    LogicalPlanNodeType::LogicalTopN => {
+                        let (resolved_info, mut project_exprs) =
+                            TopNToVectorSearchRule::resolve_vector_search(
+                                input.as_logical_top_n().expect("checked node type"),
+                            )?;
+                        if let Some(prev_proj_exprs) = prev_proj_exprs {
+                            project_exprs = ProjectMergeRule::merge_project_exprs(
+                                prev_proj_exprs.as_slice(),
+                                &project_exprs,
+                                false,
+                            )?;
+                        }
+                        break (resolved_info, project_exprs);
+                    }
+                    _ => {
+                        return None;
+                    }
+                }
+            }
         };
-        let [array_agg_order]: &[_; 1] = array_agg_order;
-        if array_agg_order.order_type != OrderType::ascending() {
-            return None;
-        }
 
-        let agg_input = agg.input();
-        let ((top_n, distance_type, left, right, lookup_input), project_exprs) =
-            TopNToVectorSearchRule::resolve_vector_search(agg_input.as_logical_top_n()?)?;
+        let (input_vector_idx, lookup_expr) = match (left, right) {
+            (ExprImpl::CorrelatedInputRef(correlated), lookup_expr)
+            | (lookup_expr, ExprImpl::CorrelatedInputRef(correlated))
+                if correlated.correlated_id() == correlated_id
+                    && IndexColumnExprValidator::validate(&lookup_expr, true).is_ok() =>
+            {
+                (correlated.index(), lookup_expr)
+            }
+            _ => {
+                return None;
+            }
+        };
 
-        let array_agg_order_input = project_exprs[array_agg_order.column_index].as_input_ref()?;
-        // vector search order by distance column in the end
-        if array_agg_order_input.index != lookup_input.schema().len() {
-            return None;
-        }
         // match pattern Row(lookup.col1, lookup.col2, ..)
         let array_agg_input_expr = &project_exprs[array_agg_input.index];
-        let array_agg_input_func = array_agg_input_expr.as_function_call()?;
-        if array_agg_input_func.func_type() != ExprType::Row {
+        let row_input_func = array_agg_input_expr.as_function_call()?;
+        if row_input_func.func_type() != ExprType::Row {
             return None;
         }
         let mut lookup_input_indices = vec![];
-        for input in array_agg_input_func.inputs() {
-            lookup_input_indices.push(input.as_input_ref()?.index);
-        }
-        let base_input = left.as_correlated_input_ref()?;
-        if base_input.correlated_id() != correlated_id {
-            return None;
+        let mut include_distance = false;
+        for (idx, row_input) in row_input_func.inputs().iter().enumerate() {
+            let input_index = row_input.as_input_ref()?.index;
+            if input_index == lookup_input.schema().len() {
+                // distance column included in the row output
+                if idx != row_input_func.inputs().len() - 1 {
+                    // for simplicity, we require that distance column should be the last column in the row
+                    return None;
+                } else {
+                    include_distance = true;
+                }
+            } else {
+                lookup_input_indices.push(input_index);
+            }
         }
 
-        // TODO: check right has no correlated input
         Some(
-            LogicalCorrelatedVectorSearch::new(
+            LogicalVectorSearchLookupJoin::new(
                 top_n,
                 distance_type,
-                base,
-                base_input.index(),
+                input,
+                input_vector_idx,
                 lookup_input,
-                right,
+                lookup_expr,
                 lookup_input_indices,
+                include_distance,
             )
             .into(),
         )
