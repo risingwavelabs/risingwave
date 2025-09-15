@@ -765,7 +765,7 @@ mod tests {
         // Add first entry: ("key1", 42)
         struct_builder.append(Some(
             StructValue::new(vec![
-                Some(ScalarImpl::Utf8("key1".to_string().into())),
+                Some(ScalarImpl::Utf8("key1".to_owned().into())),
                 Some(42i32.to_scalar_value()),
             ])
             .as_scalar_ref(),
@@ -774,7 +774,7 @@ mod tests {
         // Add second entry: ("key2", 123)
         struct_builder.append(Some(
             StructValue::new(vec![
-                Some(ScalarImpl::Utf8("key2".to_string().into())),
+                Some(ScalarImpl::Utf8("key2".to_owned().into())),
                 Some(123i32.to_scalar_value()),
             ])
             .as_scalar_ref(),
@@ -809,7 +809,7 @@ mod tests {
         int_struct_builder.append(Some(
             StructValue::new(vec![
                 Some(1i32.to_scalar_value()),
-                Some(ScalarImpl::Utf8("hello".to_string().into())),
+                Some(ScalarImpl::Utf8("hello".to_owned().into())),
             ])
             .as_scalar_ref(),
         ));
@@ -818,7 +818,7 @@ mod tests {
         int_struct_builder.append(Some(
             StructValue::new(vec![
                 Some(2i32.to_scalar_value()),
-                Some(ScalarImpl::Utf8("world".to_string().into())),
+                Some(ScalarImpl::Utf8("world".to_owned().into())),
             ])
             .as_scalar_ref(),
         ));
