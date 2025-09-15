@@ -1,0 +1,27 @@
+query II rowsort
+select * from sink_t1;
+----
+1 11
+
+query ITI rowsort
+select * from sink_t2;
+----
+3 a 13
+4 b 14
+
+query II rowsort
+select * from sink_t3;
+----
+1 11
+3 13
+4 14
+5 15
+
+query I rowsort
+select * from sink_t4;
+----
+1
+2
+3
+4
+5

@@ -15,13 +15,14 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_meta::MetaResult;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
@@ -38,6 +39,8 @@ use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
 use thiserror_ext::AsReport;
+use tokio::sync::oneshot::Sender;
+use tokio::task::JoinHandle;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
@@ -118,6 +121,92 @@ impl DdlServiceImpl {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
         }
+    }
+
+    pub fn start_migrate_table_fragments(&self) -> (JoinHandle<()>, Sender<()>) {
+        tracing::info!("start migrate legacy table fragments task");
+        let env = self.env.clone();
+        let metadata_manager = self.metadata_manager.clone();
+        let ddl_controller = self.ddl_controller.clone();
+
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            async fn migrate_inner(
+                shutdown_rx: &mut tokio::sync::oneshot::Receiver<()>,
+                env: &MetaSrvEnv,
+                metadata_manager: &MetadataManager,
+                ddl_controller: &DdlController,
+            ) -> MetaResult<()> {
+                let tables = metadata_manager
+                    .catalog_controller
+                    .list_unmigrated_tables()
+                    .await?;
+
+                let client = {
+                    let workers = metadata_manager
+                        .list_active_worker_node(Some(WorkerType::Frontend))
+                        .await?;
+                    if workers.is_empty() {
+                        return Err(anyhow::anyhow!("no active frontend nodes found").into());
+                    }
+                    let worker = workers.choose(&mut thread_rng()).unwrap().clone();
+                    env.frontend_client_pool().get(&worker).await?
+                };
+
+                for table in tables {
+                    match shutdown_rx.try_recv() {
+                        Ok(_) | Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                            tracing::info!("shutting down migrate table fragments task");
+                            return Ok(());
+                        }
+                        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                    }
+
+                    let req = GetTableReplacePlanRequest {
+                        database_id: table.database_id,
+                        owner: table.owner,
+                        table_name: table.name.clone(),
+                        cdc_table_change: None,
+                    };
+                    let resp = client
+                        .get_table_replace_plan(req)
+                        .await
+                        .context("failed to get table replace plan from frontend")?;
+
+                    let plan = resp.into_inner().replace_plan.unwrap();
+                    let replace_info = DdlServiceImpl::extract_replace_table_info(plan);
+                    ddl_controller
+                        .run_command(DdlCommand::ReplaceStreamJob(replace_info))
+                        .await?;
+                    tracing::info!("migrated table fragments for table {}", table.name);
+                }
+                tracing::info!("successfully migrated all legacy table fragments");
+
+                Ok(())
+            }
+
+            let mut attempt = 0;
+            while let Err(e) =
+                migrate_inner(&mut shutdown_rx, &env, &metadata_manager, &ddl_controller).await
+            {
+                attempt += 1;
+                tracing::error!(
+                    "failed to migrate legacy table fragments: {}, attempt {}, retrying in 5 secs",
+                    e,
+                    attempt
+                );
+                tokio::select! {
+                    biased;
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("shutting down migrate table fragments task");
+                        break;
+                    },
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
     }
 }
 
@@ -1077,7 +1166,7 @@ impl DdlService for DdlServiceImpl {
                         database_id: table.database_id,
                         owner: table.owner,
                         table_name: table.name.clone(),
-                        table_change: Some(table_change.clone()),
+                        cdc_table_change: Some(table_change.clone()),
                     })
                     .await;
 
