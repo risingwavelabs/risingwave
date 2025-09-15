@@ -27,19 +27,17 @@ download_and_prepare_rw "$profile" monitoring
 
 # Test script for internal_get_channel_delta_stats table function with monitoring
 # This script starts a RisingWave cluster with Prometheus monitoring and runs the SLT test
+# The test file is located in e2e_test/monitoring/
 
-echo "Starting RisingWave cluster with monitoring..."
+echo "--- Starting RisingWave cluster with monitoring..."
 
 # Start the cluster with monitoring
 ./risedev d ci-3cn-1fe-with-monitoring
 
-echo "Waiting for cluster to be ready..."
-sleep 10
-
-echo "Running internal_get_channel_delta_stats SLT test..."
+echo "--- Running monitoring tests"
 
 # Run the SLT test
-./risedev slt './e2e_test/table_function/internal_get_channel_delta_stats.slt'
+./risedev slt './e2e_test/monitoring/internal_get_channel_delta_stats.slt'
 
 echo "Test completed successfully!"
 
