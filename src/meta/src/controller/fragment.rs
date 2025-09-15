@@ -1870,7 +1870,6 @@ impl CatalogController {
                     .update_column(source_splits::Column::Splits)
                     .to_owned(),
             )
-            .do_nothing()
             .exec(&txn)
             .await?;
 
