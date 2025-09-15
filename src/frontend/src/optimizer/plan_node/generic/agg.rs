@@ -477,7 +477,10 @@ impl Agg<StreamPlanRef> {
                                 | PbAggKind::LastValue
                                 | PbAggKind::StringAgg
                                 | PbAggKind::ArrayAgg
-                                | PbAggKind::JsonbAgg,
+                                | PbAggKind::JsonbAgg
+                                | PbAggKind::PercentileCont
+                                | PbAggKind::PercentileDisc
+                                | PbAggKind::Mode,
                             )
                             | AggType::WrapScalar(_) => {
                                 if agg_call.order_by.is_empty() {
@@ -532,7 +535,10 @@ impl Agg<StreamPlanRef> {
                             | PbAggKind::StringAgg
                             | PbAggKind::ArrayAgg
                             | PbAggKind::JsonbAgg
-                            | PbAggKind::JsonbObjectAgg,
+                            | PbAggKind::JsonbObjectAgg
+                            | PbAggKind::PercentileCont
+                            | PbAggKind::PercentileDisc
+                            | PbAggKind::Mode,
                         )
                         | AggType::WrapScalar(_) => {
                             agg_call.inputs.iter().map(|i| i.index).collect()
@@ -545,9 +551,6 @@ impl Agg<StreamPlanRef> {
                 }
                 agg_types::rewritten!() => {
                     unreachable!("should have been rewritten")
-                }
-                agg_types::unimplemented_in_stream!() => {
-                    unreachable!("should have been banned")
                 }
                 AggType::Builtin(
                     PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar,
