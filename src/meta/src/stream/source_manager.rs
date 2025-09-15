@@ -109,6 +109,7 @@ impl SourceManagerCore {
         let mut added_backfill_fragments = Default::default();
         let mut finished_backfill_fragments = Default::default();
         let mut split_assignment = Default::default();
+        let mut actor_level_split_assignment = Default::default();
         let mut dropped_actors = Default::default();
         let mut fragment_replacements = Default::default();
         let mut dropped_source_fragments = Default::default();
@@ -124,7 +125,7 @@ impl SourceManagerCore {
             } => {
                 added_source_fragments = added_source_fragments_;
                 added_backfill_fragments = added_backfill_fragments_;
-                split_assignment = split_assignment_;
+                actor_level_split_assignment = split_assignment_;
             }
             SourceChange::CreateJobFinished {
                 finished_backfill_fragments: finished_backfill_fragments_,
@@ -220,6 +221,10 @@ impl SourceManagerCore {
                 // override previous splits info
                 self.actor_splits.insert(actor_id, splits);
             }
+        }
+
+        for (actor_id, splits) in actor_level_split_assignment {
+            self.actor_splits.insert(actor_id, splits);
         }
 
         for actor_id in dropped_actors {
@@ -549,7 +554,7 @@ pub enum SourceChange {
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
         added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
-        split_assignment: SplitAssignment,
+        split_assignment: HashMap<ActorId, Vec<SplitImpl>>,
     },
     UpdateSourceProps {
         // the new properties to be set for each source_id

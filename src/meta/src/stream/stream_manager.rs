@@ -536,7 +536,6 @@ impl GlobalStreamManager {
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
             upstream_fragment_downstreams,
-            init_split_assignment,
             definition: definition.clone(),
             streaming_job: streaming_job.clone(),
             job_type,

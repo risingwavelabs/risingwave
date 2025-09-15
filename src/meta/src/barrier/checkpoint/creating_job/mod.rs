@@ -126,11 +126,8 @@ impl CreatingStreamingJobControl {
         );
 
         let added_actors = info.stream_job_fragments.actor_ids();
-        let actor_splits = info
-            .init_split_assignment
-            .values()
-            .flat_map(build_actor_connector_splits)
-            .collect();
+
+        let actor_splits = build_actor_connector_splits(&info.stream_job_fragments.actor_splits);
 
         let initial_mutation = Mutation::Add(AddMutation {
             // for mutation of snapshot backfill job, we won't include changes to dispatchers of upstream actors.

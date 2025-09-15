@@ -83,7 +83,7 @@ use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
-use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
+use crate::stream::JobReschedulePostUpdates;
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -781,7 +781,7 @@ impl CatalogController {
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
-        split_assignment: &SplitAssignment,
+        split_assignment: &HashMap<crate::model::ActorId, Vec<SplitImpl>>,
         new_sink_downstream: Option<FragmentDownstreamRelation>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
@@ -798,18 +798,16 @@ impl CatalogController {
             .exec(&txn)
             .await?;
 
-        for splits in split_assignment.values() {
-            for (actor_id, splits) in splits {
-                let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-                let connector_splits = &PbConnectorSplits { splits };
-                actor::ActiveModel {
-                    actor_id: Set(*actor_id as _),
-                    splits: Set(Some(connector_splits.into())),
-                    ..Default::default()
-                }
-                .update(&txn)
-                .await?;
+        for (actor_id, splits) in split_assignment {
+            let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
+            let connector_splits = &PbConnectorSplits { splits };
+            actor::ActiveModel {
+                actor_id: Set(*actor_id as _),
+                splits: Set(Some(connector_splits.into())),
+                ..Default::default()
             }
+            .update(&txn)
+            .await?;
         }
 
         insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;

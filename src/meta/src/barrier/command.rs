@@ -218,7 +218,6 @@ pub struct CreateStreamingJobCommandInfo {
     #[educe(Debug(ignore))]
     pub stream_job_fragments: StreamJobFragmentsToCreate,
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
-    pub init_split_assignment: SplitAssignment,
     pub definition: String,
     pub job_type: StreamingJobType,
     pub create_type: CreateType,
@@ -881,7 +880,6 @@ impl Command {
                 info:
                     CreateStreamingJobCommandInfo {
                         stream_job_fragments: table_fragments,
-                        init_split_assignment: split_assignment,
                         upstream_fragment_downstreams,
                         fragment_backfill_ordering,
                         cdc_table_snapshot_split_assignment,
@@ -892,10 +890,7 @@ impl Command {
             } => {
                 let edges = edges.as_mut().expect("should exist");
                 let added_actors = table_fragments.actor_ids();
-                let actor_splits = split_assignment
-                    .values()
-                    .flat_map(build_actor_connector_splits)
-                    .collect();
+                let actor_splits = build_actor_connector_splits(&table_fragments.actor_splits);
                 let subscriptions_to_add =
                     if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) =
                         job_type

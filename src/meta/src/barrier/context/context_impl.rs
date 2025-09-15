@@ -303,7 +303,6 @@ impl CommandContext {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
                     ..
                 } = info;
                 let new_sink_downstream =
@@ -318,6 +317,8 @@ impl CommandContext {
                         None
                     };
 
+                let actor_splits = &stream_job_fragments.actor_splits;
+
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
@@ -325,7 +326,7 @@ impl CommandContext {
                         stream_job_fragments.stream_job_id().table_id as _,
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
-                        init_split_assignment,
+                        actor_splits,
                         new_sink_downstream,
                     )
                     .await?;
@@ -333,7 +334,7 @@ impl CommandContext {
                 let source_change = SourceChange::CreateJob {
                     added_source_fragments: stream_job_fragments.stream_source_fragments(),
                     added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
-                    split_assignment: init_split_assignment.clone(),
+                    split_assignment: actor_splits.clone(),
                 };
 
                 barrier_manager_context
@@ -371,7 +372,7 @@ impl CommandContext {
                         new_fragments.stream_job_id.table_id as _,
                         new_fragments.actor_ids(),
                         upstream_fragment_downstreams,
-                        init_split_assignment,
+                        &new_fragments.actor_splits,
                         None,
                     )
                     .await?;
