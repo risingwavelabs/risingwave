@@ -1426,36 +1426,6 @@ impl CatalogController {
         Ok(())
     }
 
-    pub async fn update_source_splits(
-        &self,
-        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
-    ) -> MetaResult<()> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-
-        for (source_id, splits) in source_splits {
-            let model = source_splits::ActiveModel {
-                source_id: Set(*source_id as _),
-                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
-                    splits: splits.iter().map(Into::into).collect_vec(),
-                }))),
-            };
-
-            SourceSplits::insert(model)
-                .on_conflict(
-                    OnConflict::column(source_splits::Column::SourceId)
-                        .update_column(source_splits::Column::Splits)
-                        .to_owned(),
-                )
-                .exec(&txn) // Execute the query within the transaction
-                .await?;
-        }
-
-        txn.commit().await?;
-
-        Ok(())
-    }
-
     #[await_tree::instrument]
     pub async fn fill_snapshot_backfill_epoch(
         &self,
