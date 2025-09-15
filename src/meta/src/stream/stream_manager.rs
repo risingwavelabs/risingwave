@@ -17,7 +17,6 @@ use std::iter;
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, span};
-use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -30,7 +29,7 @@ use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbField};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
 use tracing::Instrument;
 
 use super::{
@@ -52,10 +51,10 @@ use crate::model::{
     FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate,
     TableParallelism,
 };
+use crate::stream::SourceManagerRef;
 use crate::stream::cdc::{
     assign_cdc_table_snapshot_splits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
-use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
@@ -120,13 +119,15 @@ pub enum CreatingState {
 struct StreamingJobExecution {
     id: TableId,
     shutdown_tx: Option<Sender<CreatingState>>,
+    _permit: OwnedSemaphorePermit,
 }
 
 impl StreamingJobExecution {
-    fn new(id: TableId, shutdown_tx: Sender<CreatingState>) -> Self {
+    fn new(id: TableId, shutdown_tx: Sender<CreatingState>, permit: OwnedSemaphorePermit) -> Self {
         Self {
             id,
             shutdown_tx: Some(shutdown_tx),
+            _permit: permit,
         }
     }
 }
@@ -311,7 +312,7 @@ impl GlobalStreamManager {
         self: &Arc<Self>,
         stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
-        run_command_notifier: Option<oneshot::Sender<MetaResult<()>>>,
+        permit: OwnedSemaphorePermit,
     ) -> MetaResult<NotificationVersion> {
         let await_tree_key = format!("Create Streaming Job Worker ({})", ctx.streaming_job.id());
         let await_tree_span = span!(
@@ -323,37 +324,33 @@ impl GlobalStreamManager {
         let table_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id().into();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
-        let execution = StreamingJobExecution::new(table_id, sender.clone());
+        let execution = StreamingJobExecution::new(table_id, sender.clone(), permit);
         self.creating_job_info.add_job(execution).await;
 
         let stream_manager = self.clone();
         let fut = async move {
             let res: MetaResult<_> = try {
-                let (source_change, streaming_job) = stream_manager
+                let create_type = ctx.create_type;
+                let streaming_job = stream_manager
                     .run_create_streaming_job_command(stream_job_fragments, ctx)
-                    .inspect(move |result| {
-                        if let Some(tx) = run_command_notifier {
-                            let _ = tx.send(match result {
-                                Ok(_) => {
-                                    Ok(())
-                                }
-                                Err(err) => {
-                                    Err(err.clone())
-                                }
-                            });
-                        }
-                    })
                     .await?;
-                let version = stream_manager
-                    .metadata_manager
-                    .wait_streaming_job_finished(
-                        streaming_job.database_id().into(),
-                        streaming_job.id() as _,
-                    )
-                    .await?;
-                stream_manager.source_manager
-                    .apply_source_change(source_change)
-                    .await;
+                let version = match create_type {
+                    CreateType::Background => {
+                        stream_manager
+                            .env.notification_manager_ref().current_version().await
+                    }
+                    CreateType::Foreground => {
+                        stream_manager
+                            .metadata_manager
+                            .wait_streaming_job_finished(
+                                streaming_job.database_id().into(),
+                                streaming_job.id() as _,
+                            )
+                            .await?
+                    }
+                    CreateType::Unspecified => unreachable!(),
+                };
+
                 tracing::debug!(?streaming_job, "stream job finish");
                 version
             };
@@ -450,7 +447,7 @@ impl GlobalStreamManager {
         bail!("receiver failed to get notification version for finished stream job")
     }
 
-    /// The function will only return after backfilling finishes
+    /// The function will return after barrier collected
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
     #[await_tree::instrument]
     async fn run_create_streaming_job_command(
@@ -470,7 +467,7 @@ impl GlobalStreamManager {
             fragment_backfill_ordering,
             ..
         }: CreateStreamingJobContext,
-    ) -> MetaResult<(SourceChange, StreamingJob)> {
+    ) -> MetaResult<StreamingJob> {
         tracing::debug!(
             table_id = %stream_job_fragments.stream_job_id(),
             "built actors finished"
@@ -529,10 +526,6 @@ impl GlobalStreamManager {
             CdcTableSnapshotSplitAssignmentWithGeneration::empty()
         };
 
-        let source_change = SourceChange::CreateJobFinished {
-            finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
-        };
-
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
             upstream_fragment_downstreams,
@@ -572,7 +565,7 @@ impl GlobalStreamManager {
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
 
-        Ok((source_change, streaming_job))
+        Ok(streaming_job)
     }
 
     /// Send replace job command to barrier scheduler.
