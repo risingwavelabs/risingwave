@@ -152,7 +152,7 @@ impl SourceManagerCore {
                 dropped_source_fragments = dropped_source_fragments_;
                 dropped_actors = dropped_actors_;
                 added_source_fragments = added_source_fragments_;
-                split_assignment = split_assignment_;
+                actor_level_split_assignment = split_assignment_;
                 fragment_replacements = fragment_replacements_;
             }
             SourceChange::DropSource {
@@ -420,7 +420,7 @@ impl SourceManager {
         &self,
         dropped_job_fragments: &StreamJobFragments,
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        split_assignment: SplitAssignment,
+        actor_splits: &HashMap<ActorId, Vec<SplitImpl>>,
         replace_plan: &ReplaceStreamJobPlan,
     ) {
         // Extract the fragments that include source operators.
@@ -439,7 +439,7 @@ impl SourceManager {
             dropped_source_fragments,
             dropped_actors,
             added_source_fragments,
-            split_assignment,
+            split_assignment: actor_splits.clone(),
             fragment_replacements: replace_plan.fragment_replacements(),
         })
         .await;
@@ -583,7 +583,7 @@ pub enum SourceChange {
         dropped_actors: HashSet<ActorId>,
 
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        split_assignment: SplitAssignment,
+        split_assignment: HashMap<ActorId, Vec<SplitImpl>>,
         fragment_replacements: HashMap<FragmentId, FragmentId>,
     },
     Reschedule {

@@ -358,7 +358,6 @@ impl CommandContext {
                     old_fragments,
                     new_fragments,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
                     to_drop_state_table_ids,
                     auto_refresh_schema_sinks,
                     ..
@@ -399,7 +398,7 @@ impl CommandContext {
                     .handle_replace_job(
                         old_fragments,
                         new_fragments.stream_source_fragments(),
-                        init_split_assignment.clone(),
+                        &new_fragments.actor_splits,
                         replace_plan,
                     )
                     .await;

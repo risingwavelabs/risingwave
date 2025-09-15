@@ -128,12 +128,6 @@ pub struct ReplaceStreamJobPlan {
     /// connect to the new fragment.
     pub replace_upstream: FragmentReplaceUpstream,
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
-    /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
-    /// We need to reassign splits for it.
-    ///
-    /// Note that there's no `SourceBackfillExecutor` involved for table with connector, so we don't need to worry about
-    /// `backfill_splits`.
-    pub init_split_assignment: SplitAssignment,
     /// The `StreamingJob` info of the table to be replaced. Must be `StreamingJob::Table`
     pub streaming_job: StreamingJob,
     /// The temporary dummy job fragments id of new table fragment
@@ -992,9 +986,9 @@ impl Command {
                 old_fragments,
                 replace_upstream,
                 upstream_fragment_downstreams,
-                init_split_assignment,
                 auto_refresh_schema_sinks,
                 cdc_table_snapshot_split_assignment,
+                new_fragments,
                 ..
             }) => {
                 let edges = edges.as_mut().expect("should exist");
@@ -1020,6 +1014,7 @@ impl Command {
                                 .next_generation(iter::once(old_fragments.stream_job_id.table_id)),
                         )
                     };
+
                 Self::generate_update_mutation_for_replace_table(
                     old_fragments.actor_ids().into_iter().chain(
                         auto_refresh_schema_sinks
@@ -1036,7 +1031,7 @@ impl Command {
                     ),
                     merge_updates,
                     dispatchers,
-                    init_split_assignment,
+                    &new_fragments.actor_splits,
                     cdc_table_snapshot_split_assignment,
                     auto_refresh_schema_sinks.as_ref(),
                 )
@@ -1386,7 +1381,7 @@ impl Command {
         dropped_actors: impl IntoIterator<Item = ActorId>,
         merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: FragmentActorDispatchers,
-        init_split_assignment: &SplitAssignment,
+        actor_splits: &HashMap<ActorId, Vec<SplitImpl>>,
         cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
         auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
     ) -> Option<Mutation> {
@@ -1398,10 +1393,8 @@ impl Command {
             .map(|(actor_id, dispatchers)| (actor_id, Dispatchers { dispatchers }))
             .collect();
 
-        let actor_splits = init_split_assignment
-            .values()
-            .flat_map(build_actor_connector_splits)
-            .collect();
+        let actor_splits = build_actor_connector_splits(actor_splits);
+
         Some(Mutation::Update(UpdateMutation {
             actor_new_dispatchers,
             merge_update: merge_updates.into_values().flatten().collect(),

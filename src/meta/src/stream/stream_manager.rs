@@ -633,7 +633,6 @@ impl GlobalStreamManager {
                     new_fragments,
                     replace_upstream,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
                     streaming_job,
                     tmp_id,
                     to_drop_state_table_ids: {
