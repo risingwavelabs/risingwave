@@ -1,0 +1,4 @@
+statement ok
+set query_mode = local;
+
+include vector_nearest.slt.part
