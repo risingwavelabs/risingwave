@@ -45,31 +45,24 @@ use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
     SINK_TARGET_TABLE_NAME, WithPropertiesExt,
 };
-use risingwave_pb::catalog::PbSink;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
-use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
-use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
-    ObjectName, Query, Statement,
+    ObjectName, Query,
 };
 
 use super::RwPgResponse;
 use super::create_mv::get_column_names;
-use super::create_source::{SqlColumnStrategy, UPSTREAM_SOURCE_KEY};
+use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::util::gen_query_from_table_name;
 use crate::binder::{Binder, Relation};
-use crate::catalog::SinkId;
-use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
 use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
 use crate::optimizer::plan_node::{
     IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamPlanRef as PlanRef,
@@ -360,7 +353,7 @@ pub async fn gen_sink_plan(
     let target_table_catalog = stmt
         .into_table_name
         .as_ref()
-        .map(|table_name| fetch_table_catalog_for_alter(session, table_name))
+        .map(|table_name| fetch_table_catalog_for_alter(session, table_name).map(|t| t.0))
         .transpose()?;
 
     if let Some(target_table_catalog) = &target_table_catalog {
@@ -608,45 +601,8 @@ pub async fn handle_create_sink(
         (sink, graph, target_table_catalog, dependencies)
     };
 
-    let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
-        use crate::handler::alter_table_column::hijack_merger_for_target_table;
-
-        let (mut graph, mut table, source, target_job_type) =
-            reparse_table_for_sink(&session, &table_catalog).await?;
-
-        sink.original_target_columns = table.columns.clone();
-
-        table
-            .incoming_sinks
-            .clone_from(&table_catalog.incoming_sinks);
-
-        let incoming_sink_ids: HashSet<_> = table_catalog.incoming_sinks.iter().copied().collect();
-        let incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
-
-        let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
-        for existing_sink in incoming_sinks {
-            hijack_merger_for_target_table(
-                &mut graph,
-                &columns_without_rw_timestamp,
-                &existing_sink,
-                Some(&existing_sink.unique_identity()),
-            )?;
-        }
-
-        // for new creating sink, we don't have a unique identity because the sink id is not generated yet.
-        hijack_merger_for_target_table(&mut graph, &columns_without_rw_timestamp, &sink, None)?;
-
-        target_table_replace_plan = Some(ReplaceJobPlan {
-            replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
-                replace_job_plan::ReplaceTable {
-                    table: Some(table.to_prost()),
-                    source: source.map(|x| x.to_prost()),
-                    job_type: target_job_type as _,
-                },
-            )),
-            fragment_graph: Some(graph),
-        });
+        sink.original_target_columns = table_catalog.columns_without_rw_timestamp();
     }
 
     let _job_guard =
@@ -662,13 +618,7 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_sink(
-            sink.to_proto(),
-            graph,
-            target_table_replace_plan,
-            dependencies,
-            if_not_exists,
-        )
+        .create_sink(sink.to_proto(), graph, dependencies, if_not_exists)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
@@ -676,84 +626,23 @@ pub async fn handle_create_sink(
 
 pub fn fetch_incoming_sinks(
     session: &Arc<SessionImpl>,
-    incoming_sink_ids: &HashSet<SinkId>,
+    table: &TableCatalog,
 ) -> Result<Vec<Arc<SinkCatalog>>> {
     let reader = session.env().catalog_reader().read_guard();
-    let mut sinks = Vec::with_capacity(incoming_sink_ids.len());
-    let db_name = &session.database();
-    for schema in reader.iter_schemas(db_name)? {
-        for sink in schema.iter_sink() {
-            if incoming_sink_ids.contains(&sink.id.sink_id) {
-                sinks.push(sink.clone());
-            }
-        }
-    }
-
-    Ok(sinks)
-}
-
-pub(crate) async fn reparse_table_for_sink(
-    session: &Arc<SessionImpl>,
-    table_catalog: &Arc<TableCatalog>,
-) -> Result<(
-    StreamFragmentGraph,
-    TableCatalog,
-    Option<SourceCatalog>,
-    TableJobType,
-)> {
-    // Retrieve the original table definition and parse it to AST.
-    let definition = table_catalog.create_sql_ast_purified()?;
-    let Statement::CreateTable { name, .. } = &definition else {
-        panic!("unexpected statement: {:?}", definition);
+    let schema = reader.get_schema_by_id(&table.database_id, &table.schema_id)?;
+    let Some(incoming_sinks) = schema.table_incoming_sinks(table.id) else {
+        return Ok(vec![]);
     };
-    let table_name = name.clone();
-
-    // Create handler args as if we're creating a new table with the altered definition.
-    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
-    let col_id_gen = ColumnIdGenerator::new_alter(table_catalog);
-
-    let (graph, table, source, job_type) = generate_stream_graph_for_replace_table(
-        session,
-        table_name,
-        table_catalog,
-        handler_args,
-        definition,
-        col_id_gen,
-        SqlColumnStrategy::FollowUnchecked,
-    )
-    .await?;
-
-    Ok((graph, table, source, job_type))
-}
-
-pub(crate) fn insert_merger_to_union_with_project(
-    node: &mut StreamNode,
-    project_node: &PbNodeBody,
-    uniq_identity: Option<&str>,
-) {
-    if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
-        // TODO: MergeNode is used as a placeholder, see issue #17658
-        node.input.push(StreamNode {
-            input: vec![StreamNode {
-                node_body: Some(NodeBody::Merge(Box::new(MergeNode {
-                    ..Default::default()
-                }))),
-                ..Default::default()
-            }],
-            identity: uniq_identity
-                .unwrap_or(PbSink::UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK)
-                .to_owned(),
-            fields: node.fields.clone(),
-            node_body: Some(project_node.clone()),
-            ..Default::default()
-        });
-
-        return;
+    let mut sinks = vec![];
+    for sink_id in incoming_sinks {
+        sinks.push(
+            schema
+                .get_sink_by_id(sink_id)
+                .expect("should exist")
+                .clone(),
+        );
     }
-
-    for input in &mut node.input {
-        insert_merger_to_union_with_project(input, project_node, uniq_identity);
-    }
+    Ok(sinks)
 }
 
 fn derive_sink_to_table_expr(

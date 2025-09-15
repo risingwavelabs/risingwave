@@ -487,6 +487,18 @@ steps:
     timeout_in_minutes: 120
     retry: *auto-retry
 
+  - label: "documentation"
+    command: "ci/scripts/doc.sh"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-check"
+      || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+    plugins:
+      - *cargo-cache
+      - docker-compose#v5.5.0: *docker-compose
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-unit-test.sh"
     if: |
@@ -731,7 +743,7 @@ steps:
       #- ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 45
     retry: *auto-retry
 
   - label: "enable ci/pr/run-selected only in draft PRs"

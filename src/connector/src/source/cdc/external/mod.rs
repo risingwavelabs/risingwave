@@ -30,7 +30,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::secret::PbSecretRef;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::WithPropertiesExt;
 use crate::connector_common::{PostgresExternalTable, SslMode};
@@ -225,6 +225,8 @@ pub struct DebeziumSourceOffset {
     #[serde(rename = "txId")]
     pub txid: Option<i64>,
     pub tx_usec: Option<u64>,
+    pub lsn_commit: Option<u64>,
+    pub lsn_proc: Option<u64>,
 
     // sql server offset
     pub commit_lsn: Option<String>,

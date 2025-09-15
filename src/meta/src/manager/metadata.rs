@@ -484,15 +484,15 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
+    pub async fn get_table_catalog_by_ids(&self, ids: &[u32]) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
-            .get_table_by_ids(ids.into_iter().map(|id| id as _).collect(), false)
+            .get_table_by_ids(ids.iter().map(|id| *id as _).collect(), false)
             .await
     }
 
-    pub async fn get_sink_catalog_by_ids(&self, ids: &[u32]) -> MetaResult<Vec<PbSink>> {
+    pub async fn get_table_incoming_sinks(&self, table_id: u32) -> MetaResult<Vec<PbSink>> {
         self.catalog_controller
-            .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
+            .get_table_incoming_sinks(table_id as _)
             .await
     }
 
@@ -726,6 +726,25 @@ impl MetadataManager {
             .update_sink_props_by_sink_id(sink_id, props)
             .await?;
         Ok(new_props)
+    }
+
+    pub async fn update_iceberg_table_props_by_table_id(
+        &self,
+        table_id: TableId,
+        props: BTreeMap<String, String>,
+        alter_iceberg_table_props: Option<
+            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
+        >,
+    ) -> MetaResult<(HashMap<String, String>, u32)> {
+        let (new_props, sink_id) = self
+            .catalog_controller
+            .update_iceberg_table_props_by_table_id(
+                table_id.table_id as _,
+                props,
+                alter_iceberg_table_props,
+            )
+            .await?;
+        Ok((new_props, sink_id))
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(

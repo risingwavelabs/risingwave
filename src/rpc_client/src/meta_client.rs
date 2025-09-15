@@ -76,7 +76,9 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
+use risingwave_pb::meta::alter_connector_props_request::{
+    AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
+};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -474,14 +476,12 @@ impl MetaClient {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
-            affected_table_change,
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
         };
@@ -824,17 +824,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_sink(
-        &self,
-        sink_id: u32,
-        cascade: bool,
-        affected_table_change: Option<ReplaceJobPlan>,
-    ) -> Result<WaitVersion> {
-        let request = DropSinkRequest {
-            sink_id,
-            cascade,
-            affected_table_change,
-        };
+    pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp
             .version
@@ -1426,6 +1417,31 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Sink as i32,
+            extra_options: None,
+        };
+        let _resp = self.inner.alter_connector_props(req).await?;
+        Ok(())
+    }
+
+    pub async fn alter_iceberg_table_props(
+        &self,
+        table_id: u32,
+        sink_id: u32,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        let req = AlterConnectorPropsRequest {
+            object_id: table_id,
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            connector_conn_ref,
+            object_type: AlterConnectorPropsObject::IcebergTable as i32,
+            extra_options: Some(ExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds {
+                sink_id: sink_id as i32,
+                source_id: source_id as i32,
+            })),
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1444,6 +1460,7 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Source as i32,
+            extra_options: None,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1680,6 +1697,28 @@ impl MetaClient {
         };
         let req = AddEventLogRequest {
             event: Some(add_event_log_request::Event::SinkFail(event)),
+        };
+        self.inner.add_event_log(req).await?;
+        Ok(())
+    }
+
+    pub async fn add_cdc_auto_schema_change_fail_event(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) -> Result<()> {
+        let event = event_log::EventAutoSchemaChangeFail {
+            table_id,
+            table_name,
+            cdc_table_id,
+            upstream_ddl,
+            fail_info,
+        };
+        let req = AddEventLogRequest {
+            event: Some(add_event_log_request::Event::AutoSchemaChangeFail(event)),
         };
         self.inner.add_event_log(req).await?;
         Ok(())

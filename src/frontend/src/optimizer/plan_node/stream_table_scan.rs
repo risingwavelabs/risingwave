@@ -60,6 +60,13 @@ impl StreamTableScan {
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
 
+        let mut stream_scan_type = stream_scan_type;
+        if core.cross_database() {
+            assert_ne!(stream_scan_type, StreamScanType::UpstreamOnly);
+            // Force rewrite scan type to cross-db scan
+            stream_scan_type = StreamScanType::CrossDbSnapshotBackfill;
+        }
+
         let distribution = {
             match core.distribution_key() {
                 Some(distribution_key) => {

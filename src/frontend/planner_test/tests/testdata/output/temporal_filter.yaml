@@ -34,7 +34,7 @@
         ├─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, AddWithTimeZone(t1.ts, (t1.additional_time_to_live * 1.5:Decimal), 'UTC':Varchar) as $expr1, t1._row_id] }
         │ └─StreamTableScan { table: t1, columns: [t1.ts, t1.additional_time_to_live, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
-          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
             └─StreamNow { output: [now] }
 - name: Temporal filter with `now()` in upper bound
   sql: |-
@@ -45,7 +45,7 @@
     └─StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -58,7 +58,7 @@
         └── StreamExchange Broadcast from 1
 
     Fragment 1
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
     Table 0 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
@@ -89,7 +89,7 @@
         │ └─StreamProject { exprs: [t1.ts, DateTrunc('week':Varchar, t1.ts, 'UTC':Varchar) as $expr1, t1._row_id] }
         │   └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard($expr2) }
-          └─StreamProject { exprs: [DateTrunc('week':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+          └─StreamProject { exprs: [DateTrunc('week':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
             └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -110,7 +110,7 @@
         └── BatchPlanNode
 
     Fragment 3
-    StreamProject { exprs: [DateTrunc('week':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+    StreamProject { exprs: [DateTrunc('week':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 5 ] }
 
     Table 0 { columns: [ t1_ts, $expr1, t1__row_id, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
@@ -147,7 +147,7 @@
     └─StreamDynamicFilter [append_only] { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -161,7 +161,7 @@
         └── StreamExchange Broadcast from 1
 
     Fragment 1
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
     Table 0 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
@@ -190,10 +190,10 @@
       ├─StreamDynamicFilter { predicate: (t1.ts < $expr1), output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
       │ ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │ └─StreamExchange { dist: Broadcast }
-      │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+      │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
       │     └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
           └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -209,11 +209,11 @@
         └── StreamExchange Broadcast from 2
 
     Fragment 1
-    StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 5 ] }
 
     Fragment 2
-    StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 6 ] }
 
     Table 0 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
@@ -252,10 +252,10 @@
         │   ├─StreamDynamicFilter { predicate: (t1.ta < $expr1), output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
         │   │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         │   │ └─StreamExchange { dist: Broadcast }
-        │   │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+        │   │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
         │   │     └─StreamNow { output: [now] }
         │   └─StreamExchange { dist: Broadcast }
-        │     └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+        │     └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
         │       └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard(t2.b) }
           └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
@@ -283,10 +283,10 @@
             ├─StreamDynamicFilter { predicate: (t1.ta < $expr1), output: [t1.a, t1.ta, t1._row_id], cleaned_by_watermark: true }
             │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
             │ └─StreamExchange { dist: Broadcast }
-            │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+            │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
             │     └─StreamNow { output: [now] }
             └─StreamExchange { dist: Broadcast }
-              └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+              └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
                 └─StreamNow { output: [now] }
 - name: Temporal filter in on clause for full join's left side
   sql: |
@@ -312,10 +312,10 @@
             ├─StreamDynamicFilter { predicate: (t2.tb < $expr1), output: [t2.b, t2.tb, t2._row_id], cleaned_by_watermark: true }
             │ ├─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
             │ └─StreamExchange { dist: Broadcast }
-            │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+            │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
             │     └─StreamNow { output: [now] }
             └─StreamExchange { dist: Broadcast }
-              └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+              └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
                 └─StreamNow { output: [now] }
 - name: Temporal filter in on clause for right join's right side
   sql: |
@@ -429,7 +429,7 @@
       │     │     │     │   └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
       │     │     │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │     │     │     └─StreamExchange { dist: Broadcast }
-      │     │     │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+      │     │     │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
       │     │     │         └─StreamNow { output: [now] }
       │     │     └─StreamExchange { dist: HashShard(t._row_id, 1:Int32) }
       │     │       └─StreamProject { exprs: [t.t, t.a, t._row_id, 1:Int32] }
@@ -438,7 +438,7 @@
       │     │             └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
       │     │               └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │     └─StreamExchange { dist: Broadcast }
-      │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+      │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
       │         └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t._row_id, $src, 1:Int32) }
         └─StreamProject { exprs: [t.t, t.a, t._row_id, $src, 1:Int32] }
@@ -453,7 +453,7 @@
                 │     │   └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
                 │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
                 │     └─StreamExchange { dist: Broadcast }
-                │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+                │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
                 │         └─StreamNow { output: [now] }
                 └─StreamExchange { dist: HashShard(t._row_id, 1:Int32) }
                   └─StreamProject { exprs: [t.t, t.a, t._row_id, 1:Int32] }
@@ -472,7 +472,7 @@
         ├─StreamProject { exprs: [t.ts, t.a, AddWithTimeZone(t.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t._row_id] }
         │ └─StreamTableScan { table: t, columns: [t.ts, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: Broadcast }
-          └─StreamProject { exprs: [DateTrunc('day':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
+          └─StreamProject { exprs: [DateTrunc('day':Varchar, now, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
             └─StreamNow { output: [now] }
 - name: Non-trivial now expression 2
   sql: |
@@ -485,7 +485,7 @@
         ├─StreamProject { exprs: [t.ts, t.a, AddWithTimeZone(t.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t._row_id] }
         │ └─StreamTableScan { table: t, columns: [t.ts, t.a, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: Broadcast }
-          └─StreamProject { exprs: [DateTrunc('day':Varchar, SubtractWithTimeZone('2024-07-18 00:00:00+00:00':Timestamptz, ('2024-07-18 00:00:00+00:00':Timestamptz - now), 'UTC':Varchar), 'UTC':Varchar) as $expr2] }
+          └─StreamProject { exprs: [DateTrunc('day':Varchar, SubtractWithTimeZone('2024-07-18 00:00:00+00:00':Timestamptz, ('2024-07-18 00:00:00+00:00':Timestamptz - now), 'UTC':Varchar), 'UTC':Varchar) as $expr2], noop_update_hint: true }
             └─StreamNow { output: [now] }
 - name: Non-monotonic now expression
   sql: |
@@ -506,7 +506,7 @@
       │       └─StreamProject { exprs: [t.a, t.ta, t._row_id, Vnode(t._row_id) as _vnode] }
       │         └─StreamTableScan { table: t, columns: [t.a, t.ta, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -527,7 +527,7 @@
             └── BatchPlanNode
 
     Fragment 2
-    StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 5 ] }
 
     Table 0 { columns: [ t_a, t_ta, t__row_id, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
@@ -577,7 +577,7 @@
       │     │         └─StreamExchange { dist: HashShard(t2.tb) }
       │     │           └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
       │     └─StreamExchange { dist: Broadcast }
-      │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+      │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
       │         └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t1._row_id, t2._row_id, t1.ta, t2.tb, 1:Int32) }
         └─StreamProject { exprs: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id, t1.ta, t2.tb, 1:Int32] }
@@ -623,7 +623,7 @@
     └── BatchPlanNode
 
     Fragment 6
-    StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 8 ] }
 
     Fragment 7
