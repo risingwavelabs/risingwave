@@ -305,7 +305,7 @@ impl StreamSink {
             && downstream_pk != derived_pk
         {
             bail_bind_error!(
-                "When sink from an upsert stream, \
+                "When sinking from an upsert stream, \
                  the downstream pk must be the same as the one derived from the stream."
             )
         }
