@@ -20,7 +20,9 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::StreamScanType;
-use risingwave_sqlparser::ast::AsOf;
+use risingwave_sqlparser::ast::{
+    AsOf, Expr, Ident, ObjectName, OrderByExpr, Statement, WithProperties,
+};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
@@ -588,16 +590,38 @@ impl LogicalScan {
             .iter()
             .map(|&col| self.table().columns[col].name.clone())
             .collect_vec();
-        let index_columns = column_names
+
+        // Construct CREATE INDEX statement using AST for proper identifier quoting
+        let columns = column_names
             .iter()
-            .map(|col| "\"".to_owned() + col + "\"")
-            .join(", ");
+            .map(|col| OrderByExpr {
+                expr: Expr::Identifier(Ident::with_quote_unchecked('"', col)),
+                asc: None, // defaults to ASC
+                nulls_first: None,
+            })
+            .collect();
+
+        let index_name = format!(
+            "__recommended_idx_of_{}_{}",
+            self.table_name(),
+            column_names.join("_")
+        );
+
+        let create_index_stmt = Statement::CreateIndex {
+            name: ObjectName::from(vec![Ident::with_quote_unchecked('"', &index_name)]),
+            table_name: ObjectName::from(vec![Ident::with_quote_unchecked('"', self.table_name())]),
+            columns,
+            method: None,
+            include: vec![],
+            distributed_by: vec![],
+            unique: false,
+            if_not_exists: false,
+            with_properties: WithProperties(vec![]),
+        };
 
         self.core.ctx().warn_to_user(format!(
-            "To speed up the backfilling, consider creating an index: CREATE INDEX \"{}\" ON \"{}\" ({})",
-            "__recommended_idx_of_".to_owned() + self.table_name() + "_" + &column_names.join("_"),
-            self.table_name(),
-            index_columns
+            "To speed up the backfilling, consider creating an index: {}",
+            create_index_stmt
         ));
     }
 }
