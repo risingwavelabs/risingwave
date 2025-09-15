@@ -596,6 +596,8 @@ impl GlobalStreamManager {
             ..
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
+        let mut new_fragments = new_fragments;
+
         let init_split_assignment = if streaming_job.is_source() {
             self.source_manager
                 .allocate_splits_for_replace_source(
@@ -611,6 +613,10 @@ impl GlobalStreamManager {
             "replace_stream_job - allocate split: {:?}",
             init_split_assignment
         );
+
+        new_fragments
+            .inner
+            .set_actor_splits_by_split_assignment(init_split_assignment);
 
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
             old_fragments.stream_job_id.table_id,
