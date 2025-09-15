@@ -20,6 +20,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{Either, select};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
@@ -846,6 +847,16 @@ impl MetadataManager {
             .get_job_fragment_backfill_scan_type(job_id.table_id as _)
             .await?;
         Ok(backfill_types)
+    }
+
+    #[await_tree::instrument]
+    pub async fn update_source_splits(
+        &self,
+        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        self.catalog_controller
+            .update_source_splits(source_splits)
+            .await
     }
 }
 

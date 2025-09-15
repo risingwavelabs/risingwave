@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
+use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::panic_if_debug;
@@ -34,6 +35,7 @@ use risingwave_connector::source::{
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+pub use split_assignment::SplitState;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, MutexGuard, oneshot};
@@ -51,6 +53,7 @@ use crate::rpc::metrics::MetaMetrics;
 
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
+pub type DiscoveredSourceSplits = HashMap<SourceId, Vec<SplitImpl>>;
 pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<u32, HashMap<String, String>>;
@@ -307,6 +310,21 @@ impl SourceManagerCore {
             }
         }
     }
+
+    async fn update_source_splits(&self, source_id: SourceId) -> MetaResult<()> {
+        let handle_ref = self.managed_sources.get(&source_id).unwrap();
+
+        let discovered_splits = handle_ref.splits.lock().await.splits.clone();
+
+        if let Some(splits) = discovered_splits {
+            let source_splits =
+                HashMap::from([(source_id as _, splits.into_values().collect_vec())]);
+            self.metadata_manager
+                .update_source_splits(&source_splits)
+                .await?;
+        }
+        Ok(())
+    }
 }
 
 impl SourceManager {
@@ -453,14 +471,17 @@ impl SourceManager {
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         tracing::debug!("register_source: {}", source.get_id());
         let mut core = self.core.lock().await;
-        if let Entry::Vacant(e) = core.managed_sources.entry(source.get_id() as _) {
-            let handle = create_source_worker(source, self.metrics.clone())
-                .await
-                .context("failed to create source worker")?;
-            e.insert(handle);
-        } else {
-            tracing::warn!("source {} already registered", source.get_id());
+        let source_id = source.get_id() as _;
+        if core.managed_sources.contains_key(&source_id) {
+            tracing::warn!("source {} already registered", source_id);
+            return Ok(());
         }
+
+        let handle = create_source_worker(source, self.metrics.clone())
+            .await
+            .context("failed to create source worker")?;
+        core.managed_sources.insert(source_id, handle);
+        core.update_source_splits(source_id).await?;
         Ok(())
     }
 
@@ -469,13 +490,16 @@ impl SourceManager {
         &self,
         source_id: SourceId,
         handle: ConnectorSourceWorkerHandle,
-    ) {
+    ) -> MetaResult<()> {
         let mut core = self.core.lock().await;
-        if let Entry::Vacant(e) = core.managed_sources.entry(source_id) {
-            e.insert(handle);
-        } else {
+        if core.managed_sources.contains_key(&source_id) {
             tracing::warn!("source {} already registered", source_id);
+            return Ok(());
         }
+        core.managed_sources.insert(source_id, handle);
+        core.update_source_splits(source_id).await?;
+
+        Ok(())
     }
 
     pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
@@ -501,14 +525,14 @@ impl SourceManager {
     /// The command will first updates `SourceExecutor`'s splits, and finally calls `Self::apply_source_change`
     /// to update states in `SourceManager`.
     async fn tick(&self) -> MetaResult<()> {
-        let split_assignment = {
+        let split_states = {
             let core_guard = self.core.lock().await;
             core_guard.reassign_splits().await?
         };
 
-        for (database_id, split_assignment) in split_assignment {
-            if !split_assignment.is_empty() {
-                let command = Command::SourceChangeSplit(split_assignment);
+        for (database_id, split_state) in split_states {
+            if !split_state.split_assignment.is_empty() {
+                let command = Command::SourceChangeSplit(split_state);
                 tracing::info!(command = ?command, "pushing down split assignment command");
                 self.barrier_scheduler
                     .run_command(database_id, command)
