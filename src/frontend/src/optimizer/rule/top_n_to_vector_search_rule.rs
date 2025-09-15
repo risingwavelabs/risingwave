@@ -15,7 +15,7 @@
 use std::assert_matches::assert_matches;
 
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::aggregate::AggType;
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
