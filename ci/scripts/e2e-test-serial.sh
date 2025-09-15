@@ -72,6 +72,10 @@ cluster_stop() {
   fi
 }
 
+run_sql() {
+  psql -h localhost -p 4566 -d dev -U root -c "$@"
+}
+
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
@@ -118,6 +122,10 @@ fi
 
 risedev slt -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 risedev slt -p 4566 -d dev './e2e_test/dml/*.slt'
+
+risedev slt -p 4566 -d dev './e2e_test/copy/gen_data.slt'
+diff e2e_test/copy/expected.txt <(run_sql 'copy (select name, id from t order by id) to stdout')
+run_sql 'drop table t'
 
 echo "--- e2e, $mode, misc"
 risedev slt -p 4566 -d dev './e2e_test/misc/**/*.slt'
@@ -169,9 +177,6 @@ echo "--- Kill cluster"
 cluster_stop
 
 if [[ "$mode" == "standalone" ]]; then
-  run_sql() {
-    psql -h localhost -p 4566 -d dev -U root -c "$@"
-  }
   compactor_is_online() {
     set +e
     grep -q "risingwave_cmd_all::standalone: starting compactor-node thread" "${PREFIX_LOG}/standalone.log"

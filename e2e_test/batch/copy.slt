@@ -1,9 +1,0 @@
-statement ok
-create table t (id int, name string);
-
-statement ok
-insert into t values (1, 'name'), (2, null), (3, E'name1\tname'), (4, E'name1\rname'), (5, E'name1\nname'), (6, E'name1\\name');;
-
-query
-copy (select * from t order by id) to stdout
------
