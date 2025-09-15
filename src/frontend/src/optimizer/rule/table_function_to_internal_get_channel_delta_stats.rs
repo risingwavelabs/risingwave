@@ -79,8 +79,6 @@ impl TableFunctionToInternalGetChannelDeltaStatsRule {
         ctx: Rc<OptimizerContext>,
         table_function: &crate::expr::TableFunction,
     ) -> anyhow::Result<PlanRef> {
-        // For now, we'll return empty values since we need to integrate with the dashboard API
-        // In a real implementation, this would call the dashboard API to get channel stats
         let fields = vec![
             Field::new("upstream_fragment_id", DataType::Int32),
             Field::new("downstream_fragment_id", DataType::Int32),
