@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::FragmentTypeMask;
 use sea_orm::prelude::DateTime;
 
 use super::*;
+use crate::controller::fragment::FragmentTypeMaskExt;
 
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
@@ -268,5 +270,24 @@ impl CatalogController {
     pub async fn list_functions(&self) -> MetaResult<Vec<PbFunction>> {
         let inner = self.inner.read().await;
         inner.list_functions().await
+    }
+
+    pub async fn list_unmigrated_tables(&self) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+
+        let table_objs = Table::find()
+            .filter(table::Column::TableType.eq(TableType::Table))
+            .find_also_related(Object)
+            .join(JoinType::InnerJoin, object::Relation::Fragment.def())
+            .filter(FragmentTypeMask::intersects(FragmentTypeFlag::Mview).and(
+                FragmentTypeMask::disjoint(FragmentTypeFlag::UpstreamSinkUnion),
+            ))
+            .all(&inner.db)
+            .await?;
+
+        Ok(table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
     }
 }

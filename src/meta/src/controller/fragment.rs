@@ -110,6 +110,7 @@ pub struct FragmentParallelismInfo {
 pub(crate) trait FragmentTypeMaskExt {
     fn intersects(flag: FragmentTypeFlag) -> SimpleExpr;
     fn intersects_any(flags: impl IntoIterator<Item = FragmentTypeFlag>) -> SimpleExpr;
+    fn disjoint(flag: FragmentTypeFlag) -> SimpleExpr;
 }
 
 impl FragmentTypeMaskExt for FragmentTypeMask {
@@ -123,6 +124,12 @@ impl FragmentTypeMaskExt for FragmentTypeMask {
         Expr::col(fragment::Column::FragmentTypeMask)
             .bit_and(Expr::value(FragmentTypeFlag::raw_flag(flags) as i32))
             .ne(0)
+    }
+
+    fn disjoint(flag: FragmentTypeFlag) -> SimpleExpr {
+        Expr::col(fragment::Column::FragmentTypeMask)
+            .bit_and(Expr::value(flag as i32))
+            .eq(0)
     }
 }
 
