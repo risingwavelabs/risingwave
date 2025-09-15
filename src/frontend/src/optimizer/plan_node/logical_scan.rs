@@ -590,7 +590,7 @@ impl LogicalScan {
             .collect_vec();
         let index_columns = column_names
             .iter()
-            .map(|col| "\"".to_owned() + &col + "\"")
+            .map(|col| "\"".to_owned() + col + "\"")
             .join(", ");
 
         self.core.ctx().warn_to_user(format!(
@@ -729,7 +729,7 @@ impl ToStream for LogicalScan {
         }
 
         if self.table_indexes().is_empty() {
-            self.notice_recommended_index(&columns);
+            self.notice_recommended_index(columns);
             return None;
         }
 
@@ -761,7 +761,7 @@ impl ToStream for LogicalScan {
             }
         }
 
-        self.notice_recommended_index(&columns);
+        self.notice_recommended_index(columns);
         None
     }
 }
