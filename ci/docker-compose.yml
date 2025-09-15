@@ -19,16 +19,16 @@ services:
       ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=50", "-c", "max_wal_senders=20"]
 
   mysql:
-    image: mysql:8.0
-    command: --character-set-server=utf8 --collation-server=utf8_general_ci
+    image: mariadb:12.0.2
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     ports:
       - 3306
     environment:
-      - MYSQL_ROOT_PASSWORD=123456
-      - MYSQL_USER=mysqluser
-      - MYSQL_PASSWORD=mysqlpw
+      - MARIADB_ROOT_PASSWORD=123456
+      - MARIADB_USER=mysqluser
+      - MARIADB_PASSWORD=mysqlpw
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456"]
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root -p123456"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -36,16 +36,16 @@ services:
   # TODO: reuse the same mysql instance for connector test and meta store
   #       after https://github.com/risingwavelabs/risingwave/issues/19783 addressed
   mysql-meta:
-    image: mysql:8.0
-    command: --character-set-server=utf8 --collation-server=utf8_general_ci
+    image: mariadb:12.0.2
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     ports:
       - 3306
     environment:
-      - MYSQL_ROOT_PASSWORD=123456
-      - MYSQL_USER=mysqluser
-      - MYSQL_PASSWORD=mysqlpw
+      - MARIADB_ROOT_PASSWORD=123456
+      - MARIADB_USER=mysqluser
+      - MARIADB_PASSWORD=mysqlpw
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456"]
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root -p123456"]
       interval: 5s
       timeout: 5s
       retries: 5

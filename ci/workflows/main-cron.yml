@@ -38,7 +38,7 @@ anchors:
               endpoint: "postgres://postgres:post\\tgres@db:5432/rwmeta"
           - with:
               backend: "mysql"
-              # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
+              # mariadb -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
               endpoint: "mysql://root:123456@mysql-meta:3306/rwmeta"
       env:
         RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
