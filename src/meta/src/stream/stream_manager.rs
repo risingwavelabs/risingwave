@@ -476,6 +476,8 @@ impl GlobalStreamManager {
             "built actors finished"
         );
 
+        let mut stream_job_fragments = stream_job_fragments;
+
         // Here we need to consider:
         // - Shared source
         // - Table with connector
@@ -493,6 +495,10 @@ impl GlobalStreamManager {
                 )
                 .await?,
         );
+
+        stream_job_fragments
+            .inner
+            .set_actor_splits_by_split_assignment(init_split_assignment);
 
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
             stream_job_fragments.stream_job_id.table_id,
