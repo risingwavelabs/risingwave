@@ -373,27 +373,6 @@ steps:
     timeout_in_minutes: 120
     retry: *auto-retry
 
-  - label: "connector node integration test Java {{matrix.java_version}}"
-    key: "connector-node-integration-test"
-    command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-connector-node-integration-tests"
-      || build.env("CI_STEPS") =~ /(^|,)connector-node-integration-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    matrix:
-      setup:
-        java_version:
-          - "11"
-          - "17"
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
   - label: "release amd64 (dry-run)"
     command: "SKIP_RELEASE=1 ci/scripts/release.sh"
     if: |
@@ -429,36 +408,6 @@ steps:
     if: build.tag != null && build.pull_request.id == null
     timeout_in_minutes: 60
     retry: *auto-retry
-
-  # Notification test.
-  - key: "test-notify"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
-    command: |
-      bash -c 'echo test && exit -1'
-
-  # Notification test.
-  - key: "test-notify-2"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
-    command: |
-      bash -c 'echo test && exit -1'
-
-  # Notification test.
-  - key: "test-notify-timeout"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.env("CI_STEPS") =~ /(^|,)test_notify(,|$$)/
-    command: |
-      bash -c 'echo test && sleep 300'
-    timeout_in_minutes: 1
-
-  - wait: ~
-    continue_on_failure: true
-    allow_dependency_failure: true
-
-  # Notifies on test failure for certain tests.
-  # You may update `notify.py` to add tests and people to notify.
-  # This should be the LAST part of the main-cron file.
-  - label: "trigger failed test notification"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.branch == "main"
-    command: "ci/scripts/notify.py"
 
   #- wait: ~
 
