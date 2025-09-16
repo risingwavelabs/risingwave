@@ -165,7 +165,36 @@ pub fn mysql_datum_to_rw_datum(
             )
         }
         DataType::Varchar => {
-            handle_data_type!(mysql_row, mysql_datum_index, column_name, String)
+            // For VARCHAR, try string conversion first (normal case)
+            match mysql_row.take_opt::<Option<String>, _>(mysql_datum_index) {
+                None => bail!(
+                    "no value found at column: {}, index: {}",
+                    column_name,
+                    mysql_datum_index
+                ),
+                Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(v))),
+                Some(Err(_)) => {
+                    // If string conversion failed, try u64 conversion (for BIGINT UNSIGNED)
+                    match mysql_row.take_opt::<Option<u64>, _>(mysql_datum_index) {
+                        None => bail!(
+                            "no value found at column: {}, index: {}",
+                            column_name,
+                            mysql_datum_index
+                        ),
+                        Some(Ok(Some(val))) => {
+                            // Convert u64 to string (preserves original value for BIGINT UNSIGNED)
+                            Ok(Some(ScalarImpl::from(val.to_string())))
+                        }
+                        Some(Ok(None)) => Ok(None),
+                        Some(Err(e)) => Err(anyhow::Error::new(e.clone())
+                            .context("failed to deserialize MySQL value into rust value")
+                            .context(format!(
+                                "column: {}, index: {}, rust_type: u64",
+                                column_name, mysql_datum_index,
+                            ))),
+                    }
+                }
+            }
         }
         DataType::Date => {
             handle_data_type!(mysql_row, mysql_datum_index, column_name, NaiveDate, Date)

@@ -212,7 +212,7 @@ impl JsonParseOptions {
                 string_parsing: false,
                 string_integer_parsing: false,
             },
-            varchar_handling: VarcharHandling::Strict,
+            varchar_handling: VarcharHandling::OnlyPrimaryTypes,
             struct_handling: StructHandling::Strict,
             ignoring_keycase: true,
             handle_toast_columns,
@@ -457,7 +457,12 @@ impl JsonParseOptions {
                 | ValueType::U128
                 | ValueType::F64,
             ) if matches!(self.varchar_handling, VarcharHandling::OnlyPrimaryTypes) => {
-                value.to_string().into()
+                // Special handling for U64 to preserve original value for BIGINT UNSIGNED
+                if let Some(u64_val) = value.as_u64() {
+                    u64_val.to_string().into()
+                } else {
+                    value.to_string().into()
+                }
             }
             (
                 DataType::Varchar,
