@@ -45,10 +45,10 @@ mysql -e "
 statement ok
 create source mysql_source with (
   connector = 'mysql-cdc',
-  hostname = '${MYSQL_HOST}',
-  port = '${MYSQL_TCP_PORT}',
+  hostname = '${MARIADB_HOST}',
+  port = '${MARIADB_TCP_PORT}',
   username = 'root',
-  password = '${MYSQL_PWD}',
+  password = '${MARIADB_PWD}',
   database.name = 'testdb1',
   server.id = '5185'
 );

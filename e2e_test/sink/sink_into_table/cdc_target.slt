@@ -16,9 +16,9 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 create source mysql_source with (
   connector = 'mysql-cdc',
-  password = '${MYSQL_PWD}',
-  hostname = '${MYSQL_HOST}',
-  port = '${MYSQL_TCP_PORT}',
+  password = '${MARIADB_PWD}',
+  hostname = '${MARIADB_HOST}',
+  port = '${MARIADB_TCP_PORT}',
   username = 'root',
   database.name = 'testdb1',
   server.id = '5185'
