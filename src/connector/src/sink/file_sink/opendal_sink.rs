@@ -432,6 +432,9 @@ impl OpenDalSinkWriter {
     }
 
     async fn create_sink_writer(&mut self) -> Result<()> {
+        // Update the `created_time` to the current time when creating a new writer.
+        self.created_time = SystemTime::now();
+
         let object_writer = self.create_object_writer().await?;
         match self.encode_type {
             SinkEncode::Parquet => {
@@ -451,8 +454,6 @@ impl OpenDalSinkWriter {
             }
         }
         self.current_bached_row_num = 0;
-
-        self.created_time = SystemTime::now();
 
         Ok(())
     }

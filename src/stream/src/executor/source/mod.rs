@@ -85,6 +85,7 @@ pub fn get_split_offset_mapping_from_chunk(
     Some(split_offset_mapping)
 }
 
+/// Get the indices of the split, offset, and pulsar message id columns.
 pub fn get_split_offset_col_idx(
     column_descs: &[SourceColumnDesc],
 ) -> (Option<usize>, Option<usize>, Option<usize>) {

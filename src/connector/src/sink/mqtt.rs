@@ -23,7 +23,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use rumqttc::v5::ConnectionError;
 use rumqttc::v5::mqttbytes::QoS;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::serde_as;
 use thiserror_ext::AsReport;
 use with_options::WithOptions;

@@ -2560,9 +2560,11 @@ dependencies = [
  "futures-channel",
  "http-body-util",
  "hyper 1.6.0",
+ "hyper-rustls 0.27.5",
  "hyper-util",
  "lz4_flex",
  "replace_with",
+ "rustls 0.23.5",
  "sealed",
  "serde",
  "static_assertions",
@@ -11929,7 +11931,6 @@ dependencies = [
  "sea-orm",
  "sea-schema",
  "serde",
- "serde_derive",
  "serde_json",
  "serde_with",
  "serde_yaml",
@@ -12822,7 +12823,6 @@ dependencies = [
  "risingwave_sqlsmith",
  "sea-orm",
  "serde",
- "serde_derive",
  "serde_json",
  "sqllogictest",
  "tempfile",
@@ -15196,9 +15196,9 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.21.0"
+version = "3.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15b61f8f20e3a6f7e0649d825294eaf317edce30f82cf6026e7e4cb9222a7d1e"
+checksum = "84fa4d11fadde498443cca10fd3ac23c951f0dc59e080e9f4b93d4df4e4eea53"
 dependencies = [
  "fastrand",
  "getrandom 0.3.1",

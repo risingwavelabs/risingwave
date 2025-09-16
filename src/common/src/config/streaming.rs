@@ -239,6 +239,11 @@ pub struct StreamingDeveloperConfig {
     /// Only takes effect when `default_enable_mem_preload_state_table` is true.
     #[serde(default)]
     pub mem_preload_state_table_ids_blacklist: Vec<u32>,
+
+    /// Eliminate unnecessary updates aggressively, even if it impacts performance. Enable this
+    /// only if it's confirmed that no-op updates are causing significant streaming amplification.
+    #[serde(default)]
+    pub aggressive_noop_update_elimination: bool,
 }
 
 pub mod default {

@@ -323,8 +323,12 @@ impl ToStream for LogicalTopN {
             )));
         }
         Ok(if !self.group_key().is_empty() {
-            let input = self.input().to_stream(ctx)?;
-            let input = RequiredDist::hash_shard(self.group_key())
+            let logical_input = self
+                .input()
+                .try_better_locality(self.group_key())
+                .unwrap_or_else(|| self.input());
+            let input = logical_input.to_stream(ctx)?;
+            let input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
                 .streaming_enforce_if_not_satisfies(input)?;
             let core = self.core.clone_with_input(input);
             StreamGroupTopN::new(core, None)?.into()
