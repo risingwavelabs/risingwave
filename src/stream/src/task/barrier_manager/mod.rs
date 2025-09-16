@@ -47,6 +47,12 @@ pub(super) enum LocalBarrierEvent {
         table_id: u32,
         associated_source_id: u32,
     },
+    RefreshFinished {
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+        staging_table_id: u32,
+    },
     RegisterBarrierSender {
         actor_id: ActorId,
         barrier_sender: mpsc::UnboundedSender<Barrier>,
@@ -100,7 +106,6 @@ impl LocalBarrierManager {
         )
     }
 
-    #[cfg(test)]
     pub fn for_test() -> Self {
         Self::new(
             DatabaseId {
@@ -170,6 +175,21 @@ impl LocalBarrierManager {
             actor_id,
             table_id,
             associated_source_id,
+        });
+    }
+
+    pub fn report_refresh_finished(
+        &self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+        staging_table_id: u32,
+    ) {
+        self.send_event(LocalBarrierEvent::RefreshFinished {
+            epoch,
+            actor_id,
+            table_id,
+            staging_table_id,
         });
     }
 }

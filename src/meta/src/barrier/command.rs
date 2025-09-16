@@ -702,8 +702,14 @@ impl CommandContext {
         resps: Vec<BarrierCompleteResponse>,
         backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
     ) {
-        let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts, vector_index_adds) =
-            collect_resp_info(resps);
+        let (
+            sst_to_context,
+            synced_ssts,
+            new_table_watermarks,
+            old_value_ssts,
+            vector_index_adds,
+            truncate_tables,
+        ) = collect_resp_info(resps);
 
         let new_table_fragment_infos =
             if let Some(Command::CreateStreamingJob { info, job_type, .. }) = &self.command
@@ -802,6 +808,7 @@ impl CommandContext {
                 })
             }
         }
+        info.truncate_tables.extend(truncate_tables);
     }
 }
 

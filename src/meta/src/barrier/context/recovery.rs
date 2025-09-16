@@ -60,6 +60,10 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
+        self.metadata_manager
+            .catalog_controller
+            .reset_refreshing_tables(database_id)
+            .await?;
 
         // unregister cleaned sources.
         self.source_manager
