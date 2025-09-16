@@ -472,8 +472,6 @@ impl GlobalStreamManager {
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<(SourceChange, StreamingJob)> {
-        let mut stream_job_fragments = stream_job_fragments;
-
         tracing::debug!(
             table_id = %stream_job_fragments.stream_job_id(),
             "built actors finished"
@@ -496,10 +494,6 @@ impl GlobalStreamManager {
                 )
                 .await?,
         );
-
-        stream_job_fragments
-            .inner
-            .set_actor_splits_by_split_assignment(init_split_assignment.clone());
 
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
             stream_job_fragments.stream_job_id.table_id,

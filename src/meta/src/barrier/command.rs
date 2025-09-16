@@ -252,11 +252,12 @@ impl StreamJobFragments {
                                         .worker_id()
                                         as WorkerId,
                                     vnode_bitmap: actor.vnode_bitmap.clone(),
-                                    splits: self
-                                        .actor_splits
-                                        .get(&actor.actor_id)
-                                        .cloned()
-                                        .unwrap_or_default(),
+                                    // splits: self
+                                    //     .actor_splits
+                                    //     .get(&actor.actor_id)
+                                    //     .cloned()
+                                    //     .unwrap_or_default(),
+                                    splits: vec![], // todo
                                 },
                             )
                         })
