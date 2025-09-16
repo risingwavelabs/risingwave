@@ -310,9 +310,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return Data.DataType.TypeName.INT32_VALUE <= val
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
-                return val == Data.DataType.TypeName.INT64_VALUE
-                        || val == Data.DataType.TypeName.VARCHAR_VALUE
-                        || val == Data.DataType.TypeName.DECIMAL_VALUE;
+                return val == Data.DataType.TypeName.INT64_VALUE;
             case "boolean":
             case "bool":
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE;
