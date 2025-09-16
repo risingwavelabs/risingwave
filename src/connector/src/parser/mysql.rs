@@ -113,7 +113,67 @@ pub fn mysql_datum_to_rw_datum(
             handle_data_type!(mysql_row, mysql_datum_index, column_name, i32)
         }
         DataType::Int64 => {
-            handle_data_type!(mysql_row, mysql_datum_index, column_name, i64)
+            // 对于BIGINT UNSIGNED，直接尝试转换为u64，然后转换为i64
+            // 这样可以处理超出i64范围的BIGINT UNSIGNED值
+            match mysql_row.take_opt::<Option<u64>, _>(mysql_datum_index) {
+                None => {
+                    tracing::debug!(
+                        "u64 conversion failed for column {} at index {}, trying i64",
+                        column_name,
+                        mysql_datum_index
+                    );
+                    // 如果u64转换失败，尝试直接转换为i64（兼容有符号BIGINT）
+                    match mysql_row.take_opt::<Option<i64>, _>(mysql_datum_index) {
+                        None => bail!(
+                            "no value found at column: {}, index: {}",
+                            column_name,
+                            mysql_datum_index
+                        ),
+                        Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(v))),
+                        Some(Err(e)) => Err(anyhow::Error::new(e.clone())
+                            .context("failed to deserialize MySQL value into rust value")
+                            .context(format!(
+                                "column: {}, index: {}, rust_type: i64",
+                                column_name, mysql_datum_index,
+                            ))),
+                    }
+                }
+                Some(Ok(Some(val))) => {
+                    // 将u64转换为i64（二进制表示相同）
+                    let signed_val = val as i64;
+                    tracing::debug!(
+                        "Successfully converted u64 {} to i64 {} for column {}",
+                        val,
+                        signed_val,
+                        column_name
+                    );
+                    Ok(Some(ScalarImpl::from(signed_val)))
+                }
+                Some(Ok(None)) => Ok(None),
+                Some(Err(e)) => {
+                    tracing::debug!(
+                        "u64 conversion error for column {} at index {}: {:?}",
+                        column_name,
+                        mysql_datum_index,
+                        e
+                    );
+                    // 如果u64转换失败，尝试直接转换为i64（兼容有符号BIGINT）
+                    match mysql_row.take_opt::<Option<i64>, _>(mysql_datum_index) {
+                        None => bail!(
+                            "no value found at column: {}, index: {}",
+                            column_name,
+                            mysql_datum_index
+                        ),
+                        Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(v))),
+                        Some(Err(e)) => Err(anyhow::Error::new(e.clone())
+                            .context("failed to deserialize MySQL value into rust value")
+                            .context(format!(
+                                "column: {}, index: {}, rust_type: i64",
+                                column_name, mysql_datum_index,
+                            ))),
+                    }
+                }
+            }
         }
         DataType::Float32 => {
             handle_data_type!(mysql_row, mysql_datum_index, column_name, f32)

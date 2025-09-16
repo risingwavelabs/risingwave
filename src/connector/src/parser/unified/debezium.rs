@@ -30,7 +30,8 @@ use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaCh
 use crate::parser::schema_change::TableChangeType;
 use crate::source::cdc::build_cdc_table_id;
 use crate::source::cdc::external::mysql::{
-    mysql_type_to_rw_type, timestamp_val_to_timestamptz, type_name_to_mysql_type,
+    BigintUnsignedHandling, mysql_type_to_rw_type, timestamp_val_to_timestamptz,
+    type_name_to_mysql_type,
 };
 use crate::source::cdc::external::postgres::{pg_type_to_rw_type, type_name_to_pg_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
@@ -265,7 +266,10 @@ pub fn parse_schema_change(
                         ConnectorProperties::MysqlCdc(_) => {
                             let ty = type_name_to_mysql_type(type_name.as_str());
                             match ty {
-                                Some(ty) => match mysql_type_to_rw_type(&ty) {
+                                Some(ty) => match mysql_type_to_rw_type(
+                                    &ty,
+                                    BigintUnsignedHandling::ToSigned,
+                                ) {
                                     Ok(data_type) => data_type,
                                     Err(err) => {
                                         tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");

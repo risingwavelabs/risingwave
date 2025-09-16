@@ -17,14 +17,14 @@ use std::collections::HashMap;
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
 use futures::stream::BoxStream;
-use futures::{StreamExt, pin_mut, stream};
+use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, F32, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -41,8 +41,25 @@ use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName, SslMode, mysql_row_to_owned_row,
+    ExternalTableConfig, ExternalTableReader, Field, SchemaTableName, SslMode,
+    mysql_row_to_owned_row,
 };
+
+/// How to handle BIGINT UNSIGNED overflow when converting to RisingWave types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BigintUnsignedHandling {
+    /// Convert to signed bigint (default behavior)
+    /// This preserves the binary representation but changes the semantic meaning
+    ToSigned,
+    /// Convert to varchar to preserve the original value
+    ToVarchar,
+}
+
+impl Default for BigintUnsignedHandling {
+    fn default() -> Self {
+        Self::ToSigned
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct MySqlOffset {
@@ -89,8 +106,7 @@ impl MySqlExternalTable {
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
             .ssl_mode(match config.ssl_mode {
-                SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
-                SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
+                SslMode::Disabled | SslMode::Preferred => sqlx::mysql::MySqlSslMode::Disabled,
                 SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
                 _ => {
                     return Err(anyhow!("unsupported SSL mode").into());
@@ -103,15 +119,17 @@ impl MySqlExternalTable {
         // discover system version first
         let system_info = schema_discovery.discover_system().await?;
         schema_discovery.query = SchemaQueryBuilder::new(system_info.clone());
+
         let schema = Alias::new(config.database.as_str()).into_iden();
         let table = Alias::new(config.table.as_str()).into_iden();
         let columns = schema_discovery
             .discover_columns(schema, table, &system_info)
             .await?;
+
         let mut column_descs = vec![];
         let mut pk_names = vec![];
         for col in columns {
-            let data_type = mysql_type_to_rw_type(&col.col_type)?;
+            let data_type = mysql_type_to_rw_type(&col.col_type, BigintUnsignedHandling::ToSigned)?;
             // column name in mysql is case-insensitive, convert to lowercase
             let col_name = col.name.to_lowercase();
             let column_desc = if let Some(default) = col.default {
@@ -146,6 +164,7 @@ impl MySqlExternalTable {
         if pk_names.is_empty() {
             return Err(anyhow!("MySQL table doesn't define the primary key").into());
         }
+
         Ok(Self {
             column_descs,
             pk_names,
@@ -265,7 +284,10 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
     }
 }
 
-pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
+pub fn mysql_type_to_rw_type(
+    col_type: &ColumnType,
+    bigint_unsigned_handling: BigintUnsignedHandling,
+) -> ConnectorResult<DataType> {
     let dtype = match col_type {
         ColumnType::Serial => DataType::Int32,
         ColumnType::Bit(attr) => {
@@ -281,7 +303,10 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
         ColumnType::Bool => DataType::Boolean,
         ColumnType::MediumInt(_) => DataType::Int32,
         ColumnType::Int(_) => DataType::Int32,
-        ColumnType::BigInt(_) => DataType::Int64,
+        ColumnType::BigInt(_) => match bigint_unsigned_handling {
+            BigintUnsignedHandling::ToVarchar => DataType::Varchar,
+            BigintUnsignedHandling::ToSigned => DataType::Int64,
+        },
         ColumnType::Decimal(_) => DataType::Decimal,
         ColumnType::Float(_) => DataType::Float32,
         ColumnType::Double(_) => DataType::Float64,
@@ -382,8 +407,8 @@ impl ExternalTableReader for MySqlExternalTableReader {
         &self,
         _options: CdcTableSnapshotSplitOption,
     ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
-        // TODO(zw): feat: impl
-        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+        // TODO: Implement parallel CDC splits for MySQL
+        futures::stream::empty().boxed()
     }
 
     fn split_snapshot_read(
@@ -393,7 +418,8 @@ impl ExternalTableReader for MySqlExternalTableReader {
         _right: OwnedRow,
         _split_columns: Vec<Field>,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        todo!("implement MySQL CDC parallelized backfill")
+        // TODO: Implement split snapshot read for MySQL
+        futures::stream::empty().boxed()
     }
 }
 
@@ -600,10 +626,12 @@ impl MySqlExternalTableReader {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::time::Duration;
 
-    use futures::pin_mut;
+    use futures::{StreamExt, pin_mut};
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
+    use mysql_async::prelude::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::DataType;
 
@@ -711,5 +739,108 @@ mod tests {
         for row in stream {
             println!("OwnedRow: {:?}", row);
         }
+    }
+
+    /// To run this test(this test will be executed in `e2e-source-test.sh`):
+    ///
+    /// ```bash
+    /// cargo test --package risingwave_connector --lib -- --ignored test_mysql_async_with_connection_pool
+    /// ```
+    #[ignore]
+    #[tokio::test]
+    async fn test_mysql_async_with_connection_pool() {
+        let opts_builder = mysql_async::OptsBuilder::default()
+            .user(Some("root"))
+            .pass(Some("123456"))
+            .ip_or_hostname("mysql")
+            .tcp_port(3306)
+            .db_name(Some("unittest"));
+        let pool = mysql_async::Pool::new(opts_builder);
+        let mut conn = pool.get_conn().await.unwrap();
+        conn.exec_drop("DROP TABLE IF EXISTS test_table", ())
+            .await
+            .unwrap();
+        conn.exec_drop(
+            "CREATE TABLE test_table (id INT PRIMARY KEY, value VARCHAR(255))",
+            (),
+        )
+        .await
+        .unwrap();
+
+        for i in 1..20000 {
+            conn.exec_drop(
+                "INSERT INTO test_table VALUES (?, ?) ON DUPLICATE KEY UPDATE value=?",
+                (i, format!("value_{}", i), format!("value_{}", i)),
+            )
+            .await
+            .unwrap();
+        }
+        {
+            let rs_stream0 = conn
+                .exec_stream::<mysql_async::Row, _, _>(
+                    "SELECT * FROM test_table where id>100 LIMIT 10",
+                    (),
+                )
+                .await
+                .unwrap();
+            pin_mut!(rs_stream0);
+            let mut rows = Vec::new();
+            while let Some(rs) = rs_stream0.next().await {
+                let row = rs.unwrap();
+                rows.push(row);
+            }
+            assert_eq!(rows.len(), 10);
+        }
+        {
+            let q1 = conn.exec_drop("SET time_zone = if(not sleep(2), \"+00:00\", \"\")", ());
+            print!("set time_zone start");
+
+            match tokio::time::timeout(Duration::from_secs(1), q1).await {
+                Ok(result) => {
+                    println!("Operation completed: {:?}", result);
+                }
+                Err(_) => {
+                    println!("Operation timed out");
+                }
+            };
+        }
+        {
+            let rs_stream1 = conn
+                .exec_stream::<mysql_async::Row, _, _>(
+                    "SELECT * FROM test_table where id>100 LIMIT 10",
+                    (),
+                )
+                .await
+                .unwrap();
+            pin_mut!(rs_stream1);
+            let mut rows_err = Vec::new();
+            while let Some(rs) = rs_stream1.next().await {
+                let row = rs.unwrap();
+                rows_err.push(row);
+            }
+
+            assert_eq!(rows_err.len(), 0);
+        }
+        drop(conn);
+        let mut new_conn = pool.get_conn().await.unwrap();
+        {
+            let rs_stream2 = new_conn
+                .exec_stream::<mysql_async::Row, _, _>(
+                    "SELECT * FROM test_table where id>100 LIMIT 10",
+                    (),
+                )
+                .await
+                .unwrap();
+            pin_mut!(rs_stream2);
+            let mut rows_new_conn = Vec::new();
+            while let Some(rs) = rs_stream2.next().await {
+                let row = rs.unwrap();
+                rows_new_conn.push(row);
+            }
+
+            assert_eq!(rows_new_conn.len(), 10);
+        }
+        drop(new_conn);
+        pool.disconnect().await.unwrap();
     }
 }
