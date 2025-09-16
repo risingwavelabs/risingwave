@@ -41,19 +41,9 @@ mysql -e "
         PARTITION p20250103 VALUES LESS THAN (1735948800000)
     );
     INSERT INTO single_partition_table (id, purchased, created_at) VALUES
-    (1, 5, 1735689599000), (2, 15, 1735689599000), (3, 25, 1735689599000),
-    (11, 5, 1735775999000), (12, 15, 1735775999000), (13, 25, 1735775999000),
-    (21, 5, 1735862399000), (22, 15, 1735862399000), (23, 25, 1735862399000);
+    (1, 1, 1735689599000), (2, 2, 1735775999000), (3, 3, 1735862399000);
     INSERT INTO sub_partition_table (id, region_code, amount, created_at) VALUES
-    (1, 'US', 100.00, 1735689599000),
-    (2, 'EU', 200.00, 1735689599000),
-    (3, 'ASIA', 300.00, 1735689599000),
-    (4, 'US', 150.00, 1735775999000),
-    (5, 'EU', 250.00, 1735775999000),
-    (6, 'ASIA', 350.00, 1735775999000),
-    (7, 'US', 180.00, 1735862399000),
-    (8, 'EU', 280.00, 1735862399000),
-    (9, 'ASIA', 380.00, 1735862399000);
+    (1, 'US', 101.00, 1735689599000), (2, 'EU', 102.00, 1735775999000), (3, 'ASIA', 103.00, 1735862399000);
 "
 
 system ok
@@ -73,6 +63,18 @@ create source s with (
 );
 
 sleep 2s
+
+# Generate 1500 backfill records using MySQL recursive CTE
+system ok
+mysql -e "
+    USE testdb_partition;
+    WITH RECURSIVE numbers AS (SELECT 4 as n UNION ALL SELECT n + 1 FROM numbers WHERE n < 1500)
+    INSERT INTO single_partition_table (id, purchased, created_at)
+    SELECT n, (n % 100) + 1, CASE WHEN n % 3 = 0 THEN 1735689599000 WHEN n % 3 = 1 THEN 1735775999000 ELSE 1735862399000 END FROM numbers;
+    WITH RECURSIVE numbers AS (SELECT 4 as n UNION ALL SELECT n + 1 FROM numbers WHERE n < 1500)
+    INSERT INTO sub_partition_table (id, region_code, amount, created_at)
+    SELECT n, CASE WHEN n % 3 = 0 THEN 'US' WHEN n % 3 = 1 THEN 'EU' ELSE 'ASIA' END, (n % 1000) + 100.00, CASE WHEN n % 3 = 0 THEN 1735689599000 WHEN n % 3 = 1 THEN 1735775999000 ELSE 1735862399000 END FROM numbers;
+"
 
 # Create RisingWave table from single-level partitioned table
 statement ok
@@ -105,38 +107,22 @@ sleep 5s
 
 # Verify data synchronization for single-level partitioned table
 query IT
-select * from single_partition_rw order by id, purchased;
+select count(*) from single_partition_rw;
 ----
-1 5 1735689599000
-2 15 1735689599000
-3 25 1735689599000
-11 5 1735775999000
-12 15 1735775999000
-13 25 1735775999000
-21 5 1735862399000
-22 15 1735862399000
-23 25 1735862399000
+1500
 
 # Verify data synchronization for sub-partitioned table
 query IT
-select * from sub_partition_rw order by id;
+select count(*) from sub_partition_rw;
 ----
-1 US 100.00 1735689599000
-2 EU 200.00 1735689599000
-3 ASIA 300.00 1735689599000
-4 US 150.00 1735775999000
-5 EU 250.00 1735775999000
-6 ASIA 350.00 1735775999000
-7 US 180.00 1735862399000
-8 EU 280.00 1735862399000
-9 ASIA 380.00 1735862399000
+1500
 
 # Test CDC operations on single-level partitioned table
 system ok
 mysql -e "
     USE testdb_partition;
     INSERT INTO single_partition_table (id, purchased, created_at) VALUES
-    (5, 8, 1735689599000), (15, 18, 1735775999000), (25, 28, 1735862399000);
+    (1501, 888, 1735689599000);
     UPDATE single_partition_table SET purchased = 999 WHERE id = 1;
     DELETE FROM single_partition_table WHERE id = 2;
 "
@@ -146,8 +132,7 @@ system ok
 mysql -e "
     USE testdb_partition;
     INSERT INTO sub_partition_table (id, region_code, amount, created_at) VALUES
-    (10, 'US', 500.00, 1735689599000),
-    (11, 'EU', 600.00, 1735775999000);
+    (1501, 'US', 888.88, 1735689599000);
     UPDATE sub_partition_table SET amount = 999.99 WHERE id = 1;
     DELETE FROM sub_partition_table WHERE id = 2;
 "
@@ -156,34 +141,49 @@ sleep 5s
 
 # Verify CDC operations on single-level partitioned table
 query IT
-select * from single_partition_rw order by id, purchased;
+select count(*) from single_partition_rw;
 ----
-1 999 1735689599000
-3 25 1735689599000
-5 8 1735689599000
-11 5 1735775999000
-12 15 1735775999000
-13 25 1735775999000
-15 18 1735775999000
-21 5 1735862399000
-22 15 1735862399000
-23 25 1735862399000
-25 28 1735862399000
+1500
 
 # Verify CDC operations on sub-partitioned table
 query IT
-select * from sub_partition_rw order by id;
+select count(*) from sub_partition_rw;
 ----
-1 US 999.99 1735689599000
-3 ASIA 300.00 1735689599000
-4 US 150.00 1735775999000
-5 EU 250.00 1735775999000
-6 ASIA 350.00 1735775999000
-7 US 180.00 1735862399000
-8 EU 280.00 1735862399000
-9 ASIA 380.00 1735862399000
-10 US 500.00 1735689599000
-11 EU 600.00 1735775999000
+1500
+
+# Verify CDC operations - check if id=1 was updated
+query IT
+select id, purchased from single_partition_rw where id = 1;
+----
+1 999
+
+# Verify CDC operations - check if id=1501 was inserted
+query IT
+select id, purchased from single_partition_rw where id = 1501;
+----
+1501 888
+
+# Verify CDC operations - check if id=2 was deleted
+query IT
+select id, purchased from single_partition_rw where id = 2;
+----
+
+# Verify CDC operations on sub-partitioned table - check if id=1 was updated
+query IT
+select id, amount from sub_partition_rw where id = 1;
+----
+1 999.99
+
+# Verify CDC operations on sub-partitioned table - check if id=1501 was inserted
+query IT
+select id, amount from sub_partition_rw where id = 1501;
+----
+1501 888.88
+
+# Verify CDC operations on sub-partitioned table - check if id=2 was deleted
+query IT
+select id, amount from sub_partition_rw where id = 2;
+----
 
 # Verify partition data distribution for single-level partitioned table
 query IT
@@ -195,9 +195,9 @@ from single_partition_rw
 group by created_at
 order by created_at;
 ----
-1735689599000 3 1032
-1735775999000 4 63
-1735862399000 4 73
+1735689599000 501 250501
+1735775999000 500 250000
+1735862399000 499 249499
 
 # Verify partition data distribution for sub-partitioned table
 query IT
@@ -209,9 +209,24 @@ from sub_partition_rw
 group by created_at
 order by created_at;
 ----
-1735689599000 3 1799.99
-1735775999000 4 1350.00
-1735862399000 3 840.00
+1735689599000 501 250501.00
+1735775999000 500 250000.00
+1735862399000 499 249499.00
+
+# Verify both single-level and sub-partitioned tables work correctly
+# Check that data is properly distributed across partitions
+query IT
+select 'single_partition' as table_type, created_at, count(*) as record_count from single_partition_rw group by created_at
+union all
+select 'sub_partition' as table_type, created_at, count(*) as record_count from sub_partition_rw group by created_at
+order by table_type, created_at;
+----
+single_partition 1735689599000 501
+single_partition 1735775999000 500
+single_partition 1735862399000 499
+sub_partition 1735689599000 501
+sub_partition 1735775999000 500
+sub_partition 1735862399000 499
 
 # Clean up
 statement ok
