@@ -14,6 +14,7 @@
 
 use risingwave_common::array::{ListRef, ListValue};
 use risingwave_common::types::ScalarRefImpl;
+use risingwave_expr::expr::Context;
 use risingwave_expr::function;
 
 /// Replaces each array element equal to the second argument with the third argument.
@@ -59,9 +60,10 @@ fn array_replace(
     array: ListRef<'_>,
     elem_from: Option<ScalarRefImpl<'_>>,
     elem_to: Option<ScalarRefImpl<'_>>,
+    ctx: &Context,
 ) -> ListValue {
     ListValue::from_datum_iter(
-        &array.elem_type(),
+        ctx.arg_types[0].as_list_elem(),
         array.iter().map(|val| match val == elem_from {
             true => elem_to,
             false => val,

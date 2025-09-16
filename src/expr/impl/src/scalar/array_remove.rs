@@ -14,6 +14,7 @@
 
 use risingwave_common::array::{ListRef, ListValue};
 use risingwave_common::types::ScalarRefImpl;
+use risingwave_expr::expr::Context;
 use risingwave_expr::function;
 
 /// Removes all elements equal to the given value from the array.
@@ -67,6 +68,9 @@ use risingwave_expr::function;
 /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null], array[true]);
 /// ```
 #[function("array_remove(anyarray, any) -> anyarray")]
-fn array_remove(array: ListRef<'_>, elem: Option<ScalarRefImpl<'_>>) -> ListValue {
-    ListValue::from_datum_iter(&array.elem_type(), array.iter().filter(|x| x != &elem))
+fn array_remove(array: ListRef<'_>, elem: Option<ScalarRefImpl<'_>>, ctx: &Context) -> ListValue {
+    ListValue::from_datum_iter(
+        ctx.arg_types[0].as_list_elem(),
+        array.iter().filter(|x| x != &elem),
+    )
 }

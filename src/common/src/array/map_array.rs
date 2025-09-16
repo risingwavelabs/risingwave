@@ -275,11 +275,10 @@ mod scalar {
 
         /// # Panics
         /// Panics if `m1` and `m2` have different types.
-        pub fn concat(m1: MapRef<'_>, m2: MapRef<'_>) -> Self {
-            debug_assert_eq!(m1.inner().elem_type(), m2.inner().elem_type());
+        pub fn concat(m1: MapRef<'_>, m2: MapRef<'_>, map_type: MapType) -> Self {
             let m2_keys = m2.keys();
             let l = ListValue::from_datum_iter(
-                &m1.inner().elem_type(),
+                &map_type.into_struct(),
                 m1.iter_struct()
                     .filter(|s| !m2_keys.contains(&s.field_at(0).expect("map key is not null")))
                     .chain(m2.iter_struct())
@@ -288,7 +287,7 @@ mod scalar {
             Self::from_entries(l)
         }
 
-        pub fn insert(m: MapRef<'_>, key: ScalarImpl, value: Datum) -> Self {
+        pub fn insert(m: MapRef<'_>, key: ScalarImpl, value: Datum, map_type: MapType) -> Self {
             let l = ListValue::from_datum_iter(
                 &m.inner().elem_type(),
                 m.iter_struct()

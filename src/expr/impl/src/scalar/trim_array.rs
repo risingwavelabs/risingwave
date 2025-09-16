@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ListRef, ListValue};
+use risingwave_expr::expr::Context;
 use risingwave_expr::{ExprError, Result, function};
 
 /// Trims an array by removing the last n elements. If the array is multidimensional, only the first
@@ -70,7 +71,7 @@ use risingwave_expr::{ExprError, Result, function};
 /// select trim_array(array[1,2,3,4,5,null], true);
 /// ```
 #[function("trim_array(anyarray, int4) -> anyarray")]
-fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
+fn trim_array(array: ListRef<'_>, n: i32, ctx: &Context) -> Result<ListValue> {
     let values = array.iter();
     let len_to_trim: usize = n.try_into().map_err(|_| ExprError::InvalidParam {
         name: "n",
@@ -85,7 +86,7 @@ fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
                 reason: "more than array length".into(),
             })?;
     Ok(ListValue::from_datum_iter(
-        &array.elem_type(),
+        ctx.arg_types[0].as_list_elem(),
         values.take(len_to_retain),
     ))
 }

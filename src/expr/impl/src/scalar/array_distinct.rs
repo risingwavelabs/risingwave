@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::array::*;
+use risingwave_expr::expr::Context;
 use risingwave_expr::function;
 
 /// Returns a new array removing all the duplicates from the input array
@@ -50,13 +51,13 @@ use risingwave_expr::function;
 /// ```
 
 #[function("array_distinct(anyarray) -> anyarray")]
-pub fn array_distinct(list: ListRef<'_>) -> ListValue {
-    ListValue::from_datum_iter(&list.elem_type(), list.iter().unique())
+pub fn array_distinct(list: ListRef<'_>, ctx: &Context) -> ListValue {
+    ListValue::from_datum_iter(ctx.arg_types[0].as_list_elem(), list.iter().unique())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::Scalar;
+    use risingwave_common::types::{DataType, Scalar};
 
     use super::*;
 
@@ -64,7 +65,14 @@ mod tests {
     fn test_array_distinct_array_of_primitives() {
         let array = ListValue::from_iter([42, 43, 42]);
         let expected = ListValue::from_iter([42, 43]);
-        let actual = array_distinct(array.as_scalar_ref());
+        let actual = array_distinct(
+            array.as_scalar_ref(),
+            &Context {
+                arg_types: vec![DataType::List(DataType::Int32.into())],
+                return_type: DataType::List(DataType::Int32.into()),
+                variadic: false,
+            },
+        );
         assert_eq!(actual, expected);
     }
 

@@ -15,12 +15,13 @@
 use itertools::Itertools;
 use risingwave_common::array::*;
 use risingwave_common::types::DefaultOrdered;
+use risingwave_expr::expr::Context;
 use risingwave_expr::function;
 
 #[function("array_sort(anyarray) -> anyarray")]
-pub fn array_sort(array: ListRef<'_>) -> ListValue {
+pub fn array_sort(array: ListRef<'_>, ctx: &Context) -> ListValue {
     ListValue::from_datum_iter(
-        &array.elem_type(),
+        ctx.arg_types[0].as_list_elem(),
         array.iter().map(DefaultOrdered).sorted().map(|v| v.0),
     )
 }
