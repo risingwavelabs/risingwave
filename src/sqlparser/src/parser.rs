@@ -3864,9 +3864,6 @@ impl Parser<'_> {
             let values = self.parse_tsv();
             CopyTarget::Stdin { values }
         } else if self.parse_keywords(&[Keyword::TO, Keyword::STDOUT]) {
-            if !self.consume_token(&Token::EOF) {
-                self.expect_token(&Token::SemiColon)?;
-            }
             CopyTarget::Stdout
         } else {
             return self.expected("FROM STDIN or TO STDOUT");
