@@ -1415,11 +1415,6 @@ impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
 
-        for agg_call in self.agg_calls() {
-            if matches!(agg_call.agg_type, agg_types::unimplemented_in_stream!()) {
-                bail_not_implemented!("{} aggregation in materialized view", agg_call.agg_type);
-            }
-        }
         let eowc = ctx.emit_on_window_close();
         let input = self
             .input()

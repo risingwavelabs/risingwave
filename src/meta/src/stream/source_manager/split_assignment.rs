@@ -18,6 +18,12 @@ use itertools::Itertools;
 use super::*;
 use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
 
+#[derive(Debug, Clone)]
+pub struct SplitState {
+    pub split_assignment: SplitAssignment,
+    pub discovered_source_splits: DiscoveredSourceSplits,
+}
+
 impl SourceManager {
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
     ///
@@ -311,8 +317,9 @@ impl SourceManagerCore {
     ///
     /// `self.actor_splits` will not be updated. It will be updated by `Self::apply_source_change`,
     /// after the mutation barrier has been collected.
-    pub async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitAssignment>> {
+    pub async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitState>> {
         let mut split_assignment: SplitAssignment = HashMap::new();
+        let mut source_splits_discovered = HashMap::new();
 
         'loop_source: for (source_id, handle) in &self.managed_sources {
             let source_fragment_ids = match self.source_fragments.get(source_id) {
@@ -360,6 +367,11 @@ impl SourceManagerCore {
                         )
                     })
                     .collect();
+
+                source_splits_discovered.insert(
+                    *source_id,
+                    discovered_splits.values().cloned().collect_vec(),
+                );
 
                 if let Some(new_assignment) = reassign_splits(
                     fragment_id,
@@ -412,9 +424,34 @@ impl SourceManagerCore {
             }
         }
 
-        self.metadata_manager
+        let assignments = self
+            .metadata_manager
             .split_fragment_map_by_database(split_assignment)
-            .await
+            .await?;
+
+        let mut result = HashMap::new();
+        for (database_id, assignment) in assignments {
+            let mut source_splits = HashMap::new();
+            for (source_id, fragment_ids) in &self.source_fragments {
+                if fragment_ids
+                    .iter()
+                    .any(|fragment_id| assignment.contains_key(fragment_id))
+                    && let Some(splits) = source_splits_discovered.get(source_id)
+                {
+                    source_splits.insert(*source_id, splits.clone());
+                }
+            }
+
+            result.insert(
+                database_id,
+                SplitState {
+                    split_assignment: assignment,
+                    discovered_source_splits: source_splits,
+                },
+            );
+        }
+
+        Ok(result)
     }
 }
 

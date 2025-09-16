@@ -38,12 +38,14 @@ pub(super) fn collect_resp_info(
     HashMap<TableId, TableWatermarks>,
     Vec<SstableInfo>,
     HashMap<TableId, Vec<VectorIndexAdd>>,
+    HashSet<TableId>,
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, u32> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
     let mut vector_index_adds = HashMap::new();
+    let mut truncate_tables: HashSet<TableId> = HashSet::new();
 
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
@@ -71,6 +73,7 @@ pub(super) fn collect_resp_info(
                 )
                 .expect("non-duplicate");
         }
+        truncate_tables.extend(resp.truncate_tables.into_iter().map(TableId::new));
     }
 
     (
@@ -91,6 +94,7 @@ pub(super) fn collect_resp_info(
         ),
         old_value_ssts,
         vector_index_adds,
+        truncate_tables,
     )
 }
 
@@ -101,8 +105,14 @@ pub(super) fn collect_creating_job_commit_epoch_info(
     tables_to_commit: impl Iterator<Item = TableId>,
     is_first_time: bool,
 ) {
-    let (sst_to_context, sstables, new_table_watermarks, old_value_sst, vector_index_adds) =
-        collect_resp_info(resps);
+    let (
+        sst_to_context,
+        sstables,
+        new_table_watermarks,
+        old_value_sst,
+        vector_index_adds,
+        truncate_tables,
+    ) = collect_resp_info(resps);
     assert!(old_value_sst.is_empty());
     commit_info.sst_to_context.extend(sst_to_context);
     commit_info.sstables.extend(sstables);
@@ -115,6 +125,7 @@ pub(super) fn collect_creating_job_commit_epoch_info(
             .try_insert(table_id, VectorIndexDelta::Adds(vector_index_adds))
             .expect("non-duplicate");
     }
+    commit_info.truncate_tables.extend(truncate_tables);
     let tables_to_commit: HashSet<_> = tables_to_commit.collect();
     tables_to_commit.iter().for_each(|table_id| {
         commit_info

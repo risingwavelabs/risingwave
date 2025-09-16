@@ -74,7 +74,7 @@ use crate::model::{
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
-    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, UpstreamSinkInfo,
+    JobReschedulePostUpdates, SplitAssignment, SplitState, ThrottleConfig, UpstreamSinkInfo,
     build_actor_connector_splits,
 };
 
@@ -358,7 +358,7 @@ pub enum Command {
 
     /// `SourceChangeSplit` generates a `Splits` barrier for pushing initialized splits or
     /// changed splits.
-    SourceChangeSplit(SplitAssignment),
+    SourceChangeSplit(SplitState),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
@@ -425,7 +425,7 @@ impl std::fmt::Display for Command {
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
-            Command::SourceChangeSplit(_) => write!(f, "SourceChangeSplit"),
+            Command::SourceChangeSplit { .. } => write!(f, "SourceChangeSplit"),
             Command::Throttle(_) => write!(f, "Throttle"),
             Command::CreateSubscription {
                 subscription_id, ..
@@ -569,7 +569,7 @@ impl Command {
             ),
             Command::ReplaceStreamJob(plan) => Some(plan.fragment_changes()),
             Command::MergeSnapshotBackfillStreamingJobs(_) => None,
-            Command::SourceChangeSplit(_) => None,
+            Command::SourceChangeSplit { .. } => None,
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
@@ -702,8 +702,14 @@ impl CommandContext {
         resps: Vec<BarrierCompleteResponse>,
         backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
     ) {
-        let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts, vector_index_adds) =
-            collect_resp_info(resps);
+        let (
+            sst_to_context,
+            synced_ssts,
+            new_table_watermarks,
+            old_value_ssts,
+            vector_index_adds,
+            truncate_tables,
+        ) = collect_resp_info(resps);
 
         let new_table_fragment_infos =
             if let Some(Command::CreateStreamingJob { info, job_type, .. }) = &self.command
@@ -802,6 +808,7 @@ impl CommandContext {
                 })
             }
         }
+        info.truncate_tables.extend(truncate_tables);
     }
 }
 
@@ -837,10 +844,12 @@ impl Command {
                 }
             }
 
-            Command::SourceChangeSplit(change) => {
+            Command::SourceChangeSplit(SplitState {
+                split_assignment, ..
+            }) => {
                 let mut diff = HashMap::new();
 
-                for actor_splits in change.values() {
+                for actor_splits in split_assignment.values() {
                     diff.extend(actor_splits.clone());
                 }
 

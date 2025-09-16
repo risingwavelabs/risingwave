@@ -20,6 +20,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{Either, select};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
@@ -728,6 +729,25 @@ impl MetadataManager {
         Ok(new_props)
     }
 
+    pub async fn update_iceberg_table_props_by_table_id(
+        &self,
+        table_id: TableId,
+        props: BTreeMap<String, String>,
+        alter_iceberg_table_props: Option<
+            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
+        >,
+    ) -> MetaResult<(HashMap<String, String>, u32)> {
+        let (new_props, sink_id) = self
+            .catalog_controller
+            .update_iceberg_table_props_by_table_id(
+                table_id.table_id as _,
+                props,
+                alter_iceberg_table_props,
+            )
+            .await?;
+        Ok((new_props, sink_id))
+    }
+
     pub async fn update_fragment_rate_limit_by_fragment_id(
         &self,
         fragment_id: FragmentId,
@@ -827,6 +847,16 @@ impl MetadataManager {
             .get_job_fragment_backfill_scan_type(job_id.table_id as _)
             .await?;
         Ok(backfill_types)
+    }
+
+    #[await_tree::instrument]
+    pub async fn update_source_splits(
+        &self,
+        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        self.catalog_controller
+            .update_source_splits(source_splits)
+            .await
     }
 }
 

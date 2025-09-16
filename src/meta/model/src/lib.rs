@@ -58,6 +58,7 @@ pub mod serde_seaql_migration;
 pub mod session_parameter;
 pub mod sink;
 pub mod source;
+pub mod source_splits;
 pub mod streaming_job;
 pub mod subscription;
 pub mod system_parameter;

@@ -150,7 +150,7 @@ pub struct StateTableInner<
     /// Used for:
     /// 1. Computing `output_value_indices` to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
-    output_indices: Vec<usize>,
+    pub output_indices: Vec<usize>,
 
     op_consistency_level: StateTableOpConsistencyLevel,
 
@@ -568,7 +568,6 @@ where
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
-    #[cfg(any(test, feature = "test"))]
     pub async fn from_table_catalog_inconsistent_op(
         table_catalog: &Table,
         store: S,
@@ -1595,6 +1594,10 @@ where
 }
 
 impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
+    // The lowest-level API.
+    /// Middle-level APIs:
+    /// - [`StateTableInner::iter_with_prefix_inner`]
+    /// - [`StateTableInner::iter_kv_with_pk_range`]
     async fn iter_kv<K: CopyFromSlice + FromVnodeBytes>(
         &self,
         vnode: VirtualNode,
