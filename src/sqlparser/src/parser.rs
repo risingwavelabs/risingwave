@@ -4373,6 +4373,7 @@ impl Parser<'_> {
             Keyword::DISTSQL,
             Keyword::FORMAT,
             Keyword::DURATION_SECS,
+            Keyword::BATCH,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
@@ -4384,17 +4385,20 @@ impl Parser<'_> {
                 Keyword::TYPE => {
                     let explain_type = parser.expect_one_of_keywords(&[
                         Keyword::LOGICAL,
+                        Keyword::BATCH,
                         Keyword::PHYSICAL,
                         Keyword::DISTSQL,
                     ])?;
-                    match explain_type {
-                        Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
-                        Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                        Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
+                    options.explain_type = match explain_type {
+                        Keyword::LOGICAL => ExplainType::Logical,
+                        Keyword::BATCH => ExplainType::Batch,
+                        Keyword::PHYSICAL => ExplainType::Physical,
+                        Keyword::DISTSQL => ExplainType::DistSql,
                         _ => unreachable!("{}", keyword),
-                    }
+                    };
                 }
                 Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
+                Keyword::BATCH => options.explain_type = ExplainType::Batch,
                 Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
                 Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                 Keyword::FORMAT => {

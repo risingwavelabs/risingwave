@@ -215,11 +215,11 @@ pub async fn do_handle_explain(
             }
         };
 
-        let explain_trace = context.is_explain_trace();
-        let explain_verbose = context.is_explain_verbose();
-        let explain_backfill = context.is_explain_backfill();
-        let explain_type = context.explain_type();
-        let explain_format = context.explain_format();
+        let explain_trace = explain_options.trace;
+        let explain_verbose = explain_options.verbose;
+        let explain_backfill = explain_options.backfill;
+        let explain_type = explain_options.explain_type;
+        let explain_format = explain_options.explain_format;
 
         if explain_trace {
             let trace = context.take_trace();
@@ -304,6 +304,15 @@ pub async fn do_handle_explain(
                     blocks.push(output);
                 }
             }
+            ExplainType::Batch => {
+                // if explain trace is on, the plan has been in the rows
+                if !explain_trace {
+                    let output = context.take_batch().ok_or_else(|| {
+                        ErrorCode::InternalError("Batch plan not found for query".into())
+                    })?;
+                    blocks.push(output);
+                }
+            }
         }
 
         // Throw the error.
@@ -353,7 +362,7 @@ pub async fn handle_explain(
     }
 
     let mut blocks = Vec::new();
-    let result = do_handle_explain(handler_args, options.clone(), stmt, &mut blocks).await;
+    let result = do_handle_explain(handler_args, options, stmt, &mut blocks).await;
 
     if let Err(e) = result {
         if options.trace {
