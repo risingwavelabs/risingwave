@@ -121,7 +121,7 @@ echo '> run test..'
 risedev slt './e2e_test/source_legacy/cdc/mongodb/**/*.slt'
 
 echo "--- inline cdc test"
-export MARIADB_HOST=mysql MARIADB_TCP_PORT=3306 MARIADB_PWD=123456
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
 
 echo "--- mysql & postgres cdc validate test"
@@ -130,7 +130,7 @@ risedev slt './e2e_test/source_legacy/cdc/cdc.validate.postgres.slt'
 
 echo "--- cdc share source test"
 # cdc share stream test cases
-export MARIADB_HOST=mysql MARIADB_TCP_PORT=3306 MARIADB_PWD=123456
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 risedev slt './e2e_test/source_legacy/cdc/cdc.share_stream.slt'
 
 echo "--- mysql & postgres load and check"
