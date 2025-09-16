@@ -157,7 +157,7 @@ select * from from_basic_enum order by id;
 3 PENDING
 
 statement ok
-insert into t_basic_enum values (6, 'INVALID_STATUS');  
+insert into t_basic_enum values (6, 'INVALID_STATUS');
 
 sleep 5s
 

@@ -83,7 +83,7 @@ if [[ -n "${BUILDKITE_TAG:-}" ]]; then
   echo "--- Tagging release ${BUILDKITE_TAG}"
   docker tag "${acraddr}:${BUILDKITE_COMMIT}-${arch}" "${acraddr}:${BUILDKITE_TAG}-${arch}"
   docker tag "${acraddr}:${BUILDKITE_COMMIT}-${arch}" "${acraddr}:latest-${arch}"
-  
+
   docker push "${acraddr}:${BUILDKITE_TAG}-${arch}"
   docker push "${acraddr}:latest-${arch}"
 fi

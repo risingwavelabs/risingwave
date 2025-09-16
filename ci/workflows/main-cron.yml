@@ -189,7 +189,7 @@ steps:
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 120
       retry: *auto-retry
-      
+
   - label: "fuzz test"
     key: "fuzz-test"
     command: "ci/scripts/cron-fuzz-test.sh -p ci-release"
