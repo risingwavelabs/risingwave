@@ -142,6 +142,10 @@ impl DdlServiceImpl {
                     .list_unmigrated_tables()
                     .await?;
 
+                if tables.is_empty() {
+                    return Ok(());
+                }
+
                 let client = {
                     let workers = metadata_manager
                         .list_active_worker_node(Some(WorkerType::Frontend))
@@ -192,7 +196,7 @@ impl DdlServiceImpl {
                 attempt += 1;
                 tracing::error!(
                     "failed to migrate legacy table fragments: {}, attempt {}, retrying in 5 secs",
-                    e,
+                    e.as_report(),
                     attempt
                 );
                 tokio::select! {
