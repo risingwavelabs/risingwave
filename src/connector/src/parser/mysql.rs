@@ -113,7 +113,41 @@ pub fn mysql_datum_to_rw_datum(
             handle_data_type!(mysql_row, mysql_datum_index, column_name, i32)
         }
         DataType::Int64 => {
-            handle_data_type!(mysql_row, mysql_datum_index, column_name, i64)
+            // Try u64 conversion first (handles both BIGINT and BIGINT UNSIGNED)
+            match mysql_row.take_opt::<Option<u64>, _>(mysql_datum_index) {
+                // Case 1: Column doesn't exist or index out of range
+                None => bail!(
+                    "no value found at column: {}, index: {}",
+                    column_name,
+                    mysql_datum_index
+                ),
+
+                // Case 2: Successfully got u64 value (handles both BIGINT and BIGINT UNSIGNED)
+                Some(Ok(Some(val))) => {
+                    // Convert u64 to i64 (same binary representation)
+                    let signed_val = val as i64;
+                    Ok(Some(ScalarImpl::from(signed_val)))
+                }
+
+                // Case 3: Got NULL value
+                Some(Ok(None)) => Ok(None),
+
+                // Case 4: u64 conversion failed, fallback to i64 (rare edge case)
+                Some(Err(_)) => match mysql_row.take_opt::<Option<i64>, _>(mysql_datum_index) {
+                    None => bail!(
+                        "no value found at column: {}, index: {}",
+                        column_name,
+                        mysql_datum_index
+                    ),
+                    Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(v))),
+                    Some(Err(e)) => Err(anyhow::Error::new(e.clone())
+                        .context("failed to deserialize MySQL value into rust value")
+                        .context(format!(
+                            "column: {}, index: {}, rust_type: i64",
+                            column_name, mysql_datum_index,
+                        ))),
+                },
+            }
         }
         DataType::Float32 => {
             handle_data_type!(mysql_row, mysql_datum_index, column_name, f32)
