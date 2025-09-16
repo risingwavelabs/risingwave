@@ -432,11 +432,15 @@ impl CatalogController {
         for_replace: bool,
         creating_streaming_job: Option<&'a StreamingJob>,
     ) -> MetaResult<()> {
+        // NOTE: we don't need to pass actor splits for now
+        // splits field will be updated during the post_collect_job_fragments stage
+        let empty_actor_splits = Default::default();
+
         let fragment_actors = Self::extract_fragment_and_actors_from_fragments(
             job_id,
             get_fragments(),
             actor_status,
-            &Default::default(),
+            &empty_actor_splits,
         )?;
         let inner = self.inner.write().await;
 

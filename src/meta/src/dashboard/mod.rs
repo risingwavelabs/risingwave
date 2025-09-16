@@ -34,7 +34,6 @@ use tower_http::cors::{self, CorsLayer};
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::diagnose::DiagnoseCommandRef;
-use crate::stream::SourceManagerRef;
 
 #[derive(Clone)]
 pub struct DashboardService {
@@ -43,7 +42,6 @@ pub struct DashboardService {
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
-    pub source_manager: SourceManagerRef,
     pub hummock_manager: HummockManagerRef,
     pub compute_clients: ComputeClientPool,
     pub diagnose_command: DiagnoseCommandRef,
@@ -390,7 +388,6 @@ pub(super) mod handlers {
             )
             .await
             .map_err(err)?;
-
         Ok(Json(
             table_fragments.to_protobuf(&upstream_fragments, &dispatchers),
         ))
