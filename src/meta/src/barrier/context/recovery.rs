@@ -520,7 +520,19 @@ impl GlobalBarrierWorkerContextImpl {
                         .await?;
 
                     // get split assignments for all actors
-                    let source_splits = self.env.shared_actor_infos().list_assignments();
+
+                    // QQ: why empty here?
+                    // let source_splits = self.env.shared_actor_infos().list_assignments();
+
+                    let mut source_splits = HashMap::new();
+                    for (_, job) in info.values().flatten() {
+                        for fragment in job.fragment_infos.values() {
+                            for (actor_id, info) in &fragment.actors {
+                                source_splits.insert(*actor_id, info.splits.clone());
+                            }
+                        }
+                    }
+
                     let cdc_table_backfill_actors = self
                         .metadata_manager
                         .catalog_controller
