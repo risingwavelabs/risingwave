@@ -365,6 +365,7 @@ macro_rules! for_all_rules {
             , { AddLogstoreRule }
             , { EmptyAggRemoveRule }
             , { TopNToVectorSearchRule }
+            , { CorrelatedTopNToVectorSearchRule }
         }
     };
 }
