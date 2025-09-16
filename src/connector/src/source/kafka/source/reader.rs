@@ -107,7 +107,50 @@ impl SplitReader for KafkaSplitReader {
 
         let mut offsets = HashMap::new();
         let mut backfill_info = HashMap::new();
-        for split in splits.clone() {
+        for mut split in splits.clone() {
+            // Fetch watermarks to validate/adjust proposed start offset
+            let (low, high) = consumer
+                .fetch_watermarks(
+                    split.topic.as_str(),
+                    split.partition,
+                    properties.common.sync_call_timeout,
+                )
+                .await?;
+            tracing::info!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
+
+            // Watermarks: low (inclusive), high (exclusive). Our start_offset is exclusive.
+            // Valid start_offset range (exclusive): [low-1, max(high-1, -1)].
+            let earliest_exclusive = low - 1;
+            let latest_exclusive = if high == 0 { -1 } else { high - 1 };
+
+            // Apply rules: > high => latest & skip backfill; < low => earliest
+            let mut force_no_backfill = false;
+            if let Some(proposed) = split.start_offset {
+                if proposed > latest_exclusive {
+                    tracing::warn!(
+                        topic = %split.topic,
+                        partition = split.partition,
+                        proposed_start = proposed,
+                        high,
+                        latest = latest_exclusive,
+                        "proposed start > high watermark; using latest and skipping backfill"
+                    );
+                    split.start_offset = Some(latest_exclusive);
+                    force_no_backfill = true;
+                } else if proposed < earliest_exclusive {
+                    tracing::warn!(
+                        topic = %split.topic,
+                        partition = split.partition,
+                        proposed_start = proposed,
+                        low,
+                        earliest = earliest_exclusive,
+                        "proposed start < low watermark; using earliest"
+                    );
+                    split.start_offset = Some(earliest_exclusive);
+                }
+            }
+
+            // Build assignment with validated/adjusted offset
             offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
             if let Some(offset) = split.start_offset {
@@ -120,16 +163,11 @@ impl SplitReader for KafkaSplitReader {
                 tpl.add_partition(split.topic.as_str(), split.partition);
             }
 
-            let (low, high) = consumer
-                .fetch_watermarks(
-                    split.topic.as_str(),
-                    split.partition,
-                    properties.common.sync_call_timeout,
-                )
-                .await?;
-            tracing::info!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
-            // note: low is inclusive, high is exclusive, start_offset is exclusive
-            if low == high || split.start_offset.is_some_and(|offset| offset + 1 >= high) {
+            // Compute backfill info based on watermarks and validated start
+            if force_no_backfill
+                || low == high
+                || split.start_offset.is_some_and(|offset| offset + 1 >= high)
+            {
                 backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
             } else {
                 debug_assert!(high > 0);
