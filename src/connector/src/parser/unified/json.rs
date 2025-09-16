@@ -299,6 +299,7 @@ impl JsonParseOptions {
                 DataType::Int32,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) => value.try_as_i32().map_err(|_| create_error())?.into(),
+
             (DataType::Int32, ValueType::String)
                 if matches!(
                     self.numeric_handling,
