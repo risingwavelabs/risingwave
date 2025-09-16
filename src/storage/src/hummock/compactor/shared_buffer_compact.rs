@@ -477,6 +477,7 @@ fn generate_splits(
         let v = table_size_infos.entry(imm.table_id).or_insert(0);
         *v += data_size;
     }
+
     size_and_start_user_keys.sort_by(|a, b| a.1.cmp(&b.1));
     let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
     splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
@@ -497,31 +498,29 @@ fn generate_splits(
         compact_data_size
     };
 
-    if existing_table_ids.len() > 1 {
-        if parallelism > 1 && compact_data_size > sstable_size {
-            let mut last_buffer_size = 0;
-            let mut last_user_key: UserKey<Vec<u8>> = UserKey::default();
-            for (data_size, user_key) in size_and_start_user_keys {
-                if last_buffer_size >= sub_compaction_data_size
-                    && last_user_key.as_ref() != user_key
-                {
-                    last_user_key.set(user_key);
-                    key_split_append(
-                        &FullKey {
-                            user_key,
-                            epoch_with_gap: EpochWithGap::new_max_epoch(),
-                        }
-                        .encode()
-                        .into(),
-                    );
-                    last_buffer_size = data_size;
-                } else {
-                    last_user_key.set(user_key);
-                    last_buffer_size += data_size;
-                }
+    if parallelism > 1 && compact_data_size > sstable_size {
+        let mut last_buffer_size = 0;
+        let mut last_user_key: UserKey<Vec<u8>> = UserKey::default();
+        for (data_size, user_key) in size_and_start_user_keys {
+            if last_buffer_size >= sub_compaction_data_size && last_user_key.as_ref() != user_key {
+                last_user_key.set(user_key);
+                key_split_append(
+                    &FullKey {
+                        user_key,
+                        epoch_with_gap: EpochWithGap::new_max_epoch(),
+                    }
+                    .encode()
+                    .into(),
+                );
+                last_buffer_size = data_size;
+            } else {
+                last_user_key.set(user_key);
+                last_buffer_size += data_size;
             }
         }
+    }
 
+    if compact_data_size > sstable_size {
         // Meta node will calculate size of each state-table in one task in `risingwave_meta::hummock::manager::compaction::calculate_vnode_partition`.
         // To make the calculate result more accurately we shall split the large state-table from other small ones.
         for table_id in existing_table_ids {
