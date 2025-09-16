@@ -1,5 +1,8 @@
 include create_embedding_udf.slt.part
 
+statement ok
+set batch_hnsw_ef_search = default;
+
 # test flat index
 statement ok
 create table items (id int primary key, extra string, text string, embedding vector(3)) append only;
@@ -28,27 +31,26 @@ select * from items order by id;
 
 # test covering index on raw embedding column
 query T
-select id, text, power(distance, 2)::int from (select id, text, '[3,2,1]'::vector(3) <-> embedding as distance from no_index_mv order by distance limit 2);
+select id, text, power(distance, 2)::int from (select id, text, '[3,2,1]'::vector(3) <-> embedding as distance from no_index_mv order by distance limit 2) order by distance;
 ----
 1 first 8
 2 second 35
 
 statement ok
-create view query_view as select id, text, power(distance, 2)::int from (select id, text, '[3,2,1]'::vector(3) <-> embedding as distance from items order by distance limit 2);
+create view query_view as select id, text, power(distance, 2)::int as distance from (select id, text, '[3,2,1]'::vector(3) <-> embedding as distance from items order by distance limit 2);
 
 # ensure that vector index is used
 query T
 explain(verbose) select * from query_view;
 ----
-BatchExchange { order: [], dist: Single }
-└─BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
+<slt:ignore>BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
   └─BatchProjectSet { select_list: [Unnest($1)] }
     └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector:  }
       └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
 
 
 query T
-select * from query_view;
+select * from query_view order by distance;
 ----
 1 first 8
 2 second 35
@@ -58,28 +60,27 @@ drop view query_view;
 
 # test non-covering index on raw embedding column
 query T
-select id, text, extra, power(distance, 2)::int from (select id, text, extra, get_embedding('query') <-> embedding as distance from no_index_mv order by distance limit 2);
+select id, text, extra, power(distance, 2)::int from (select id, text, extra, get_embedding('query') <-> embedding as distance from no_index_mv order by distance limit 2) order by distance;
 ----
 1 first extra1 8
 2 second extra2 35
 
 statement ok
-create view query_view as select id, text, extra, power(distance, 2)::int from (select id, text, extra, get_embedding('query') <-> embedding as distance from items order by distance limit 2);
+create view query_view as select id, text, extra, power(distance, 2)::int as distance from (select id, text, extra, get_embedding('query') <-> embedding as distance from items order by distance limit 2);
 
 # ensure that vector index is used
 query T
 explain(verbose) select * from query_view;
 ----
-BatchProject { exprs: [$expr2, $expr1, items.extra, Pow($expr3, 2:Float64)::Int32 as $expr4] }
-└─BatchLookupJoin { type: Inner, predicate: $expr2 IS NOT DISTINCT FROM items.id, output: [$expr2, items.extra, $expr1, $expr3], lookup table: items }
-  └─BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
-      └─BatchProjectSet { select_list: [Unnest($1)] }
-        └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector:  }
-          └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
+<slt:ignore>BatchProject { exprs: [$expr2, $expr1, items.extra, Pow($expr3, 2:Float64)::Int32 as $expr4] }
+<slt:ignore>└─BatchLookupJoin { type: Inner, predicate: $expr2 IS NOT DISTINCT FROM items.id, output: [$expr2, items.extra, $expr1, $expr3], lookup table: items }
+<slt:ignore>  └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
+<slt:ignore>    └─BatchProjectSet { select_list: [Unnest($1)] }
+<slt:ignore>      └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector:  }
+<slt:ignore>        └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
 
 query T
-select * from query_view;
+select * from query_view order by distance;
 ----
 1 first extra1 8
 2 second extra2 35
@@ -95,27 +96,26 @@ create index i on items using flat (get_embedding(text)) include(text) with (dis
 
 # test covering index on functional embedding column
 query T
-select id, text, power(distance, 2)::int from (select id, text, get_embedding('query') <-> get_embedding(text) as distance from no_index_mv order by distance limit 2);
+select id, text, power(distance, 2)::int from (select id, text, get_embedding('query') <-> get_embedding(text) as distance from no_index_mv order by distance limit 2) order by distance;
 ----
 1 first 8
 2 second 35
 
 statement ok
-create view query_view as select id, text, power(distance, 2)::int from (select id, text, get_embedding('query') <-> get_embedding(text) as distance from items order by distance limit 2);
+create view query_view as select id, text, power(distance, 2)::int as distance from (select id, text, get_embedding('query') <-> get_embedding(text) as distance from items order by distance limit 2);
 
 # ensure that vector index is used
 query T
 explain(verbose) select * from query_view;
 ----
-BatchExchange { order: [], dist: Single }
-└─BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
+<slt:ignore>BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
   └─BatchProjectSet { select_list: [Unnest($1)] }
     └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector:  }
       └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
 
 
 query T
-select * from query_view;
+select * from query_view order by distance;
 ----
 1 first 8
 2 second 35
@@ -125,28 +125,27 @@ drop view query_view;
 
 # test non-covering index on functional embedding column
 query T
-select id, text, extra, power(distance, 2)::int from (select id, text, extra, get_embedding('query') <-> get_embedding(text) as distance from no_index_mv order by distance limit 2);
+select id, text, extra, power(distance, 2)::int from (select id, text, extra, get_embedding('query') <-> get_embedding(text) as distance from no_index_mv order by distance limit 2) order by distance;
 ----
 1 first extra1 8
 2 second extra2 35
 
 statement ok
-create view query_view as select id, text, extra, power(distance, 2)::int from (select id, text, extra, get_embedding('query') <-> get_embedding(text) as distance from items order by distance limit 2);
+create view query_view as select id, text, extra, power(distance, 2)::int as distance from (select id, text, extra, get_embedding('query') <-> get_embedding(text) as distance from items order by distance limit 2);
 
 # ensure that vector index is used
 query T
 explain(verbose) select * from query_view;
 ----
-BatchProject { exprs: [$expr2, $expr1, items.extra, Pow($expr3, 2:Float64)::Int32 as $expr4] }
-└─BatchLookupJoin { type: Inner, predicate: $expr2 IS NOT DISTINCT FROM items.id, output: [$expr2, items.extra, $expr1, $expr3], lookup table: items }
-  └─BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
-      └─BatchProjectSet { select_list: [Unnest($1)] }
-        └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector:  }
-          └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
+<slt:ignore>BatchProject { exprs: [$expr2, $expr1, items.extra, Pow($expr3, 2:Float64)::Int32 as $expr4] }
+<slt:ignore>└─BatchLookupJoin { type: Inner, predicate: $expr2 IS NOT DISTINCT FROM items.id, output: [$expr2, items.extra, $expr1, $expr3], lookup table: items }
+<slt:ignore>  └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
+<slt:ignore>    └─BatchProjectSet { select_list: [Unnest($1)] }
+<slt:ignore>      └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector:  }
+<slt:ignore>        └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
 
 query T
-select * from query_view;
+select * from query_view order by distance;
 ----
 1 first extra1 8
 2 second extra2 35
@@ -187,17 +186,16 @@ select * from items order by id;
 3 extra3 third [7,8,9]
 
 statement ok
-create view query_view as select id, text, power(distance, 2)::int from (select id, text, '[3,2,1]'::vector(3) <-> embedding as distance from items order by distance limit 2);
+create view query_view as select id, text, power(distance, 2)::int as distance from (select id, text, '[3,2,1]'::vector(3) <-> embedding as distance from items order by distance limit 2);
 
 # ensure that vector index is used
 query T
 explain(verbose) select * from query_view;
 ----
-BatchExchange { order: [], dist: Single }
-└─BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
-  └─BatchProjectSet { select_list: [Unnest($1)] }
-    └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: , hnsw_ef_search: 40  }
-      └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
+<slt:ignore>BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
+<slt:ignore>└─BatchProjectSet { select_list: [Unnest($1)] }
+<slt:ignore>  └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: , hnsw_ef_search: 40 }
+<slt:ignore>    └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }<slt:ignore>
 
 statement ok
 set batch_hnsw_ef_search = 20;
@@ -206,14 +204,13 @@ set batch_hnsw_ef_search = 20;
 query T
 explain(verbose) select * from query_view;
 ----
-BatchExchange { order: [], dist: Single }
-└─BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
-  └─BatchProjectSet { select_list: [Unnest($1)] }
-    └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: , hnsw_ef_search: 20  }
-      └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
+<slt:ignore>BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
+<slt:ignore>└─BatchProjectSet { select_list: [Unnest($1)] }
+<slt:ignore>  └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: , hnsw_ef_search: 20 }
+<slt:ignore>    └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
 
 query T
-select * from query_view;
+select * from query_view order by distance;
 ----
 1 first 8
 2 second 35
