@@ -34,6 +34,7 @@ use tower_http::cors::{self, CorsLayer};
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::diagnose::DiagnoseCommandRef;
+use crate::stream::SourceManagerRef;
 
 #[derive(Clone)]
 pub struct DashboardService {
@@ -42,6 +43,7 @@ pub struct DashboardService {
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
+    pub source_manager: SourceManagerRef,
     pub hummock_manager: HummockManagerRef,
     pub compute_clients: ComputeClientPool,
     pub diagnose_command: DiagnoseCommandRef,
@@ -85,6 +87,7 @@ pub(super) mod handlers {
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
     use crate::rpc::await_tree::{dump_cluster_await_tree, dump_worker_node_await_tree};
+    use crate::stream::build_actor_connector_splits;
 
     #[derive(Serialize)]
     pub struct TableWithStats {
@@ -388,9 +391,15 @@ pub(super) mod handlers {
             )
             .await
             .map_err(err)?;
-        Ok(Json(
-            table_fragments.to_protobuf(&upstream_fragments, &dispatchers),
-        ))
+
+        let actor_splits = srv.source_manager.list_assignments().await;
+
+        let actor_splits = build_actor_connector_splits(&actor_splits);
+        Ok(Json(table_fragments.to_protobuf(
+            &upstream_fragments,
+            &dispatchers,
+            &actor_splits,
+        )))
     }
 
     pub async fn list_users(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbUserInfo>>> {

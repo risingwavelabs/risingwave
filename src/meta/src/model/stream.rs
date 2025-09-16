@@ -22,7 +22,6 @@ use risingwave_common::hash::{
     ActorAlignmentId, IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat,
 };
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
-use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, PbActorLocation};
@@ -37,6 +36,7 @@ use risingwave_pb::meta::table_parallelism::{
 };
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
+use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, PbDispatchOutputMapping, PbDispatcher, PbStreamActor,
@@ -44,7 +44,6 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::{ActorId, FragmentId};
-use crate::stream::{SplitAssignment, build_actor_connector_splits};
 
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -256,10 +255,9 @@ pub struct StreamJobFragments {
     /// The status of actors
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
 
-    /// The splits of actors,
-    /// incl. both `Source` and `SourceBackfill` actors.
-    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-
+    // /// The splits of actors,
+    // /// incl. both `Source` and `SourceBackfill` actors.
+    // pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     /// The streaming context associated with this stream plan and its fragments
     pub ctx: StreamContext,
 
@@ -316,7 +314,18 @@ impl StreamJobFragments {
         &self,
         fragment_upstreams: &HashMap<FragmentId, HashSet<FragmentId>>,
         fragment_dispatchers: &FragmentActorDispatchers,
+        actor_splits: &HashMap<u32, ConnectorSplits>,
     ) -> PbTableFragments {
+        let actor_splits = self
+            .actor_ids()
+            .iter()
+            .flat_map(|actor_id| {
+                actor_splits
+                    .get(actor_id)
+                    .map(|split| (*actor_id, split.clone()))
+            })
+            .collect();
+
         PbTableFragments {
             table_id: self.stream_job_id.table_id(),
             state: self.state as _,
@@ -334,7 +343,7 @@ impl StreamJobFragments {
                 })
                 .collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
-            actor_splits: build_actor_connector_splits(&self.actor_splits),
+            actor_splits,
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),
@@ -388,7 +397,6 @@ impl StreamJobFragments {
             state: State::Initial,
             fragments,
             actor_status,
-            actor_splits: HashMap::default(),
             ctx,
             assigned_parallelism: table_parallelism,
             max_parallelism,
@@ -445,10 +453,6 @@ impl StreamJobFragments {
         for actor_status in self.actor_status.values_mut() {
             actor_status.set_state(state);
         }
-    }
-
-    pub fn set_actor_splits_by_split_assignment(&mut self, split_assignment: SplitAssignment) {
-        self.actor_splits = split_assignment.into_values().flatten().collect();
     }
 
     /// Returns actor ids associated with this table.

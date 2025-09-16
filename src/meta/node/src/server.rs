@@ -414,25 +414,6 @@ pub async fn start_service_as_election_leader(
     });
     let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
 
-    #[cfg(not(madsim))]
-    let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
-        let dashboard_service = crate::dashboard::DashboardService {
-            await_tree_reg: env.await_tree_reg().clone(),
-            dashboard_addr: *dashboard_addr,
-            prometheus_client,
-            prometheus_selector,
-            metadata_manager: metadata_manager.clone(),
-            hummock_manager: hummock_manager.clone(),
-            compute_clients: ComputeClientPool::new(1, env.opts.compute_client_config.clone()), /* typically no need for plural clients */
-            diagnose_command,
-            trace_state,
-        };
-        let task = tokio::spawn(dashboard_service.serve());
-        Some(task)
-    } else {
-        None
-    };
-
     let (barrier_scheduler, scheduled_barriers) =
         BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
     tracing::info!("BarrierScheduler started");
@@ -475,6 +456,26 @@ pub async fn start_service_as_election_leader(
         .unwrap(),
     );
     tracing::info!("SourceManager started");
+
+    #[cfg(not(madsim))]
+    let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
+        let dashboard_service = crate::dashboard::DashboardService {
+            await_tree_reg: env.await_tree_reg().clone(),
+            dashboard_addr: *dashboard_addr,
+            prometheus_client,
+            prometheus_selector,
+            metadata_manager: metadata_manager.clone(),
+            hummock_manager: hummock_manager.clone(),
+            source_manager: source_manager.clone(),
+            compute_clients: ComputeClientPool::new(1, env.opts.compute_client_config.clone()), /* typically no need for plural clients */
+            diagnose_command,
+            trace_state,
+        };
+        let task = tokio::spawn(dashboard_service.serve());
+        Some(task)
+    } else {
+        None
+    };
 
     let (iceberg_compaction_stat_tx, iceberg_compaction_stat_rx) =
         tokio::sync::mpsc::unbounded_channel();

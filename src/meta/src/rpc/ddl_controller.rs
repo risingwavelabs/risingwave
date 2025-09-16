@@ -1458,7 +1458,6 @@ impl DdlController {
             let replace_upstream = ctx.replace_upstream.clone();
 
             if let Some(sinks) = &ctx.auto_refresh_schema_sinks {
-                let empty_actor_splits = HashMap::new();
                 let empty_downstreams = FragmentDownstreamRelation::default();
                 for sink in sinks {
                     self.metadata_manager
@@ -1467,7 +1466,6 @@ impl DdlController {
                             sink.tmp_sink_id,
                             || [&sink.new_fragment].into_iter(),
                             &sink.actor_status,
-                            &empty_actor_splits,
                             &empty_downstreams,
                             true,
                             None,

@@ -17,7 +17,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{
     JobReschedulePlan, JobReschedulePostUpdates, RescheduleOptions, ScaleControllerRef,
-    WorkerReschedule,
+    WorkerReschedule, build_actor_connector_splits,
 };
 use risingwave_meta_model::FragmentId;
 use risingwave_pb::common::WorkerType;
@@ -71,6 +71,9 @@ impl ScaleService for ScaleServiceImpl {
             .table_fragments()
             .await?;
 
+        let actor_splits = self.source_manager.list_assignments().await;
+        let actor_splits = build_actor_connector_splits(&actor_splits);
+
         let mut table_fragments = Vec::with_capacity(stream_job_fragments.len());
         for (_, stream_job_fragments) in stream_job_fragments {
             let upstreams = self
@@ -88,7 +91,11 @@ impl ScaleService for ScaleServiceImpl {
                         .collect(),
                 )
                 .await?;
-            table_fragments.push(stream_job_fragments.to_protobuf(&upstreams, &dispatchers))
+            table_fragments.push(stream_job_fragments.to_protobuf(
+                &upstreams,
+                &dispatchers,
+                &actor_splits,
+            ))
         }
 
         let worker_nodes = self

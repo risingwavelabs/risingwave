@@ -352,7 +352,6 @@ impl CatalogController {
             state: state as _,
             fragments: pb_fragments,
             actor_status: pb_actor_status,
-            actor_splits: pb_actor_splits,
             ctx: ctx
                 .as_ref()
                 .map(StreamContext::from_protobuf)
