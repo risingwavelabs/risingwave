@@ -36,7 +36,6 @@ use risingwave_pb::meta::table_parallelism::{
 };
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
-use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, PbDispatchOutputMapping, PbDispatcher, PbStreamActor,
@@ -311,18 +310,7 @@ impl StreamJobFragments {
         &self,
         fragment_upstreams: &HashMap<FragmentId, HashSet<FragmentId>>,
         fragment_dispatchers: &FragmentActorDispatchers,
-        actor_splits: &HashMap<u32, ConnectorSplits>,
     ) -> PbTableFragments {
-        let actor_splits = self
-            .actor_ids()
-            .iter()
-            .flat_map(|actor_id| {
-                actor_splits
-                    .get(actor_id)
-                    .map(|split| (*actor_id, split.clone()))
-            })
-            .collect();
-
         PbTableFragments {
             table_id: self.stream_job_id.table_id(),
             state: self.state as _,
@@ -340,7 +328,6 @@ impl StreamJobFragments {
                 })
                 .collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
-            actor_splits,
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),

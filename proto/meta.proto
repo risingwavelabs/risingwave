@@ -107,7 +107,7 @@ message TableFragments {
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
   // `Source` and `SourceBackfill` are handled together here.
-  map<uint32, source.ConnectorSplits> actor_splits = 5;
+  // map<uint32, source.ConnectorSplits> actor_splits = 5;
 
   stream_plan.StreamContext ctx = 6;
 
