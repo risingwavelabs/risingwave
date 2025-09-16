@@ -353,13 +353,31 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             }
         }
 
-        // Check if we need to skip stage1 and go directly to stage2 (for recovery)
-        let mut skip_to_stage2 = false;
+        // ================================================================================
+        // REFRESH EXECUTION STAGES OVERVIEW:
+        //
+        // Stage 1 (Normal Ingestion):
+        //   - Process incoming data chunks and write to staging table during refresh
+        //   - Wait for LoadFinish signal to transition to Stage 2
+        //   - Handle regular barriers and mutations
+        //
+        // Stage 2 (Merge and Replace):
+        //   - Merge staging table data with main table
+        //   - Delete outdated rows from main table
+        //   - Handle barriers during merge process
+        //
+        // Stage 3 (Cleanup):
+        //   - Final cleanup and metadata reset
+        //   - Clear progress tracking
+        //   - Return to Stage 1 for next refresh cycle
+        // ================================================================================
+
+        // Determine initial execution stage (for recovery scenarios)
+        let mut should_start_with_merge_stage = false;
         if let Some(ref refresh_args) = self.refresh_args
             && refresh_args.is_refreshing
         {
-            // Since stage info is no longer in progress table,
-            // use the executor's internal state to determine recovery stage
+            // Recovery logic: Check if there are incomplete vnodes from previous run
             let incomplete_vnodes: Vec<_> = refresh_args
                 .progress_table
                 .get_all_progress()
@@ -368,15 +386,21 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 .map(|(&vnode, _)| vnode)
                 .collect();
             if !incomplete_vnodes.is_empty() {
-                // For simplicity, assume all incomplete VNodes need stage2 (merge)
-                skip_to_stage2 = true;
+                // Resume from merge stage since some VNodes were left incomplete
+                should_start_with_merge_stage = true;
+                tracing::info!(
+                    incomplete_vnodes = incomplete_vnodes.len(),
+                    "Recovery: Resuming refresh from merge stage due to incomplete VNodes"
+                );
             }
         }
 
+        // Main execution loop: cycles through Stage 1 -> Stage 2 -> Stage 3 -> Stage 1...
         loop {
-            let mut goto_stage2 = skip_to_stage2;
-            // Reset the skip flag after first use
-            skip_to_stage2 = false;
+            // ============ STAGE 1: NORMAL INGESTION PHASE ============
+            let mut should_transition_to_merge = should_start_with_merge_stage;
+            // Reset the recovery flag after first use
+            should_start_with_merge_stage = false;
             if let Some(ref mut refresh_args) = self.refresh_args {
                 refresh_args.is_refreshing = false;
             }
@@ -558,7 +582,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             %load_finish_source_id,
                                             "LoadFinish received, starting data replacement"
                                         );
-                                        goto_stage2 = true;
+                                        should_transition_to_merge = true;
                                     }
                                 }
                                 _ => {}
@@ -632,8 +656,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             .materialize_current_epoch
                             .set(b_epoch.curr as i64);
 
-                        if goto_stage2 {
+                        if should_transition_to_merge {
                             debug_assert!(self.refresh_args.is_some());
+                            tracing::info!(
+                                "Transitioning from Stage 1 (Normal Ingestion) to Stage 2 (Merge)"
+                            );
                             break 'stage1;
                         } else {
                             continue;
@@ -644,7 +671,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 yield msg;
             }
 
-            if self.refresh_args.is_none() || !goto_stage2 {
+            if self.refresh_args.is_none() || !should_transition_to_merge {
                 return Err(StreamExecutorError::from(ErrorKind::Uncategorized(
                     anyhow::anyhow!(
                         "unexpected: input stream terminated with no batch source triggered"
@@ -652,7 +679,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 )));
             }
 
-            // stage 2 - merging and deleting
+            // ============ STAGE 2: MERGE AND REPLACE PHASE ============
+            // Merge staging table data with main table and delete outdated rows
             'stage_2: loop {
                 // if the upstream is finished, it is still possible to go into 'stage_2 loop
                 let Some(refresh_args) = self.refresh_args.as_mut() else {
@@ -823,7 +851,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 // handle barrier finished, go back to 'merge_sort_loop
             }
 
-            // stage2 cleanup
+            // ============ STAGE 3: CLEANUP PHASE ============
+            // Final cleanup, metadata reset, and progress table clearing
             'stage2_cleanup: {
                 let Some(refresh_args) = self.refresh_args.as_mut() else {
                     break 'stage2_cleanup;
@@ -987,7 +1016,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Cleared refresh progress table after successful completion");
             }
 
-            // stage 2 finished, go back to stage 1
+            // ============ END OF REFRESH CYCLE ============
+            // Stage 3 completed successfully, returning to Stage 1 for next refresh cycle
         }
     }
 
