@@ -28,8 +28,8 @@ create secret mysql_pwd with (
 statement error
 create source mysql_mytest with (
  connector = 'mysql-cdc',
- hostname = '${MARIADB_HOST:localhost}',
- port = '${MARIADB_TCP_PORT:8306}',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
  username = 'rwcdc',
  password = secret mysql_pwd,
  database.name = 'mytest',
@@ -46,14 +46,14 @@ create source mysql_mytest with (
 #   5: Internal error: Access denied for user 'rwcdc'@'172.17.0.1' (using password: YES)
 
 statement ok
-alter secret mysql_pwd as '${MARIADB_PWD:}';
+alter secret mysql_pwd as '${MYSQL_PWD:}';
 
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
 statement ok
 create source mysql_mytest with (
  connector = 'mysql-cdc',
- hostname = '${MARIADB_HOST:localhost}',
- port = '${MARIADB_TCP_PORT:8306}',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
  username = 'rwcdc',
  password = secret mysql_pwd,
  database.name = 'mytest',
@@ -132,8 +132,8 @@ HASH {SOURCE,DML}
 statement ok
 create source mysql_source with (
  connector = 'mysql-cdc',
- hostname = '${MARIADB_HOST:localhost}',
- port = '${MARIADB_TCP_PORT:8306}',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
  username = 'rwcdc',
  password = secret mysql_pwd,
  database.name = 'mytest,kdb',
@@ -816,11 +816,11 @@ NULL 2
 ### BEGIN reset the password to the original one
 onlyif can-use-recover
 statement ok
-alter secret mysql_pwd as '${MARIADB_PWD:}';
+alter secret mysql_pwd as '${MYSQL_PWD:}';
 
 onlyif can-use-recover
 system ok
-mariadb --protocol=tcp -u root -e "ALTER USER 'rwcdc'@'%' IDENTIFIED BY '${MARIADB_PWD:}';"
+mysql --protocol=tcp -u root -e "ALTER USER 'rwcdc'@'%' IDENTIFIED BY '${MYSQL_PWD:}';"
 
 onlyif can-use-recover
 statement ok

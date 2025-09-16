@@ -62,10 +62,10 @@ ALTER SYSTEM SET license_key TO '';
 statement ok
 create source mysql_source with (
  connector = 'mysql-cdc',
- hostname = '${MARIADB_HOST:localhost}',
- port = '${MARIADB_TCP_PORT:8306}',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
  username = 'root',
- password = '${MARIADB_PWD:}',
+ password = '${MYSQL_PWD:}',
  database.name = 'mytest',
  server.id = '5601'
 );
