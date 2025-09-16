@@ -273,21 +273,7 @@ impl JsonParseOptions {
             (
                 DataType::Int16,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => {
-                // Try signed conversion first
-                if let Ok(val) = value.try_as_i16() {
-                    val.into()
-                } else {
-                    // If signed conversion fails, try unsigned conversion (for UNSIGNED types)
-                    // Use try_as_i64() and then cast to u16, then to i16
-                    let val = value.try_as_i64().map_err(|_| create_error())?;
-                    if val >= 0 && val <= u16::MAX as i64 {
-                        (val as u16 as i16).into()
-                    } else {
-                        Err(create_error())?
-                    }
-                }
-            }
+            ) => value.try_as_i16().map_err(|_| create_error())?.into(),
 
             (DataType::Int16, ValueType::String)
                 if matches!(
@@ -308,21 +294,7 @@ impl JsonParseOptions {
             (
                 DataType::Int32,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => {
-                // Try signed conversion first
-                if let Ok(val) = value.try_as_i32() {
-                    val.into()
-                } else {
-                    // If signed conversion fails, try unsigned conversion (for UNSIGNED types)
-                    // Use try_as_i64() and then cast to u32, then to i32
-                    let val = value.try_as_i64().map_err(|_| create_error())?;
-                    if val >= 0 && val <= u32::MAX as i64 {
-                        (val as u32 as i32).into()
-                    } else {
-                        Err(create_error())?
-                    }
-                }
-            }
+            ) => value.try_as_i32().map_err(|_| create_error())?.into(),
 
             (DataType::Int32, ValueType::String)
                 if matches!(
