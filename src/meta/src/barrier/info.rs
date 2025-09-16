@@ -22,7 +22,7 @@ use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
-use risingwave_connector::source::SplitImpl;
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
@@ -31,6 +31,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbSubscriptionUpstreamInfo, PbUpstreamSinkInfo};
 use tracing::warn;
 
+use crate::MetaResult;
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
@@ -103,6 +104,49 @@ impl SharedActorInfos {
                     .map(|(actor_id, info)| (*actor_id, info.splits.clone()))
             })
             .collect()
+    }
+
+    /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
+    ///
+    /// Very occasionally split removal may happen during scaling, in which case we need to
+    /// use the old splits for reallocation instead of the latest splits (which may be missing),
+    /// so that we can resolve the split removal in the next command.
+    pub fn migrate_splits_for_source_actors(
+        &self,
+        fragment_id: FragmentId,
+        prev_actor_ids: &[ActorId],
+        curr_actor_ids: &[ActorId],
+    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
+        let guard = self.read_guard();
+
+        let prev_splits = prev_actor_ids
+            .iter()
+            .flat_map(|actor_id| {
+                // Note: File Source / Iceberg Source doesn't have splits assigned by meta.
+                guard
+                    .get_fragment(fragment_id)
+                    .and_then(|info| info.actors.get(actor_id))
+                    .map(|actor| actor.splits.clone())
+                    .unwrap_or_default()
+            })
+            .map(|split| (split.id(), split))
+            .collect();
+
+        let empty_actor_splits = curr_actor_ids
+            .iter()
+            .map(|actor_id| (*actor_id, vec![]))
+            .collect();
+
+        let diff = crate::stream::source_manager::reassign_splits(
+            fragment_id,
+            empty_actor_splits,
+            &prev_splits,
+            // pre-allocate splits is the first time getting splits, and it does not have scale-in scene
+            std::default::Default::default(),
+        )
+        .unwrap_or_default();
+
+        Ok(diff)
     }
 }
 

@@ -66,7 +66,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::barrier::{SharedActorInfos, SnapshotBackfillInfo};
+use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
@@ -326,7 +326,6 @@ impl CatalogController {
     }
 
     pub fn compose_table_fragments(
-        _shared_actor_infos: &SharedActorInfos,
         table_id: u32,
         state: PbState,
         ctx: Option<PbStreamContext>,
@@ -627,7 +626,6 @@ impl CatalogController {
             .remove(&job_id);
 
         Self::compose_table_fragments(
-            self.env.shared_actor_infos(),
             job_id as _,
             job_info.job_status.into(),
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
@@ -854,7 +852,6 @@ impl CatalogController {
             table_fragments.insert(
                 job.job_id as ObjectId,
                 Self::compose_table_fragments(
-                    self.env.shared_actor_infos(),
                     job.job_id as _,
                     job.job_status.into(),
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),

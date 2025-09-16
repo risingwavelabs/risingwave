@@ -472,8 +472,7 @@ pub async fn start_service_as_election_leader(
             meta_metrics.clone(),
             env.clone(),
         )
-        .await
-        .unwrap(),
+        .await?,
     );
     tracing::info!("SourceManager started");
 

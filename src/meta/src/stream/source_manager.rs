@@ -35,7 +35,7 @@ use risingwave_connector::source::{
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-pub use split_assignment::SplitState;
+pub use split_assignment::{SplitDiffOptions, SplitState, reassign_splits};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, MutexGuard, oneshot};
@@ -84,7 +84,6 @@ pub struct SourceManagerCore {
 pub struct SourceManagerRunningInfo {
     pub source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
     pub backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
-    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 impl SourceManagerCore {
@@ -445,12 +444,10 @@ impl SourceManager {
 
     pub async fn get_running_info(&self) -> SourceManagerRunningInfo {
         let core = self.core.lock().await;
-        let assignment = core.env.shared_actor_infos().list_assignments();
 
         SourceManagerRunningInfo {
             source_fragments: core.source_fragments.clone(),
             backfill_fragments: core.backfill_fragments.clone(),
-            actor_splits: assignment,
         }
     }
 

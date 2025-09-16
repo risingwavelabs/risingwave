@@ -1184,13 +1184,13 @@ impl ScaleController {
                 let curr_actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
 
                 let actor_splits = self
-                    .source_manager
+                    .env
+                    .shared_actor_infos()
                     .migrate_splits_for_source_actors(
                         *fragment_id,
                         &prev_actor_ids,
                         &curr_actor_ids,
-                    )
-                    .await?;
+                    )?;
 
                 tracing::debug!(
                     "source actor splits: {:?}, fragment_id: {}",

@@ -26,51 +26,6 @@ pub struct SplitState {
 
 impl SourceManager {
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
-    ///
-    /// Very occasionally split removal may happen during scaling, in which case we need to
-    /// use the old splits for reallocation instead of the latest splits (which may be missing),
-    /// so that we can resolve the split removal in the next command.
-    pub async fn migrate_splits_for_source_actors(
-        &self,
-        fragment_id: FragmentId,
-        prev_actor_ids: &[ActorId],
-        curr_actor_ids: &[ActorId],
-    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
-        let core = self.core.lock().await;
-
-        let guard = core.env.shared_actor_infos().read_guard();
-
-        let prev_splits = prev_actor_ids
-            .iter()
-            .flat_map(|actor_id| {
-                // Note: File Source / Iceberg Source doesn't have splits assigned by meta.
-                guard
-                    .get_fragment(fragment_id)
-                    .and_then(|info| info.actors.get(actor_id))
-                    .map(|actor| actor.splits.clone())
-                    .unwrap_or_default()
-            })
-            .map(|split| (split.id(), split))
-            .collect();
-
-        let empty_actor_splits = curr_actor_ids
-            .iter()
-            .map(|actor_id| (*actor_id, vec![]))
-            .collect();
-
-        let diff = reassign_splits(
-            fragment_id,
-            empty_actor_splits,
-            &prev_splits,
-            // pre-allocate splits is the first time getting splits and it does not have scale-in scene
-            SplitDiffOptions::default(),
-        )
-        .unwrap_or_default();
-
-        Ok(diff)
-    }
-
-    /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
     pub fn migrate_splits_for_backfill_actors(
         &self,
         fragment_id: FragmentId,
@@ -499,7 +454,7 @@ impl SourceManagerCore {
 /// See also:
 /// - [Kinesis resharding doc](https://docs.aws.amazon.com/streams/latest/dev/kinesis-using-sdk-java-after-resharding.html#kinesis-using-sdk-java-resharding-data-routing)
 /// - An example of how the shards can be like: <https://stackoverflow.com/questions/72272034/list-shard-show-more-shards-than-provisioned>
-fn reassign_splits<T>(
+pub fn reassign_splits<T>(
     fragment_id: FragmentId,
     actor_splits: HashMap<ActorId, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
