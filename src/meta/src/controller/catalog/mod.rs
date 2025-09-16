@@ -719,12 +719,25 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn complete_dropped_tables(
-        &self,
-        table_ids: impl Iterator<Item = TableId>,
-    ) -> Vec<PbTable> {
+    pub async fn complete_dropped_tables(&self, table_ids: impl Iterator<Item = TableId>) {
         let mut inner = self.inner.write().await;
-        inner.complete_dropped_tables(table_ids)
+        let tables = inner.complete_dropped_tables(table_ids);
+
+        let objects = tables
+            .into_iter()
+            .map(|t| PbObject {
+                object_info: Some(PbObjectInfo::Table(t)),
+            })
+            .collect();
+        let group = NotificationInfo::ObjectGroup(PbObjectGroup { objects });
+        self.env
+            .notification_manager()
+            .notify_hummock(NotificationOperation::Delete, group.clone())
+            .await;
+        self.env
+            .notification_manager()
+            .notify_compactor(NotificationOperation::Delete, group)
+            .await;
     }
 }
 
