@@ -1853,6 +1853,17 @@ impl Parser<'_> {
         }
     }
 
+    pub fn peek_nth_any_of_uppercase_identifiers(
+        &mut self,
+        n: usize,
+        identifiers: &[&str],
+    ) -> bool {
+        match self.peek_nth_token(n).token {
+            Token::Word(w) => identifiers.contains(&w.value.to_ascii_uppercase().as_str()),
+            _ => false,
+        }
+    }
+
     /// Bail out if the current token is not one of the expected keywords, or consume it if it is
     pub fn expect_one_of_keywords(&mut self, keywords: &[Keyword]) -> ModalResult<Keyword> {
         if let Some(keyword) = self.parse_one_of_keywords(keywords) {
@@ -4363,62 +4374,59 @@ impl Parser<'_> {
         let mut options = ExplainOptions::default();
         let mut analyze_duration = None;
 
-        let explain_key_words = [
-            Keyword::BACKFILL,
-            Keyword::VERBOSE,
-            Keyword::TRACE,
-            Keyword::TYPE,
-            Keyword::LOGICAL,
-            Keyword::PHYSICAL,
-            Keyword::DISTSQL,
-            Keyword::FORMAT,
-            Keyword::DURATION_SECS,
+        let explain_options_identifiers = [
+            "BACKFILL",
+            "VERBOSE",
+            "TRACE",
+            "TYPE",
+            "LOGICAL",
+            "PHYSICAL",
+            "DISTSQL",
+            "FORMAT",
+            "DURATION_SECS",
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
-            let keyword = parser.expect_one_of_keywords(&explain_key_words)?;
-            match keyword {
-                Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
-                Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
-                Keyword::BACKFILL => options.backfill = parser.parse_optional_boolean(true),
-                Keyword::TYPE => {
-                    let explain_type = parser.expect_one_of_keywords(&[
-                        Keyword::LOGICAL,
-                        Keyword::PHYSICAL,
-                        Keyword::DISTSQL,
-                    ])?;
-                    match explain_type {
-                        Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
-                        Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                        Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
-                        _ => unreachable!("{}", keyword),
-                    }
-                }
-                Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
-                Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
-                Keyword::FORMAT => {
-                    options.explain_format = {
-                        match parser.expect_one_of_keywords(&[
-                            Keyword::TEXT,
-                            Keyword::JSON,
-                            Keyword::XML,
-                            Keyword::YAML,
-                            Keyword::DOT,
-                        ])? {
-                            Keyword::TEXT => ExplainFormat::Text,
-                            Keyword::JSON => ExplainFormat::Json,
-                            Keyword::XML => ExplainFormat::Xml,
-                            Keyword::YAML => ExplainFormat::Yaml,
-                            Keyword::DOT => ExplainFormat::Dot,
-                            _ => unreachable!("{}", keyword),
+            let ident = parser.parse_identifier()?;
+            match ident.value.to_ascii_uppercase().as_str() {
+                "VERBOSE" => options.verbose = parser.parse_optional_boolean(true),
+                "TRACE" => options.trace = parser.parse_optional_boolean(true),
+                "BACKFILL" => options.backfill = parser.parse_optional_boolean(true),
+                "TYPE" => {
+                    let explain_type = parser.parse_identifier()?;
+                    match explain_type.value.to_ascii_uppercase().as_str() {
+                        "LOGICAL" => options.explain_type = ExplainType::Logical,
+                        "PHYSICAL" => options.explain_type = ExplainType::Physical,
+                        "DISTSQL" => options.explain_type = ExplainType::DistSql,
+                        unexpected => {
+                            parser_err!("unexpected explain type: [{unexpected}]")
                         }
                     }
                 }
-                Keyword::DURATION_SECS => {
+                "LOGICAL" => options.explain_type = ExplainType::Logical,
+                "PHYSICAL" => options.explain_type = ExplainType::Physical,
+                "DISTSQL" => options.explain_type = ExplainType::DistSql,
+                "FORMAT" => {
+                    options.explain_format = {
+                        let format = parser.parse_identifier()?;
+                        match format.value.to_ascii_uppercase().as_str() {
+                            "TEXT" => ExplainFormat::Text,
+                            "JSON" => ExplainFormat::Json,
+                            "XML" => ExplainFormat::Xml,
+                            "YAML" => ExplainFormat::Yaml,
+                            "DOT" => ExplainFormat::Dot,
+                            unexpected => {
+                                parser_err!("unexpected explain format [{unexpected}]")
+                            }
+                        }
+                    }
+                }
+                "DURATION_SECS" => {
                     analyze_duration = Some(parser.parse_literal_u64()?);
                 }
-                _ => unreachable!("{}", keyword),
+                unexpected => {
+                    parser_err!("unexpected explain options: [{unexpected}]")
+                }
             };
             Ok(())
         };
@@ -4426,7 +4434,7 @@ impl Parser<'_> {
         // In order to support following statement, we need to peek before consume.
         // explain (select 1) union (select 1)
         if self.peek_token() == Token::LParen
-            && self.peek_nth_any_of_keywords(1, &explain_key_words)
+            && self.peek_nth_any_of_uppercase_identifiers(1, &explain_options_identifiers)
             && self.consume_token(&Token::LParen)
         {
             self.parse_comma_separated(parse_explain_option)?;
