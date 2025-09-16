@@ -27,7 +27,7 @@ use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::LogicalPlanRef;
-use crate::optimizer::plan_node::{BatchPlanRef, LogicalPlanRef as PlanRef, PlanNodeId};
+use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, PlanNodeId};
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
 
@@ -47,7 +47,6 @@ pub struct OptimizerContext {
     optimizer_trace: RefCell<Vec<String>>,
     /// Store the optimized logical plan of optimizer
     logical_explain: RefCell<Option<String>>,
-    batch_explain: RefCell<Option<String>>,
     /// Store options or properties from the `with` clause
     with_options: WithOptions,
     /// Store the Session Timezone and whether it was used.
@@ -102,7 +101,6 @@ impl OptimizerContext {
             explain_options,
             optimizer_trace: RefCell::new(vec![]),
             logical_explain: RefCell::new(None),
-            batch_explain: RefCell::new(None),
             with_options: handler_args.with_options,
             session_timezone,
             total_rule_applied: RefCell::new(0),
@@ -129,7 +127,6 @@ impl OptimizerContext {
             explain_options: ExplainOptions::default(),
             optimizer_trace: RefCell::new(vec![]),
             logical_explain: RefCell::new(None),
-            batch_explain: RefCell::new(None),
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             total_rule_applied: RefCell::new(0),
@@ -207,23 +204,15 @@ impl OptimizerContext {
         self.explain_options.trace
     }
 
-    pub fn trace(&self, str: impl Into<String>) {
-        match self.explain_options.explain_type {
-            ExplainType::Logical => {
-                // If explain type is logical, do not store the trace for any optimizations beyond logical.
-                if self.logical_explain.borrow().is_some() {
-                    return;
-                }
-            }
-            ExplainType::Batch => {
-                // If explain type is batch, do not store the trace for any optimizations beyond batch.
-                if self.batch_explain.borrow().is_some() {
-                    return;
-                }
-            }
-            ExplainType::Physical | ExplainType::DistSql => {}
-        }
+    fn is_explain_logical(&self) -> bool {
+        self.explain_options.explain_type == ExplainType::Logical
+    }
 
+    pub fn trace(&self, str: impl Into<String>) {
+        // If explain type is logical, do not store the trace for any optimizations beyond logical.
+        if self.is_explain_logical() && self.logical_explain.borrow().is_some() {
+            return;
+        }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
         let string = str.into();
         tracing::info!(target: "explain_trace", "\n{}", string);
@@ -246,25 +235,14 @@ impl OptimizerContext {
     }
 
     pub fn may_store_explain_logical(&self, plan: &LogicalPlanRef) {
-        if self.explain_options.explain_type == ExplainType::Logical {
+        if self.is_explain_logical() {
             let str = self.explain_plan_impl(plan);
             *self.logical_explain.borrow_mut() = Some(str);
         }
     }
 
-    pub fn may_store_explain_batch(&self, plan: &BatchPlanRef) {
-        if self.explain_options.explain_type == ExplainType::Batch {
-            let str = self.explain_plan_impl(plan);
-            *self.batch_explain.borrow_mut() = Some(str);
-        }
-    }
-
     pub fn take_logical(&self) -> Option<String> {
         self.logical_explain.borrow_mut().take()
-    }
-
-    pub fn take_batch(&self) -> Option<String> {
-        self.batch_explain.borrow_mut().take()
     }
 
     pub fn take_trace(&self) -> Vec<String> {

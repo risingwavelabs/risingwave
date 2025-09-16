@@ -1159,7 +1159,6 @@ impl fmt::Display for CommentObject {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ExplainType {
     Logical,
-    Batch,
     Physical,
     DistSql,
 }
@@ -1170,7 +1169,6 @@ impl fmt::Display for ExplainType {
             ExplainType::Logical => f.write_str("Logical"),
             ExplainType::Physical => f.write_str("Physical"),
             ExplainType::DistSql => f.write_str("DistSQL"),
-            ExplainType::Batch => f.write_str("Batch"),
         }
     }
 }

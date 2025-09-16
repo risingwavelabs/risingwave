@@ -304,15 +304,6 @@ pub async fn do_handle_explain(
                     blocks.push(output);
                 }
             }
-            ExplainType::Batch => {
-                // if explain trace is on, the plan has been in the rows
-                if !explain_trace {
-                    let output = context.take_batch().ok_or_else(|| {
-                        ErrorCode::InternalError("Batch plan not found for query".into())
-                    })?;
-                    blocks.push(output);
-                }
-            }
         }
 
         // Throw the error.

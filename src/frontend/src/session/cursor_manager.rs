@@ -988,7 +988,6 @@ impl SubscriptionCursor {
             out_fields,
             out_names,
         );
-
         let schema = plan_root.schema().clone();
         let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
             QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),

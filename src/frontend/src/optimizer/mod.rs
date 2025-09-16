@@ -379,8 +379,6 @@ impl BatchOptimizedLogicalPlanRoot {
             ctx.trace(plan.explain_to_string());
         }
 
-        ctx.may_store_explain_batch(&plan);
-
         Ok(self.into_phase(plan))
     }
 }

@@ -98,7 +98,6 @@ define_keywords!(
     AVG,
     BACKFILL,
     BASE64,
-    BATCH,
     BEGIN,
     BEGIN_FRAME,
     BEGIN_PARTITION,
