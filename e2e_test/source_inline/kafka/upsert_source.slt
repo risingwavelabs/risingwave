@@ -90,6 +90,7 @@ SELECT id, name, age FROM students;
 statement ok
 DROP TABLE students;
 
+# Demonstrate that we cannot use a different column as the sink primary key.
 statement ok
 CREATE TABLE students_id_as_pk (
     id INT PRIMARY KEY,
@@ -108,7 +109,7 @@ CREATE SINK sk INTO students_id_as_pk AS
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Bind error: When sinking from an upsert stream, the downstream pk must be the same as the one derived from the stream.
+  Bind error: When sinking from an upsert stream, the downstream primary key must be the same as or a subset of the one derived from the stream.
 
 
 statement ok
