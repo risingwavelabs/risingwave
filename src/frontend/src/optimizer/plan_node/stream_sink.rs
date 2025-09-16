@@ -301,12 +301,14 @@ impl StreamSink {
             }
         };
 
+        // The "upsert" property is defined based on a specific stream key: columns other than the stream key
+        // might not be valid. We should reject the cases referencing such columns in primary key.
         if let StreamKind::Upsert = input.stream_kind()
-            && downstream_pk != derived_pk
+            && !downstream_pk.iter().all(|i| derived_pk.contains(i))
         {
             bail_bind_error!(
                 "When sinking from an upsert stream, \
-                 the downstream pk must be the same as the one derived from the stream."
+                 the downstream primary key must be the same as or a subset of the one derived from the stream."
             )
         }
 
