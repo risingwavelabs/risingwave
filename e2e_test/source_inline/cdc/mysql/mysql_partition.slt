@@ -1,0 +1,241 @@
+# Test MySQL CDC support for partitioned tables (both single-level and sub-partitioned tables)
+
+control substitution on
+
+statement ok
+ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;
+
+system ok
+mysql -e "
+    SET GLOBAL time_zone = '+01:00';
+"
+
+system ok
+mysql -e "
+    DROP DATABASE IF EXISTS testdb_partition; CREATE DATABASE testdb_partition;
+    USE testdb_partition;
+
+    -- Create single-level partitioned table (Range partition)
+    CREATE TABLE single_partition_table (
+        id INT NOT NULL,
+        purchased INT DEFAULT NULL,
+        created_at BIGINT UNSIGNED NOT NULL DEFAULT '0' COMMENT 'Creation timestamp',
+        PRIMARY KEY (id, created_at),
+        KEY idx (id, purchased)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Single-level partitioned test table'
+    PARTITION BY RANGE (created_at) (
+        PARTITION p20250101 VALUES LESS THAN (1735689600000) ENGINE = InnoDB,
+        PARTITION p20250102 VALUES LESS THAN (1735776000000) ENGINE = InnoDB,
+        PARTITION p20250103 VALUES LESS THAN (1735948800000) ENGINE = InnoDB
+    );
+
+    -- Create sub-partitioned table (Range + Hash subpartition)
+    CREATE TABLE sub_partition_table (
+        id INT NOT NULL,
+        region_code VARCHAR(10) NOT NULL,
+        amount DECIMAL(10, 2) NOT NULL,
+        created_at BIGINT UNSIGNED NOT NULL DEFAULT '0' COMMENT 'Creation timestamp',
+        PRIMARY KEY (id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Sub-partitioned test table'
+    PARTITION BY RANGE (created_at)
+    SUBPARTITION BY HASH (id)
+    SUBPARTITIONS 4 (
+        PARTITION p20250101 VALUES LESS THAN (1735689600000),
+        PARTITION p20250102 VALUES LESS THAN (1735776000000),
+        PARTITION p20250103 VALUES LESS THAN (1735948800000)
+    );
+
+    -- Insert test data for single-level partitioned table
+    INSERT INTO single_partition_table (id, purchased, created_at) VALUES
+    (1, 5, 1735689599000), (2, 15, 1735689599000), (3, 25, 1735689599000),
+    (11, 5, 1735775999000), (12, 15, 1735775999000), (13, 25, 1735775999000),
+    (21, 5, 1735862399000), (22, 15, 1735862399000), (23, 25, 1735862399000);
+
+    -- Insert test data for sub-partitioned table
+    INSERT INTO sub_partition_table (id, region_code, amount, created_at) VALUES
+    (1, 'US', 100.00, 1735689599000),
+    (2, 'EU', 200.00, 1735689599000),
+    (3, 'ASIA', 300.00, 1735689599000),
+    (4, 'US', 150.00, 1735775999000),
+    (5, 'EU', 250.00, 1735775999000),
+    (6, 'ASIA', 350.00, 1735775999000),
+    (7, 'US', 180.00, 1735862399000),
+    (8, 'EU', 280.00, 1735862399000),
+    (9, 'ASIA', 380.00, 1735862399000);
+"
+
+system ok
+mysql -e "
+    DROP USER IF EXISTS 'partition-cdc'@'%';
+    CREATE USER 'partition-cdc'@'%' IDENTIFIED BY 'partition123';
+    GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'partition-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+create source s with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = 'partition-cdc',
+  password = 'partition123',
+  database.name = 'testdb_partition',
+);
+
+sleep 2s
+
+# Create RisingWave table from single-level partitioned table
+statement ok
+create table single_partition_rw (
+  id INT,
+  purchased INT,
+  created_at BIGINT,
+  PRIMARY KEY (id, created_at)
+) with(
+  snapshot = 'true',
+  snapshot.interval = 10,
+  snapshot.batch_size = 10000
+) from s table 'testdb_partition.single_partition_table';
+
+# Create RisingWave table from sub-partitioned table
+statement ok
+create table sub_partition_rw (
+  id INT,
+  region_code VARCHAR,
+  amount DECIMAL,
+  created_at BIGINT,
+  PRIMARY KEY (id, created_at)
+) with(
+  snapshot = 'true',
+  snapshot.interval = 10,
+  snapshot.batch_size = 10000
+) from s table 'testdb_partition.sub_partition_table';
+
+sleep 5s
+
+# Verify data synchronization for single-level partitioned table
+query IT
+select * from single_partition_rw order by id, purchased;
+----
+1 5 1735689599000
+2 15 1735689599000
+3 25 1735689599000
+11 5 1735775999000
+12 15 1735775999000
+13 25 1735775999000
+21 5 1735862399000
+22 15 1735862399000
+23 25 1735862399000
+
+# Verify data synchronization for sub-partitioned table
+query IT
+select * from sub_partition_rw order by id;
+----
+1 US 100.00 1735689599000
+2 EU 200.00 1735689599000
+3 ASIA 300.00 1735689599000
+4 US 150.00 1735775999000
+5 EU 250.00 1735775999000
+6 ASIA 350.00 1735775999000
+7 US 180.00 1735862399000
+8 EU 280.00 1735862399000
+9 ASIA 380.00 1735862399000
+
+# Test CDC operations on single-level partitioned table
+system ok
+mysql -e "
+    USE testdb_partition;
+    -- Insert new data
+    INSERT INTO single_partition_table (id, purchased, created_at) VALUES
+    (5, 8, 1735689599000), (15, 18, 1735775999000), (25, 28, 1735862399000);
+
+    -- Update existing data
+    UPDATE single_partition_table SET purchased = 999 WHERE id = 1;
+
+    -- Delete some data
+    DELETE FROM single_partition_table WHERE id = 2;
+"
+
+# Test CDC operations on sub-partitioned table
+system ok
+mysql -e "
+    USE testdb_partition;
+    -- Insert new data
+    INSERT INTO sub_partition_table (id, region_code, amount, created_at) VALUES
+    (10, 'US', 500.00, 1735689599000),
+    (11, 'EU', 600.00, 1735775999000);
+
+    -- Update existing data
+    UPDATE sub_partition_table SET amount = 999.99 WHERE id = 1;
+
+    -- Delete some data
+    DELETE FROM sub_partition_table WHERE id = 2;
+"
+
+sleep 5s
+
+# Verify CDC operations on single-level partitioned table
+query IT
+select * from single_partition_rw order by id, purchased;
+----
+1 999 1735689599000
+3 25 1735689599000
+5 8 1735689599000
+11 5 1735775999000
+12 15 1735775999000
+13 25 1735775999000
+15 18 1735775999000
+21 5 1735862399000
+22 15 1735862399000
+23 25 1735862399000
+25 28 1735862399000
+
+# Verify CDC operations on sub-partitioned table
+query IT
+select * from sub_partition_rw order by id;
+----
+1 US 999.99 1735689599000
+3 ASIA 300.00 1735689599000
+4 US 150.00 1735775999000
+5 EU 250.00 1735775999000
+6 ASIA 350.00 1735775999000
+7 US 180.00 1735862399000
+8 EU 280.00 1735862399000
+9 ASIA 380.00 1735862399000
+10 US 500.00 1735689599000
+11 EU 600.00 1735775999000
+
+# Verify partition data distribution for single-level partitioned table
+query IT
+select
+    created_at,
+    count(*) as count,
+    sum(purchased) as total_purchased
+from single_partition_rw
+group by created_at
+order by created_at;
+----
+1735689599000 4 1032
+1735775999000 4 63
+1735862399000 3 48
+
+# Verify partition data distribution for sub-partitioned table
+query IT
+select
+    created_at,
+    count(*) as count,
+    sum(amount) as total_amount
+from sub_partition_rw
+group by created_at
+order by created_at;
+----
+1735689599000 3 1799.99
+1735775999000 4 1350.00
+1735862399000 3 840.00
+
+# Clean up
+statement ok
+drop source s cascade;
+
+system ok
+mysql -e "
+    SET GLOBAL time_zone = '+00:00';
+"
