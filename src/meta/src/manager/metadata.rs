@@ -17,12 +17,8 @@ use std::fmt::{Debug, Formatter};
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
-
 use risingwave_connector::source::SplitImpl;
-
-
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId, fragment};
-
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};

@@ -32,7 +32,6 @@ const _DEBEZIUM_SINK_CREATE: &str = "create sink s2 from m with (connector='kafk
 const APPEND_ONLY_TOPIC: &str = "t_sink_append_only";
 const DEBEZIUM_TOPIC: &str = "t_sink_debezium";
 
-use risingwave_common::hash::WorkerSlotId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

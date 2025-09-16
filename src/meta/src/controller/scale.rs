@@ -22,16 +22,14 @@ use risingwave_common::catalog;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
-use risingwave_connector::WithOptionsSecResolved;
-use risingwave_connector::source::{ConnectorProperties, SplitImpl};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
     Database, Fragment, FragmentRelation, Sink, Source, SourceSplits, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    ConnectorSplits, DatabaseId, DispatcherType, FragmentId, ObjectId, Property, SourceId,
-    StreamingParallelism, TableId, WorkerId, database, fragment, fragment_relation, object, sink,
-    source, source_splits, streaming_job, table,
+    DatabaseId, DispatcherType, FragmentId, ObjectId, SourceId, StreamingParallelism, TableId,
+    WorkerId, database, fragment, fragment_relation, object, sink, source, source_splits,
+    streaming_job, table,
 };
 use risingwave_meta_model_migration::Condition;
 use risingwave_pb::source::ConnectorSplit;
@@ -45,7 +43,7 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::id::{IdCategory, IdGeneratorManagerRef};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor};
-use crate::stream::{AssignerBuilder, SourceManagerRef, SourceWorkerProperties};
+use crate::stream::{AssignerBuilder, SourceWorkerProperties};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
     txn: &C,
@@ -164,7 +162,7 @@ where
         jobs,
         available_workers,
         adaptive_parallelism_strategy,
-        None,
+        Default::default(),
     )
     .await?;
 
@@ -196,7 +194,7 @@ pub async fn render_jobs<C>(
     job_ids: HashSet<ObjectId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-    mut source_properties: HashMap<SourceId, SourceWorkerProperties>,
+    source_properties: HashMap<SourceId, SourceWorkerProperties>,
 ) -> MetaResult<RenderedGraph>
 where
     C: ConnectionTrait,
@@ -358,11 +356,14 @@ where
 
         let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
 
-        if let Some(entry_fragment) = entry_fragments.iter().next() {
-            if let Some(source_id) = fragment_source_ids.get(&entry_fragment.fragment_id) {
-                println!("fragment {} source_id {}", entry_fragment.fragment_id, source_id);
-                assert_eq!(entry_fragments.len(), 1);
-            }
+        if let Some(entry_fragment) = entry_fragments.first()
+            && let Some(source_id) = fragment_source_ids.get(&entry_fragment.fragment_id)
+        {
+            println!(
+                "fragment {} source_id {}",
+                entry_fragment.fragment_id, source_id
+            );
+            assert_eq!(entry_fragments.len(), 1);
         }
 
         for fragment_id in components {
@@ -374,7 +375,7 @@ where
                 stream_node,
                 state_table_ids,
                 ..
-            } = fragment_map.remove(&fragment_id).unwrap();
+            } = fragment_map.remove(fragment_id).unwrap();
 
             let actor_id_base =
                 id_gen.generate_interval::<{ IdCategory::Actor }>(actors.len() as u64) as u32;
@@ -452,14 +453,14 @@ where
     C: ConnectionTrait,
 {
     let mut source_fragment_ids = HashMap::new();
-    for (fragment_id, fragment) in &fragment_map {
-        if FragmentTypeMask::from(fragment.fragment_type_mask).contains(FragmentTypeFlag::Source) {
-            if let Some(source_id) = fragment.stream_node.to_protobuf().find_stream_source() {
-                source_fragment_ids
-                    .entry(source_id as SourceId)
-                    .or_insert_with(BTreeSet::new)
-                    .insert(fragment_id);
-            }
+    for (fragment_id, fragment) in fragment_map {
+        if FragmentTypeMask::from(fragment.fragment_type_mask).contains(FragmentTypeFlag::Source)
+            && let Some(source_id) = fragment.stream_node.to_protobuf().find_stream_source()
+        {
+            source_fragment_ids
+                .entry(source_id as SourceId)
+                .or_insert_with(BTreeSet::new)
+                .insert(fragment_id);
         }
     }
 

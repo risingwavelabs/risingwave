@@ -32,24 +32,15 @@ use risingwave_meta_model::actor::{ActorModel, ActorStatus};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-
-    Actor, Fragment as FragmentModel, FragmentRelation, Sink, SourceSplits, StreamingJob,
-
-
+    Fragment as FragmentModel, FragmentRelation, Sink, SourceSplits, StreamingJob,
 };
 use risingwave_meta_model::{
     ActorId, ConnectorSplits, DatabaseId, DispatcherType, ExprContext, FragmentId, I32Array,
     JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
-
-    VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, object, sink, source,
+    VnodeBitmap, WorkerId, database, fragment, fragment_relation, object, sink, source,
     source_splits, streaming_job, table,
-
-
 };
-
-use risingwave_meta_model_migration::{Alias, ExprTrait, OnConflict, SelectStatement, SimpleExpr};
-
-
+use risingwave_meta_model_migration::{ExprTrait, OnConflict, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
@@ -83,25 +74,9 @@ use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo}
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
 use crate::controller::utils::{
-
-
-    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-
-    get_fragment_mappings, get_sink_fragment_by_ids, has_table_been_migrated,
+    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
+    get_sink_fragment_by_ids, has_table_been_migrated, rebuild_fragment_mapping,
     resolve_no_shuffle_actor_dispatcher,
-
-
-    get_fragment_mappings_txn,
-
-
- compose_dispatchers,
-    rebuild_fragment_mapping,
-
-
-
-
-
-
 };
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
@@ -109,9 +84,7 @@ use crate::model::{
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
-use crate::stream::{
-    SourceManager, SourceManagerRef, SplitAssignment, UpstreamSinkInfo, build_actor_split_impls,
-};
+use crate::stream::{SourceManagerRef, SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
 
 /// Some information of running (inflight) actors.
 #[derive(Clone, Debug)]

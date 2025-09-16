@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use futures::future;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeMask};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::{
@@ -507,7 +507,15 @@ impl ScaleController {
         let RenderedGraph {
             fragments: render_result,
             ..
-        } = render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy, None).await?;
+        } = render_jobs(
+            txn,
+            id_gen,
+            jobs,
+            workers,
+            adaptive_parallelism_strategy,
+            Default::default(),
+        )
+        .await?;
 
         for (db, jobs) in &render_result {
             println!("\tdb: {db}");
