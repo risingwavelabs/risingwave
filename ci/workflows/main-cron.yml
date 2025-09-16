@@ -105,8 +105,8 @@ steps:
       key: "e2e-preload-memory-test-release"
       command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true ci/scripts/e2e-test-serial.sh -p ci-release -m ci-3streaming-2serving-3fe"
       if: |
-        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-        || build.pull_request.labels includes "ci/run-preload-memory-tests"
+        build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-preload-memory-tests")
       depends_on:
         - "build"
       plugins:
@@ -120,9 +120,9 @@ steps:
       <<: *sql-backend
       command: "ci/scripts/slow-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
       if: |
-        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-slow-e2e-tests"
-        || build.env("CI_STEPS") =~ /(^|,)slow-e2e-tests?(,|$$)/
+        || build.env("CI_STEPS") =~ /(^|,)slow-e2e-tests?(,|$$)/)
       depends_on:
         - "build"
         - "build-other"
@@ -137,9 +137,9 @@ steps:
       <<: *sql-backend
       command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
       if: |
-        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-tests"
-        || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
+        || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/)
       depends_on:
         - "build"
         - "build-other"
@@ -210,9 +210,9 @@ steps:
     key: "e2e-meta-backup-test-release"
     command: "ci/scripts/run-meta-backup-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-meta-backup-test"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/)
     depends_on:
       - "build"
       - "build-other"
@@ -229,9 +229,9 @@ steps:
     key: "unit-test"
     command: "ci/scripts/run-unit-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test"
-      || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/)
     plugins:
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 120
@@ -241,9 +241,9 @@ steps:
     key: "unit-test-deterministic"
     command: "MADSIM_TEST_NUM=100 timeout 50m ci/scripts/deterministic-unit-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/)
     plugins:
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 120
@@ -254,9 +254,9 @@ steps:
     key: "background-ddl-arrangement-backfill-recovery-test-deterministic"
     command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.8 USE_ARRANGEMENT_BACKFILL=true timeout 90m ci/scripts/deterministic-recovery-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/)
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
@@ -270,9 +270,9 @@ steps:
     key: "e2e-java-binding-tests"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-java-binding-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-java-binding-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-java-binding-tests?(,|$$)/)
     depends_on:
       - "build"
       - "build-other"
@@ -288,9 +288,9 @@ steps:
     key: "run-micro-benchmarks"
     command: "ci/scripts/run-micro-benchmarks.sh"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-micro-benchmarks"
-      || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/)
     plugins:
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 60
@@ -299,9 +299,9 @@ steps:
   - label: "upload micro-benchmark"
     key: "upload-micro-benchmarks"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-micro-benchmarks"
-      || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/)
     command:
       - "BUILDKITE_BUILD_NUMBER=$BUILDKITE_BUILD_NUMBER ci/scripts/upload-micro-bench-results.sh"
     depends_on: "run-micro-benchmarks"
@@ -313,9 +313,9 @@ steps:
     key: "backfill-tests"
     command: "BUILDKITE=${BUILDKITE:-} ci/scripts/backfill-test.sh -p ci-release"
     if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      build.tag == null && (!(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-backfill-tests"
-      || build.env("CI_STEPS") =~ /(^|,)backfill-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)backfill-tests?(,|$$)/)
     depends_on:
       - "build"
     plugins:

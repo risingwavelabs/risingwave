@@ -15,20 +15,8 @@ acraddr="${ACR_LOGIN_SERVER}/risingwave"
 arch="$(uname -m)"
 CARGO_PROFILE=${CARGO_PROFILE:-production}
 
-echo "$ORIGINAL_IMAGE_TAG"
-echo "$NEW_IMAGE_TAG"
-echo "$BUILDKITE_COMMIT"
-
 echo "--- Docker login"
 echo "$ACR_PASSWORD" | docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" --password-stdin
-
-if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
-  echo "--- retag docker image"
-  docker pull ${acraddr}:${ORIGINAL_IMAGE_TAG}
-  docker tag ${acraddr}:${ORIGINAL_IMAGE_TAG} ${acraddr}:${NEW_IMAGE_TAG}-${arch}
-  docker push ${acraddr}:${NEW_IMAGE_TAG}-${arch}
-  exit 0
-fi
 
 # Check image existence
 set +e
@@ -71,9 +59,11 @@ docker buildx build -f docker/Dockerfile \
   --cache-from "type=registry,ref=${ACR_LOGIN_SERVER}/risingwave-build-cache:${arch}" \
   .
 
+
+
 echo "--- check the image can start correctly"
 container_id=$(docker run -d "${acraddr}:${BUILDKITE_COMMIT}-${arch}" playground)
-sleep 10
+sleep 20
 container_status=$(docker inspect --format='{{.State.Status}}' "$container_id")
 if [ "$container_status" != "running" ]; then
   echo "docker run failed with status $container_status"
@@ -84,6 +74,19 @@ fi
 
 echo "--- docker images"
 docker images
+
+echo "--- remove docker container"
+docker rm -f "$container_id" 2>/dev/null || true
+
+echo "--- docker tag and push to release ---"
+if [[ -n "${BUILDKITE_TAG:-}" ]]; then
+  echo "--- Tagging release ${BUILDKITE_TAG}"
+  docker tag "${acraddr}:${BUILDKITE_COMMIT}-${arch}" "${acraddr}:${BUILDKITE_TAG}-${arch}"
+  docker tag "${acraddr}:${BUILDKITE_COMMIT}-${arch}" "${acraddr}:latest-${arch}"
+  
+  docker push "${acraddr}:${BUILDKITE_TAG}-${arch}"
+  docker push "${acraddr}:latest-${arch}"
+fi
 
 echo "--- docker push"
 docker push "${acraddr}:${BUILDKITE_COMMIT}-${arch}"

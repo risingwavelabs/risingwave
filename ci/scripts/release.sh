@@ -59,7 +59,7 @@ cd dashboard && nvm install && nvm use && cd ..
 
 echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG}" ]]; then
-  CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
+  CARGO_PKG_VERSION="$(toml get --toml-path /mnt/Cargo.toml workspace.package.version)"
   if [[ "${CARGO_PKG_VERSION}" != "${BUILDKITE_TAG#*v}" ]]; then
     echo "CARGO_PKG_VERSION: ${CARGO_PKG_VERSION}"
     echo "BUILDKITE_TAG: ${BUILDKITE_TAG}"
@@ -84,20 +84,9 @@ check_link_info production
 
 cd target/production && chmod +x risingwave risectl
 
-if [ "${SKIP_RELEASE}" -ne 1 ]; then
-  echo "--- Upload nightly binary to s3"
-  if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
-    tar -czvf risingwave-"$(date '+%Y%m%d')"-"${ARCH}"-unknown-linux.tar.gz risingwave
-    aws s3 cp risingwave-"$(date '+%Y%m%d')"-"${ARCH}"-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
-  elif [[ -n "${BINARY_NAME+x}" ]]; then
-    tar -czvf risingwave-"${BINARY_NAME}"-"${ARCH}"-unknown-linux.tar.gz risingwave
-    aws s3 cp risingwave-"${BINARY_NAME}"-"${ARCH}"-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
-  fi
-else
-  echo "--- Skipped upload nightly binary"
-fi
-
 echo "--- Build connector node"
+echo "${REPO_ROOT}"
+
 cd "${REPO_ROOT}"/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
 
 if [[ -n "${BUILDKITE_TAG}" ]]; then
@@ -116,7 +105,7 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   if [ "${SKIP_RELEASE}" -ne 1 ]; then
     echo "--- Release create"
     set +e
-    response=$(gh release view -R risingwavelabs/risingwave "${BUILDKITE_TAG}" 2>&1)
+    response=$(gh release view -R justinjoseph89/risingwave "${BUILDKITE_TAG}" 2>&1)
     set -euo pipefail
     if [[ $response == *"not found"* ]]; then
       echo "Tag ${BUILDKITE_TAG} does not exist. Creating release..."
