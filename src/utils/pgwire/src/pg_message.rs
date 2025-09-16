@@ -732,40 +732,49 @@ impl BeMessage<'_> {
             }
             BeMessage::CopyData(row) => {
                 buf.put_u8(b'd');
-                // by default, write as TSV format
+                // As in https://www.postgresql.org/docs/current/sql-copy.html, the default format is TSV format
                 write_body(buf, |buf| {
+                    fn write_str_bytes(
+                        buf: &mut BytesMut,
+                        str_bytes: &Option<Bytes>,
+                    ) -> Result<()> {
+                        let Some(str_bytes) = str_bytes else {
+                            return Ok(());
+                        };
+                        let s = String::from_utf8_lossy(str_bytes);
+                        for c in s.as_str().chars() {
+                            // As suggested in https://en.wikipedia.org/wiki/Tab-separated_values
+                            // we only escape "\t\b\r\\"
+                            match c {
+                                '\t' => {
+                                    buf.put_slice(b"\\t");
+                                }
+                                '\n' => {
+                                    buf.put_slice(b"\\n");
+                                }
+                                '\r' => {
+                                    buf.put_slice(b"\\r");
+                                }
+                                '\\' => {
+                                    buf.put_slice(b"\\\\");
+                                }
+                                _ => {
+                                    std::fmt::Write::write_char(buf, c).map_err(|_| {
+                                        Error::other(anyhow!("failed to write_char [{c}]"))
+                                    })?;
+                                }
+                            }
+                        }
+                        Ok(())
+                    }
                     match row.values() {
                         [] => {}
                         [first, rest @ ..] => {
-                            if let Some(first) = first {
-                                let s = String::from_utf8_lossy(first);
-                                for c in s.as_str().chars() {
-                                    match c {
-                                        '\t' => {
-                                            buf.put_slice(b"\\t");
-                                        }
-                                        '\n' => {
-                                            buf.put_slice(b"\\n");
-                                        }
-                                        '\r' => {
-                                            buf.put_slice(b"\\r");
-                                        }
-                                        '\\' => {
-                                            buf.put_slice(b"\\\\");
-                                        }
-                                        _ => {
-                                            std::fmt::Write::write_char(buf, c).map_err(|_| {
-                                                Error::other(anyhow!("failed to write_char [{c}]"))
-                                            })?;
-                                        }
-                                    }
-                                }
-                            }
+                            write_str_bytes(buf, first)?;
+
                             for rest in rest {
                                 buf.put_u8(b'\t');
-                                if let Some(rest) = rest {
-                                    buf.put_slice(rest)
-                                }
+                                write_str_bytes(buf, rest)?;
                             }
                         }
                     }
