@@ -201,11 +201,19 @@ fn map_length<T: TryFrom<usize>>(map: MapRef<'_>) -> Result<T, ExprError> {
 /// {a:1,b:3.0,c:4.0}
 /// ```
 #[function("map_cat(anymap, anymap) -> anymap")]
-fn map_cat(m1: Option<MapRef<'_>>, m2: Option<MapRef<'_>>) -> Result<Option<MapValue>, ExprError> {
+fn map_cat(
+    m1: Option<MapRef<'_>>,
+    m2: Option<MapRef<'_>>,
+    ctx: &Context,
+) -> Result<Option<MapValue>, ExprError> {
     match (m1, m2) {
         (None, None) => Ok(None),
         (Some(m), None) | (None, Some(m)) => Ok(Some(m.to_owned())),
-        (Some(m1), Some(m2)) => Ok(Some(MapValue::concat(m1, m2))),
+        (Some(m1), Some(m2)) => Ok(Some(MapValue::concat(
+            m1,
+            m2,
+            ctx.return_type.as_map().clone(),
+        ))),
     }
 }
 
@@ -231,11 +239,17 @@ fn map_insert(
     map: MapRef<'_>,
     key: Option<ScalarRefImpl<'_>>,
     value: Option<ScalarRefImpl<'_>>,
+    ctx: &Context,
 ) -> MapValue {
     let Some(key) = key else {
         return map.to_owned();
     };
-    MapValue::insert(map, key.into_scalar_impl(), value.to_owned_datum())
+    MapValue::insert(
+        map,
+        key.into_scalar_impl(),
+        value.to_owned_datum(),
+        ctx.return_type.as_map().clone(),
+    )
 }
 
 /// Deletes a key-value pair from the map.
@@ -256,11 +270,11 @@ fn map_insert(
 ///
 /// TODO: support variadic arguments
 #[function("map_delete(anymap, any) -> anymap")]
-fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>) -> MapValue {
+fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>, ctx: &Context) -> MapValue {
     let Some(key) = key else {
         return map.to_owned();
     };
-    MapValue::delete(map, key)
+    MapValue::delete(map, key, ctx.return_type.as_map().clone())
 }
 
 /// # Example

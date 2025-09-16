@@ -289,7 +289,7 @@ mod scalar {
 
         pub fn insert(m: MapRef<'_>, key: ScalarImpl, value: Datum, map_type: MapType) -> Self {
             let l = ListValue::from_datum_iter(
-                &m.inner().elem_type(),
+                &map_type.into_struct(),
                 m.iter_struct()
                     .filter(|s| {
                         key.as_scalar_ref_impl() != s.field_at(0).expect("map key is not null")
@@ -302,9 +302,9 @@ mod scalar {
             Self::from_entries(l)
         }
 
-        pub fn delete(m: MapRef<'_>, key: ScalarRefImpl<'_>) -> Self {
+        pub fn delete(m: MapRef<'_>, key: ScalarRefImpl<'_>, map_type: MapType) -> Self {
             let l = ListValue::from_datum_iter(
-                &m.inner().elem_type(),
+                &map_type.into_struct(),
                 m.iter_struct()
                     .filter(|s| key != s.field_at(0).expect("map key is not null"))
                     .map(|s| Some(ScalarRefImpl::Struct(s))),

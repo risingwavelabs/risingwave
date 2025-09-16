@@ -317,19 +317,21 @@ where
     }
 }
 
-impl FromIterator<ListValue> for ListArray {
-    fn from_iter<I: IntoIterator<Item = ListValue>>(iter: I) -> Self {
-        let mut iter = iter.into_iter();
-        let first = iter.next().expect("empty iterator");
-        let mut builder =
-            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(first.elem_type()));
-        builder.append(Some(first.as_scalar_ref()));
-        for v in iter {
-            builder.append(Some(v.as_scalar_ref()));
-        }
-        builder.finish()
-    }
-}
+// impl FromIterator<ListValue> for ListArray {
+//     fn from_iter<I: IntoIterator<Item = ListValue>>(iter: I) -> Self {
+//         let mut iter = iter.into_iter();
+//         let first = iter.next().expect("empty iterator");
+//         let mut builder = ListArrayBuilder::with_type(
+//             iter.size_hint().0,
+//             DataType::list(first.data_type()),
+//         );
+//         builder.append(Some(first.as_scalar_ref()));
+//         for v in iter {
+//             builder.append(Some(v.as_scalar_ref()));
+//         }
+//         builder.finish()
+//     }
+// }
 
 #[derive(Clone, PartialEq, Eq, EstimateSize)]
 pub struct ListValue {
@@ -401,6 +403,7 @@ impl ListValue {
     }
 
     /// Returns the data type of the elements in the list.
+    #[deprecated]
     pub fn elem_type(&self) -> DataType {
         self.values.data_type()
     }
@@ -492,7 +495,8 @@ impl<'a> FromIterator<&'a str> for ListValue {
 
 impl FromIterator<ListValue> for ListValue {
     fn from_iter<I: IntoIterator<Item = ListValue>>(iter: I) -> Self {
-        Self::new(iter.into_iter().collect::<ListArray>().into())
+        // Self::new(iter.into_iter().collect::<ListArray>().into())
+        todo!()
     }
 }
 
@@ -522,6 +526,7 @@ impl<'a> ListRef<'a> {
     }
 
     /// Returns the data type of the elements in the list.
+    #[deprecated]
     pub fn elem_type(&self) -> DataType {
         self.array.data_type()
     }

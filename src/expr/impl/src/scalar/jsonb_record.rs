@@ -71,7 +71,11 @@ pub fn jsonb_populate_map(
         .to_map(output_type)
         .map_err(|e| ExprError::Parse(e.into()))?;
     match base {
-        Some(base) => Ok(MapValue::concat(base, jsonb_map.as_scalar_ref())),
+        Some(base) => Ok(MapValue::concat(
+            base,
+            jsonb_map.as_scalar_ref(),
+            output_type.clone(),
+        )),
         None => Ok(jsonb_map),
     }
 }
