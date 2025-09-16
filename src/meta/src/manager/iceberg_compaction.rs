@@ -130,7 +130,9 @@ impl IcebergCompactionHandle {
             .get_sink_by_ids(vec![self.sink_id.sink_id as i32])
             .await?;
         if sinks.is_empty() {
-            bail!("Sink not found: {}", self.sink_id.sink_id);
+            // The sink may be deleted, just return Ok.
+            tracing::warn!("Sink not found: {}", self.sink_id.sink_id);
+            return Ok(());
         }
         let prost_sink_catalog: PbSink = sinks.remove(0);
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
