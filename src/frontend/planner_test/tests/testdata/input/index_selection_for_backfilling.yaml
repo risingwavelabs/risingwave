@@ -42,6 +42,18 @@
 - sql: |
     create table t (a int, b int, c int);
     create index idx_a on t(a);
+    select count(*) from t where c > 1 group by a + 1;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
+    select count(*) from t where c > 1 group by a + b;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t (a int, b int, c int);
+    create index idx_a on t(a);
     create index idx_bc on t(b, c desc);
     select RANK() OVER (PARTITION BY a ORDER BY b) as rank from t;
   expected_outputs:
@@ -124,5 +136,90 @@
     create index idx1 on stream (a1, b1);
     create index idx2 on version (a2, b2);
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t(a int, b int, c int);
+    SELECT * FROM (
+    SELECT
+        *,
+        row_number() OVER (PARTITION BY a ORDER BY b) AS rank
+        FROM t
+    ) WHERE rank <= 1;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t(a int, b int, c int);
+    create index idx_a on t(a);
+    SELECT * FROM (
+    SELECT
+        *,
+        row_number() OVER (PARTITION BY a ORDER BY b) AS rank
+        FROM t
+    ) WHERE rank <= 1;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t(a int, b int, c int) append only;
+    select distinct on(a) * from t ;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t(a int, b int, c int) append only;
+    create index idx_a on t(a);
+    select distinct on(a) * from t ;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    create table t1(a int, b int, c int);
+    create table t2(a int, b int, c int);
+    create index idx1_a on t1(a);
+    create index idx2_a on t2(a);
+    select count(*) from (select * from t1 union all select * from t2) t group by a;
+  expected_outputs:
+    - stream_plan
+- name: Index selection for backfilling with temporal filter
+  sql: |
+    create table t (a int, b int, ts timestamp with time zone);
+    create index idx_a on t(a);
+    select a, count(*) from t where ts + interval '1 hour' > now() group by a;
+  expected_outputs:
+    - stream_plan
+- name: Index selection for backfilling with hop window
+  sql: |
+    create table t (a int, b int, c int, ts timestamp);
+    create index idx_a on t(a);
+    create index idx_ts on t(ts);
+     select count(*) from hop(t, ts, interval '1' minute, interval '5' minute) group by ts;
+  expected_outputs:
+    - stream_plan
+- name: Index selection for backfilling with hop window
+  sql: |
+    create table t (a int, b int, c int, ts timestamp);
+    create index idx_a on t(a);
+    create index idx_ts on t(ts);
+     select count(*) from hop(t, ts, interval '1' minute, interval '5' minute) group by a;
+  expected_outputs:
+    - stream_plan
+- name: Index selection for backfilling with hop window
+  sql: |
+    create table t (a int, b int, c int, ts timestamp);
+    create index idx_a on t(a);
+    create index idx_ts on t(ts);
+     select count(*) from hop(t, ts, interval '1' minute, interval '5' minute) group by window_start;
+  expected_outputs:
+    - stream_plan
+- name: Index selection for backfilling with project set
+  sql: |
+    create table t(a int, b int, c int, x int[]);
+    create index idx_a on t(a);
+    select sum(unnest) from (select a, b, c, unnest(x) as unnest from t) group by a;
+  expected_outputs:
+    - stream_plan
+- name: Index selection for backfilling with project set
+  sql: |
+    create table t(a int, b int, c int, x int[]);
+    create index idx_a on t(a);
+    select sum(unnest) from (select a, b, c, unnest(x) as unnest from t) group by a + 1;
   expected_outputs:
     - stream_plan

@@ -16,8 +16,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use reqwest::Method;
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use serde_derive::Deserialize;
 use url::{ParseError, Url};
 
 use crate::schema::{InvalidOptionError, bail_invalid_option_error};

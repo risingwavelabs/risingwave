@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use anyhow::Context;
 use itertools::Itertools;
-use prost_reflect::{Cardinality, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value};
+use prost_reflect::{
+    Cardinality, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value,
+};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::catalog::Field;
 use risingwave_common::types::{
@@ -69,7 +72,38 @@ fn detect_loop_and_push(
     Ok(())
 }
 
-pub fn from_protobuf_value<'a>(
+/// Converts a protobuf message field to a datum.
+///
+/// We will get the protobuf value from the message by checking the field descriptor and correctly
+/// handling presence, then call [`from_protobuf_value`].
+pub fn from_protobuf_message_field<'a>(
+    field_desc: &FieldDescriptor,
+    message: &'a DynamicMessage,
+    type_expected: &DataType,
+    messages_as_jsonb: &'a HashSet<String>,
+) -> AccessResult<DatumCow<'a>> {
+    let value = if field_desc.supports_presence() && !message.has_field(field_desc) {
+        // The field supports presence and it's absent in the message. Treat it as NULL.
+        // This is the case for `optional` fields, message fields, and fields contained in `oneof`.
+        return Ok(DatumCow::NULL);
+    } else {
+        // Otherwise, directly call `get_field`, which will return the default value if absent.
+        message.get_field(field_desc)
+    };
+
+    match value {
+        Cow::Borrowed(value) => {
+            from_protobuf_value(field_desc, value, type_expected, messages_as_jsonb)
+        }
+        Cow::Owned(value) => {
+            from_protobuf_value(field_desc, &value, type_expected, messages_as_jsonb)
+                .map(|d| d.to_owned_datum().into())
+        }
+    }
+}
+
+/// Converts a protobuf value to a datum.
+fn from_protobuf_value<'a>(
     field_desc: &FieldDescriptor,
     value: &'a Value,
     type_expected: &DataType,
@@ -118,25 +152,22 @@ pub fn from_protobuf_value<'a>(
                     });
                 };
 
-                let mut rw_values = Vec::with_capacity(st.len());
+                let mut datums = Vec::with_capacity(st.len());
                 for (name, expected_field_type) in st.iter() {
                     let Some(field_desc) = desc.get_field_by_name(name) else {
                         // Field deleted in protobuf. Fallback to SQL NULL (of proper RW type).
-                        rw_values.push(None);
+                        datums.push(None);
                         continue;
                     };
-                    let value = dyn_msg.get_field(&field_desc);
-                    rw_values.push(
-                        from_protobuf_value(
-                            &field_desc,
-                            &value,
-                            expected_field_type,
-                            messages_as_jsonb,
-                        )?
-                        .to_owned_datum(),
-                    );
+                    let datum = from_protobuf_message_field(
+                        &field_desc,
+                        dyn_msg,
+                        expected_field_type,
+                        messages_as_jsonb,
+                    )?;
+                    datums.push(datum.to_owned_datum());
                 }
-                ScalarImpl::Struct(StructValue::new(rw_values))
+                ScalarImpl::Struct(StructValue::new(datums))
             }
         }
         Value::List(values) => {

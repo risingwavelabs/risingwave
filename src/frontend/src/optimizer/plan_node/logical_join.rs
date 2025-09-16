@@ -1752,6 +1752,26 @@ impl ToStream for LogicalJoin {
         // the added columns is at the end, so it will not change the exists column index
         Ok((plan, out_col_change))
     }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        let mut ctx = ToStreamContext::new(false);
+        // only pass through the locality information if it can be converted to dynamic filter
+        if let Ok(Some(_)) = self.to_stream_dynamic_filter(self.on().clone(), &mut ctx) {
+            // since dynamic filter only supports left input ref in the output indices, we can safely use o2i mapping to convert the required columns.
+            let o2i_mapping = self.core.o2i_col_mapping();
+            let left_input_columns = columns
+                .iter()
+                .map(|&col| o2i_mapping.try_map(col))
+                .collect::<Option<Vec<usize>>>()?;
+            if let Some(better_left_plan) = self.left().try_better_locality(&left_input_columns) {
+                return Some(
+                    self.clone_with_left_right(better_left_plan, self.right())
+                        .into(),
+                );
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]

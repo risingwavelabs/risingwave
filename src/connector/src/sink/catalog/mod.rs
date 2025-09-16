@@ -29,7 +29,7 @@ use risingwave_pb::catalog::{
     PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
 use risingwave_pb::secret::PbSecretRef;
-use serde_derive::Serialize;
+use serde::Serialize;
 
 use super::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,

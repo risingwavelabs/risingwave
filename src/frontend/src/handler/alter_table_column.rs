@@ -126,13 +126,6 @@ pub async fn handle_alter_table_column(
     let (original_catalog, has_incoming_sinks) =
         fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
-    if has_incoming_sinks && original_catalog.has_generated_column() {
-        return Err(RwError::from(ErrorCode::BindError(
-            "Alter a table with incoming sink and generated column has not been implemented."
-                .to_owned(),
-        )));
-    }
-
     if original_catalog.webhook_info.is_some() {
         return Err(RwError::from(ErrorCode::BindError(
             "Adding/dropping a column of a table with webhook has not been implemented.".to_owned(),
