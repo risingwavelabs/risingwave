@@ -1904,7 +1904,7 @@ impl Statement {
 
                 match target {
                     CopyTarget::Stdin { values } => {
-                        write!(f, " FROM stdin; ")?;
+                        write!(f, " FROM STDIN; ")?;
                         if !values.is_empty() {
                             writeln!(f)?;
                             let mut delim = "";
@@ -1921,7 +1921,7 @@ impl Statement {
                         write!(f, "\n\\.")
                     }
                     CopyTarget::Stdout => {
-                        write!(f, "TO stdout;")
+                        write!(f, " TO STDOUT;")
                     }
                 }
             }
