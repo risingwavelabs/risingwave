@@ -19,6 +19,7 @@ use std::task::{Context, Poll};
 
 use anyhow::Context as _;
 use futures::future::try_join_all;
+use itertools::Itertools;
 use pin_project::pin_project;
 use risingwave_common::catalog::Field;
 use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
@@ -178,7 +179,7 @@ pub struct UpstreamSinkUnionExecutor {
     chunk_size: usize,
 
     /// The initial inputs to the executor.
-    initial_upstream_infos: Vec<UpstreamFragmentInfo>,
+    initial_inputs: Vec<BoxedSinkInput>,
 
     /// The error report for evaluation errors.
     eval_error_report: ActorEvalErrorReport,
@@ -193,7 +194,10 @@ pub struct UpstreamSinkUnionExecutor {
 impl Debug for UpstreamSinkUnionExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UpstreamSinkUnionExecutor")
-            .field("initial_upstream_infos", &self.initial_upstream_infos)
+            .field(
+                "initial_upstream_fragments",
+                &self.initial_inputs.iter().map(|i| i.id()).collect_vec(),
+            )
             .finish()
     }
 }
@@ -205,25 +209,41 @@ impl Execute for UpstreamSinkUnionExecutor {
 }
 
 impl UpstreamSinkUnionExecutor {
-    pub fn new(
+    pub async fn new(
         ctx: ActorContextRef,
         local_barrier_manager: LocalBarrierManager,
         executor_stats: Arc<StreamingMetrics>,
         chunk_size: usize,
         initial_upstream_infos: Vec<UpstreamFragmentInfo>,
         eval_error_report: ActorEvalErrorReport,
-    ) -> Self {
+    ) -> StreamExecutorResult<Self> {
         let barrier_rx = local_barrier_manager.subscribe_barrier(ctx.id);
-        Self {
+        let mut executor = Self {
             actor_context: ctx,
             local_barrier_manager,
             executor_stats,
             chunk_size,
-            initial_upstream_infos,
+            initial_inputs: Default::default(),
             eval_error_report,
             barrier_rx,
             barrier_tx_map: Default::default(),
+        };
+        executor.init_with_upstreams(initial_upstream_infos).await?;
+
+        Ok(executor)
+    }
+
+    async fn init_with_upstreams(
+        &mut self,
+        initial_upstream_infos: Vec<UpstreamFragmentInfo>,
+    ) -> StreamExecutorResult<()> {
+        self.initial_inputs.reserve(initial_upstream_infos.len());
+        for info in initial_upstream_infos {
+            let input = self.new_sink_input(info).await?;
+            self.initial_inputs.push(input);
         }
+
+        Ok(())
     }
 
     #[cfg(test)]
@@ -240,7 +260,7 @@ impl UpstreamSinkUnionExecutor {
             local_barrier_manager,
             executor_stats: metrics.into(),
             chunk_size,
-            initial_upstream_infos: vec![],
+            initial_inputs: vec![],
             eval_error_report: ActorEvalErrorReport {
                 actor_context: actor_ctx,
                 identity: format!("UpstreamSinkUnionExecutor-{}", actor_id).into(),
@@ -317,32 +337,7 @@ impl UpstreamSinkUnionExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
-        let inputs: Vec<_> = {
-            let initial_upstream_infos = std::mem::take(&mut self.initial_upstream_infos);
-            let mut inputs = Vec::with_capacity(initial_upstream_infos.len());
-            for UpstreamFragmentInfo {
-                upstream_fragment_id,
-                upstream_actors,
-                merge_schema,
-                project_exprs,
-            } in initial_upstream_infos
-            {
-                let merge_executor = self
-                    .new_merge_executor(upstream_fragment_id, upstream_actors, merge_schema)
-                    .await?;
-
-                let input = SinkHandlerInput::new(
-                    upstream_fragment_id,
-                    Box::new(merge_executor),
-                    project_exprs,
-                )
-                .boxed_input();
-
-                inputs.push(input);
-            }
-            inputs
-        };
-
+        let inputs = std::mem::take(&mut self.initial_inputs);
         let execution_stream = self.execute_with_inputs(inputs);
         pin_mut!(execution_stream);
         while let Some(msg) = execution_stream.next().await {
