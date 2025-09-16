@@ -443,25 +443,10 @@ impl SourceManager {
         Ok(())
     }
 
-    pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
-        let core = self.core.lock().await;
-        core.env
-            .shared_actor_infos()
-            .read_guard()
-            .iter_over_fragments()
-            .flat_map(|(_, fragment)| {
-                fragment
-                    .actors
-                    .iter()
-                    .map(|(actor_id, info)| (*actor_id, info.splits.clone()))
-            })
-            .collect()
-    }
-
     pub async fn get_running_info(&self) -> SourceManagerRunningInfo {
-        let assignment = self.list_assignments().await;
-
         let core = self.core.lock().await;
+        let assignment = core.env.shared_actor_infos().list_assignments();
+
         SourceManagerRunningInfo {
             source_fragments: core.source_fragments.clone(),
             backfill_fragments: core.backfill_fragments.clone(),

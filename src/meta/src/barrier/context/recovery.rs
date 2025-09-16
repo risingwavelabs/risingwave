@@ -520,7 +520,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .await?;
 
                     // get split assignments for all actors
-                    let source_splits = self.source_manager.list_assignments().await;
+                    let source_splits = self.env.shared_actor_infos().list_assignments();
                     let cdc_table_backfill_actors = self
                         .metadata_manager
                         .catalog_controller
@@ -679,7 +679,7 @@ impl GlobalBarrierWorkerContextImpl {
         })?;
 
         // get split assignments for all actors
-        let source_splits = self.source_manager.list_assignments().await;
+        let source_splits = self.env.shared_actor_infos().list_assignments();
 
         let cdc_table_backfill_actors = self
             .metadata_manager

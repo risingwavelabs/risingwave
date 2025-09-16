@@ -92,6 +92,18 @@ impl SharedActorInfos {
     pub fn read_guard(&self) -> RwLockReadGuard<'_, RawRwLock, SharedActorInfosInner> {
         self.inner.read()
     }
+
+    pub fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
+        let core = self.inner.read();
+        core.iter_over_fragments()
+            .flat_map(|(_, fragment)| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|(actor_id, info)| (*actor_id, info.splits.clone()))
+            })
+            .collect()
+    }
 }
 
 impl SharedActorInfos {

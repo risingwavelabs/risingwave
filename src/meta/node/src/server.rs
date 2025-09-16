@@ -567,10 +567,9 @@ pub async fn start_service_as_election_leader(
 
     let scale_srv = ScaleServiceImpl::new(
         metadata_manager.clone(),
-        source_manager,
         stream_manager.clone(),
         barrier_manager.clone(),
-        scale_controller.clone(),
+        env.clone(),
     );
 
     let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.clone());
