@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use mysql_async::Row as MysqlRow;
-use mysql_common::constants::{ColumnFlags, ColumnType as MysqlColumnType};
+use mysql_common::constants::ColumnFlags;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
@@ -59,6 +59,42 @@ macro_rules! handle_data_type {
                     $i,
                     stringify!($rw_type),
                 ))),
+        }
+    }};
+}
+
+macro_rules! handle_data_type_with_signed {
+    (
+        $mysql_row:expr,
+        $mysql_datum_index:expr,
+        $column_name:expr,
+        $signed_type:ty,
+        $unsigned_type:ty
+    ) => {{
+        let column_flags = $mysql_row.columns()[$mysql_datum_index].flags();
+
+        if column_flags.contains(ColumnFlags::UNSIGNED_FLAG) {
+            // UNSIGNED类型: 使用unsigned类型转换，然后转换为signed
+            match $mysql_row.take_opt::<Option<$unsigned_type>, _>($mysql_datum_index) {
+                Some(Ok(Some(val))) => Ok(Some(ScalarImpl::from(val as $signed_type))),
+                Some(Ok(None)) => Ok(None),
+                Some(Err(e)) => Err(anyhow::Error::new(e.clone())
+                    .context("failed to deserialize MySQL value into rust value")
+                    .context(format!(
+                        "column: {}, index: {}, rust_type: {}",
+                        $column_name,
+                        $mysql_datum_index,
+                        stringify!($unsigned_type),
+                    ))),
+                None => bail!(
+                    "no value found at column: {}, index: {}",
+                    $column_name,
+                    $mysql_datum_index
+                ),
+            }
+        } else {
+            // SIGNED类型: 使用默认的signed类型转换
+            handle_data_type!($mysql_row, $mysql_datum_index, $column_name, $signed_type)
         }
     }};
 }
@@ -108,41 +144,13 @@ pub fn mysql_datum_to_rw_datum(
             }
         }
         DataType::Int16 => {
-            handle_data_type!(mysql_row, mysql_datum_index, column_name, i16)
+            handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i16, u16)
         }
         DataType::Int32 => {
-            handle_data_type!(mysql_row, mysql_datum_index, column_name, i32)
+            handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i32, u32)
         }
         DataType::Int64 => {
-            let mysql_column_type = mysql_row.columns()[mysql_datum_index].column_type();
-
-            if mysql_column_type == MysqlColumnType::MYSQL_TYPE_LONGLONG {
-                let column_flags = mysql_row.columns()[mysql_datum_index].flags();
-                if column_flags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                    // BIGINT UNSIGNED: 使用u64转换，然后转换为i64
-                    match mysql_row.take_opt::<Option<u64>, _>(mysql_datum_index) {
-                        Some(Ok(Some(val))) => Ok(Some(ScalarImpl::from(val as i64))),
-                        Some(Ok(None)) => Ok(None),
-                        Some(Err(e)) => Err(anyhow::Error::new(e.clone())
-                            .context("failed to deserialize MySQL value into rust value")
-                            .context(format!(
-                                "column: {}, index: {}, rust_type: u64",
-                                column_name, mysql_datum_index,
-                            ))),
-                        None => bail!(
-                            "no value found at column: {}, index: {}",
-                            column_name,
-                            mysql_datum_index
-                        ),
-                    }
-                } else {
-                    // BIGINT SIGNED: 使用默认的i64转换
-                    handle_data_type!(mysql_row, mysql_datum_index, column_name, i64)
-                }
-            } else {
-                // 其他类型: 使用默认的i64转换
-                handle_data_type!(mysql_row, mysql_datum_index, column_name, i64)
-            }
+            handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i64, u64)
         }
         DataType::Float32 => {
             handle_data_type!(mysql_row, mysql_datum_index, column_name, f32)
