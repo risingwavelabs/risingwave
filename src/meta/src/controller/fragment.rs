@@ -334,7 +334,6 @@ impl CatalogController {
         job_definition: Option<String>,
     ) -> MetaResult<StreamJobFragments> {
         let mut pb_fragments = BTreeMap::new();
-        let mut pb_actor_splits = HashMap::new();
         let mut pb_actor_status = BTreeMap::new();
 
         for (fragment, actors) in fragments {
@@ -342,8 +341,6 @@ impl CatalogController {
                 Self::compose_fragment(fragment, actors, job_definition.clone())?;
 
             pb_fragments.insert(fragment.fragment_id, fragment);
-
-            pb_actor_splits.extend(build_actor_split_impls(&fragment_actor_splits));
             pb_actor_status.extend(fragment_actor_status.into_iter());
         }
 
