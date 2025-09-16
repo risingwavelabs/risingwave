@@ -212,6 +212,9 @@ impl DorisSink {
             risingwave_common::types::DataType::Int256 => {
                 Err(SinkError::Doris("INT256 is not supported for Doris sink.".to_owned()))
             }
+            risingwave_common::types::DataType::UInt256 => {
+                Err(SinkError::Doris("doris can not support UInt256".to_owned()))
+            }
             risingwave_common::types::DataType::Map(_) => {
                 Err(SinkError::Doris("MAP is not supported for Doris sink.".to_owned()))
             }

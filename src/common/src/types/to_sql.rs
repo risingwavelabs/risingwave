@@ -46,6 +46,7 @@ impl ToSql for ScalarImpl {
             ScalarImpl::Jsonb(v) => v.to_sql(ty, out),
             ScalarImpl::Vector(_)
             | ScalarImpl::Int256(_)
+            | ScalarImpl::UInt256(_)
             | ScalarImpl::Struct(_)
             | ScalarImpl::List(_) => {
                 bail_not_implemented!("the postgres encoding for {ty} is unsupported")
@@ -89,6 +90,7 @@ impl ToSql for ScalarRefImpl<'_> {
             ScalarRefImpl::Jsonb(v) => v.to_sql(ty, out),
             ScalarRefImpl::Vector(_)
             | ScalarRefImpl::Int256(_)
+            | ScalarRefImpl::UInt256(_)
             | ScalarRefImpl::Struct(_)
             | ScalarRefImpl::List(_) => {
                 bail_not_implemented!("the postgres encoding for {ty} is unsupported")

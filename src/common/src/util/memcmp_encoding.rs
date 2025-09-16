@@ -24,7 +24,7 @@ use crate::array::{ArrayImpl, DataChunk, VectorItemType};
 use crate::row::{OwnedRow, Row};
 use crate::types::{
     DataType, Date, Datum, F32, F64, Int256, ScalarImpl, Serial, Time, Timestamp, Timestamptz,
-    ToDatumRef,
+    ToDatumRef, UInt256,
 };
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
@@ -171,6 +171,7 @@ fn calculate_encoded_size_inner(
             DataType::Varchar => deserializer.skip_bytes()?,
             DataType::Bytea => deserializer.skip_bytes()?,
             DataType::Int256 => Int256::MEMCMP_ENCODED_SIZE,
+            DataType::UInt256 => UInt256::MEMCMP_ENCODED_SIZE,
         };
 
         // consume offset of fixed_type

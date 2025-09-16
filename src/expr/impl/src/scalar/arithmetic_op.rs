@@ -27,6 +27,7 @@ use rust_decimal::MathematicalOps;
 #[function("add(*float, *float) -> auto")]
 #[function("add(interval, interval) -> interval")]
 #[function("add(int256, int256) -> int256")]
+#[function("add(uint256, uint256) -> uint256")]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -43,6 +44,7 @@ where
 #[function("subtract(*float, *float) -> auto")]
 #[function("subtract(interval, interval) -> interval")]
 #[function("subtract(int256, int256) -> int256")]
+#[function("subtract(uint256, uint256) -> uint256")]
 pub fn general_sub<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -58,6 +60,7 @@ where
 #[function("multiply(decimal, decimal) -> auto")]
 #[function("multiply(*float, *float) -> auto")]
 #[function("multiply(int256, int256) -> int256")]
+#[function("multiply(uint256, uint256) -> uint256")]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -75,6 +78,8 @@ where
 #[function("divide(int256, int256) -> int256")]
 #[function("divide(int256, float8) -> float8")]
 #[function("divide(int256, *int) -> int256")]
+#[function("divide(uint256, uint256) -> uint256")]
+#[function("divide(uint256, float8) -> float8")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -92,9 +97,208 @@ where
     })
 }
 
+use risingwave_common::types::UInt256;
+
+// Addition operators for uint256 with signed integers
+#[function("add(uint256, int2) -> uint256")]
+#[function("add(uint256, int4) -> uint256")]
+#[function("add(uint256, int8) -> uint256")]
+pub fn uint256_add_int<L, T>(l: L, r: T) -> Result<UInt256>
+where
+    L: Into<UInt256>,
+    T: TryInto<UInt256> + Debug,
+    T::Error: Debug,
+{
+    let l_uint256 = l.into();
+    let r_uint256 = r
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    l_uint256
+        .checked_add(r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("add(int2, uint256) -> uint256")]
+#[function("add(int4, uint256) -> uint256")]
+#[function("add(int8, uint256) -> uint256")]
+pub fn int_add_uint256<T, R>(l: T, r: R) -> Result<UInt256>
+where
+    T: TryInto<UInt256> + Debug,
+    T::Error: Debug,
+    R: Into<UInt256>,
+{
+    let l_uint256 = l
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    let r_uint256 = r.into();
+    l_uint256
+        .checked_add(r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+// Subtraction operators for uint256 with signed integers
+#[function("subtract(uint256, int2) -> uint256")]
+#[function("subtract(uint256, int4) -> uint256")]
+#[function("subtract(uint256, int8) -> uint256")]
+pub fn uint256_sub_int<L, T>(l: L, r: T) -> Result<UInt256>
+where
+    L: Into<UInt256>,
+    T: TryInto<UInt256> + Debug,
+    T::Error: Debug,
+{
+    let l_uint256 = l.into();
+    let r_uint256 = r
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    l_uint256
+        .checked_sub(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("subtract(int2, uint256) -> uint256")]
+#[function("subtract(int4, uint256) -> uint256")]
+#[function("subtract(int8, uint256) -> uint256")]
+pub fn int_sub_uint256<T, R>(l: T, r: R) -> Result<UInt256>
+where
+    T: TryInto<UInt256> + Debug,
+    T::Error: Debug,
+    R: Into<UInt256>,
+{
+    let l_uint256 = l
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    let r_uint256 = r.into();
+    l_uint256
+        .checked_sub(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+// Multiplication operators for uint256 with signed integers
+#[function("multiply(uint256, int2) -> uint256")]
+#[function("multiply(uint256, int4) -> uint256")]
+#[function("multiply(uint256, int8) -> uint256")]
+pub fn uint256_mul_int<L, T>(l: L, r: T) -> Result<UInt256>
+where
+    L: Into<UInt256>,
+    T: TryInto<UInt256> + Debug,
+    T::Error: Debug,
+{
+    let l_uint256 = l.into();
+    let r_uint256 = r
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    l_uint256
+        .checked_mul(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("multiply(int2, uint256) -> uint256")]
+#[function("multiply(int4, uint256) -> uint256")]
+#[function("multiply(int8, uint256) -> uint256")]
+pub fn int_mul_uint256<T, R>(l: T, r: R) -> Result<UInt256>
+where
+    T: TryInto<UInt256> + Debug,
+    T::Error: Debug,
+    R: Into<UInt256>,
+{
+    let l_uint256 = l
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    let r_uint256 = r.into();
+    l_uint256
+        .checked_mul(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("divide(uint256, int2) -> uint256")]
+#[function("divide(uint256, int4) -> uint256")]
+#[function("divide(uint256, int8) -> uint256")]
+pub fn uint256_div_int<L, T>(l: L, r: T) -> Result<UInt256>
+where
+    L: Into<UInt256>,
+    T: TryInto<UInt256> + Zero + Debug,
+    T::Error: Debug,
+{
+    if r.is_zero() {
+        return Err(ExprError::DivisionByZero);
+    }
+    let l_uint256 = l.into();
+    let r_uint256 = r
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    l_uint256
+        .checked_div(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("divide(int2, uint256) -> uint256")]
+#[function("divide(int4, uint256) -> uint256")]
+#[function("divide(int8, uint256) -> uint256")]
+pub fn int_div_uint256<T, R>(l: T, r: R) -> Result<UInt256>
+where
+    T: TryInto<UInt256> + Debug,
+    T::Error: Debug,
+    R: Into<UInt256>,
+{
+    let r_uint256 = r.into();
+    if r_uint256.is_zero() {
+        return Err(ExprError::DivisionByZero);
+    }
+    let l_uint256 = l
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    l_uint256
+        .checked_div(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+// Modulus operators for uint256 with signed integers
+#[function("modulus(uint256, int2) -> uint256")]
+#[function("modulus(uint256, int4) -> uint256")]
+#[function("modulus(uint256, int8) -> uint256")]
+pub fn uint256_mod_int<L, T>(l: L, r: T) -> Result<UInt256>
+where
+    L: Into<UInt256>,
+    T: TryInto<UInt256> + Zero + Debug,
+    T::Error: Debug,
+{
+    if r.is_zero() {
+        return Err(ExprError::DivisionByZero);
+    }
+    let l_uint256 = l.into();
+    let r_uint256 = r
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    l_uint256
+        .checked_rem(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("modulus(int2, uint256) -> uint256")]
+#[function("modulus(int4, uint256) -> uint256")]
+#[function("modulus(int8, uint256) -> uint256")]
+pub fn int_mod_uint256<T, R>(l: T, r: R) -> Result<UInt256>
+where
+    T: TryInto<UInt256> + Debug,
+    T::Error: Debug,
+    R: Into<UInt256>,
+{
+    let r_uint256 = r.into();
+    if r_uint256.is_zero() {
+        return Err(ExprError::DivisionByZero);
+    }
+    let l_uint256 = l
+        .try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
+    l_uint256
+        .checked_rem(&r_uint256)
+        .ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("modulus(*int, *int) -> auto")]
 #[function("modulus(decimal, decimal) -> auto")]
 #[function("modulus(int256, int256) -> int256")]
+#[function("modulus(uint256, uint256) -> uint256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -124,6 +328,22 @@ where
         .ok_or(ExprError::NumericOutOfRange)
 }
 
+#[function("neg(uint256) -> uint256")]
+pub fn uint256_neg<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+    T: Zero + Debug,
+{
+    // For UInt256, negation is only valid for zero (result is zero)
+    // Any other value would result in a negative number, which is invalid for unsigned
+    let value = expr.into();
+    if value.is_zero() {
+        Ok(value)
+    } else {
+        Err(ExprError::NumericOutOfRange)
+    }
+}
+
 #[function("abs(*int) -> auto")]
 pub fn general_abs<T1: IsNegative + CheckedNeg>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
@@ -150,6 +370,15 @@ where
     } else {
         Ok(expr)
     }
+}
+
+#[function("abs(uint256) -> uint256")]
+pub fn uint256_abs<TRef, T>(expr: TRef) -> Result<T>
+where
+    TRef: Into<T> + Debug,
+{
+    // UInt256 is always non-negative, so abs is identity
+    Ok(expr.into())
 }
 
 #[function("abs(decimal) -> decimal")]

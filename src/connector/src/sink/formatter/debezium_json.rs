@@ -286,6 +286,7 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
         risingwave_common::types::DataType::Int32 => ("int32", ""),
         risingwave_common::types::DataType::Int64 => ("int64", ""),
         risingwave_common::types::DataType::Int256 => ("string", ""),
+        risingwave_common::types::DataType::UInt256 => ("string", ""),
         risingwave_common::types::DataType::Float32 => ("float", ""),
         risingwave_common::types::DataType::Float64 => ("double", ""),
         // currently, we only support handling decimal as string.

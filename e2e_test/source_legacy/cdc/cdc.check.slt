@@ -70,6 +70,18 @@ select * from numeric_to_rw_int256 order by id;
 6 NULL
 7 NULL
 
+# Test uint256 - only non-negative values within range should work
+query II
+select * from numeric_to_rw_uint256 order by id;
+----
+1 NULL
+2 57896044618658097711785492504343953926634992332820282019728792003956564819967
+3 57896044618658097711785492504343953926634992332820282019728792003956564819968
+4 NULL
+5 NULL
+6 NULL
+7 NULL
+
 query II
 select * from enum_to_varchar order by id;
 ----

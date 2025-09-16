@@ -103,6 +103,7 @@ pub trait ToArrow {
             ArrayImpl::Int32(array) => self.int32_to_arrow(array),
             ArrayImpl::Int64(array) => self.int64_to_arrow(array),
             ArrayImpl::Int256(array) => self.int256_to_arrow(array),
+            ArrayImpl::UInt256(array) => self.uint256_to_arrow(array),
             ArrayImpl::Float32(array) => self.float32_to_arrow(array),
             ArrayImpl::Float64(array) => self.float64_to_arrow(array),
             ArrayImpl::Date(array) => self.date_to_arrow(array),
@@ -165,6 +166,24 @@ pub trait ToArrow {
     #[inline]
     fn int256_to_arrow(&self, array: &Int256Array) -> Result<arrow_array::ArrayRef, ArrayError> {
         Ok(Arc::new(arrow_array::Decimal256Array::from(array)))
+    }
+
+    #[inline]
+    fn uint256_to_arrow(&self, array: &UInt256Array) -> Result<arrow_array::ArrayRef, ArrayError> {
+        // Convert to FixedSizeBinary(32) with big-endian bytes for correct ordering
+        let mut builder =
+            arrow_array::builder::FixedSizeBinaryBuilder::with_capacity(array.len(), 32);
+        for value in array.iter() {
+            match value {
+                Some(uint256) => {
+                    builder
+                        .append_value(uint256.to_be_bytes())
+                        .map_err(ArrayError::to_arrow)?;
+                }
+                None => builder.append_null(),
+            }
+        }
+        Ok(Arc::new(builder.finish()))
     }
 
     #[inline]
@@ -341,6 +360,7 @@ pub trait ToArrow {
             DataType::Int32 => self.int32_type_to_arrow(),
             DataType::Int64 => self.int64_type_to_arrow(),
             DataType::Int256 => self.int256_type_to_arrow(),
+            DataType::UInt256 => self.uint256_type_to_arrow(),
             DataType::Float32 => self.float32_type_to_arrow(),
             DataType::Float64 => self.float64_type_to_arrow(),
             DataType::Date => self.date_type_to_arrow(),
@@ -384,6 +404,11 @@ pub trait ToArrow {
     #[inline]
     fn int256_type_to_arrow(&self) -> arrow_schema::DataType {
         arrow_schema::DataType::Decimal256(arrow_schema::DECIMAL256_MAX_PRECISION, 0)
+    }
+
+    #[inline]
+    fn uint256_type_to_arrow(&self) -> arrow_schema::DataType {
+        arrow_schema::DataType::FixedSizeBinary(32)
     }
 
     #[inline]
@@ -556,6 +581,7 @@ pub trait FromArrow {
             Interval(MonthDayNano) => DataType::Interval,
             Utf8 => DataType::Varchar,
             Binary => DataType::Bytea,
+            FixedSizeBinary(32) => DataType::UInt256,
             LargeUtf8 => self.from_large_utf8()?,
             LargeBinary => self.from_large_binary()?,
             List(field) => DataType::List(Box::new(self.from_field(field)?)),
@@ -660,6 +686,9 @@ pub trait FromArrow {
             }
             Utf8 => self.from_utf8_array(array.as_any().downcast_ref().unwrap()),
             Binary => self.from_binary_array(array.as_any().downcast_ref().unwrap()),
+            FixedSizeBinary(32) => {
+                self.from_fixed_size_binary_array(array.as_any().downcast_ref().unwrap())
+            }
             LargeUtf8 => self.from_large_utf8_array(array.as_any().downcast_ref().unwrap()),
             LargeBinary => self.from_large_binary_array(array.as_any().downcast_ref().unwrap()),
             List(_) => self.from_list_array(array.as_any().downcast_ref().unwrap()),
@@ -866,6 +895,33 @@ pub trait FromArrow {
         array: &arrow_array::LargeBinaryArray,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Bytea(array.into()))
+    }
+
+    fn from_fixed_size_binary_array(
+        &self,
+        array: &arrow_array::FixedSizeBinaryArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        use arrow_array::Array;
+        // Convert FixedSizeBinary(32) back to UInt256Array
+        // The bytes are stored in big-endian format
+        let mut builder = UInt256ArrayBuilder::new(array.len());
+        for i in 0..array.len() {
+            if array.is_null(i) {
+                builder.append(None);
+            } else {
+                let bytes = array.value(i);
+                if bytes.len() != 32 {
+                    return Err(ArrayError::from_arrow(format!(
+                        "expected 32 bytes for UInt256, got {}",
+                        bytes.len()
+                    )));
+                }
+                let mut bytes_array = [0u8; 32];
+                bytes_array.copy_from_slice(bytes);
+                builder.append(Some(UInt256::from_be_bytes(bytes_array).as_scalar_ref()));
+            }
+        }
+        Ok(ArrayImpl::UInt256(builder.finish()))
     }
 
     fn from_list_array(&self, array: &arrow_array::ListArray) -> Result<ArrayImpl, ArrayError> {
@@ -1456,6 +1512,15 @@ impl From<&Int256Array> for arrow_array::Decimal256Array {
     }
 }
 
+impl From<&UInt256Array> for arrow_array::Decimal256Array {
+    fn from(array: &UInt256Array) -> Self {
+        array
+            .iter()
+            .map(|o| o.map(|v| arrow_buffer::i256::from_le_bytes(v.to_le_bytes())))
+            .collect()
+    }
+}
+
 impl From<&arrow_array::Decimal256Array> for Int256Array {
     fn from(array: &arrow_array::Decimal256Array) -> Self {
         let values = array.iter().map(|o| o.map(Int256::from)).collect_vec();
@@ -1861,5 +1926,95 @@ mod tests {
             Int256Array::from_iter(values.iter().map(|r| r.as_ref().map(|x| x.as_scalar_ref())));
         let arrow = arrow_array::Decimal256Array::from(&array);
         assert_eq!(Int256Array::from(&arrow), array);
+    }
+
+    #[test]
+    fn uint256_arrow_sorting_correctness() {
+        use std::str::FromStr;
+
+        use crate::types::UInt256;
+
+        // Create a converter instance
+        #[derive(Default)]
+        struct DefaultArrowConvert;
+        impl ToArrow for DefaultArrowConvert {}
+        impl FromArrow for DefaultArrowConvert {}
+
+        // Test values that expose the Decimal256Array vs FixedSizeBinary issue
+        // These values include ones >= 2^255 (MSB set) that would be misinterpreted as negative in Decimal256Array
+        let values = [
+            Some(UInt256::from(0u64)),
+            Some(UInt256::from(1u64)),
+            Some(UInt256::from(100u64)),
+            // 2^255 - 1 (MSB = 0, should be positive)
+            Some(UInt256::from_str("57896044618658097711785492504343953926634992332820282019728792003956564819967").unwrap()),
+            // 2^255 (MSB = 1, would be negative in Decimal256Array)
+            Some(UInt256::from_str("57896044618658097711785492504343953926634992332820282019728792003956564819968").unwrap()),
+            // 2^256 - 1 (MSB = 1, would be negative in Decimal256Array)
+            Some(UInt256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap()),
+        ];
+
+        let array =
+            UInt256Array::from_iter(values.iter().map(|r| r.as_ref().map(|x| x.as_scalar_ref())));
+
+        // Convert to Arrow using the current implementation (FixedSizeBinary)
+        let converter = DefaultArrowConvert;
+        let arrow = converter.uint256_to_arrow(&array).unwrap();
+
+        // Critical test: verify that Arrow conversion preserves unsigned integer sorting order
+        // This is the core requirement regardless of the underlying Arrow type used
+
+        // Create a sortable representation from the Arrow array
+        // This tests the fundamental sorting behavior
+        let mut arrow_sortable_values = Vec::new();
+
+        for i in 0..array.len() {
+            if array.is_null(i) {
+                arrow_sortable_values.push(None);
+            } else {
+                // Extract sortable representation from Arrow array
+                // The exact format depends on the Arrow type used
+                match arrow.data_type() {
+                    arrow_schema::DataType::FixedSizeBinary(_) => {
+                        let fixed_binary = arrow
+                            .as_any()
+                            .downcast_ref::<arrow_array::FixedSizeBinaryArray>()
+                            .unwrap();
+                        arrow_sortable_values.push(Some(fixed_binary.value(i).to_vec()));
+                    }
+                    arrow_schema::DataType::Decimal256(_, _) => {
+                        let decimal = arrow
+                            .as_any()
+                            .downcast_ref::<arrow_array::Decimal256Array>()
+                            .unwrap();
+                        arrow_sortable_values.push(Some(decimal.value(i).to_le_bytes().to_vec()));
+                    }
+                    _ => panic!(
+                        "Unexpected Arrow data type for UInt256: {:?}",
+                        arrow.data_type()
+                    ),
+                }
+            }
+        }
+
+        // CRITICAL ASSERTION: Arrow representation must preserve UInt256 sorting order
+        // This is the test that FAILS with Decimal256Array but PASSES with FixedSizeBinary
+        for i in 0..values.len() - 1 {
+            if let (Some(uint_a), Some(uint_b)) = (&values[i], &values[i + 1]) {
+                let arrow_a = arrow_sortable_values[i].as_ref().unwrap();
+                let arrow_b = arrow_sortable_values[i + 1].as_ref().unwrap();
+
+                // This assertion captures the core issue: Arrow representation must preserve
+                // the numerical ordering of unsigned integers
+                assert!(
+                    arrow_a < arrow_b,
+                    "SORTING FAILURE: Arrow conversion broke UInt256 ordering! \
+                     UInt256 {:?} < {:?} but Arrow representation violates this order. \
+                     This causes incorrect sorting for large unsigned values.",
+                    uint_a,
+                    uint_b
+                );
+            }
+        }
     }
 }

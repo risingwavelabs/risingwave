@@ -754,6 +754,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 // NUMERIC -> DECIMAL, INT256, VARCHAR
                 return val == Data.DataType.TypeName.DECIMAL_VALUE
                         || val == Data.DataType.TypeName.INT256_VALUE
+                        || val == Data.DataType.TypeName.UINT256_VALUE
                         || val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "money":
                 // MONEY -> NUMERIC
