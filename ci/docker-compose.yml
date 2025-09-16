@@ -20,7 +20,7 @@ services:
 
   mysql:
     image: mariadb:12.0.2
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --log-bin=mysql-bin --binlog-format=ROW --server-id=1
     ports:
       - 3306
     environment:
@@ -37,7 +37,7 @@ services:
   #       after https://github.com/risingwavelabs/risingwave/issues/19783 addressed
   mysql-meta:
     image: mariadb:12.0.2
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --log-bin=mysql-bin --binlog-format=ROW --server-id=1
     ports:
       - 3306
     environment:
