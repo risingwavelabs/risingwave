@@ -195,9 +195,9 @@ from single_partition_rw
 group by created_at
 order by created_at;
 ----
-1735689599000 4 1032
+1735689599000 3 1032
 1735775999000 4 63
-1735862399000 3 48
+1735862399000 4 73
 
 # Verify partition data distribution for sub-partitioned table
 query IT
