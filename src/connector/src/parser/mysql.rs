@@ -74,7 +74,7 @@ macro_rules! handle_data_type_with_signed {
         let column_flags = $mysql_row.columns()[$mysql_datum_index].flags();
 
         if column_flags.contains(ColumnFlags::UNSIGNED_FLAG) {
-            // UNSIGNED类型: 使用unsigned类型转换，然后转换为signed
+            // UNSIGNED type: use unsigned type conversion, then convert to signed
             match $mysql_row.take_opt::<Option<$unsigned_type>, _>($mysql_datum_index) {
                 Some(Ok(Some(val))) => Ok(Some(ScalarImpl::from(val as $signed_type))),
                 Some(Ok(None)) => Ok(None),
@@ -93,7 +93,7 @@ macro_rules! handle_data_type_with_signed {
                 ),
             }
         } else {
-            // SIGNED类型: 使用默认的signed类型转换
+            // SIGNED type: use default signed type conversion
             handle_data_type!($mysql_row, $mysql_datum_index, $column_name, $signed_type)
         }
     }};
