@@ -1023,6 +1023,10 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::threshold")]
     pub threshold: f64,
 
+    /// Recent filter layer shards.
+    #[serde(default = "default::cache_refill::recent_filter_shards")]
+    pub recent_filter_shards: usize,
+
     /// Recent filter layer count.
     #[serde(default = "default::cache_refill::recent_filter_layers")]
     pub recent_filter_layers: usize,
@@ -1030,6 +1034,12 @@ pub struct CacheRefillConfig {
     /// Recent filter layer rotate interval.
     #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
     pub recent_filter_rotate_interval_ms: usize,
+
+    /// Skip check recent filter on data refill.
+    ///
+    /// This option is suitable for a single compute node or debugging.
+    #[serde(default = "default::cache_refill::skip_recent_filter")]
+    pub skip_recent_filter: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1278,6 +1288,9 @@ pub struct StreamingDeveloperConfig {
     /// For example, if this is set to 1000, it means we can have at most 1000 rows in cache.
     #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
     pub hash_join_entry_state_max_rows: usize,
+
+    #[serde(default = "default::developer::streaming_now_progress_ratio")]
+    pub now_progress_ratio: Option<f32>,
 
     /// Enable / Disable profiling stats used by `EXPLAIN ANALYZE`
     #[serde(default = "default::developer::enable_explain_analyze_stats")]
@@ -2146,12 +2159,20 @@ pub mod default {
             0.5
         }
 
+        pub fn recent_filter_shards() -> usize {
+            16
+        }
+
         pub fn recent_filter_layers() -> usize {
             6
         }
 
         pub fn recent_filter_rotate_interval_ms() -> usize {
             10000
+        }
+
+        pub fn skip_recent_filter() -> bool {
+            false
         }
     }
 
@@ -2375,6 +2396,10 @@ pub mod default {
         pub fn streaming_hash_join_entry_state_max_rows() -> usize {
             // NOTE(kwannoel): This is just an arbitrary number.
             30000
+        }
+
+        pub fn streaming_now_progress_ratio() -> Option<f32> {
+            None
         }
 
         pub fn enable_explain_analyze_stats() -> bool {
