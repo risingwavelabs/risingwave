@@ -209,6 +209,7 @@ impl Execute for UpstreamSinkUnionExecutor {
 }
 
 impl UpstreamSinkUnionExecutor {
+    // Need to wait for establishing stream-connections to upstream actors, so async.
     pub async fn new(
         ctx: ActorContextRef,
         local_barrier_manager: LocalBarrierManager,
