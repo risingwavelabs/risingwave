@@ -25,7 +25,8 @@ jobs:
         id: check_documentation_update
         if: steps.PR.outputs.pr_found == 'true'
         run: |
-          if [[ $PR_BODY == *"- [x] <!-- OPTIONAL --> My PR needs documentation updates."* ]]; then
+          REGEX_PATTERN="-\ \[x\].*My PR needs documentation updates\."
+          if echo "$PR_BODY" | grep -q -- "$REGEX_PATTERN"; then
             echo "documentation_update=true" >> $GITHUB_OUTPUT
           elif [[ $PR_LABEL == *"user-facing-changes"* ]]; then
             echo "documentation_update=true" >> $GITHUB_OUTPUT
