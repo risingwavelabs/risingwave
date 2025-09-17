@@ -52,7 +52,9 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
                 })
                 .collect(),
         ),
-        DataType::List(typ) => AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))),
+        DataType::ListNew(list) => {
+            AstDataType::Array(Box::new(data_type_to_ast_data_type(list.elem())))
+        }
         DataType::Vector(n) => AstDataType::Vector(*n as _),
         DataType::Map(_) => todo!(),
     }

@@ -494,8 +494,8 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Struct(_) => Err(SinkError::ClickHouse(
                 "struct needs to be converted into a list".to_owned(),
             )),
-            risingwave_common::types::DataType::List(list) => {
-                Self::check_and_correct_column_type(list.as_ref(), ck_column)?;
+            risingwave_common::types::DataType::ListNew(list) => {
+                Self::check_and_correct_column_type(list.elem(), ck_column)?;
                 Ok(ck_column.r#type.contains("Array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(

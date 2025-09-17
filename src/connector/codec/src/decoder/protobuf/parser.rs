@@ -171,19 +171,20 @@ fn from_protobuf_value<'a>(
             }
         }
         Value::List(values) => {
-            let DataType::List(element_type) = type_expected else {
+            let DataType::ListNew(list_type) = type_expected else {
                 return Err(AccessError::TypeError {
                     expected: type_expected.to_string(),
                     got: format!("repeated {:?}", kind),
                     value: value.to_string(), // Protobuf TEXT
                 });
             };
-            let mut builder = element_type.create_array_builder(values.len());
+            let elem_type = list_type.elem();
+            let mut builder = elem_type.create_array_builder(values.len());
             for value in values {
                 builder.append(from_protobuf_value(
                     field_desc,
                     value,
-                    element_type,
+                    elem_type,
                     messages_as_jsonb,
                 )?);
             }

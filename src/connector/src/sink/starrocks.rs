@@ -259,12 +259,13 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Struct(_) => Err(SinkError::Starrocks(
                 "STRUCT is not supported for Starrocks sink.".to_owned(),
             )),
-            risingwave_common::types::DataType::List(list) => {
+            risingwave_common::types::DataType::ListNew(list) => {
                 // For compatibility with older versions starrocks
                 if starrocks_data_type.contains("unknown") {
                     return Ok(true);
                 }
-                let check_result = Self::check_and_correct_column_type(list.as_ref(), starrocks_data_type)?;
+                // TODO(list): is comparing element type correct?
+                let check_result = Self::check_and_correct_column_type(list.elem(), starrocks_data_type)?;
                 Ok(check_result && starrocks_data_type.contains("array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(

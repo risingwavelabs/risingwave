@@ -211,8 +211,8 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     | DataType::Interval
                     | DataType::Jsonb
                     | DataType::Bytea => Ok(()),
-            DataType::List(list) => {
-                if is_remote_es_sink(sink_name) || matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
+            DataType::ListNew(list) => {
+                if is_remote_es_sink(sink_name) || matches!(list.elem(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(

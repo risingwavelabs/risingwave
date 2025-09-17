@@ -654,7 +654,7 @@ fn bind_params(
                 }
                 DataType::Interval => return Err(data_type_not_supported("Interval")),
                 DataType::Struct(_) => return Err(data_type_not_supported("Struct")),
-                DataType::List(_) => return Err(data_type_not_supported("List")),
+                DataType::ListNew(_) => return Err(data_type_not_supported("List")),
                 DataType::Jsonb => return Err(data_type_not_supported("Jsonb")),
                 DataType::Serial => return Err(data_type_not_supported("Serial")),
                 DataType::Int256 => return Err(data_type_not_supported("Int256")),
@@ -689,7 +689,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         | DataType::Bytea => Ok(()),
         DataType::Interval => Err(data_type_not_supported("Interval")),
         DataType::Struct(_) => Err(data_type_not_supported("Struct")),
-        DataType::List(_) => Err(data_type_not_supported("List")),
+        DataType::ListNew(_) => Err(data_type_not_supported("List")),
         DataType::Jsonb => Err(data_type_not_supported("Jsonb")),
         DataType::Serial => Err(data_type_not_supported("Serial")),
         DataType::Int256 => Err(data_type_not_supported("Int256")),

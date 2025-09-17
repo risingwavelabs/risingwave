@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 use rand::Rng;
 use rand::distr::Alphanumeric;
 use rand::prelude::IndexedRandom;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ListType};
 use risingwave_sqlparser::ast::{Array, DataType as AstDataType, Expr, Value};
 
 use crate::sql_gen::SqlGenerator;
@@ -120,10 +120,10 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 data_type: AstDataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             })),
-            T::List(ref ty) => {
+            T::ListNew(ref list) => {
                 let n = self.rng.random_range(1..=4);
                 Expr::Array(Array {
-                    elem: self.gen_simple_scalar_list(ty, n),
+                    elem: self.gen_simple_scalar_list(list, n),
                     named: true,
                 })
             }
@@ -139,9 +139,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
         }
     }
 
-    /// Generates a list of `n` simple scalar values of a specific `type`.
-    fn gen_simple_scalar_list(&mut self, ty: &DataType, n: usize) -> Vec<Expr> {
-        (0..n).map(|_| self.gen_simple_scalar(ty)).collect()
+    /// Generates a list of `n` simple scalar values of a specific type.
+    fn gen_simple_scalar_list(&mut self, list: &ListType, n: usize) -> Vec<Expr> {
+        (0..n)
+            .map(|_| self.gen_simple_scalar(list.elem()))
+            .collect()
     }
 
     fn gen_int(&mut self, min: i64, max: i64) -> String {

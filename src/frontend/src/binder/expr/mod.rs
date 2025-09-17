@@ -1013,8 +1013,8 @@ impl Binder {
 
     pub fn bind_cast_inner(&mut self, expr: &Expr, data_type: &DataType) -> Result<ExprImpl> {
         match (expr, data_type) {
-            (Expr::Array(Array { elem: expr, .. }), DataType::List(element_type)) => {
-                self.bind_array_cast(expr, element_type)
+            (Expr::Array(Array { elem: expr, .. }), DataType::ListNew(list_type)) => {
+                self.bind_array_cast(expr, list_type.elem())
             }
             (Expr::Map { entries }, DataType::Map(m)) => self.bind_map_cast(entries, m),
             (expr, data_type) => {

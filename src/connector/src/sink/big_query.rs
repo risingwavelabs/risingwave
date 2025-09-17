@@ -386,8 +386,8 @@ impl BigQuerySink {
                 }
                 Ok(format!("STRUCT<{}>", elements_vec.join(", ")))
             }
-            DataType::List(l) => {
-                let element_string = Self::get_string_and_check_support_from_datatype(l.as_ref())?;
+            DataType::ListNew(l) => {
+                let element_string = Self::get_string_and_check_support_from_datatype(l.elem())?;
                 Ok(format!("ARRAY<{}>", element_string))
             }
             DataType::Bytea => Ok("BYTES".to_owned()),
@@ -437,8 +437,9 @@ impl BigQuerySink {
                 }
                 TableFieldSchema::record(&rw_field.name, sub_fields)
             }
-            DataType::List(dt) => {
-                let inner_field = Self::map_field(&Field::with_name(*dt.clone(), &rw_field.name))?;
+            DataType::ListNew(lt) => {
+                let inner_field =
+                    Self::map_field(&Field::with_name(lt.elem().clone(), &rw_field.name))?;
                 TableFieldSchema {
                     mode: Some("REPEATED".to_owned()),
                     ..inner_field
@@ -957,8 +958,8 @@ fn build_protobuf_field(
             field.type_name = Some(name);
             return Ok((field, Some(sub_proto)));
         }
-        DataType::List(l) => {
-            let (mut field, proto) = build_protobuf_field(l.as_ref(), index, name.clone())?;
+        DataType::ListNew(l) => {
+            let (mut field, proto) = build_protobuf_field(l.elem(), index, name.clone())?;
             field.label = Some(field_descriptor_proto::Label::Repeated.into());
             return Ok((field, proto));
         }

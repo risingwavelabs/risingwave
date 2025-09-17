@@ -172,9 +172,9 @@ pub enum DataType {
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Struct(StructType),
-    #[display("{0}[]")]
-    #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
-    List(Box<DataType>),
+    #[display("{0}")]
+    #[from_str(regex = r"(?i)^(?P<0>.+)$")]
+    ListNew(ListType),
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
     Bytea,
@@ -193,6 +193,14 @@ pub enum DataType {
     #[display("vector({0})")]
     #[from_str(regex = "(?i)^vector\\((?P<0>.+)\\)$")]
     Vector(usize),
+}
+
+impl DataType {
+    /// Construct a [`DataType::ListNew`] from the element type.
+    #[allow(non_snake_case)] // to be compatible with the old `List(/* elem */)` variant
+    pub fn List(elem: Box<DataType>) -> Self {
+        Self::ListNew(ListType::from_elem(elem))
+    }
 }
 
 impl !PartialOrd for DataType {}
@@ -231,7 +239,7 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
             DataTypeName::Struct
-            | DataTypeName::List
+            | DataTypeName::ListNew
             | DataTypeName::Map
             | DataTypeName::Vector => Err(
                 "Functions returning parameterized types can not be inferred. Please use `FunctionCall::new_unchecked`.",
@@ -326,7 +334,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::Bytea => PbTypeName::Bytea,
             DataTypeName::Jsonb => PbTypeName::Jsonb,
             DataTypeName::Struct => PbTypeName::Struct,
-            DataTypeName::List => PbTypeName::List,
+            DataTypeName::ListNew => PbTypeName::List,
             DataTypeName::Int256 => PbTypeName::Int256,
             DataTypeName::Map => PbTypeName::Map,
             DataTypeName::Vector => PbTypeName::Vector,
@@ -395,7 +403,7 @@ pub mod data_types {
     #[macro_export]
     macro_rules! _composite_data_types {
         () => {
-            DataType::Struct { .. } | DataType::List { .. } | DataType::Map { .. }
+            DataType::Struct { .. } | DataType::ListNew { .. } | DataType::Map { .. }
         };
     }
     pub use _composite_data_types as composite;
@@ -448,8 +456,8 @@ impl DataType {
                     pb.field_ids = ids.map(|id| id.get_id()).collect();
                 }
             }
-            DataType::List(datatype) => {
-                pb.field_type = vec![datatype.to_protobuf()];
+            DataType::ListNew(datatype) => {
+                pb.field_type = vec![datatype.elem().to_protobuf()];
             }
             DataType::Map(datatype) => {
                 // Same as List<Struct<K,V>>
@@ -503,7 +511,7 @@ impl DataType {
     }
 
     pub fn is_array(&self) -> bool {
-        matches!(self, DataType::List(_))
+        matches!(self, DataType::ListNew(_))
     }
 
     pub fn is_struct(&self) -> bool {
@@ -560,16 +568,18 @@ impl DataType {
     /// # Panics
     ///
     /// Panics if the type is not a list type.
+    // TODO(list): `as_list -> &ListType`
     pub fn as_list_element_type(&self) -> &DataType {
         match self {
-            DataType::List(t) => t,
+            DataType::ListNew(t) => t.elem(),
             t => panic!("expect list type, got {t}"),
         }
     }
 
+    // TODO(list): `into_list -> ListType`
     pub fn into_list_element_type(self) -> DataType {
         match self {
-            DataType::List(t) => *t,
+            DataType::ListNew(t) => t.into_elem(),
             t => panic!("expect list type, got {t}"),
         }
     }
@@ -583,9 +593,10 @@ impl DataType {
     /// assert_eq!(List(Box::new(Int32)).unnest_list(), &Int32);
     /// assert_eq!(List(Box::new(List(Box::new(Int32)))).unnest_list(), &Int32);
     /// ```
+    // TODO(list): shall we implement on `ListType`?
     pub fn unnest_list(&self) -> &Self {
         match self {
-            DataType::List(inner) => inner.unnest_list(),
+            DataType::ListNew(list) => list.elem().unnest_list(),
             _ => self,
         }
     }
@@ -595,9 +606,9 @@ impl DataType {
     pub fn array_ndims(&self) -> usize {
         let mut d = 0;
         let mut t = self;
-        while let Self::List(inner) = t {
+        while let Self::ListNew(list) = t {
             d += 1;
-            t = inner;
+            t = list.elem();
         }
         d
     }
@@ -606,7 +617,7 @@ impl DataType {
     pub fn equals_datatype(&self, other: &DataType) -> bool {
         match (self, other) {
             (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
-            (Self::List(d1), Self::List(d2)) => d1.equals_datatype(d2),
+            (Self::ListNew(d1), Self::ListNew(d2)) => d1.elem().equals_datatype(d2.elem()),
             (Self::Map(m1), Self::Map(m2)) => {
                 m1.key().equals_datatype(m2.key()) && m1.value().equals_datatype(m2.value())
             }
@@ -640,7 +651,7 @@ impl DataType {
                 Some(struct_can_alter)
             }
 
-            DataType::List(inner_type) => inner_type.can_alter(),
+            DataType::ListNew(list_type) => list_type.elem().can_alter(),
             DataType::Map(map_type) => {
                 debug_assert!(
                     map_type.key().is_simple(),
@@ -1061,7 +1072,7 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
-            DataType::Vector(_) | DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
+            DataType::Vector(_) | DataType::Struct(_) | DataType::ListNew(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
         };
@@ -1090,7 +1101,7 @@ impl ScalarImpl {
             DataType::Timestamptz => Timestamptz::from_str(s)?.into(),
             DataType::Time => Time::from_str(s)?.into(),
             DataType::Interval => Interval::from_str(s)?.into(),
-            DataType::List(_) => ListValue::from_str(s, data_type)?.into(),
+            DataType::ListNew(_) => ListValue::from_str(s, data_type)?.into(),
             DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
@@ -1255,7 +1266,7 @@ impl ScalarImpl {
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
-            Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
+            Ty::ListNew(t) => ListValue::memcmp_deserialize(t.elem(), de)?.to_scalar_value(),
             Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
             Ty::Vector(dimension) => {
                 VectorVal::memcmp_deserialize(*dimension, de)?.to_scalar_value()
@@ -1433,7 +1444,7 @@ mod tests {
                         ("b", DataType::Float64),
                     ])),
                 ),
-                DataTypeName::List => (
+                DataTypeName::ListNew => (
                     ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
                 ),

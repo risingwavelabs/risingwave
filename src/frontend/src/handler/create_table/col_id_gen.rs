@@ -93,10 +93,10 @@ impl ColumnIdGenerator {
                         });
                     }
                 }
-                DataType::List(inner) => {
+                DataType::ListNew(list) => {
                     // There's no id for the element as list's own structure won't change.
                     with_segment!(Segment::ListElement, {
-                        handle(existing, path, ColumnId::placeholder(), *inner.clone());
+                        handle(existing, path, ColumnId::placeholder(), list.elem().clone());
                     });
                 }
                 DataType::Map(map) => {
@@ -249,9 +249,10 @@ impl ColumnIdGenerator {
                     }
                     DataType::Struct(StructType::new(new_fields).with_ids(ids))
                 }
-                DataType::List(inner) => {
-                    let (_, new_inner) =
-                        with_segment!(Segment::ListElement, { handle(this, path, *inner)? });
+                DataType::ListNew(list) => {
+                    let (_, new_inner) = with_segment!(Segment::ListElement, {
+                        handle(this, path, list.elem().clone())?
+                    });
                     DataType::List(Box::new(new_inner))
                 }
                 DataType::Map(map) => {

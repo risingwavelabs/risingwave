@@ -2011,12 +2011,15 @@ fn get_fields<'a>(
                     schema_fields.insert(MAP_KEY, map_fields.key());
                     schema_fields.insert(MAP_VALUE, map_fields.value());
                 }
-                risingwave_common::types::DataType::List(list_field) => {
-                    list_field.as_struct().iter().for_each(|(name, data_type)| {
-                        let res = schema_fields.insert(name, data_type);
-                        // This assert is to make sure there is no duplicate field name in the schema.
-                        assert!(res.is_none())
-                    });
+                risingwave_common::types::DataType::ListNew(list) => {
+                    list.elem()
+                        .as_struct()
+                        .iter()
+                        .for_each(|(name, data_type)| {
+                            let res = schema_fields.insert(name, data_type);
+                            // This assert is to make sure there is no duplicate field name in the schema.
+                            assert!(res.is_none())
+                        });
                 }
                 _ => {}
             };

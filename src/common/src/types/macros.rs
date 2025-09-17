@@ -57,8 +57,8 @@ macro_rules! for_all_variants {
             { Jsonb,        Jsonb,        jsonb,        $crate::types::JsonbVal,    $crate::types::JsonbRef<'scalar>,   $crate::array::JsonbArray,          $crate::array::JsonbArrayBuilder        },
             { Serial,       Serial,       serial,       $crate::types::Serial,      $crate::types::Serial,              $crate::array::SerialArray,         $crate::array::SerialArrayBuilder       },
             { Struct,       Struct,       struct,       $crate::types::StructValue, $crate::types::StructRef<'scalar>,  $crate::array::StructArray,         $crate::array::StructArrayBuilder       },
-            { List,         List,         list,         $crate::types::ListValue,   $crate::types::ListRef<'scalar>,    $crate::array::ListArray,           $crate::array::ListArrayBuilder         },
-            { Map,          Map,          map,          $crate::types::MapValue,    $crate::types::MapRef<'scalar>,     $crate::array::MapArray,            $crate::array::MapArrayBuilder         },
+            { ListNew,      List,         list,         $crate::types::ListValue,   $crate::types::ListRef<'scalar>,    $crate::array::ListArray,           $crate::array::ListArrayBuilder         },
+            { Map,          Map,          map,          $crate::types::MapValue,    $crate::types::MapRef<'scalar>,     $crate::array::MapArray,            $crate::array::MapArrayBuilder          },
             { Vector,       Vector,       vector,       $crate::types::VectorVal,   $crate::types::VectorRef<'scalar>,  $crate::array::VectorArray,         $crate::array::VectorArrayBuilder       },
             { Bytea,        Bytea,        bytea,        Box<[u8]>,                  &'scalar [u8],                      $crate::array::BytesArray,          $crate::array::BytesArrayBuilder        }
         }

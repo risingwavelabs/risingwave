@@ -150,13 +150,13 @@ mod type_mapping {
                 DatumCow::Borrowed(Some(scalar))
             }
             (data_types::simple!(), data_types::simple!()) => DatumCow::Borrowed(Some(scalar)),
-            (DataType::List(from_inner_type), DataType::List(into_inner_type)) => {
+            (DataType::ListNew(from_list_type), DataType::ListNew(into_list_type)) => {
                 let list = scalar.into_list();
 
                 // Recursively map each element.
-                let mut builder = into_inner_type.create_array_builder(list.len());
+                let mut builder = into_list_type.elem().create_array_builder(list.len());
                 for datum in list.iter() {
-                    let datum = do_map(datum, from_inner_type, into_inner_type);
+                    let datum = do_map(datum, from_list_type.elem(), into_list_type.elem());
                     builder.append(datum);
                 }
                 let list = ListValue::new(builder.finish());

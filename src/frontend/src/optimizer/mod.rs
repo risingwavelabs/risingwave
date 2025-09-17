@@ -1159,7 +1159,7 @@ fn find_version_column_indices(
         for (index, column) in column_catalog.iter().enumerate() {
             if column.column_desc.name == version_column_name {
                 if let &DataType::Jsonb
-                | &DataType::List(_)
+                | &DataType::ListNew(_)
                 | &DataType::Struct(_)
                 | &DataType::Bytea
                 | &DataType::Boolean = column.data_type()

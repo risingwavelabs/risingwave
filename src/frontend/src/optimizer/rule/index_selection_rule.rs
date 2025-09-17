@@ -786,7 +786,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Bytea => 20,
             DataType::Jsonb => 20,
             DataType::Struct { .. } => 20,
-            DataType::List { .. } => 20,
+            DataType::ListNew { .. } => 20,
             DataType::Map(_) => 20,
             DataType::Vector(d) => d * size_of::<VectorDistanceType>(),
         }

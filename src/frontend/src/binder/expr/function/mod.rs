@@ -497,7 +497,7 @@ impl Binder {
         })?;
 
         let inner_ty = match bound_array.return_type() {
-            DataType::List(ty) => *ty,
+            DataType::ListNew(ty) => ty.into_elem(),
             real_type => return Err(ErrorCode::BindError(format!(
                 "The `array` argument for `array_transform` should be an array, but {} were got",
                 real_type

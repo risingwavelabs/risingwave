@@ -240,27 +240,28 @@ impl ScalarAdapter {
                 pg_numeric_to_rw_numeric(&numeric)
             }
             (ScalarAdapter::Enum(EnumString(s)), &DataType::Varchar) => Some(ScalarImpl::from(s)),
-            (ScalarAdapter::NumericList(vec), &DataType::List(dtype)) => {
-                let mut builder = dtype.create_array_builder(0);
+            (ScalarAdapter::NumericList(vec), &DataType::ListNew(list)) => {
+                let elem = list.elem();
+                let mut builder = elem.create_array_builder(0);
                 for val in vec {
-                    let scalar = match (val, &dtype) {
+                    let scalar = match (val, &elem) {
                         // A numeric array contains special values like NaN, Inf, -Inf, which are not supported in Debezium,
                         // when we encounter these special values, we fallback the array to NULL, returning None directly.
-                        (Some(numeric), box DataType::Varchar) => {
+                        (Some(numeric), DataType::Varchar) => {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
                             } else {
-                                ScalarAdapter::Numeric(numeric).into_scalar(dtype)
+                                ScalarAdapter::Numeric(numeric).into_scalar(elem)
                             }
                         }
-                        (Some(numeric), box DataType::Int256 | box DataType::Decimal) => {
+                        (Some(numeric), DataType::Int256 | DataType::Decimal) => {
                             if pg_numeric_is_special(&numeric) {
                                 return None;
                             } else {
                                 // A PgNumeric can sometimes exceeds the range of Int256 and RwNumeric.
                                 // In our json parsing, we fallback the array to NULL in this case.
                                 // Here we keep the behavior consistent and return None directly.
-                                match ScalarAdapter::Numeric(numeric).into_scalar(dtype) {
+                                match ScalarAdapter::Numeric(numeric).into_scalar(elem) {
                                     Some(scalar) => Some(scalar),
                                     None => {
                                         return None;
@@ -278,8 +279,8 @@ impl ScalarAdapter {
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
             }
-            (ScalarAdapter::EnumList(vec), &DataType::List(dtype)) => {
-                let mut builder = dtype.create_array_builder(0);
+            (ScalarAdapter::EnumList(vec), &DataType::ListNew(list)) => {
+                let mut builder = list.elem().create_array_builder(0);
                 for val in vec {
                     match val {
                         Some(EnumString(s)) => {
@@ -292,14 +293,15 @@ impl ScalarAdapter {
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
             }
-            (ScalarAdapter::List(vec), &DataType::List(dtype)) => {
+            (ScalarAdapter::List(vec), &DataType::ListNew(list)) => {
+                let elem = list.elem();
                 // Due to https://github.com/risingwavelabs/risingwave/issues/16882, INTERVAL_ARRAY is not supported in Debezium, so we keep backfilling and CDC consistent.
-                if matches!(**dtype, DataType::Interval) {
+                if matches!(elem, DataType::Interval) {
                     return None;
                 }
-                let mut builder = dtype.create_array_builder(0);
+                let mut builder = elem.create_array_builder(0);
                 for val in vec {
-                    builder.append(val.and_then(|v| v.into_scalar(dtype)));
+                    builder.append(val.and_then(|v| v.into_scalar(elem)));
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
             }
@@ -321,10 +323,10 @@ pub fn validate_pg_type_to_rw_type(pg_type: &DataType, rw_type: &DataType) -> bo
     }
     match rw_type {
         DataType::Varchar => matches!(pg_type, DataType::Decimal | DataType::Int256),
-        DataType::List(box DataType::Varchar) => {
+        DataType::ListNew(list) if list.elem() == &DataType::Varchar => {
             matches!(
                 pg_type,
-                DataType::List(box (DataType::Decimal | DataType::Int256))
+                DataType::ListNew(list) if matches!(list.elem(), DataType::Decimal | DataType::Int256)
             )
         }
         _ => false,

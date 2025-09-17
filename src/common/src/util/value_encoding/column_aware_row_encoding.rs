@@ -138,6 +138,7 @@ mod new_serde {
     }
 
     // Copy of `plain` but call `new_` for the elements.
+    // TODO(list): pass `ListType`
     fn new_deserialize_list(item_type: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
         let len = data.get_u32_le();
         let mut builder = item_type.create_array_builder(len as usize);
@@ -172,7 +173,7 @@ mod new_serde {
     pub fn new_deserialize_scalar(ty: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
         Ok(match ty {
             DataType::Struct(struct_def) => new_deserialize_struct(struct_def, data)?,
-            DataType::List(item_type) => new_deserialize_list(item_type, data)?,
+            DataType::ListNew(list_type) => new_deserialize_list(list_type.elem(), data)?,
             DataType::Map(map_type) => new_deserialize_map(map_type, data)?,
             data_types::simple!() => plain::deserialize_value(ty, data)?,
         })

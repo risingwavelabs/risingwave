@@ -219,6 +219,7 @@ trait MaybeData: std::fmt::Debug {
     /// Switch to `RecordSchema` after #12562
     fn on_struct(self, st: &StructType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
+    // TODO(list): pass `ListType`
     fn on_list(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
     fn on_map(
@@ -477,8 +478,8 @@ fn on_field<D: MaybeData>(
             AvroSchema::Record { .. } => maybe.on_struct(st, inner, refs)?,
             _ => return no_match_err(),
         },
-        DataType::List(elem) => match inner {
-            AvroSchema::Array(avro_elem) => maybe.on_list(elem, avro_elem, refs)?,
+        DataType::ListNew(lt) => match inner {
+            AvroSchema::Array(avro_elem) => maybe.on_list(lt.elem(), avro_elem, refs)?,
             _ => return no_match_err(),
         },
         DataType::Map(m) => {

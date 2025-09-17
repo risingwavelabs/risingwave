@@ -203,7 +203,7 @@ impl DorisSink {
                 "INTERVAL is not supported for Doris sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Struct(_) => Ok(doris_data_type.contains("STRUCT")),
-            risingwave_common::types::DataType::List(_) => Ok(doris_data_type.contains("ARRAY")),
+            risingwave_common::types::DataType::ListNew(_) => Ok(doris_data_type.contains("ARRAY")),
             risingwave_common::types::DataType::Bytea => {
                 Err(SinkError::Doris("BYTEA is not supported for Doris sink. Please convert to VARCHAR or other supported types.".to_owned()))
             }

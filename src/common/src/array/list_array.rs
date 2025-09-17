@@ -64,7 +64,7 @@ impl ArrayBuilder for ListArrayBuilder {
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
-        let DataType::List(value_type) = ty else {
+        let DataType::ListNew(list_ty) = ty else {
             panic!("data type must be DataType::List");
         };
         let mut offsets = Vec::with_capacity(capacity + 1);
@@ -72,7 +72,7 @@ impl ArrayBuilder for ListArrayBuilder {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             offsets,
-            value: Box::new(value_type.create_array_builder(capacity)),
+            value: Box::new(list_ty.elem().create_array_builder(capacity)),
         }
     }
 
@@ -409,6 +409,7 @@ impl ListValue {
         self.values.data_type()
     }
 
+    // TODO(list): pass `ListType`
     pub fn memcmp_deserialize(
         item_datatype: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
@@ -698,7 +699,7 @@ impl ToText for ListRef<'_> {
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            DataType::List { .. } => self.write(f),
+            DataType::ListNew { .. } => self.write(f),
             _ => unreachable!(),
         }
     }

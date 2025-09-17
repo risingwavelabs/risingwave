@@ -775,14 +775,15 @@ pub fn extract_bson_field(
             Some(ScalarImpl::Struct(value))
         }
 
-        DataType::List(list_type) => {
+        DataType::ListNew(list_type) => {
+            let elem_type = list_type.elem();
             let Some(d_array) = datum.as_array() else {
                 return Err(type_error(datum));
             };
 
-            let mut builder = list_type.create_array_builder(d_array.len());
+            let mut builder = elem_type.create_array_builder(d_array.len());
             for item in d_array {
-                builder.append(extract_bson_field(list_type, item, None)?);
+                builder.append(extract_bson_field(elem_type, item, None)?);
             }
             Some(ScalarImpl::from(ListValue::new(builder.finish())))
         }

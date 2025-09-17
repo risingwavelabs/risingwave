@@ -323,7 +323,7 @@ impl ExprImpl {
             ));
         }
         match self.return_type() {
-            DataType::List(_) => Ok(()),
+            DataType::ListNew(_) => Ok(()),
             t => Err(ErrorCode::BindError(format!("expects array but got {t}"))),
         }
     }

@@ -112,7 +112,7 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
+            DataType::ListNew(datatype) => self.list_type_to_arrow(datatype.elem())?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
             DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
         };
@@ -279,7 +279,7 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
+            DataType::ListNew(datatype) => self.list_type_to_arrow(datatype.elem())?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
             DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
         };
