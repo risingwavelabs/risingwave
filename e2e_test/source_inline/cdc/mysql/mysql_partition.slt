@@ -71,6 +71,11 @@ mysql -e "
     WITH RECURSIVE numbers AS (SELECT 4 as n UNION ALL SELECT n + 1 FROM numbers WHERE n < 1500)
     INSERT INTO single_partition_table (id, purchased, created_at)
     SELECT n, (n % 100) + 1, CASE WHEN n % 3 = 0 THEN 1735689599000 WHEN n % 3 = 1 THEN 1735775999000 ELSE 1735862399000 END FROM numbers;
+"
+
+system ok
+mysql -e "
+    USE testdb_partition;
     WITH RECURSIVE numbers AS (SELECT 4 as n UNION ALL SELECT n + 1 FROM numbers WHERE n < 1500)
     INSERT INTO sub_partition_table (id, region_code, amount, created_at)
     SELECT n, CASE WHEN n % 3 = 0 THEN 'US' WHEN n % 3 = 1 THEN 'EU' ELSE 'ASIA' END, (n % 1000) + 100.00, CASE WHEN n % 3 = 0 THEN 1735689599000 WHEN n % 3 = 1 THEN 1735775999000 ELSE 1735862399000 END FROM numbers;
