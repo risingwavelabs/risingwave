@@ -307,7 +307,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
                 false
             }
         }
-        DataType::ListNew(rw_list) => {
+        DataType::Ljst(rw_list) => {
             if let DeltaLakeDataType::Array(dl_list) = dl_data_type {
                 check_field_type(rw_list.elem(), dl_list.element_type())?
             } else {

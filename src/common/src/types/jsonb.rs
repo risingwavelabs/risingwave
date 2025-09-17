@@ -429,7 +429,7 @@ impl<'a> JsonbRef<'a> {
         }
         let datum = match ty {
             DataType::Jsonb => ScalarImpl::Jsonb(self.into()),
-            DataType::ListNew(l) => ScalarImpl::List(self.to_list(l)?),
+            DataType::Ljst(l) => ScalarImpl::List(self.to_list(l)?),
             DataType::Struct(s) => ScalarImpl::Struct(self.to_struct(s)?),
             _ => {
                 let s = self.force_string();

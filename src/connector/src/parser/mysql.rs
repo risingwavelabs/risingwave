@@ -198,7 +198,7 @@ pub fn mysql_datum_to_rw_datum(
         DataType::Vector(_)
         | DataType::Interval
         | DataType::Struct(_)
-        | DataType::ListNew(_)
+        | DataType::Ljst(_)
         | DataType::Int256
         | DataType::Serial
         | DataType::Map(_) => Err(anyhow!(

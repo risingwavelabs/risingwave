@@ -328,7 +328,7 @@ fn wasm_identifier_v1(
             DataType::Int256 => "int256".to_owned(),
             DataType::Bytea => "binary".to_owned(),
             DataType::Varchar => "string".to_owned(),
-            DataType::ListNew(inner) => format!("{}[]", datatype_name(inner)?),
+            DataType::Ljst(inner) => format!("{}[]", datatype_name(inner)?),
             DataType::Struct(s) => format!(
                 "struct<{}>",
                 s.iter()

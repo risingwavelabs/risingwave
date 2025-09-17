@@ -120,7 +120,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 data_type: AstDataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             })),
-            T::ListNew(ref list) => {
+            T::Ljst(ref list) => {
                 let n = self.rng.random_range(1..=4);
                 Expr::Array(Array {
                     elem: self.gen_simple_scalar_list(list, n),

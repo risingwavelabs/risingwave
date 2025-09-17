@@ -114,7 +114,7 @@ impl MapType {
             | DataType::Timestamptz
             | DataType::Interval
             | DataType::Struct(_)
-            | DataType::ListNew(_)
+            | DataType::Ljst(_)
             | DataType::Bytea
             | DataType::Jsonb
             | DataType::Serial

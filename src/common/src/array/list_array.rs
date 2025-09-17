@@ -64,7 +64,7 @@ impl ArrayBuilder for ListArrayBuilder {
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
-        let DataType::ListNew(list_ty) = ty else {
+        let DataType::Ljst(list_ty) = ty else {
             panic!("data type must be DataType::List");
         };
         let mut offsets = Vec::with_capacity(capacity + 1);
@@ -699,7 +699,7 @@ impl ToText for ListRef<'_> {
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            DataType::ListNew { .. } => self.write(f),
+            DataType::Ljst { .. } => self.write(f),
             _ => unreachable!(),
         }
     }

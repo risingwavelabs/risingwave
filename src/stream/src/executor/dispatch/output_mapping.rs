@@ -150,7 +150,7 @@ mod type_mapping {
                 DatumCow::Borrowed(Some(scalar))
             }
             (data_types::simple!(), data_types::simple!()) => DatumCow::Borrowed(Some(scalar)),
-            (DataType::ListNew(from_list_type), DataType::ListNew(into_list_type)) => {
+            (DataType::Ljst(from_list_type), DataType::Ljst(into_list_type)) => {
                 let list = scalar.into_list();
 
                 // Recursively map each element.

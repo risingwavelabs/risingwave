@@ -302,7 +302,7 @@ fn datum_to_json_object(
             }
             JsonbHandlingMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
         },
-        (DataType::ListNew(lt), ScalarRefImpl::List(list_ref)) => {
+        (DataType::Ljst(lt), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
             let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(lt.into_elem());
@@ -409,7 +409,7 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
         DataType::Timestamptz => "string",
         DataType::Interval => "string",
         DataType::Struct(_) => "struct",
-        DataType::ListNew(_) => "array",
+        DataType::Ljst(_) => "array",
         DataType::Vector(_) => "array",
         DataType::Bytea => "bytes",
         DataType::Jsonb => "string",
@@ -435,8 +435,11 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
                 .collect_vec();
             mapping.insert("fields".to_owned(), json!(sub_fields));
         }
-        DataType::ListNew(list_type) => {
-            mapping.insert("items".to_owned(), json!(type_as_json_schema(list_type.elem())));
+        DataType::Ljst(list_type) => {
+            mapping.insert(
+                "items".to_owned(),
+                json!(type_as_json_schema(list_type.elem())),
+            );
         }
         _ => {}
     }

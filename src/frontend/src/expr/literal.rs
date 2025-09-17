@@ -61,7 +61,7 @@ impl std::fmt::Debug for Literal {
                         "'{}'",
                         v.as_scalar_ref_impl().to_text_with_type(&data_type)
                     ),
-                    DataType::ListNew { .. } => write!(f, "{}", v.as_list().display_for_explain()),
+                    DataType::Ljst { .. } => write!(f, "{}", v.as_list().display_for_explain()),
                 },
             }?;
             write!(f, ":{:?}", data_type)

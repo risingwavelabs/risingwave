@@ -47,7 +47,7 @@ pub fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f6
             DataType::Int256 => seed_rand_array_ref::<Int256Array>(size, seed, null_ratio),
             DataType::Bytea => seed_rand_array_ref::<BytesArray>(size, seed, null_ratio),
             DataType::Jsonb => seed_rand_array_ref::<JsonbArray>(size, seed, null_ratio),
-            DataType::Vector(_) | DataType::Struct(_) | DataType::ListNew(_) | DataType::Map(_) => {
+            DataType::Vector(_) | DataType::Struct(_) | DataType::Ljst(_) | DataType::Map(_) => {
                 todo!()
             }
         });

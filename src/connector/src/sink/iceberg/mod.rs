@@ -2011,7 +2011,7 @@ fn get_fields<'a>(
                     schema_fields.insert(MAP_KEY, map_fields.key());
                     schema_fields.insert(MAP_VALUE, map_fields.value());
                 }
-                risingwave_common::types::DataType::ListNew(list) => {
+                risingwave_common::types::DataType::Ljst(list) => {
                     list.elem()
                         .as_struct()
                         .iter()

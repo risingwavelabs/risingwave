@@ -72,7 +72,7 @@ impl DataType {
                     DataType::Serial => 8,
                     DataType::Int256 => -1,
                     DataType::Vector(_) => -1,
-                    DataType::ListNew(_) | DataType::Struct(_) | DataType::Map(_) => -1,
+                    DataType::Ljst(_) | DataType::Struct(_) | DataType::Map(_) => -1,
                 }
             }
         }
@@ -113,14 +113,14 @@ impl DataType {
                     $(
                     DataType::$enum => $oid,
                     )*
-                    DataType::ListNew(list) => match list.elem().unnest_list() {
+                    DataType::Ljst(list) => match list.elem().unnest_list() {
                         $(
                             DataType::$enum => $oid_array,
                         )*
                         DataType::Int256 => 1302,
                         DataType::Serial => 1016,
                         DataType::Struct(_) => 2287, // pseudo-type of array[struct] (see `pg_type.dat`)
-                        DataType::ListNew { .. } => unreachable!("Never reach here!"),
+                        DataType::Ljst { .. } => unreachable!("Never reach here!"),
                         DataType::Map(_) => 1304,
                         DataType::Vector(_) => 1306,
                     }
@@ -145,7 +145,7 @@ impl DataType {
                     DataType::$enum => stringify!($name),
                     )*
                     DataType::Struct(_) => "struct",
-                    DataType::ListNew(_) => "list",
+                    DataType::Ljst(_) => "list",
                     DataType::Serial => "serial",
                     DataType::Int256 => "rw_int256",
                     DataType::Map(_) => "map",

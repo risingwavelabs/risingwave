@@ -98,7 +98,7 @@ pub fn infer_some_all(
 ) -> Result<DataType> {
     let element_type = if inputs[1].is_untyped() {
         None
-    } else if let DataType::ListNew(list) = inputs[1].return_type() {
+    } else if let DataType::Ljst(list) = inputs[1].return_type() {
         Some(list.into_elem())
     } else {
         return Err(ErrorCode::BindError(
@@ -441,7 +441,7 @@ fn infer_type_for_special(
                 }
                 // Unlike auto-cast in struct, PostgreSQL disallows `int[] = bigint[]` for array.
                 // They have to match exactly.
-                (l @ DataType::ListNew { .. }, r @ DataType::ListNew { .. }) => l == r,
+                (l @ DataType::Ljst { .. }, r @ DataType::Ljst { .. }) => l == r,
                 // use general rule unless `struct = struct` or `array = array`
                 _ => return Ok(None),
             };
@@ -462,8 +462,8 @@ fn infer_type_for_special(
             let right_type = (!inputs[1].is_untyped()).then(|| inputs[1].return_type());
             let return_type = match (left_type, right_type) {
                 (None, t @ None)
-                | (None, t @ Some(DataType::ListNew(_)))
-                | (t @ Some(DataType::ListNew(_)), None) => {
+                | (None, t @ Some(DataType::Ljst(_)))
+                | (t @ Some(DataType::Ljst(_)), None) => {
                     // when neither type is available, default to `varchar[]`
                     // when one side is unknown and other side is list, use that list type
                     let t = t.unwrap_or_else(|| DataType::List(DataType::Varchar.into()));
@@ -472,7 +472,7 @@ fn infer_type_for_special(
                     }
                     Some(t)
                 }
-                (Some(DataType::ListNew(_)), Some(DataType::ListNew(_))) => {
+                (Some(DataType::Ljst(_)), Some(DataType::Ljst(_))) => {
                     align_types(inputs.iter_mut())
                         .or_else(|_| align_array_and_element(0, &[1], inputs))
                         .or_else(|_| align_array_and_element(1, &[0], inputs))
@@ -575,8 +575,8 @@ fn infer_type_for_special(
             ensure_arity!("array_dims", | inputs | == 1);
             inputs[0].ensure_array_type()?;
 
-            if let DataType::ListNew(list) = inputs[0].return_type()
-                && let DataType::ListNew(_) = list.elem()
+            if let DataType::Ljst(list) = inputs[0].return_type()
+                && let DataType::Ljst(_) = list.elem()
             {
                 return Err(ErrorCode::BindError(
                     "array_dims for dimensions greater than 1 not supported".into(),
@@ -590,11 +590,11 @@ fn infer_type_for_special(
             let left_type = (!inputs[0].is_untyped()).then(|| inputs[0].return_type());
             let right_type = (!inputs[1].is_untyped()).then(|| inputs[1].return_type());
             match (left_type, right_type) {
-                (None, Some(DataType::ListNew(_))) | (Some(DataType::ListNew(_)), None) => {
+                (None, Some(DataType::Ljst(_))) | (Some(DataType::Ljst(_)), None) => {
                     align_types(inputs.iter_mut())?;
                     Ok(Some(DataType::Boolean))
                 }
-                (Some(DataType::ListNew(left)), Some(DataType::ListNew(right))) => {
+                (Some(DataType::Ljst(left)), Some(DataType::Ljst(right))) => {
                     // cannot directly cast, find unnest type and judge if they are same type
                     let left = left.elem().unnest_list();
                     let right = right.elem().unnest_list();

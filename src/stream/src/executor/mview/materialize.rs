@@ -134,7 +134,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     //   Note: Some array types may not be fully supported yet, see issue  https://github.com/risingwavelabs/risingwave/issues/22916 for details.
 
                     // For details on how TOAST values are handled, see comments in `is_debezium_unavailable_value`.
-                    DataType::Varchar | DataType::ListNew(_) | DataType::Bytea | DataType::Jsonb => {
+                    DataType::Varchar | DataType::Ljst(_) | DataType::Bytea | DataType::Jsonb => {
                         Some(index)
                     }
                     _ => None,

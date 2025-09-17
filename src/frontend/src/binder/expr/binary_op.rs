@@ -101,9 +101,9 @@ impl Binder {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
-                    (Some(DataType::ListNew { .. }), Some(DataType::ListNew { .. }))
-                    | (Some(DataType::ListNew { .. }), None)
-                    | (None, Some(DataType::ListNew { .. })) => ExprType::ArrayContains,
+                    (Some(DataType::Ljst { .. }), Some(DataType::Ljst { .. }))
+                    | (Some(DataType::Ljst { .. }), None)
+                    | (None, Some(DataType::Ljst { .. })) => ExprType::ArrayContains,
                     (Some(DataType::Jsonb), Some(DataType::Jsonb))
                     | (Some(DataType::Jsonb), None)
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbContains,
@@ -121,9 +121,9 @@ impl Binder {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
-                    (Some(DataType::ListNew { .. }), Some(DataType::ListNew { .. }))
-                    | (Some(DataType::ListNew { .. }), None)
-                    | (None, Some(DataType::ListNew { .. })) => ExprType::ArrayContained,
+                    (Some(DataType::Ljst { .. }), Some(DataType::Ljst { .. }))
+                    | (Some(DataType::Ljst { .. }), None)
+                    | (None, Some(DataType::Ljst { .. })) => ExprType::ArrayContained,
                     (Some(DataType::Jsonb), Some(DataType::Jsonb))
                     | (Some(DataType::Jsonb), None)
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbContained,
@@ -148,11 +148,11 @@ impl Binder {
                 // 5. invalid
                 match (left_type, right_type) {
                     // array concatenation
-                    (Some(DataType::ListNew { .. }), Some(DataType::ListNew { .. }))
-                    | (Some(DataType::ListNew { .. }), None)
-                    | (None, Some(DataType::ListNew { .. })) => ExprType::ArrayCat,
-                    (Some(DataType::ListNew { .. }), Some(_)) => ExprType::ArrayAppend,
-                    (Some(_), Some(DataType::ListNew { .. })) => ExprType::ArrayPrepend,
+                    (Some(DataType::Ljst { .. }), Some(DataType::Ljst { .. }))
+                    | (Some(DataType::Ljst { .. }), None)
+                    | (None, Some(DataType::Ljst { .. })) => ExprType::ArrayCat,
+                    (Some(DataType::Ljst { .. }), Some(_)) => ExprType::ArrayAppend,
+                    (Some(_), Some(DataType::Ljst { .. })) => ExprType::ArrayPrepend,
 
                     // string concatenation
                     (Some(DataType::Varchar), _) | (_, Some(DataType::Varchar)) => {

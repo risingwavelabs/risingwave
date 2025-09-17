@@ -240,7 +240,7 @@ impl ScalarAdapter {
                 pg_numeric_to_rw_numeric(&numeric)
             }
             (ScalarAdapter::Enum(EnumString(s)), &DataType::Varchar) => Some(ScalarImpl::from(s)),
-            (ScalarAdapter::NumericList(vec), &DataType::ListNew(list)) => {
+            (ScalarAdapter::NumericList(vec), &DataType::Ljst(list)) => {
                 let elem = list.elem();
                 let mut builder = elem.create_array_builder(0);
                 for val in vec {
@@ -279,7 +279,7 @@ impl ScalarAdapter {
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
             }
-            (ScalarAdapter::EnumList(vec), &DataType::ListNew(list)) => {
+            (ScalarAdapter::EnumList(vec), &DataType::Ljst(list)) => {
                 let mut builder = list.elem().create_array_builder(0);
                 for val in vec {
                     match val {
@@ -293,7 +293,7 @@ impl ScalarAdapter {
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
             }
-            (ScalarAdapter::List(vec), &DataType::ListNew(list)) => {
+            (ScalarAdapter::List(vec), &DataType::Ljst(list)) => {
                 let elem = list.elem();
                 // Due to https://github.com/risingwavelabs/risingwave/issues/16882, INTERVAL_ARRAY is not supported in Debezium, so we keep backfilling and CDC consistent.
                 if matches!(elem, DataType::Interval) {
@@ -323,10 +323,10 @@ pub fn validate_pg_type_to_rw_type(pg_type: &DataType, rw_type: &DataType) -> bo
     }
     match rw_type {
         DataType::Varchar => matches!(pg_type, DataType::Decimal | DataType::Int256),
-        DataType::ListNew(list) if list.elem() == &DataType::Varchar => {
+        DataType::Ljst(list) if list.elem() == &DataType::Varchar => {
             matches!(
                 pg_type,
-                DataType::ListNew(list) if matches!(list.elem(), DataType::Decimal | DataType::Int256)
+                DataType::Ljst(list) if matches!(list.elem(), DataType::Decimal | DataType::Int256)
             )
         }
         _ => false,

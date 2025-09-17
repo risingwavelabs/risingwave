@@ -775,7 +775,7 @@ pub fn extract_bson_field(
             Some(ScalarImpl::Struct(value))
         }
 
-        DataType::ListNew(list_type) => {
+        DataType::Ljst(list_type) => {
             let elem_type = list_type.elem();
             let Some(d_array) = datum.as_array() else {
                 return Err(type_error(datum));

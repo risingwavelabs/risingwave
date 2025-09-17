@@ -36,7 +36,7 @@ impl DataType {
             DataType::Interval => AstDataType::Interval,
             DataType::Jsonb => AstDataType::Jsonb,
             DataType::Bytea => AstDataType::Bytea,
-            DataType::ListNew(list) => AstDataType::Array(Box::new(list.elem().to_ast())),
+            DataType::Ljst(list) => AstDataType::Array(Box::new(list.elem().to_ast())),
             DataType::Struct(fields) => {
                 let fields = fields
                     .iter()

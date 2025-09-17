@@ -134,7 +134,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 ];
                 if depth > 0 {
                     candidate_ret_types.push(T::Struct);
-                    candidate_ret_types.push(T::ListNew);
+                    candidate_ret_types.push(T::Ljst);
                 }
                 let typ_name = candidate_ret_types.choose(&mut self.rng).unwrap();
                 match typ_name {
@@ -152,7 +152,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                     T::Time => S::Time,
                     T::Interval => S::Interval,
                     T::Struct => self.gen_struct_data_type(depth - 1),
-                    T::ListNew => self.gen_list_data_type(depth - 1),
+                    T::Ljst => self.gen_list_data_type(depth - 1),
                     _ => unreachable!(),
                 }
             }
