@@ -35,7 +35,7 @@ use risingwave_frontend_macro::system_catalog;
         NULL::bigint as n_tup_del,
         NULL::bigint as n_tup_hot_upd,
         NULL::bigint as n_tup_newpage_upd,
-        rts.total_key_count as n_live_tup,
+        rts.storage_key_count as n_live_tup,
         NULL::bigint as n_dead_tup,
         NULL::bigint as n_mod_since_analyze,
         NULL::bigint as n_ins_since_vacuum,
