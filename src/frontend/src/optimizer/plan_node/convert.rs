@@ -56,6 +56,9 @@ pub trait ToStream {
         required_dist.streaming_enforce_if_not_satisfies(ret)
     }
 
+    /// Try to generate a plan with better locality for the given columns.
+    /// This is used to improve the performance of aggregation, over window, join and so on
+    /// by colocating the (group by, partition or join) keys.
     fn try_better_locality(&self, _columns: &[usize]) -> Option<LogicalPlanRef> {
         None
     }

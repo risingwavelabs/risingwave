@@ -20,7 +20,9 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::StreamScanType;
-use risingwave_sqlparser::ast::AsOf;
+use risingwave_sqlparser::ast::{
+    AsOf, Expr, Ident, ObjectName, OrderByExpr, Statement, WithProperties,
+};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
@@ -565,6 +567,63 @@ impl LogicalScan {
 
         None
     }
+
+    /// Notify user about the recommended index
+    fn notice_recommended_index(&self, columns: &[usize]) {
+        let table_column_indices = columns
+            .iter()
+            .map(|&col| self.output_col_idx()[col])
+            .collect_vec();
+
+        let primary_key_columns: Vec<usize> = self
+            .primary_key()
+            .iter()
+            .map(|col_order| col_order.column_index)
+            .collect();
+
+        if primary_key_columns == table_column_indices {
+            // Don't recommend an index that's identical to the primary key
+            return;
+        }
+
+        let column_names = table_column_indices
+            .iter()
+            .map(|&col| self.table().columns[col].name.clone())
+            .collect_vec();
+
+        // Construct CREATE INDEX statement using AST for proper identifier quoting
+        let columns = column_names
+            .iter()
+            .map(|col| OrderByExpr {
+                expr: Expr::Identifier(Ident::with_quote_unchecked('"', col)),
+                asc: None, // defaults to ASC
+                nulls_first: None,
+            })
+            .collect();
+
+        let index_name = format!(
+            "__recommended_idx_of_{}_{}",
+            self.table_name(),
+            column_names.join("_")
+        );
+
+        let create_index_stmt = Statement::CreateIndex {
+            name: ObjectName::from(vec![Ident::with_quote_unchecked('"', &index_name)]),
+            table_name: ObjectName::from(vec![Ident::with_quote_unchecked('"', self.table_name())]),
+            columns,
+            method: None,
+            include: vec![],
+            distributed_by: vec![],
+            unique: false,
+            if_not_exists: false,
+            with_properties: WithProperties(vec![]),
+        };
+
+        self.core.ctx().warn_to_user(format!(
+            "To speed up the backfilling, consider creating an index: {}",
+            create_index_stmt
+        ));
+    }
 }
 
 impl ToBatch for LogicalScan {
@@ -692,9 +751,14 @@ impl ToStream for LogicalScan {
         if columns.is_empty() {
             return None;
         }
+
         if self.table_indexes().is_empty() {
+            if self.ctx().is_explain_advisor() {
+                self.notice_recommended_index(columns);
+            }
             return None;
         }
+
         let orders = if columns.len() <= 3 {
             OrderType::all()
         } else {
@@ -721,6 +785,10 @@ impl ToStream for LogicalScan {
                     return Some(index_scan.into());
                 }
             }
+        }
+
+        if self.ctx().is_explain_advisor() {
+            self.notice_recommended_index(columns);
         }
         None
     }

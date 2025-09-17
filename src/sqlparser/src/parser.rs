@@ -4364,6 +4364,7 @@ impl Parser<'_> {
         let mut analyze_duration = None;
 
         let explain_key_words = [
+            Keyword::ADVISOR,
             Keyword::BACKFILL,
             Keyword::VERBOSE,
             Keyword::TRACE,
@@ -4378,6 +4379,7 @@ impl Parser<'_> {
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
             let keyword = parser.expect_one_of_keywords(&explain_key_words)?;
             match keyword {
+                Keyword::ADVISOR => options.advisor = parser.parse_optional_boolean(true),
                 Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
                 Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
                 Keyword::BACKFILL => options.backfill = parser.parse_optional_boolean(true),

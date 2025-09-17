@@ -73,6 +73,7 @@ define_keywords!(
     ACTION,
     ADAPTIVE,
     ADD,
+    ADVISOR,
     AGGREGATE,
     ALL,
     ALLOCATE,
