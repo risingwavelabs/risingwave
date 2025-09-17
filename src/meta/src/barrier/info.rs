@@ -346,6 +346,9 @@ pub(crate) enum CommandFragmentChanges {
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
     RemoveFragment,
+    SplitAssignment {
+        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    },
 }
 
 #[derive(Default, Clone, Debug)]
@@ -528,6 +531,8 @@ impl InflightDatabaseInfo {
                         for (actor_id, splits) in actor_splits {
                             actors.get_mut(&actor_id).expect("should exist").splits = splits;
                         }
+
+                        // info will be upserted into shared_actor_infos in post_apply stage
                     }
                     CommandFragmentChanges::RemoveFragment => {}
                     CommandFragmentChanges::ReplaceNodeUpstream(replace_map) => {
@@ -619,6 +624,15 @@ impl InflightDatabaseInfo {
                             }
                         });
                         assert!(removed, "should remove upstream from UpstreamSinkUnion");
+                    }
+                    CommandFragmentChanges::SplitAssignment { actor_splits } => {
+                        let info = self.fragment_mut(fragment_id);
+                        let actors = &mut info.actors;
+                        for (actor_id, splits) in actor_splits {
+                            actors.get_mut(&actor_id).expect("should exist").splits = splits;
+                        }
+
+                        shared_actor_writer.upsert([&*info]);
                     }
                 }
             }
@@ -837,7 +851,8 @@ impl InflightDatabaseInfo {
                     }
                     CommandFragmentChanges::ReplaceNodeUpstream(_)
                     | CommandFragmentChanges::AddNodeUpstream(_)
-                    | CommandFragmentChanges::DropNodeUpstream(_) => {}
+                    | CommandFragmentChanges::DropNodeUpstream(_)
+                    | CommandFragmentChanges::SplitAssignment { .. } => {}
                 }
             }
         }

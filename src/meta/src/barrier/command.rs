@@ -587,7 +587,21 @@ impl Command {
             ),
             Command::ReplaceStreamJob(plan) => Some(plan.fragment_changes()),
             Command::MergeSnapshotBackfillStreamingJobs(_) => None,
-            Command::SourceChangeSplit { .. } => None,
+            Command::SourceChangeSplit(SplitState {
+                split_assignment, ..
+            }) => Some(
+                split_assignment
+                    .iter()
+                    .map(|(&fragment_id, splits)| {
+                        (
+                            fragment_id,
+                            CommandFragmentChanges::SplitAssignment {
+                                actor_splits: splits.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
+            ),
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,

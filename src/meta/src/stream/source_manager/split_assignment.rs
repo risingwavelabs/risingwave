@@ -616,7 +616,11 @@ impl<T: SplitMetaData + Clone> PartialOrd<Self> for ActorSplitsAssignment<T> {
 impl<T: SplitMetaData + Clone> Ord for ActorSplitsAssignment<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // Note: this is reversed order, to make BinaryHeap a min heap.
-        other.splits.len().cmp(&self.splits.len())
+        other
+            .splits
+            .len()
+            .cmp(&self.splits.len())
+            .then(self.actor_id.cmp(&other.actor_id))
     }
 }
 
