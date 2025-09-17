@@ -567,12 +567,16 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
 
                     return Err(StreamExecutorError::from(ErrorKind::Uncategorized(
-                        anyhow::anyhow!("Materialize stream exited unexpectedly"),
+                        anyhow::anyhow!(
+                            "Input stream terminated unexpectedly during normal ingestion"
+                        ),
                     )));
                 }
                 MaterializeStreamState::MergingData => {
                     let Some(refresh_args) = self.refresh_args.as_mut() else {
-                        panic!("cannot merge data when not refreshing");
+                        panic!(
+                            "MaterializeExecutor entered CleanUp state without refresh_args configured"
+                        );
                     };
                     tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Starting table replacement operation");
 
@@ -671,7 +675,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 }
                 MaterializeStreamState::CleanUp => {
                     let Some(refresh_args) = self.refresh_args.as_mut() else {
-                        panic!("cannot merge data when not refreshing");
+                        panic!(
+                            "MaterializeExecutor entered MergingData state without refresh_args configured"
+                        );
                     };
                     tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: resuming CleanUp Stage");
 
@@ -716,7 +722,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 }
                 MaterializeStreamState::RefreshEnd { on_complete_epoch } => {
                     let Some(refresh_args) = self.refresh_args.as_mut() else {
-                        panic!("cannot clean up when not refreshing");
+                        panic!(
+                            "MaterializeExecutor entered RefreshEnd state without refresh_args configured"
+                        );
                     };
                     let staging_table_id = refresh_args.staging_table.table_id();
 
