@@ -23,6 +23,11 @@ WITH (
  topic = 'test_include_key')
 FORMAT UPSERT ENCODE JSON
 
+query TT
+SHOW CREATE SOURCE upsert_students
+----
+public.upsert_students CREATE SOURCE upsert_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL, PRIMARY KEY (rw_key)) INCLUDE KEY AS rw_key WITH (<slt:ignore>) FORMAT UPSERT ENCODE JSON
+
 statement ok
 CREATE TABLE students (
     rw_key BYTEA PRIMARY KEY,
