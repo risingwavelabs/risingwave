@@ -82,7 +82,10 @@ impl AggregateFunction for ScalarWrapper {
         let state = &state.downcast_ref::<State>().0;
         // XXX: can we avoid cloning here?
         let list = ListValue::new(state.clone().finish());
-        let chunk = DataChunk::new(vec![ListArray::from_iter([list]).into_ref()], 1);
+        let chunk = DataChunk::new(
+            vec![ListArray::from_list_value(self.arg_type.clone(), list).into_ref()],
+            1,
+        );
         let output = self.scalar.eval(&chunk).await?;
         Ok(output.to_datum())
     }

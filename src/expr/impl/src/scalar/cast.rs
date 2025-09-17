@@ -340,7 +340,8 @@ mod tests {
         assert_eq!(str_to_list("{1, 2, 3}", &ctx).unwrap(), list123);
 
         // Nested List
-        let nested_list123 = ListValue::from_iter([list123]);
+        let nested_list123 =
+            ListValue::from_nested_iter(&DataType::List(Box::new(DataType::Int32)), [list123]);
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[][]").unwrap(),
@@ -348,10 +349,15 @@ mod tests {
         };
         assert_eq!(str_to_list("{{1, 2, 3}}", &ctx).unwrap(), nested_list123);
 
-        let nested_list445566 = ListValue::from_iter([ListValue::from_iter([44, 55, 66])]);
+        let nested_list445566 = ListValue::from_nested_iter(
+            &DataType::List(Box::new(DataType::Int32)),
+            [ListValue::from_iter([44, 55, 66])],
+        );
 
-        let double_nested_list123_445566 =
-            ListValue::from_iter([nested_list123.clone(), nested_list445566.clone()]);
+        let double_nested_list123_445566 = ListValue::from_nested_iter(
+            &DataType::List(Box::new(DataType::List(Box::new(DataType::Int32)))),
+            [nested_list123.clone(), nested_list445566.clone()],
+        );
 
         // Double nested List
         let ctx = Context {
@@ -370,10 +376,13 @@ mod tests {
             return_type: DataType::from_str("varchar[][]").unwrap(),
             variadic: false,
         };
-        let double_nested_varchar_list123_445566 = ListValue::from_iter([
-            list_cast(nested_list123.as_scalar_ref(), &ctx).unwrap(),
-            list_cast(nested_list445566.as_scalar_ref(), &ctx).unwrap(),
-        ]);
+        let double_nested_varchar_list123_445566 = ListValue::from_nested_iter(
+            &DataType::List(Box::new(DataType::List(Box::new(DataType::Varchar)))),
+            [
+                list_cast(nested_list123.as_scalar_ref(), &ctx).unwrap(),
+                list_cast(nested_list445566.as_scalar_ref(), &ctx).unwrap(),
+            ],
+        );
 
         // Double nested Varchar List
         let ctx = Context {

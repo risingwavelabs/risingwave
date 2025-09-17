@@ -102,6 +102,7 @@ mod test {
     use crate::array::arrow::arrow_deltalake::DeltaLakeConvert;
     use crate::array::{ArrayImpl, Decimal, DecimalArray, ListArray, ListValue};
     use crate::bitmap::Bitmap;
+    use crate::types::DataType;
 
     #[test]
     fn test_decimal_list_chunk() {
@@ -113,7 +114,10 @@ mod test {
             Some(Decimal::Normalized("1".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ])));
-        let array = Arc::new(ArrayImpl::List(ListArray::from_iter(vec![value])));
+        let array = Arc::new(ArrayImpl::List(ListArray::from_list_value(
+            DataType::Decimal,
+            value,
+        )));
         let chunk = crate::array::DataChunk::new(vec![array], Bitmap::ones(1));
 
         let schema = arrow_schema::Schema::new(vec![Field::new(

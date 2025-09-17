@@ -30,7 +30,7 @@ fn array_access(list: ListRef<'_>, index: i32) -> Option<ScalarRefImpl<'_>> {
 mod tests {
 
     use risingwave_common::array::ListValue;
-    use risingwave_common::types::Scalar;
+    use risingwave_common::types::{DataType, Scalar};
 
     use super::*;
 
@@ -58,10 +58,13 @@ mod tests {
 
     #[test]
     fn test_nested_array_access() {
-        let v = ListValue::from_iter([
-            ListValue::from_iter(["foo", "bar"]),
-            ListValue::from_iter(["fizz", "buzz"]),
-        ]);
+        let v = ListValue::from_nested_iter(
+            &DataType::List(Box::new(DataType::Varchar)),
+            [
+                ListValue::from_iter(["foo", "bar"]),
+                ListValue::from_iter(["fizz", "buzz"]),
+            ],
+        );
         assert_eq!(
             array_access(v.as_scalar_ref(), 1),
             Some(ListValue::from_iter(["foo", "bar"]).as_scalar_ref().into())
