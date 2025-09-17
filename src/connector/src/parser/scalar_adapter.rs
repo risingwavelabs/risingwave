@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use bytes::BytesMut;
 use pg_bigdecimal::PgNumeric;
 use risingwave_common::types::{DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{FromSql, IsNull, Kind, ToSql, Type, to_sql_checked};
 
@@ -388,7 +389,7 @@ impl ScalarAdapter {
                 }
 
                 let mut struct_fields = Vec::with_capacity(field_values.len());
-                for (field_value, field_type) in field_values.into_iter().zip(field_types) {
+                for (field_value, field_type) in field_values.into_iter().zip_eq_fast(field_types) {
                     match field_value {
                         Some(adapter) => match adapter.into_scalar(field_type) {
                             Some(scalar) => struct_fields.push(Some(scalar)),
