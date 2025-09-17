@@ -47,11 +47,11 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{
     StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
 };
-use crate::executor::BarrierMutationType;
 use crate::executor::error::ErrorKind;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::mview::RefreshProgressTable;
 use crate::executor::prelude::*;
+use crate::executor::{BarrierInner, BarrierMutationType, EpochPair};
 use crate::task::LocalBarrierManager;
 
 #[derive(Debug, Clone)]
