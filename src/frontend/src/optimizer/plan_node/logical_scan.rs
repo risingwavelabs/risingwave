@@ -753,7 +753,9 @@ impl ToStream for LogicalScan {
         }
 
         if self.table_indexes().is_empty() {
-            self.notice_recommended_index(columns);
+            if self.ctx().is_explain_advisor() {
+                self.notice_recommended_index(columns);
+            }
             return None;
         }
 
@@ -785,7 +787,9 @@ impl ToStream for LogicalScan {
             }
         }
 
-        self.notice_recommended_index(columns);
+        if self.ctx().is_explain_advisor() {
+            self.notice_recommended_index(columns);
+        }
         None
     }
 }

@@ -1204,6 +1204,8 @@ pub struct ExplainOptions {
     pub trace: bool,
     // Display backfill order
     pub backfill: bool,
+    // Show advisor recommendations
+    pub advisor: bool,
     // explain's plan type
     pub explain_type: ExplainType,
     // explain's plan format
@@ -1216,6 +1218,7 @@ impl Default for ExplainOptions {
             verbose: false,
             trace: false,
             backfill: false,
+            advisor: false,
             explain_type: ExplainType::Physical,
             explain_format: ExplainFormat::Text,
         }

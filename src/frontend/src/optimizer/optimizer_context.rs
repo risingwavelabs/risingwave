@@ -206,6 +206,10 @@ impl OptimizerContext {
         self.explain_options.backfill
     }
 
+    pub fn is_explain_advisor(&self) -> bool {
+        self.explain_options.advisor
+    }
+
     pub fn explain_type(&self) -> ExplainType {
         self.explain_options.explain_type.clone()
     }
