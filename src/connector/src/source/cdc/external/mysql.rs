@@ -168,6 +168,9 @@ fn derive_default_value(default: ColumnDefault, data_type: &DataType) -> Connect
             DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
             DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
             DataType::Int64 => Some(ScalarImpl::Int64(val)),
+            DataType::Decimal => Some(ScalarImpl::Decimal(
+                Decimal::try_from(val).context("failed to convert default value to decimal")?,
+            )),
             DataType::Varchar => {
                 // should be the Enum type which is mapped to Varchar
                 Some(ScalarImpl::from(val.to_string()))
@@ -466,6 +469,7 @@ impl MySqlExternalTableReader {
             )
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
+            println!("这里过滤的filter_expr: {}", filter_expr);
             format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
@@ -473,8 +477,9 @@ impl MySqlExternalTableReader {
                 filter_expr,
                 order_key,
             )
+           
         };
-
+        println!("完整的select是: {}", sql);
         let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
@@ -518,6 +523,7 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
+                            DataType::Decimal => Value::from(value.into_decimal().to_string()),
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
                         ConnectorResult::Ok((pk.to_lowercase(), val))
@@ -554,10 +560,12 @@ impl MySqlExternalTableReader {
     fn filter_expression(columns: &[String]) -> String {
         let mut conditions = vec![];
         // push the first condition
+        println!("旧的Self::quote_column(&columns[0]): {}", Self::quote_column(&columns[0]));
+        println!("新的Self::quote_column_with_cast(&columns[0]): {}", Self::quote_column_with_cast(&columns[0]));
         conditions.push(format!(
-            "({} > :{})",
+            "({} > {})",
             Self::quote_column(&columns[0]),
-            columns[0].to_lowercase()
+            Self::quote_param_with_cast(&columns[0])
         ));
         for i in 2..=columns.len() {
             // '=' condition
@@ -565,23 +573,23 @@ impl MySqlExternalTableReader {
             for (j, col) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
                     condition.push_str(&format!(
-                        "({} = :{})",
+                        "({} = {})",
                         Self::quote_column(col),
-                        col.to_lowercase()
+                        Self::quote_param_with_cast(col)
                     ));
                 } else {
                     condition.push_str(&format!(
-                        " AND ({} = :{})",
+                        " AND ({} = {})",
                         Self::quote_column(col),
-                        col.to_lowercase()
+                        Self::quote_param_with_cast(col)
                     ));
                 }
             }
             // '>' condition
             condition.push_str(&format!(
-                " AND ({} > :{})",
+                " AND ({} > {})",
                 Self::quote_column(&columns[i - 1]),
-                columns[i - 1].to_lowercase()
+                Self::quote_param_with_cast(&columns[i - 1])
             ));
             conditions.push(format!("({})", condition));
         }
@@ -589,6 +597,24 @@ impl MySqlExternalTableReader {
             conditions.join(" OR ")
         } else {
             conditions.join("")
+        }
+    }
+
+    fn quote_param_with_cast(column: &str) -> String {
+        // 为 bill_no_hash 列添加 CAST 以处理 BIGINT UNSIGNED 溢出问题
+        if column == "bill_no_hash" {
+            format!("CAST(:{} AS UNSIGNED)", column.to_lowercase())
+        } else {
+            format!(":{}", column.to_lowercase())
+        }
+    }
+
+    fn quote_column_with_cast(column: &str) -> String {
+        // 为 bill_no_hash 列添加 CAST 以处理 BIGINT UNSIGNED 溢出问题
+        if column == "bill_no_hash" {
+            format!("CAST({} AS UNSIGNED)", Self::quote_column(column))
+        } else {
+            Self::quote_column(column)
         }
     }
 

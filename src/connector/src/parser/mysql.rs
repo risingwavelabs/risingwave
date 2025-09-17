@@ -156,13 +156,38 @@ pub fn mysql_datum_to_rw_datum(
             handle_data_type!(mysql_row, mysql_datum_index, column_name, f64)
         }
         DataType::Decimal => {
-            handle_data_type!(
-                mysql_row,
-                mysql_datum_index,
-                column_name,
-                RustDecimal,
-                Decimal
-            )
+            println!("这里 decimal {}", mysql_datum_index);
+            // Try u64 conversion first (handles BIGINT UNSIGNED)
+            match mysql_row.take_opt::<Option<u64>, _>(mysql_datum_index) {
+                // Case 1: Column doesn't exist or index out of range
+                None => bail!(
+                    "no value found at column: {}, index: {}",
+                    column_name,
+                    mysql_datum_index
+                ),
+
+                // Case 2: Successfully got u64 value (handles BIGINT UNSIGNED)
+                Some(Ok(Some(val))) => {
+                    // Convert u64 to RustDecimal via string
+                    let decimal_val = val.to_string().parse::<RustDecimal>()
+                        .map_err(|e| anyhow::Error::new(e)
+                            .context("failed to convert u64 to RustDecimal")
+                            .context(format!("column: {}, index: {}, value: {}", column_name, mysql_datum_index, val)))?;
+                    Ok(Some(ScalarImpl::from(Decimal::from(decimal_val))))
+                }
+
+                // Case 3: Got NULL value
+                Some(Ok(None)) => Ok(None),
+
+                // Case 4: u64 conversion failed, fallback to direct RustDecimal conversion
+                Some(Err(_)) => handle_data_type!(
+                    mysql_row,
+                    mysql_datum_index,
+                    column_name,
+                    RustDecimal,
+                    Decimal
+                ),
+            }
         }
         DataType::Varchar => {
             // For VARCHAR, try string conversion first (normal case)

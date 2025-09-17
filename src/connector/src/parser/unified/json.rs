@@ -392,8 +392,15 @@ impl JsonParseOptions {
                     .map_err(|_| create_error())?
                     .into()
             }
-            (DataType::Decimal, ValueType::I64 | ValueType::U64) => {
+            (DataType::Decimal, ValueType::I64) => {
                 Decimal::from(value.try_as_i64().map_err(|_| create_error())?).into()
+            }
+            (DataType::Decimal, ValueType::U64) => {
+                // Special handling for U64 to preserve original value for BIGINT UNSIGNED
+                let u64_val = value.try_as_u64().map_err(|_| create_error())?;
+                Decimal::from_str(&u64_val.to_string())
+                    .map_err(|_| create_error())?
+                    .into()
             }
 
             (DataType::Decimal, ValueType::F64) => {
