@@ -84,7 +84,7 @@ const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 5] = [
     [4000, 100, 30, 20, 20],
 ];
 const LOOKUP_COST_CONST: usize = 3;
-const MAX_COMBINATION_SIZE: usize = 3;
+const MAX_COMBINATION_SIZE: usize = 4;
 const MAX_CONJUNCTION_SIZE: usize = 8;
 
 pub struct IndexSelectionRule {}
@@ -396,47 +396,87 @@ impl IndexSelectionRule {
         primary_table_row_size: usize,
     ) -> Vec<PlanRef> {
         let mut result = vec![];
-        for expr in conjunctions {
-            // it's OR clause!
-            if let ExprImpl::FunctionCall(function_call) = expr
-                && function_call.func_type() == ExprType::Or
-            {
-                let mut index_to_be_merged = vec![];
 
-                let disjunctions = to_disjunctions(expr.clone());
-                let (map, others) = self.clustering_disjunction(disjunctions);
-                let iter = map
-                    .into_iter()
-                    .map(|(column_index, expr)| (Some(column_index), expr))
-                    .chain(others.into_iter().map(|expr| (None, expr)));
-                for (column_index, expr) in iter {
-                    let mut index_paths = vec![];
-                    let conjunctions = to_conjunctions(expr);
+        // split by OR clause, the not_or_conjunctions could be used to generate index path by combining with each arm of OR clause.
+        let (or_conjunctions, not_or_conjunctions): (Vec<ExprImpl>, Vec<ExprImpl>) =
+            conjunctions.iter().cloned().partition(|expr| {
+                if let ExprImpl::FunctionCall(function_call) = expr
+                    && function_call.func_type() == ExprType::Or
+                {
+                    true
+                } else {
+                    false
+                }
+            });
+        // Only consider eq ,in and cmp condition for not_or_conjunctions
+        let interest_conjunctions: Vec<ExprImpl> = not_or_conjunctions
+            .into_iter()
+            .filter(|expr| {
+                expr.as_eq_const().is_some()
+                    || expr.as_in_const_list().is_some()
+                    || expr.as_comparison_const().is_some()
+            })
+            .collect();
+
+        for expr in or_conjunctions {
+            // it must be OR clause!
+            let mut index_to_be_merged = vec![];
+
+            let disjunctions = to_disjunctions(expr.clone());
+
+            let extended_disjunctions = disjunctions
+                .into_iter()
+                .map(|expr| {
+                    if interest_conjunctions.is_empty() {
+                        expr
+                    } else {
+                        ExprImpl::FunctionCall(
+                            FunctionCall::new_unchecked(
+                                ExprType::And,
+                                vec![expr]
+                                    .into_iter()
+                                    .chain(interest_conjunctions.iter().cloned())
+                                    .collect(),
+                                DataType::Boolean,
+                            )
+                            .into(),
+                        )
+                    }
+                })
+                .collect_vec();
+
+            let (map, others) = self.clustering_disjunction(extended_disjunctions);
+            let iter = map
+                .into_iter()
+                .map(|(column_index, expr)| (Some(column_index), expr))
+                .chain(others.into_iter().map(|expr| (None, expr)));
+            for (column_index, expr) in iter {
+                let mut index_paths = vec![];
+                let conjunctions = to_conjunctions(expr);
+                index_paths.extend(
+                    self.gen_index_path(column_index, &conjunctions, logical_scan)
+                        .into_iter(),
+                );
+                // complex condition, recursively gen paths
+                if conjunctions.len() > 1 {
                     index_paths.extend(
-                        self.gen_index_path(column_index, &conjunctions, logical_scan)
+                        self.gen_paths(&conjunctions, logical_scan, primary_table_row_size)
                             .into_iter(),
                     );
-                    // complex condition, recursively gen paths
-                    if conjunctions.len() > 1 {
-                        index_paths.extend(
-                            self.gen_paths(&conjunctions, logical_scan, primary_table_row_size)
-                                .into_iter(),
-                        );
-                    }
-
-                    match self.choose_min_cost_path(&index_paths, primary_table_row_size) {
-                        None => {
-                            // One arm of OR clause can't use index, bail out
-                            index_to_be_merged.clear();
-                            break;
-                        }
-                        Some((path, _)) => index_to_be_merged.push(path),
-                    }
                 }
 
-                if let Some(path) = self.merge(index_to_be_merged) {
-                    result.push(path)
+                match self.choose_min_cost_path(&index_paths, primary_table_row_size) {
+                    None => {
+                        // One arm of OR clause can't use index, bail out
+                        index_to_be_merged.clear();
+                        break;
+                    }
+                    Some((path, _)) => index_to_be_merged.push(path),
                 }
+            }
+
+            if let Some(path) = self.merge(index_to_be_merged) {
+                result.push(path)
             }
         }
 
@@ -511,15 +551,11 @@ impl IndexSelectionRule {
     ) -> Vec<PlanRef> {
         // Assumption: use at most `MAX_COMBINATION_SIZE` clauses, we can determine which is the
         // best index.
-        let mut combinations = vec![];
-        for i in 1..min(conjunctions.len(), MAX_COMBINATION_SIZE) + 1 {
-            combinations.extend(
-                conjunctions
-                    .iter()
-                    .take(min(conjunctions.len(), MAX_CONJUNCTION_SIZE))
-                    .combinations(i),
-            );
-        }
+        let combinations = conjunctions
+            .iter()
+            .take(min(conjunctions.len(), MAX_CONJUNCTION_SIZE))
+            .combinations(min(conjunctions.len(), MAX_COMBINATION_SIZE))
+            .collect_vec();
 
         let mut result = vec![];
 
