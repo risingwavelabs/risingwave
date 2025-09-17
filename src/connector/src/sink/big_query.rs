@@ -25,6 +25,7 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use gcp_bigquery_client::Client;
 use gcp_bigquery_client::error::BQError;
+use gcp_bigquery_client::model::field_type::FieldType;
 use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::model::table::Table;
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
@@ -48,7 +49,7 @@ use prost_types::{
 };
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, StructType};
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
@@ -196,7 +197,7 @@ impl LogSinker for BigQueryLogSinker {
 }
 
 impl BigQueryCommon {
-    async fn build_client(&self, aws_auth_props: &AwsAuthProps) -> Result<Client> {
+    pub async fn build_client(&self, aws_auth_props: &AwsAuthProps) -> Result<Client> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
         let service_account =
@@ -230,7 +231,80 @@ impl BigQueryCommon {
         StorageWriterClient::new(credentials_file).await
     }
 
-    async fn get_auth_json_from_path(&self, aws_auth_props: &AwsAuthProps) -> Result<String> {
+    pub async fn get_table_schema(&self, client: &Client) -> Result<BTreeMap<String, String>> {
+        let mut rs = client
+            .job()
+            .query(
+                &self.project,
+                QueryRequest::new(format!(
+                    "SELECT column_name, data_type FROM `{}.{}.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = '{}'",
+                    self.project, self.dataset, self.table,
+                )),
+            ).await.map_err(|e| SinkError::BigQuery(e.into()))?;
+
+        let mut big_query_schema = BTreeMap::default();
+        while rs.next_row() {
+            big_query_schema.insert(
+                rs.get_string_by_name("column_name")
+                    .map_err(|e| SinkError::BigQuery(e.into()))?
+                    .ok_or_else(|| {
+                        SinkError::BigQuery(anyhow::anyhow!("Cannot find column_name"))
+                    })?,
+                rs.get_string_by_name("data_type")
+                    .map_err(|e| SinkError::BigQuery(e.into()))?
+                    .ok_or_else(|| SinkError::BigQuery(anyhow::anyhow!("Cannot find data_type")))?,
+            );
+        }
+        Ok(big_query_schema)
+    }
+
+    pub async fn get_table(&self, client: &Client) -> Result<Table> {
+        let table = client
+            .table()
+            .get(&self.project, &self.dataset, &self.table, None)
+            .await
+            .context("Failed to get BigQuery table")?;
+        Ok(table)
+    }
+
+    /// <https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types>
+    pub fn bigquery_type_to_rw_type(
+        ty: &TableFieldSchema,
+    ) -> anyhow::Result<risingwave_common::types::DataType> {
+        match ty.r#type {
+            FieldType::String => Ok(risingwave_common::types::DataType::Varchar),
+            FieldType::Integer | FieldType::Int64 => Ok(risingwave_common::types::DataType::Int64),
+            FieldType::Float | FieldType::Float64 => {
+                Ok(risingwave_common::types::DataType::Float64)
+            }
+            FieldType::Boolean | FieldType::Bool => Ok(risingwave_common::types::DataType::Boolean),
+            FieldType::Timestamp => Ok(risingwave_common::types::DataType::Timestamptz),
+            FieldType::Date => Ok(risingwave_common::types::DataType::Date),
+            FieldType::Time => Ok(risingwave_common::types::DataType::Time),
+            FieldType::Datetime => Ok(risingwave_common::types::DataType::Timestamp),
+            FieldType::Json => Ok(risingwave_common::types::DataType::Jsonb),
+            FieldType::Bytes => Ok(risingwave_common::types::DataType::Bytea),
+            FieldType::Numeric => Ok(risingwave_common::types::DataType::Decimal),
+            FieldType::Bignumeric => {
+                anyhow::bail!("BIGNUMERIC type is not supported in RisingWave.")
+            }
+            FieldType::Struct | FieldType::Record => {
+                let fields = ty
+                    .fields
+                    .as_ref()
+                    .context("no struct fields found")?
+                    .iter()
+                    .map(|f| Ok((f.name.clone(), BigQueryCommon::bigquery_type_to_rw_type(f)?)))
+                    .collect::<Result<Vec<_>>>()?;
+                let struct_type = StructType::new(fields);
+                Ok(risingwave_common::types::DataType::Struct(struct_type))
+            }
+            FieldType::Geography => anyhow::bail!("Geography type is not supported in RisingWave."),
+            // XXX: array is not supported?
+        }
+    }
+
+    pub async fn get_auth_json_from_path(&self, aws_auth_props: &AwsAuthProps) -> Result<String> {
         if let Some(credentials) = &self.credentials {
             Ok(credentials.clone())
         } else if let Some(local_path) = &self.local_path {
@@ -324,7 +398,7 @@ impl BigQuerySink {
 impl BigQuerySink {
     fn check_column_name_and_type(
         &self,
-        big_query_columns_desc: HashMap<String, String>,
+        big_query_columns_desc: BTreeMap<String, String>,
     ) -> Result<()> {
         let rw_fields_name = self.schema.fields();
         if big_query_columns_desc.is_empty() {
@@ -555,31 +629,7 @@ impl Sink for BigQuerySink {
             }
         }
 
-        let mut rs = client
-            .job()
-            .query(
-                &self.config.common.project,
-                QueryRequest::new(format!(
-                    "SELECT column_name, data_type FROM `{}.{}.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = '{}'",
-                    project_id, dataset_id, table_id,
-                )),
-            ).await.map_err(|e| SinkError::BigQuery(e.into()))?;
-
-        let mut big_query_schema = HashMap::default();
-        while rs.next_row() {
-            big_query_schema.insert(
-                rs.get_string_by_name("column_name")
-                    .map_err(|e| SinkError::BigQuery(e.into()))?
-                    .ok_or_else(|| {
-                        SinkError::BigQuery(anyhow::anyhow!("Cannot find column_name"))
-                    })?,
-                rs.get_string_by_name("data_type")
-                    .map_err(|e| SinkError::BigQuery(e.into()))?
-                    .ok_or_else(|| {
-                        SinkError::BigQuery(anyhow::anyhow!("Cannot find column_name"))
-                    })?,
-            );
-        }
+        let big_query_schema = self.config.common.get_table_schema(&client).await?;
 
         self.check_column_name_and_type(big_query_schema)?;
         Ok(())

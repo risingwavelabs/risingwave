@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_connector::source::BATCH_POSIX_FS_CONNECTOR;
+use risingwave_connector::source::{BATCH_BIGQUERY_CONNECTOR, BATCH_POSIX_FS_CONNECTOR};
 
 use super::*;
 
@@ -87,6 +87,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 BATCH_POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv],
+                ),
+                BATCH_BIGQUERY_CONNECTOR => hashmap!(
+                    Format::None => vec![Encode::None],
                 ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
                     Format::Debezium => vec![Encode::Json],

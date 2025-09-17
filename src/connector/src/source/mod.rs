@@ -14,6 +14,7 @@
 
 pub mod prelude {
     // import all split enumerators
+    pub use crate::source::big_query_batch::BatchBigQueryEnumerator as BatchBigQuerySplitEnumerator;
     pub use crate::source::datagen::DatagenSplitEnumerator;
     pub use crate::source::filesystem::LegacyS3SplitEnumerator;
     pub use crate::source::filesystem::opendal_source::OpendalEnumerator;
@@ -45,6 +46,7 @@ pub mod prelude {
 
 pub mod base;
 pub mod batch;
+pub mod big_query_batch;
 pub mod cdc;
 pub mod data_gen_util;
 pub mod datagen;
@@ -84,6 +86,7 @@ use risingwave_common::row::OwnedRow;
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
+pub use crate::source::big_query_batch::BATCH_BIGQUERY_CONNECTOR;
 pub use crate::source::filesystem::LEGACY_S3_CONNECTOR;
 pub use crate::source::filesystem::opendal_source::{
     AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR,

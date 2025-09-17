@@ -25,7 +25,9 @@ pub mod iceberg;
 use iceberg::extract_iceberg_columns;
 mod protobuf;
 use protobuf::extract_protobuf_table_schema;
+mod bigquery;
 pub mod nexmark;
+use bigquery::extract_bigquery_columns;
 
 /// Resolves the schema of the source from external schema file.
 /// See <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
@@ -278,6 +280,12 @@ async fn bind_columns_from_source_for_non_cdc(
             if options_with_secret.is_iceberg_connector() {
                 Some(
                     extract_iceberg_columns(&options_with_secret)
+                        .await
+                        .map_err(|err| ProtocolError(err.to_report_string()))?,
+                )
+            } else if options_with_secret.is_bigquery_connector() {
+                Some(
+                    extract_bigquery_columns(&options_with_secret)
                         .await
                         .map_err(|err| ProtocolError(err.to_report_string()))?,
                 )
