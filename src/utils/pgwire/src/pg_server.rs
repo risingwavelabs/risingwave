@@ -205,7 +205,6 @@ async fn validate_jwt(
     cluster_id: &str,
     metadata: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
-    let _header = decode_header(jwt)?;
     let jwks: Jwks = reqwest::get(jwks_url).await?.json().await?;
     validate_jwt_with_jwks(jwt, &jwks, issuer, cluster_id, metadata)
 }
@@ -628,14 +627,14 @@ mod tests {
 
         fn create_test_jwks(public_key: &RsaPublicKey, kid: &str, alg: &str) -> Jwks {
             let n = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(&public_key.n().to_bytes_be());
+                .encode(public_key.n().to_bytes_be());
             let e = base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .encode(&public_key.e().to_bytes_be());
+                .encode(public_key.e().to_bytes_be());
 
             Jwks {
                 keys: vec![Jwk {
-                    kid: kid.to_string(),
-                    alg: alg.to_string(),
+                    kid: kid.to_owned(),
+                    alg: alg.to_owned(),
                     n,
                     e,
                 }],
@@ -652,7 +651,7 @@ mod tests {
             additional_claims: HashMap<String, serde_json::Value>,
         ) -> String {
             let mut header = Header::new(algorithm);
-            header.kid = Some(kid.to_string());
+            header.kid = Some(kid.to_owned());
 
             let mut claims = json!({
                 "iss": issuer,
@@ -668,7 +667,7 @@ mod tests {
             }
 
             let encoding_key = EncodingKey::from_rsa_pem(
-                &private_key
+                private_key
                     .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
                     .unwrap()
                     .as_bytes(),
@@ -880,13 +879,13 @@ mod tests {
             let jwks = create_test_jwks(&public_key, "test-kid", "RS256");
 
             let mut metadata = HashMap::new();
-            metadata.insert("role".to_string(), "admin".to_string());
-            metadata.insert("department".to_string(), "security".to_string());
+            metadata.insert("role".to_owned(), "admin".to_owned());
+            metadata.insert("department".to_owned(), "security".to_owned());
 
             let mut claims = HashMap::new();
-            claims.insert("role".to_string(), json!("admin"));
-            claims.insert("department".to_string(), json!("security"));
-            claims.insert("extra_claim".to_string(), json!("ignored")); // Extra claims are fine
+            claims.insert("role".to_owned(), json!("admin"));
+            claims.insert("department".to_owned(), json!("security"));
+            claims.insert("extra_claim".to_owned(), json!("ignored")); // Extra claims are fine
 
             let jwt = create_jwt_token(
                 &private_key,
@@ -906,7 +905,7 @@ mod tests {
                 &metadata,
             );
 
-            assert_eq!(result.unwrap(), true);
+            assert!(result.unwrap());
         }
 
         #[test]
@@ -915,12 +914,12 @@ mod tests {
             let jwks = create_test_jwks(&public_key, "test-kid", "RS256");
 
             let mut metadata = HashMap::new();
-            metadata.insert("role".to_string(), "admin".to_string());
-            metadata.insert("department".to_string(), "security".to_string());
+            metadata.insert("role".to_owned(), "admin".to_owned());
+            metadata.insert("department".to_owned(), "security".to_owned());
 
             let mut claims = HashMap::new();
-            claims.insert("role".to_string(), json!("user")); // Wrong role
-            claims.insert("department".to_string(), json!("security"));
+            claims.insert("role".to_owned(), json!("user")); // Wrong role
+            claims.insert("department".to_owned(), json!("security"));
 
             let jwt = create_jwt_token(
                 &private_key,
