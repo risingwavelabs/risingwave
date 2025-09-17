@@ -1196,6 +1196,18 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn alter_iceberg_table_props(
+        &self,
+        _table_id: u32,
+        _sink_id: u32,
+        _source_id: u32,
+        _changed_props: BTreeMap<String, String>,
+        _changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        _connector_conn_ref: Option<u32>,
+    ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn alter_source_connector_props(
         &self,
         _source_id: u32,

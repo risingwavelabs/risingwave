@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::env;
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use risingwave_common::config::MetaConfig;
@@ -60,7 +61,7 @@ Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
             WorkerType::RiseCtl,
             &get_new_ctl_identity(),
             Property::default(),
-            &MetaConfig::default(),
+            Arc::new(MetaConfig::default()),
         )
         .await;
         let worker_id = client.worker_id();

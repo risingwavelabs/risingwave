@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
@@ -22,6 +23,50 @@ use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::MetadataManager;
 use crate::{MetaError, MetaResult};
 
+/// # High level design for refresh table
+///
+/// - Three tables:
+///
+/// - Main table: serves queries.
+/// - Staging table: receives refreshed content during `Refreshing`.
+/// - Progress table: per-VNode progress state for resumable refresh.
+///
+/// - Phased execution:
+///
+/// - Normal → Refreshing → Merging → Cleanup → Normal.
+/// - Refreshing: load and write to staging.
+/// - Merging: chunked sort-merge integrates staging into main; per-VNode progress persists checkpoints.
+/// - Cleanup: purge staging and reset progress.
+///
+/// - Barrier-first responsiveness:
+///
+/// - Executor uses left-priority `select_with_strategy`, always handling upstream messages/barriers before background merge.
+/// - On barriers, the executor persists progress so restarts resume exactly.
+///
+/// - Meta-managed state:
+///
+/// - `refresh_state` on each table enforces no concurrent refresh and enables recovery after failures.
+/// - Startup recovery resets lingering `Refreshing` tables to `Idle` and lets executors resume `Finishing` safely.
+///
+/// ## Progress Table (Conceptual)
+/// Tracks, per VNode:
+/// - last processed position (e.g., last PK),
+/// - completion flag,
+/// - processed row count,
+/// - last checkpoint epoch.
+///
+/// The executor initializes entries on `RefreshStart`, updates them during merge, and loads them at startup to resume from the last checkpoint.
+///
+/// ## Barrier Coordination and Completion
+/// - Compute reports:
+///
+/// - `refresh_finished_table_ids`: indicates a materialized view finished refreshing.
+/// - `truncate_tables`: staging tables to be cleaned up.
+// - Checkpoint control aggregates these across barrier types; completion handlers in meta:
+/// - update `refresh_state` to `Idle`,
+/// - schedule/handle `LoadFinish`,
+/// - drive cleanup work reliably after the storage version commit.
+///
 /// Manager responsible for handling refresh operations on refreshable tables
 pub struct RefreshManager {
     metadata_manager: MetadataManager,
@@ -41,8 +86,10 @@ impl RefreshManager {
     ///
     /// This method:
     /// 1. Validates that the table exists and is refreshable
-    /// 2. Sends a refresh command through the barrier system
-    /// 3. Returns the result of the refresh operation
+    /// 2. Checks current refresh state and ensures no concurrent refresh
+    /// 3. Atomically sets the table state to REFRESHING
+    /// 4. Sends a refresh command through the barrier system
+    /// 5. Returns the result of the refresh operation
     pub async fn refresh_table(&self, request: RefreshRequest) -> MetaResult<RefreshResponse> {
         let table_id = TableId::new(request.table_id);
         let associated_source_id = TableId::new(request.associated_source_id);
@@ -79,9 +126,7 @@ impl RefreshManager {
                     "Refresh command completed successfully"
                 );
 
-                Ok(RefreshResponse {
-                    status: None, // Success indicated by None status
-                })
+                Ok(RefreshResponse { status: None })
             }
             Err(e) => {
                 tracing::error!(
@@ -127,6 +172,24 @@ impl RefreshManager {
                 "Table '{}' is not associated with source '{}'. table.optional_associated_source_id: {:?}",
                 table.name, associated_source_id, table.optional_associated_source_id
             )));
+        }
+
+        let current_state = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_refresh_state(table_id.table_id as _)
+            .await?;
+        match current_state {
+            Some(RefreshState::Idle) | None => {
+                // the table is not refreshing. issue a refresh
+            }
+            state @ (Some(RefreshState::Finishing) | Some(RefreshState::Refreshing)) => {
+                return Err(MetaError::invalid_parameter(format!(
+                    "Table '{}' is currently in state {:?}. Cannot start a new refresh operation.",
+                    table.name,
+                    state.unwrap()
+                )));
+            }
         }
 
         tracing::debug!(

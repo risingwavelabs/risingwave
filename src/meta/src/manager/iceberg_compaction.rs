@@ -124,16 +124,30 @@ impl IcebergCompactionHandle {
         task_id: u64,
     ) -> MetaResult<()> {
         use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
-        let prost_sink_catalog: PbSink = self
+        let mut sinks = self
             .metadata_manager
             .catalog_controller
             .get_sink_by_ids(vec![self.sink_id.sink_id as i32])
-            .await?
-            .remove(0);
+            .await?;
+        if sinks.is_empty() {
+            // The sink may be deleted, just return Ok.
+            tracing::warn!("Sink not found: {}", self.sink_id.sink_id);
+            return Ok(());
+        }
+        let prost_sink_catalog: PbSink = sinks.remove(0);
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
         let task_type: TaskType = match param.sink_type {
-            SinkType::AppendOnly | SinkType::ForceAppendOnly => TaskType::SmallDataFileCompaction,
+            SinkType::AppendOnly | SinkType::ForceAppendOnly => {
+                if risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .is_ok()
+                {
+                    TaskType::SmallDataFileCompaction
+                } else {
+                    TaskType::FullCompaction
+                }
+            }
 
             _ => TaskType::FullCompaction,
         };

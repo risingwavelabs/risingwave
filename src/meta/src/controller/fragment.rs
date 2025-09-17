@@ -31,15 +31,15 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, Fragment as FragmentModel, FragmentRelation, Sink, StreamingJob,
+    Actor, Fragment as FragmentModel, FragmentRelation, Sink, SourceSplits, StreamingJob,
 };
 use risingwave_meta_model::{
     ActorId, ConnectorSplits, DatabaseId, DispatcherType, ExprContext, FragmentId, I32Array,
     JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
     VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, object, sink, source,
-    streaming_job, table,
+    source_splits, streaming_job, table,
 };
-use risingwave_meta_model_migration::{Alias, ExprTrait, SelectStatement, SimpleExpr};
+use risingwave_meta_model_migration::{Alias, ExprTrait, OnConflict, SelectStatement, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
@@ -71,7 +71,8 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, get_sink_fragment_by_ids, resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings, get_sink_fragment_by_ids, has_table_been_migrated,
+    resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
@@ -79,7 +80,7 @@ use crate::model::{
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
-use crate::stream::{SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
+use crate::stream::{SplitAssignment, UpstreamSinkInfo};
 use crate::{MetaError, MetaResult};
 
 /// Some information of running (inflight) actors.
@@ -333,16 +334,13 @@ impl CatalogController {
         job_definition: Option<String>,
     ) -> MetaResult<StreamJobFragments> {
         let mut pb_fragments = BTreeMap::new();
-        let mut pb_actor_splits = HashMap::new();
         let mut pb_actor_status = BTreeMap::new();
 
         for (fragment, actors) in fragments {
-            let (fragment, fragment_actor_status, fragment_actor_splits) =
+            let (fragment, fragment_actor_status, _) =
                 Self::compose_fragment(fragment, actors, job_definition.clone())?;
 
             pb_fragments.insert(fragment.fragment_id, fragment);
-
-            pb_actor_splits.extend(build_actor_split_impls(&fragment_actor_splits));
             pb_actor_status.extend(fragment_actor_status.into_iter());
         }
 
@@ -351,7 +349,6 @@ impl CatalogController {
             state: state as _,
             fragments: pb_fragments,
             actor_status: pb_actor_status,
-            actor_splits: pb_actor_splits,
             ctx: ctx
                 .as_ref()
                 .map(StreamContext::from_protobuf)
@@ -1838,6 +1835,43 @@ impl CatalogController {
         }
 
         Ok(mview_fragment.into_iter().next().unwrap())
+    }
+
+    pub async fn has_table_been_migrated(&self, table_id: TableId) -> MetaResult<bool> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        has_table_been_migrated(&txn, table_id).await
+    }
+
+    pub async fn update_source_splits(
+        &self,
+        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let models: Vec<source_splits::ActiveModel> = source_splits
+            .iter()
+            .map(|(source_id, splits)| source_splits::ActiveModel {
+                source_id: Set(*source_id as _),
+                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
+                    splits: splits.iter().map(Into::into).collect_vec(),
+                }))),
+            })
+            .collect();
+
+        SourceSplits::insert_many(models)
+            .on_conflict(
+                OnConflict::column(source_splits::Column::SourceId)
+                    .update_column(source_splits::Column::Splits)
+                    .to_owned(),
+            )
+            .exec(&txn)
+            .await?;
+
+        txn.commit().await?;
+
+        Ok(())
     }
 }
 

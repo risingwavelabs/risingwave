@@ -912,9 +912,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.29.0"
+version = "0.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31acf814d6b499e33ec894bb0fd7ddaf2665b44fbdd42b858d736449271fde0c"
+checksum = "d4fc47ec9e669d562e0755f59e1976d157546910e403f3c2da856d0a4d3cdc07"
 dependencies = [
  "async-openai-macros",
  "backoff",
@@ -923,7 +923,7 @@ dependencies = [
  "derive_builder",
  "eventsource-stream",
  "futures",
- "rand 0.8.5",
+ "rand 0.9.0",
  "reqwest 0.12.15",
  "reqwest-eventsource",
  "secrecy",
@@ -2560,9 +2560,11 @@ dependencies = [
  "futures-channel",
  "http-body-util",
  "hyper 1.6.0",
+ "hyper-rustls 0.27.5",
  "hyper-util",
  "lz4_flex",
  "replace_with",
+ "rustls 0.23.5",
  "sealed",
  "serde",
  "static_assertions",
@@ -7156,9 +7158,9 @@ checksum = "5a611371471e98973dbcab4e0ec66c31a10bc356eeb4d54a0e05eac8158fe38c"
 
 [[package]]
 name = "io-uring"
-version = "0.7.9"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d93587f37623a1a17d94ef2bc9ada592f5465fe7732084ab7beefabe5c77c0c4"
+checksum = "046fa2d4d00aea763528b4950358d0ead425372445dc8ff86312b3c69ff7727b"
 dependencies = [
  "bitflags 2.9.0",
  "cfg-if",
@@ -8876,7 +8878,7 @@ dependencies = [
  "md-5",
  "parking_lot 0.12.1",
  "percent-encoding",
- "quick-xml 0.37.5",
+ "quick-xml 0.37.1",
  "rand 0.9.0",
  "reqwest 0.12.15",
  "ring",
@@ -8968,7 +8970,7 @@ dependencies = [
  "log",
  "md-5",
  "percent-encoding",
- "quick-xml 0.37.5",
+ "quick-xml 0.37.1",
  "reqsign",
  "reqwest 0.12.15",
  "serde",
@@ -10623,9 +10625,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.37.5"
+version = "0.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "331e97a1af0bf59823e6eadffe373d7b27f485be8748f71471c662c1f269b7fb"
+checksum = "f22f29bdff3987b4d8632ef95fd6424ec7e4e0a57e2f4fc63e489e75357f6a03"
 dependencies = [
  "memchr",
  "serde",
@@ -10633,9 +10635,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.38.1"
+version = "0.38.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9845d9dccf565065824e69f9f235fafba1587031eda353c1f1561cd6a6be78f4"
+checksum = "42a232e7487fc2ef313d96dde7948e7a3c05101870d8985e4fd8d26aedd27b89"
 dependencies = [
  "memchr",
  "serde",
@@ -11037,7 +11039,7 @@ dependencies = [
  "log",
  "once_cell",
  "percent-encoding",
- "quick-xml 0.37.5",
+ "quick-xml 0.37.1",
  "rand 0.8.5",
  "reqwest 0.12.15",
  "rsa",
@@ -11931,7 +11933,6 @@ dependencies = [
  "sea-orm",
  "sea-schema",
  "serde",
- "serde_derive",
  "serde_json",
  "serde_with",
  "serde_yaml",
@@ -12245,7 +12246,7 @@ dependencies = [
  "pretty_assertions",
  "prometheus",
  "prost 0.13.4",
- "quick-xml 0.38.1",
+ "quick-xml 0.38.3",
  "rand 0.9.0",
  "risingwave_batch",
  "risingwave_batch_executors",
@@ -12824,7 +12825,6 @@ dependencies = [
  "risingwave_sqlsmith",
  "sea-orm",
  "serde",
- "serde_derive",
  "serde_json",
  "sqllogictest",
  "tempfile",
@@ -15198,9 +15198,9 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.19.1"
+version = "3.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7437ac7763b9b123ccf33c338a5cc1bac6f69b45a136c19bdd8a65e3916435bf"
+checksum = "84fa4d11fadde498443cca10fd3ac23c951f0dc59e080e9f4b93d4df4e4eea53"
 dependencies = [
  "fastrand",
  "getrandom 0.3.1",

@@ -110,7 +110,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         );
 
         let metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
-
         Self {
             actor_ctx,
             external_table,

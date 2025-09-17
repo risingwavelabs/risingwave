@@ -25,7 +25,7 @@ use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tokio_postgres::types::{PgLsn, Type as PgType};
 
 use crate::connector_common::create_pg_client;
@@ -238,7 +238,6 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-
         let client = create_pg_client(
             &config.username,
             &config.password,
@@ -249,7 +248,6 @@ impl PostgresExternalTableReader {
             &config.ssl_root_cert,
         )
         .await?;
-
         let field_names = rw_schema
             .fields
             .iter()

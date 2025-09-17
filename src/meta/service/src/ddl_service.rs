@@ -1037,6 +1037,18 @@ impl DdlService for DdlServiceImpl {
                                     original_columns = ?original_columns,
                                     new_columns = ?new_columns,
                                     "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported");
+
+                    let fail_info = "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported".to_owned();
+                    add_auto_schema_change_fail_event_log(
+                        &self.meta_metrics,
+                        table.id,
+                        table.name.clone(),
+                        table_change.cdc_table_id.clone(),
+                        table_change.upstream_ddl.clone(),
+                        &self.env.event_log_manager_ref(),
+                        fail_info,
+                    );
+
                     return Err(Status::invalid_argument(
                         "New columns should be a subset or superset of the original columns (including hidden columns)",
                     ));
@@ -1114,6 +1126,8 @@ impl DdlService for DdlServiceImpl {
                                         upstraem_ddl = table_change.upstream_ddl,
                                         "failed to replace the table",
                                     );
+                                    let fail_info =
+                                        format!("failed to replace the table: {}", e.as_report());
                                     add_auto_schema_change_fail_event_log(
                                         &self.meta_metrics,
                                         table.id,
@@ -1121,6 +1135,7 @@ impl DdlService for DdlServiceImpl {
                                         table_change.cdc_table_id.clone(),
                                         table_change.upstream_ddl.clone(),
                                         &self.env.event_log_manager_ref(),
+                                        fail_info,
                                     );
                                 }
                             };
@@ -1134,6 +1149,8 @@ impl DdlService for DdlServiceImpl {
                             cdc_table_id = table.cdc_table_id,
                             "failed to get replace table plan",
                         );
+                        let fail_info =
+                            format!("failed to get replace table plan: {}", e.as_report());
                         add_auto_schema_change_fail_event_log(
                             &self.meta_metrics,
                             table.id,
@@ -1141,6 +1158,7 @@ impl DdlService for DdlServiceImpl {
                             table_change.cdc_table_id.clone(),
                             table_change.upstream_ddl.clone(),
                             &self.env.event_log_manager_ref(),
+                            fail_info,
                         );
                     }
                 };
@@ -1267,6 +1285,7 @@ fn add_auto_schema_change_fail_event_log(
     cdc_table_id: String,
     upstream_ddl: String,
     event_log_manager: &EventLogManagerRef,
+    fail_info: String,
 ) {
     meta_metrics
         .auto_schema_change_failure_cnt
@@ -1277,6 +1296,7 @@ fn add_auto_schema_change_fail_event_log(
         table_name,
         cdc_table_id,
         upstream_ddl,
+        fail_info,
     };
     event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
 }
