@@ -72,6 +72,67 @@ impl ToSql for EnumString {
     }
 }
 
+/// Parse composite type fields from binary format
+fn parse_composite_fields(
+    _ty: &Type,
+    raw: &[u8],
+    fields: &[tokio_postgres::types::Field],
+) -> Result<Vec<Option<ScalarAdapter>>, Box<dyn std::error::Error + Sync + Send>> {
+    use std::io::Cursor;
+
+    use byteorder::{BigEndian, ReadBytesExt};
+
+    let mut cursor = Cursor::new(raw);
+
+    // Read number of fields (4 bytes, big endian)
+    let num_fields = cursor.read_u32::<BigEndian>()?;
+
+    if num_fields as usize != fields.len() {
+        return Err(format!(
+            "Field count mismatch: expected {}, got {}",
+            fields.len(),
+            num_fields
+        )
+        .into());
+    }
+
+    let mut field_values = Vec::with_capacity(num_fields as usize);
+
+    for field in fields {
+        // Read field OID (4 bytes) - this should match the field type
+        let _field_oid = cursor.read_u32::<BigEndian>()?;
+
+        // Read field length (4 bytes, -1 means NULL)
+        let field_length = cursor.read_i32::<BigEndian>()?;
+
+        if field_length == -1 {
+            // NULL field
+            field_values.push(None);
+        } else {
+            // Read field data
+            let mut field_data = vec![0u8; field_length as usize];
+            std::io::Read::read_exact(&mut cursor, &mut field_data)?;
+
+            // Parse the field data using the field's type
+            let field_type = field.type_();
+            match ScalarAdapter::from_sql(field_type, &field_data) {
+                Ok(adapter) => field_values.push(Some(adapter)),
+                Err(e) => {
+                    tracing::warn!(
+                        field_name = field.name(),
+                        field_type = ?field_type,
+                        error = %e,
+                        "Failed to parse composite field, setting to NULL"
+                    );
+                    field_values.push(None);
+                }
+            }
+        }
+    }
+
+    Ok(field_values)
+}
+
 /// Adapter for `ScalarImpl` to Postgres data type,
 /// which can be used to encode/decode to/from Postgres value.
 #[derive(Debug)]
@@ -87,6 +148,8 @@ pub(crate) enum ScalarAdapter {
     // UuidList is covered by List, while NumericList and EnumList are special cases.
     // Note: The IntervalList is not supported.
     List(Vec<Option<ScalarAdapter>>),
+    // Composite type containing field values
+    Composite(Vec<Option<ScalarAdapter>>),
 }
 
 impl ToSql for ScalarAdapter {
@@ -105,6 +168,7 @@ impl ToSql for ScalarAdapter {
             ScalarAdapter::NumericList(v) => v.to_sql(ty, out),
             ScalarAdapter::EnumList(v) => v.to_sql(ty, out),
             ScalarAdapter::List(v) => v.to_sql(ty, out),
+            ScalarAdapter::Composite(v) => v.to_sql(ty, out),
         }
     }
 
@@ -135,6 +199,11 @@ impl<'a> FromSql<'a> for ScalarAdapter {
                 Ok(ScalarAdapter::EnumList(FromSql::from_sql(ty, raw)?))
             }
             Kind::Array(_) => Ok(ScalarAdapter::List(FromSql::from_sql(ty, raw)?)),
+            Kind::Composite(fields) => {
+                // Parse composite type from binary format
+                let field_values = parse_composite_fields(ty, raw, fields)?;
+                Ok(ScalarAdapter::Composite(field_values))
+            }
             _ => Err(anyhow!("failed to convert type {:?} to ScalarAdapter", ty).into()),
         }
     }
@@ -146,6 +215,7 @@ impl<'a> FromSql<'a> for ScalarAdapter {
             }
             Kind::Enum(_) => true,
             Kind::Array(inner_type) => <ScalarAdapter as FromSql>::accepts(inner_type),
+            Kind::Composite(_) => true,
             _ => false,
         }
     }
@@ -161,6 +231,7 @@ impl ScalarAdapter {
             ScalarAdapter::EnumList(_) => "EnumList",
             ScalarAdapter::NumericList(_) => "NumericList",
             ScalarAdapter::List(_) => "List",
+            ScalarAdapter::Composite(_) => "Composite",
         }
     }
 
@@ -303,6 +374,34 @@ impl ScalarAdapter {
                 }
                 Some(ScalarImpl::from(ListValue::new(builder.finish())))
             }
+            (ScalarAdapter::Composite(field_values), &DataType::Struct(struct_type)) => {
+                // Convert composite type to RisingWave StructValue
+                let field_types = struct_type.types().collect::<Vec<_>>();
+
+                if field_values.len() != field_types.len() {
+                    tracing::error!(
+                        composite_fields = field_values.len(),
+                        struct_fields = field_types.len(),
+                        "Field count mismatch between composite type and struct type"
+                    );
+                    return None;
+                }
+
+                let mut struct_fields = Vec::with_capacity(field_values.len());
+                for (field_value, field_type) in field_values.into_iter().zip(field_types) {
+                    match field_value {
+                        Some(adapter) => match adapter.into_scalar(field_type) {
+                            Some(scalar) => struct_fields.push(Some(scalar)),
+                            None => struct_fields.push(None),
+                        },
+                        None => struct_fields.push(None),
+                    }
+                }
+
+                Some(ScalarImpl::from(
+                    risingwave_common::array::StructValue::new(struct_fields),
+                ))
+            }
             (scaler, ty) => {
                 tracing::error!(
                     adapter = scaler.name(),
@@ -391,5 +490,79 @@ fn rw_numeric_to_pg_numeric(val: Decimal) -> PgNumeric {
         Decimal::Normalized(inner) => PgNumeric::Normalized(inner.to_string().parse().unwrap()),
         Decimal::PositiveInf => PgNumeric::PositiveInf,
         Decimal::NaN => PgNumeric::NaN,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::{DataType, StructType};
+
+    use super::*;
+
+    #[test]
+    fn test_composite_adapter_name() {
+        let composite = ScalarAdapter::Composite(vec![]);
+        assert_eq!(composite.name(), "Composite");
+    }
+
+    #[test]
+    fn test_composite_into_scalar() {
+        // Create a composite with two fields: varchar and decimal
+        let field1 = ScalarAdapter::Builtin(ScalarImpl::from("USD"));
+        let field2 = ScalarAdapter::Numeric(PgNumeric::Normalized("123.45".parse().unwrap()));
+
+        let composite = ScalarAdapter::Composite(vec![Some(field1), Some(field2)]);
+
+        // Create corresponding struct type
+        let struct_type = StructType::new(vec![
+            ("currency_code", DataType::Varchar),
+            ("amount", DataType::Decimal),
+        ]);
+        let data_type = DataType::Struct(struct_type);
+
+        // Convert to scalar
+        let result = composite.into_scalar(&data_type);
+        assert!(result.is_some(), "Composite should convert to struct");
+
+        if let Some(ScalarImpl::Struct(struct_value)) = result {
+            let fields = struct_value.fields();
+            assert_eq!(fields.len(), 2);
+
+            // Check first field (currency_code)
+            if let Some(ScalarImpl::Utf8(currency)) = &fields[0] {
+                assert_eq!(currency.as_ref(), "USD");
+            } else {
+                panic!("First field should be a string");
+            }
+
+            // Check second field (amount) - should be a decimal
+            assert!(fields[1].is_some(), "Second field should not be null");
+        } else {
+            panic!("Result should be a struct");
+        }
+    }
+
+    #[test]
+    fn test_composite_with_null_fields() {
+        // Create a composite with one null field
+        let field1 = ScalarAdapter::Builtin(ScalarImpl::from("EUR"));
+
+        let composite = ScalarAdapter::Composite(vec![Some(field1), None]);
+
+        let struct_type = StructType::new(vec![
+            ("currency_code", DataType::Varchar),
+            ("amount", DataType::Decimal),
+        ]);
+        let data_type = DataType::Struct(struct_type);
+
+        let result = composite.into_scalar(&data_type);
+        assert!(result.is_some());
+
+        if let Some(ScalarImpl::Struct(struct_value)) = result {
+            let fields = struct_value.fields();
+            assert_eq!(fields.len(), 2);
+            assert!(fields[0].is_some());
+            assert!(fields[1].is_none());
+        }
     }
 }

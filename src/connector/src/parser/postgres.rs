@@ -116,10 +116,20 @@ fn postgres_cell_to_scalar_impl(
                 }
             }
         },
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
-        DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
+        DataType::Struct(_) => {
+            // Handle composite types using ScalarAdapter
+            let res = row.try_get::<_, Option<ScalarAdapter>>(i);
+            match res {
+                Ok(val) => val.and_then(|v| v.into_scalar(data_type)),
+                Err(err) => {
+                    log_error!(name, err, "parse composite column failed");
+                    None
+                }
+            }
+        }
+        DataType::Vector(_) | DataType::Serial | DataType::Map(_) => {
             // Is this branch reachable?
-            // Struct and Serial are not supported
+            // Vector, Serial and Map are not supported
             tracing::warn!(name, ?data_type, "unsupported data type, set to null");
             None
         }
@@ -132,7 +142,7 @@ mod tests {
 
     use crate::parser::scalar_adapter::EnumString;
     const DB: &str = "postgres";
-    const USER: &str = "kexiang";
+    const USER: &str = "postgres";
 
     #[ignore]
     #[tokio::test]
@@ -196,5 +206,96 @@ mod tests {
         assert_eq!("happy", got_new.0.as_str());
         client.execute("DROP TABLE person", &[]).await.unwrap();
         client.execute("DROP TYPE mood", &[]).await.unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn composite_type_integration_test() {
+        use risingwave_common::types::{DataType, StructType};
+
+        use crate::parser::scalar_adapter::ScalarAdapter;
+
+        let connect = format!(
+            "host=localhost port=5432 user={} password={} dbname={}",
+            USER, DB, DB
+        );
+        let (client, connection) = tokio_postgres::connect(connect.as_str(), NoTls)
+            .await
+            .unwrap();
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("connection error: {}", e);
+            }
+        });
+
+        // Clean up any existing types/tables
+        let _ = client
+            .execute("DROP TABLE IF EXISTS test_composite_table", &[])
+            .await;
+        let _ = client
+            .execute("DROP TYPE IF EXISTS money_with_currency CASCADE", &[])
+            .await;
+
+        // Create composite type
+        client
+            .execute(
+                "CREATE TYPE money_with_currency AS (currency_code char(3), amount numeric(20,8))",
+                &[],
+            )
+            .await
+            .unwrap();
+
+        // Create table with composite type
+        client
+            .execute(
+                "CREATE TABLE test_composite_table (id int PRIMARY KEY, money_info money_with_currency)",
+                &[],
+            )
+            .await
+            .unwrap();
+
+        // Insert test data
+        client
+            .execute(
+                "INSERT INTO test_composite_table VALUES (1, ('USD', 123.45))",
+                &[],
+            )
+            .await
+            .unwrap();
+
+        // Test reading composite type
+        let row = client
+            .query_one(
+                "SELECT money_info FROM test_composite_table WHERE id = 1",
+                &[],
+            )
+            .await
+            .unwrap();
+
+        let composite_adapter: ScalarAdapter = row.get(0);
+
+        // Test conversion to struct
+        let struct_type = StructType::new(vec![
+            ("currency_code", DataType::Varchar),
+            ("amount", DataType::Decimal),
+        ]);
+        let struct_data_type = DataType::Struct(struct_type);
+
+        let result = composite_adapter.into_scalar(&struct_data_type);
+        assert!(
+            result.is_some(),
+            "Composite type should convert to struct successfully"
+        );
+
+        // Clean up
+        client
+            .execute("DROP TABLE test_composite_table", &[])
+            .await
+            .unwrap();
+        client
+            .execute("DROP TYPE money_with_currency", &[])
+            .await
+            .unwrap();
     }
 }
