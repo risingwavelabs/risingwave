@@ -487,23 +487,15 @@ impl MySqlExternalTableReader {
         Ok(column_infos)
     }
 
-    /// Get the MySQL column type for a given column name, converting to CAST-compatible type
+    /// Get the MySQL column type for a given column name, only return CAST type for unsigned integers
     fn get_column_type(&self, column_name: &str) -> &str {
         for (col_name, col_type) in &self.upstream_mysql_pk_infos {
             if col_name == column_name {
-                // Convert MySQL column types to CAST-compatible types
+                // Only CAST unsigned integer types, others return empty string (no CAST)
                 return match col_type.as_str() {
-                    "bigint unsigned" => "UNSIGNED",
-                    "int unsigned" => "UNSIGNED",
-                    "mediumint unsigned" => "UNSIGNED",
-                    "smallint unsigned" => "UNSIGNED",
-                    "tinyint unsigned" => "UNSIGNED",
-                    "bigint" => "SIGNED",
-                    "int" => "SIGNED",
-                    "mediumint" => "SIGNED",
-                    "smallint" => "SIGNED",
-                    "tinyint" => "SIGNED",
-                    _ => "SIGNED", // Default fallback
+                    "bigint unsigned" | "int unsigned" | "mediumint unsigned"
+                    | "smallint unsigned" | "tinyint unsigned" => "UNSIGNED",
+                    _ => "", // No CAST for signed types, varchar, timestamp, date, etc.
                 };
             }
         }
