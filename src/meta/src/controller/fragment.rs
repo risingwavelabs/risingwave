@@ -1205,14 +1205,13 @@ impl CatalogController {
     ) -> MetaResult<Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)>> {
         let inner = self.inner.read().await;
 
-        let fragment_objects: Vec<(FragmentId, ObjectId, SchemaId, ObjectType, DatabaseId)> =
+        let fragment_objects: Vec<(FragmentId, ObjectId, SchemaId, ObjectType)> =
             FragmentModel::find()
                 .select_only()
                 .join(JoinType::LeftJoin, fragment::Relation::Object.def())
                 .column_as(object::Column::Oid, "job_id")
                 .column_as(object::Column::SchemaId, "schema_id")
                 .column_as(object::Column::ObjType, "type")
-                .column_as(object::Column::DatabaseId, "database_id")
                 .into_tuple()
                 .all(&inner.db)
                 .await?;
@@ -1222,24 +1221,22 @@ impl CatalogController {
 
             fragment_objects
                 .into_iter()
-                .flat_map(
-                    |(fragment_id, object_id, schema_id, object_type, database_id)| {
-                        let SharedFragmentInfo {
-                            fragment_id,
-                            actors,
-                            ..
-                        } = info.get_fragment(fragment_id as _).unwrap();
-                        actors.keys().map(move |actor_id| {
-                            (
-                                *actor_id as _,
-                                *fragment_id as _,
-                                object_id,
-                                schema_id,
-                                object_type,
-                            )
-                        })
-                    },
-                )
+                .flat_map(|(fragment_id, object_id, schema_id, object_type)| {
+                    let SharedFragmentInfo {
+                        fragment_id,
+                        actors,
+                        ..
+                    } = info.get_fragment(fragment_id as _).unwrap();
+                    actors.keys().map(move |actor_id| {
+                        (
+                            *actor_id as _,
+                            *fragment_id as _,
+                            object_id,
+                            schema_id,
+                            object_type,
+                        )
+                    })
+                })
                 .collect_vec()
         };
 
@@ -1399,6 +1396,8 @@ impl CatalogController {
 
         let id_gen = self.env.id_gen_manager();
 
+        let props = source_manager_ref.list_sources_special_props().await;
+
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1409,6 +1408,7 @@ impl CatalogController {
             database_id,
             worker_nodes,
             adaptive_parallelism_strategy,
+            props,
         )
         .await?;
 

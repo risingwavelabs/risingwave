@@ -379,7 +379,6 @@ impl CommandContext {
                     old_fragments,
                     new_fragments,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
                     to_drop_state_table_ids,
                     auto_refresh_schema_sinks,
                     ..

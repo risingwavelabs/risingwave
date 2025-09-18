@@ -22,6 +22,7 @@ use risingwave_common::catalog;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
     Database, Fragment, FragmentRelation, Sink, Source, SourceSplits, StreamingJob, Table,
@@ -32,7 +33,6 @@ use risingwave_meta_model::{
     streaming_job, table,
 };
 use risingwave_meta_model_migration::Condition;
-use risingwave_pb::source::ConnectorSplit;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, QueryTrait,
     RelationTrait,
@@ -112,6 +112,7 @@ pub async fn load_fragment_info<C>(
     database_id: Option<DatabaseId>,
     worker_nodes: &ActiveStreamingWorkerNodes,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    props: HashMap<SourceId, SourceWorkerProperties>,
 ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
 where
     C: ConnectionTrait,
@@ -151,18 +152,13 @@ where
 
     println!("before render");
 
-    let RenderedGraph {
-        fragments,
-        ensembles,
-        source_fragments,
-        cdc_source_fragments,
-    } = render_jobs(
+    let RenderedGraph { fragments, .. } = render_jobs(
         txn,
         id_gen,
         jobs,
         available_workers,
         adaptive_parallelism_strategy,
-        Default::default(),
+        props,
     )
     .await?;
 
@@ -203,8 +199,6 @@ where
 
     println!("jobs {:?}", job_ids);
     println!("workers {:?}", workers);
-
-    // SourceSplits::find().all
 
     let jobs: HashMap<_, _> = StreamingJob::find()
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
@@ -251,6 +245,8 @@ where
 
     let (fragment_source_ids, source_splits) =
         resolve_source_fragments(txn, source_properties, &fragment_map).await?;
+
+    println!("source splits {:#?}", source_splits);
 
     let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
         .select_only()
@@ -356,7 +352,7 @@ where
 
         let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
 
-        if let Some(entry_fragment) = entry_fragments.first()
+        let fragment_splits = if let Some(entry_fragment) = entry_fragments.first()
             && let Some(source_id) = fragment_source_ids.get(&entry_fragment.fragment_id)
         {
             println!(
@@ -364,7 +360,35 @@ where
                 entry_fragment.fragment_id, source_id
             );
             assert_eq!(entry_fragments.len(), 1);
-        }
+
+            let entry_fragment = entry_fragments.iter().exactly_one().unwrap();
+            let entry_fragment_id = entry_fragment.fragment_id;
+
+            let empty_actor_splits = actors
+                .iter()
+                .map(|actor_id| (*actor_id as _, vec![]))
+                .collect();
+
+            let splits = source_splits
+                .get(source_id)
+                .map(|(_, splits)| splits.clone())
+                .unwrap_or_default();
+
+            let splits = splits.into_iter().map(|s| (s.id(), s)).collect();
+
+            crate::stream::source_manager::reassign_splits(
+                entry_fragment_id as _,
+                empty_actor_splits,
+                &splits,
+                // pre-allocate splits is the first time getting splits, and it does not have scale-in scene
+                std::default::Default::default(),
+            )
+            .unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+
+        println!("fragment splits {:#?}", fragment_splits);
 
         for fragment_id in components {
             let fragment::Model {
@@ -394,12 +418,24 @@ where
                     };
 
                     let actor_id = actor_id_base + actor_idx as u32;
+
+                    let splits = if fragment_source_ids.contains_key(&fragment_id) {
+                        fragment_splits
+                            .get(&(actor_idx as _))
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        vec![]
+                    };
+
+                    println!("xxactor split {} splits {:#?}", actor_id, splits);
+
                     (
                         actor_id,
                         InflightActorInfo {
                             worker_id,
                             vnode_bitmap,
-                            splits: todo!(),
+                            splits,
                         },
                     )
                 })
@@ -447,7 +483,7 @@ async fn resolve_source_fragments<C>(
     fragment_map: &HashMap<FragmentId, fragment::Model>,
 ) -> MetaResult<(
     HashMap<FragmentId, SourceId>,
-    HashMap<SourceId, (SourceWorkerProperties, Vec<ConnectorSplit>)>,
+    HashMap<SourceId, (SourceWorkerProperties, Vec<SplitImpl>)>,
 )>
 where
     C: ConnectionTrait,
@@ -490,7 +526,12 @@ where
                         source_properties
                             .remove(&model.source_id)
                             .unwrap_or_default(),
-                        splits.to_protobuf().splits,
+                        splits
+                            .to_protobuf()
+                            .splits
+                            .iter()
+                            .flat_map(SplitImpl::try_from)
+                            .collect(),
                     ),
                 )
             })
