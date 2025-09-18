@@ -1853,17 +1853,6 @@ impl Parser<'_> {
         }
     }
 
-    pub fn peek_nth_any_of_uppercase_identifiers(
-        &mut self,
-        n: usize,
-        identifiers: &[&str],
-    ) -> bool {
-        match self.peek_nth_token(n).token {
-            Token::Word(w) => identifiers.contains(&w.value.to_ascii_uppercase().as_str()),
-            _ => false,
-        }
-    }
-
     /// Bail out if the current token is not one of the expected keywords, or consume it if it is
     pub fn expect_one_of_keywords(&mut self, keywords: &[Keyword]) -> ModalResult<Keyword> {
         if let Some(keyword) = self.parse_one_of_keywords(keywords) {
@@ -4387,14 +4376,20 @@ impl Parser<'_> {
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
-            let ident = parser.parse_identifier()?;
-            match ident.value.to_ascii_uppercase().as_str() {
+            fn parse_unquote_ident_to_upper(parser: &mut Parser<'_>) -> ModalResult<String> {
+                let ident = parser.parse_identifier()?;
+                if ident.quote_style.is_some() {
+                    parser_err!("quoted explain options not allowed: {}", ident);
+                }
+                Ok(ident.value.to_ascii_uppercase())
+            }
+            match parse_unquote_ident_to_upper(parser)?.as_str() {
                 "VERBOSE" => options.verbose = parser.parse_optional_boolean(true),
                 "TRACE" => options.trace = parser.parse_optional_boolean(true),
                 "BACKFILL" => options.backfill = parser.parse_optional_boolean(true),
                 "TYPE" => {
-                    let explain_type = parser.parse_identifier()?;
-                    match explain_type.value.to_ascii_uppercase().as_str() {
+                    let explain_type = parse_unquote_ident_to_upper(parser)?;
+                    match explain_type.as_str() {
                         "LOGICAL" => options.explain_type = ExplainType::Logical,
                         "PHYSICAL" => options.explain_type = ExplainType::Physical,
                         "DISTSQL" => options.explain_type = ExplainType::DistSql,
@@ -4408,8 +4403,8 @@ impl Parser<'_> {
                 "DISTSQL" => options.explain_type = ExplainType::DistSql,
                 "FORMAT" => {
                     options.explain_format = {
-                        let format = parser.parse_identifier()?;
-                        match format.value.to_ascii_uppercase().as_str() {
+                        let format = parse_unquote_ident_to_upper(parser)?;
+                        match format.as_str() {
                             "TEXT" => ExplainFormat::Text,
                             "JSON" => ExplainFormat::Json,
                             "XML" => ExplainFormat::Xml,
@@ -4434,9 +4429,11 @@ impl Parser<'_> {
         // In order to support following statement, we need to peek before consume.
         // explain (select 1) union (select 1)
         if self.peek_token() == Token::LParen
-            && self.peek_nth_any_of_uppercase_identifiers(1, &explain_options_identifiers)
-            && self.consume_token(&Token::LParen)
+            && let Token::Word(word) = self.peek_nth_token(1).token
+            && word.quote_style.is_none()
+            && explain_options_identifiers.contains(&word.value.to_ascii_uppercase().as_str())
         {
+            assert!(self.consume_token(&Token::LParen));
             self.parse_comma_separated(parse_explain_option)?;
             self.expect_token(&Token::RParen)?;
         }
