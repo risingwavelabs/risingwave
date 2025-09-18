@@ -346,20 +346,6 @@ impl ChangelogRowIdGenerator {
         )
     }
 
-    // fn gen_iter(&mut self) -> impl Iterator<Item = RowId> + '_ {
-    //     std::iter::from_fn(move || {
-    //         if let Some(next) = self.next_changelog_row_id_in_current_timestamp() {
-    //             Some(next)
-    //         } else {
-    //             self.try_update_timestamp();
-    //             Some(
-    //                 self.next_changelog_row_id_in_current_timestamp()
-    //                     .expect("timestamp should be updated"),
-    //             )
-    //         }
-    //     })
-    // }
-
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self, vnode: &VirtualNode) -> RowId {
         self.try_update_timestamp();
