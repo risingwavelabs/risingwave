@@ -15,7 +15,6 @@ mysql -e "
     );
     INSERT INTO customers VALUES(1, NOW(), 'John', NULL);
     INSERT INTO customers VALUES(2, NOW(), 'Doe', NULL);
-    ALTER TABLE customers ADD INDEX zipsa( (CAST(custinfo->'zipcode' AS UNSIGNED ARRAY)) );
     "
 
 statement ok

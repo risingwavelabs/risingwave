@@ -92,7 +92,7 @@ cp src/connector/src/test_data/complex-schema.json ./json-complex-schema
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 
 # import data to mysql
-mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source_legacy/cdc/mysql_cdc.sql
+mariadb --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source_legacy/cdc/mysql_cdc.sql
 
 echo "run mysql-async integration test"
 cargo test --package risingwave_mysql_test -- --ignored
@@ -145,7 +145,7 @@ echo "> cluster killed "
 
 echo "--- mysql & postgres recovery check"
 # insert into mytest database (cdc.share_stream.slt)
-mysql --protocol=tcp -u root mytest -e "INSERT INTO products
+mariadb --protocol=tcp -u root mytest -e "INSERT INTO products
        VALUES (default,'RisingWave','Next generation Streaming Database'),
               (default,'Materialize','The Streaming Database You Already Know How to Use');
        UPDATE products SET name = 'RW' WHERE id <= 103;
@@ -153,7 +153,7 @@ mysql --protocol=tcp -u root mytest -e "INSERT INTO products
 
 
 # insert new rows
-mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source_legacy/cdc/mysql_cdc_insert.sql
+mariadb --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source_legacy/cdc/mysql_cdc_insert.sql
 echo "> inserted new rows into mysql"
 
 psql < ./e2e_test/source_legacy/cdc/postgres_cdc_insert.sql

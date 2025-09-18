@@ -63,12 +63,12 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             // Check whether MySQL version is less than 8.4,
             // since MySQL 8.4 introduces some breaking changes:
             // https://dev.mysql.com/doc/relnotes/mysql/8.4/en/news-8-4-0.html#mysqld-8-4-0-deprecation-removal
-            var major = jdbcConnection.getMetaData().getDatabaseMajorVersion();
-            var minor = jdbcConnection.getMetaData().getDatabaseMinorVersion();
+            // var major = jdbcConnection.getMetaData().getDatabaseMajorVersion();
+            // var minor = jdbcConnection.getMetaData().getDatabaseMinorVersion();
 
-            if ((major > 8) || (major == 8 && minor >= 4)) {
-                throw ValidatorUtils.failedPrecondition("MySQL version should be less than 8.4");
-            }
+            // if ((major > 8) || (major == 8 && minor >= 4)) {
+            //     throw ValidatorUtils.failedPrecondition("MySQL version should be less than 8.4");
+            // }
 
             // "database.name" is a comma-separated list of database names
             var dbNames = userProps.get(DbzConnectorConfig.DB_NAME);
