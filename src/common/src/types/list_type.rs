@@ -43,11 +43,6 @@ impl ListType {
     pub fn into_elem(self) -> DataType {
         *self.elem
     }
-
-    /// Wrap `self` into a nested list type where the element type is `self`.
-    pub fn list(self) -> Self {
-        Self::new(DataType::from(self))
-    }
 }
 
 impl DataType {
