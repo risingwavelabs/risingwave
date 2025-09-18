@@ -512,7 +512,6 @@ impl MySqlExternalTableReader {
         negative_val as u16
     }
 
-
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
     async fn snapshot_read_inner(
         &self,
@@ -579,27 +578,39 @@ impl MySqlExternalTableReader {
                             DataType::Int16 => {
                                 let int16_val = value.into_int16();
                                 if int16_val < 0 && self.is_unsigned_type(pk.as_str()) {
-                                    Value::from(self.convert_negative_to_unsigned_i16(int16_val, pk.as_str()))
+                                    Value::from(
+                                        self.convert_negative_to_unsigned_i16(
+                                            int16_val,
+                                            pk.as_str(),
+                                        ),
+                                    )
                                 } else {
                                     Value::from(int16_val)
                                 }
-                            },
+                            }
                             DataType::Int32 => {
                                 let int32_val = value.into_int32();
                                 if int32_val < 0 && self.is_unsigned_type(pk.as_str()) {
-                                    Value::from(self.convert_negative_to_unsigned_i32(int32_val, pk.as_str()))
+                                    Value::from(
+                                        self.convert_negative_to_unsigned_i32(
+                                            int32_val,
+                                            pk.as_str(),
+                                        ),
+                                    )
                                 } else {
                                     Value::from(int32_val)
                                 }
-                            },
+                            }
                             DataType::Int64 => {
                                 let int64_val = value.into_int64();
                                 if int64_val < 0 && self.is_unsigned_type(pk.as_str()) {
-                                    Value::from(self.convert_negative_to_unsigned(int64_val, pk.as_str()))
+                                    Value::from(
+                                        self.convert_negative_to_unsigned(int64_val, pk.as_str()),
+                                    )
                                 } else {
                                     Value::from(int64_val)
                                 }
-                            },
+                            }
                             DataType::Float32 => Value::from(value.into_float32().into_inner()),
                             DataType::Float64 => Value::from(value.into_float64().into_inner()),
                             DataType::Varchar => Value::from(String::from(value.into_utf8())),
@@ -722,12 +733,19 @@ mod tests {
         println!("columns: {:?}", &table.column_descs);
         println!("primary keys: {:?}", &table.pk_names);
     }
+    #[test]
+    fn test_mysql_filter_expr() {
+        let cols = vec!["id".to_owned()];
+        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(expr, "(`id` > :id)");
 
-    // TODO: Fix test after implementing dynamic cast logic
-    // #[test]
-    // fn test_mysql_filter_expr() {
-    //     // Test will be updated once we have proper mock setup
-    // }
+        let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
+        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(
+            expr,
+            "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
+        );
+    }
 
     #[test]
     fn test_mysql_binlog_offset() {
