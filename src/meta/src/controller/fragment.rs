@@ -80,7 +80,7 @@ use crate::model::{
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
-use crate::stream::{SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
+use crate::stream::{SplitAssignment, UpstreamSinkInfo};
 use crate::{MetaError, MetaResult};
 
 /// Some information of running (inflight) actors.
@@ -334,16 +334,13 @@ impl CatalogController {
         job_definition: Option<String>,
     ) -> MetaResult<StreamJobFragments> {
         let mut pb_fragments = BTreeMap::new();
-        let mut pb_actor_splits = HashMap::new();
         let mut pb_actor_status = BTreeMap::new();
 
         for (fragment, actors) in fragments {
-            let (fragment, fragment_actor_status, fragment_actor_splits) =
+            let (fragment, fragment_actor_status, _) =
                 Self::compose_fragment(fragment, actors, job_definition.clone())?;
 
             pb_fragments.insert(fragment.fragment_id, fragment);
-
-            pb_actor_splits.extend(build_actor_split_impls(&fragment_actor_splits));
             pb_actor_status.extend(fragment_actor_status.into_iter());
         }
 
@@ -352,7 +349,6 @@ impl CatalogController {
             state: state as _,
             fragments: pb_fragments,
             actor_status: pb_actor_status,
-            actor_splits: pb_actor_splits,
             ctx: ctx
                 .as_ref()
                 .map(StreamContext::from_protobuf)
