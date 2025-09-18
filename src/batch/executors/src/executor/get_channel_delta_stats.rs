@@ -54,12 +54,6 @@ impl GetChannelDeltaStatsExecutor {
         }
     }
 
-    /// Generate channel stats data using the metrics reader
-    async fn generate_channel_stats(&self) -> Result<Vec<Vec<Option<ScalarImpl>>>> {
-        let stats = self.fetch_channel_stats_from_metrics_reader().await?;
-        Ok(stats)
-    }
-
     /// Fetch channel stats from metrics reader
     async fn fetch_channel_stats_from_metrics_reader(
         &self,
@@ -110,7 +104,7 @@ impl GetChannelDeltaStatsExecutor {
         // 1. Read the channel stats from the meta node RPC.
         // 2. Render into rows.
 
-        let rows = self.generate_channel_stats().await?;
+        let rows = self.fetch_channel_stats_from_metrics_reader().await?;
 
         if !rows.is_empty() {
             let mut array_builders = self.schema.create_array_builders(rows.len());

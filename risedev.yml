@@ -537,6 +537,7 @@ profile:
       - use: frontend
       - use: compactor
 
+  # Used for e2e monitoring tests in CI
   ci-3cn-1fe-with-monitoring:
     config-path: src/config/ci.toml
     steps:
