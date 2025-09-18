@@ -338,7 +338,7 @@ fn on_field<D: MaybeData>(
         )))
     };
 
-    if expect_list && !matches!(data_type, DataType::Ljst(_)) {
+    if expect_list && !matches!(data_type, DataType::List(_)) {
         return no_match_err();
     }
 
@@ -389,7 +389,7 @@ fn on_field<D: MaybeData>(
             Kind::Message(pb) => maybe.on_struct(st, &pb)?,
             _ => return no_match_err(),
         },
-        DataType::Ljst(lt) => match expect_list {
+        DataType::List(lt) => match expect_list {
             true => maybe.on_list(lt.elem(), proto_field)?,
             false => return no_match_err(),
         },

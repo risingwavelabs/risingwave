@@ -16,18 +16,22 @@ use parse_display::{Display, FromStr};
 
 use crate::types::DataType;
 
+/// A list type, or `ARRAY` type in PostgreSQL.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Display, FromStr)]
 #[display("{elem}[]")]
 #[from_str(regex = r"(?i)^(?P<elem>.+)\[\]$")]
 #[repr(transparent)]
 pub struct ListType {
+    /// The element type of the list.
     elem: Box<DataType>,
 }
 
 impl ListType {
-    /// Creates a new list type from the element type.
-    pub fn from_elem(elem: impl Into<Box<DataType>>) -> Self {
-        Self { elem: elem.into() }
+    /// Creates a list type with the element type.
+    pub fn new(elem: DataType) -> Self {
+        Self {
+            elem: Box::new(elem),
+        }
     }
 
     /// Returns the element type of the list.
@@ -42,20 +46,20 @@ impl ListType {
 
     /// Wrap `self` into a nested list type where the element type is `self`.
     pub fn list(self) -> Self {
-        Self::from_elem(DataType::from(self))
+        Self::new(DataType::from(self))
     }
 }
 
 impl DataType {
     /// Wrap `self` into a list type where the element type is `self`.
     pub fn list(self) -> DataType {
-        ListType::from_elem(self).into()
+        ListType::new(self).into()
     }
 }
 
 impl From<ListType> for DataType {
     fn from(value: ListType) -> Self {
-        Self::Ljst(value)
+        Self::List(value)
     }
 }
 

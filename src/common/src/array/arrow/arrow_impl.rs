@@ -354,7 +354,7 @@ pub trait ToArrow {
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::Ljst(datatype) => self.list_type_to_arrow(datatype.elem())?,
+            DataType::List(datatype) => self.list_type_to_arrow(datatype.elem())?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
             DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
         };
@@ -1528,7 +1528,7 @@ pub fn is_parquet_schema_match_source_schema(
         }
         // List type recursive matching
         // Arrow's List matches RisingWave's List if the element type matches recursively
-        (ArrowType::List(arrow_field), RwType::Ljst(rw_list_ty)) => {
+        (ArrowType::List(arrow_field), RwType::List(rw_list_ty)) => {
             is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_list_ty.elem())
         }
         // Map type recursive matching

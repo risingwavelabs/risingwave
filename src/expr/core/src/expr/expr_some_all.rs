@@ -217,7 +217,7 @@ impl Build for SomeAllExpression {
         let left_expr = build_child(&inner_children[0])?;
         let right_expr = build_child(&inner_children[1])?;
 
-        let DataType::Ljst(right_list_type) = right_expr.return_type() else {
+        let DataType::List(right_list_type) = right_expr.return_type() else {
             bail!("Expect Array Type");
         };
         let right_expr_return_type = right_list_type.into_elem();

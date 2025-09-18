@@ -595,7 +595,7 @@ impl JsonParseOptions {
             }
 
             // ---- List -----
-            (DataType::Ljst(list_type), ValueType::Array) => ListValue::new({
+            (DataType::List(list_type), ValueType::Array) => ListValue::new({
                 let item_type = list_type.elem();
                 let array = value.as_array().unwrap();
                 let mut builder = item_type.create_array_builder(array.len());

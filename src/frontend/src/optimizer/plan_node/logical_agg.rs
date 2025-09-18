@@ -788,7 +788,7 @@ impl LogicalAggBuilder {
                 let comparison_arg_type = agg_call.args[1].return_type();
                 match comparison_arg_type {
                     DataType::Struct(_)
-                    | DataType::Ljst(_)
+                    | DataType::List(_)
                     | DataType::Map(_)
                     | DataType::Vector(_)
                     | DataType::Jsonb => {

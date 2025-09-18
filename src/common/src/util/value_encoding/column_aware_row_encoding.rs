@@ -173,7 +173,7 @@ mod new_serde {
     pub fn new_deserialize_scalar(ty: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
         Ok(match ty {
             DataType::Struct(struct_def) => new_deserialize_struct(struct_def, data)?,
-            DataType::Ljst(list_type) => new_deserialize_list(list_type.elem(), data)?,
+            DataType::List(list_type) => new_deserialize_list(list_type.elem(), data)?,
             DataType::Map(map_type) => new_deserialize_map(map_type, data)?,
             data_types::simple!() => plain::deserialize_value(ty, data)?,
         })

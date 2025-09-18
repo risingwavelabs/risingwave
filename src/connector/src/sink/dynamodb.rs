@@ -340,7 +340,7 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
         | DataType::Jsonb => AttributeValue::S(scalar_ref.to_text_with_type(data_type)),
         DataType::Boolean => AttributeValue::Bool(scalar_ref.into_bool()),
         DataType::Bytea => AttributeValue::B(Blob::new(scalar_ref.into_bytea())),
-        DataType::Ljst(lt) => {
+        DataType::List(lt) => {
             let list_attr = scalar_ref
                 .into_list()
                 .iter()

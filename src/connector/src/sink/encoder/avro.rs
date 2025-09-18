@@ -478,7 +478,7 @@ fn on_field<D: MaybeData>(
             AvroSchema::Record { .. } => maybe.on_struct(st, inner, refs)?,
             _ => return no_match_err(),
         },
-        DataType::Ljst(lt) => match inner {
+        DataType::List(lt) => match inner {
             AvroSchema::Array(avro_elem) => maybe.on_list(lt.elem(), avro_elem, refs)?,
             _ => return no_match_err(),
         },

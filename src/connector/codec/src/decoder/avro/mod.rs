@@ -278,7 +278,7 @@ impl<'a> AvroParseOptionsInner<'a> {
             })
             .into(),
             // ---- List -----
-            (DataType::Ljst(list_type), Value::Array(array)) => ListValue::new({
+            (DataType::List(list_type), Value::Array(array)) => ListValue::new({
                 let Schema::Array(element_schema) = self.lookup_ref(unresolved_schema) else {
                     return Err(create_error());
                 };

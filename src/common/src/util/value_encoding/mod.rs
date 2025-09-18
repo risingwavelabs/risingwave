@@ -370,7 +370,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
         DataType::Vector(dimension) => deserialize_vector(*dimension, data),
-        DataType::Ljst(item_type) => deserialize_list(item_type.elem(), data)?,
+        DataType::List(item_type) => deserialize_list(item_type.elem(), data)?,
         DataType::Map(map_type) => {
             // FIXME: clone type everytime here is inefficient
             let list = deserialize_list(&map_type.clone().into_struct(), data)?.into_list();

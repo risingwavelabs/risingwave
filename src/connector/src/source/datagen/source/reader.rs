@@ -295,7 +295,7 @@ fn generator_from_data_type(
                 .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields).map_err(Into::into)
         }
-        DataType::Ljst(list_type) => {
+        DataType::List(list_type) => {
             let length_key = format!("fields.{}.length", name);
             let length_value = fields_option_map.get(&length_key).cloned();
             let generator = generator_from_data_type(

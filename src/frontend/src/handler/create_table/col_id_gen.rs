@@ -93,7 +93,7 @@ impl ColumnIdGenerator {
                         });
                     }
                 }
-                DataType::Ljst(list) => {
+                DataType::List(list) => {
                     // There's no id for the element as list's own structure won't change.
                     with_segment!(Segment::ListElement, {
                         handle(existing, path, ColumnId::placeholder(), list.elem().clone());
@@ -249,7 +249,7 @@ impl ColumnIdGenerator {
                     }
                     DataType::Struct(StructType::new(new_fields).with_ids(ids))
                 }
-                DataType::Ljst(list) => {
+                DataType::List(list) => {
                     let (_, new_inner) = with_segment!(Segment::ListElement, {
                         handle(this, path, list.elem().clone())?
                     });

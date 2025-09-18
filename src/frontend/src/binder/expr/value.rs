@@ -219,7 +219,7 @@ impl Binder {
     pub(super) fn bind_index(&mut self, obj: &Expr, index: &Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
-            DataType::Ljst(l) => Ok(FunctionCall::new_unchecked(
+            DataType::List(l) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
                 vec![obj, self.bind_expr_inner(index)?],
                 l.into_elem(),
@@ -261,7 +261,7 @@ impl Binder {
                 .cast_implicit(&DataType::Int32)?,
         };
         match obj.return_type() {
-            t @ DataType::Ljst(_) => Ok(FunctionCall::new_unchecked(
+            t @ DataType::List(_) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayRangeAccess,
                 vec![obj, start, end],
                 t,
@@ -413,7 +413,7 @@ mod tests {
         let expr_pb = expr.to_expr_proto();
         let expr = build_from_prost(&expr_pb).unwrap();
         match expr.return_type() {
-            DataType::Ljst(list) => {
+            DataType::List(list) => {
                 assert_eq!(list.into_elem(), DataType::Int32);
             }
             _ => panic!("unexpected type"),

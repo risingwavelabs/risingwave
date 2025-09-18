@@ -259,7 +259,7 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Struct(_) => Err(SinkError::Starrocks(
                 "STRUCT is not supported for Starrocks sink.".to_owned(),
             )),
-            risingwave_common::types::DataType::Ljst(list) => {
+            risingwave_common::types::DataType::List(list) => {
                 // For compatibility with older versions starrocks
                 if starrocks_data_type.contains("unknown") {
                     return Ok(true);

@@ -93,7 +93,7 @@ pub fn align_array_and_element(
         true => ExprImpl::from(Literal::new_untyped(None)),
         false => {
             let array_element_type = match inputs[array_idx].return_type() {
-                DataType::Ljst(t) => t.into_elem(),
+                DataType::List(t) => t.into_elem(),
                 t => return Err(ErrorCode::BindError(format!("expects array but got {t}"))),
             };
             // use InputRef rather than literal_null so it is always typed, even for varchar
@@ -186,7 +186,7 @@ pub fn cast_ok_base(source: &DataType, target: &DataType, allows: CastContext) -
     matches!(CAST_TABLE.get(&(source.into(), target.into())), Some(context) if *context <= allows)
     // TODO(VECTOR_PLACEHOLDER): not in CAST_TABLE because
     // * `DataType::try_from(DataTypeName::Vector).unwrap().to_oid()` panics
-    // * `DataTypeName::Vector.to_oid()` is better but `to_oid` does not work for `DataTypeName::Ljst`
+    // * `DataTypeName::Vector.to_oid()` is better but `to_oid` does not work for `DataTypeName::List`
     || matches!((source, target), (DataType::Varchar, DataType::Vector(_)) if CastContext::Explicit <= allows)
     || matches!((source, target), (DataType::Vector(_), DataType::Varchar) if CastContext::Assign <= allows)
 }
@@ -229,19 +229,19 @@ fn cast_struct(source: &DataType, target: &DataType, allows: CastContext) -> Cas
 
 fn cast_array(source: &DataType, target: &DataType, allows: CastContext) -> CastResult {
     match (source, target) {
-        (DataType::Ljst(source), DataType::Ljst(target)) => {
+        (DataType::List(source), DataType::List(target)) => {
             cast(source.elem(), target.elem(), allows)
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
-        (DataType::Varchar, DataType::Ljst(_)) => canbo(CastContext::Explicit <= allows),
-        (DataType::Ljst(_), DataType::Varchar) => canbo(CastContext::Assign <= allows),
+        (DataType::Varchar, DataType::List(_)) => canbo(CastContext::Explicit <= allows),
+        (DataType::List(_), DataType::Varchar) => canbo(CastContext::Assign <= allows),
         // https://github.com/pgvector/pgvector/blob/v0.8.0/sql/vector.sql#L157-L170
-        (DataType::Vector(_), DataType::Ljst(list)) => {
+        (DataType::Vector(_), DataType::List(list)) => {
             canbo(list.elem() == &DataType::Float32 && CastContext::Implicit <= allows)
         }
-        (DataType::Ljst(list), DataType::Vector(_)) => canbo(
+        (DataType::List(list), DataType::Vector(_)) => canbo(
             matches!(
                 list.elem(),
                 DataType::Int32 | DataType::Decimal | DataType::Float32 | DataType::Float64

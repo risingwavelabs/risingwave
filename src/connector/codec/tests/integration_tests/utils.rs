@@ -39,7 +39,7 @@ impl std::fmt::Debug for DataTypeTestDisplay<'_> {
                 f.finish()?;
                 Ok(())
             }
-            DataType::Ljst(l) => {
+            DataType::List(l) => {
                 let t = l.elem();
                 if t.is_struct() {
                     f.debug_tuple("List")

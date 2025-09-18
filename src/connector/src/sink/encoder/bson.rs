@@ -178,7 +178,7 @@ fn datum_to_bson(field: &Field, datum: DatumRef<'_>) -> Bson {
             }
             Bson::Document(doc)
         }
-        (DataType::Ljst(lt), ScalarRefImpl::List(v)) => {
+        (DataType::List(lt), ScalarRefImpl::List(v)) => {
             let inner_field = Field::unnamed(lt.into_elem());
             v.iter()
                 .map(|scalar_ref| datum_to_bson(&inner_field, scalar_ref))

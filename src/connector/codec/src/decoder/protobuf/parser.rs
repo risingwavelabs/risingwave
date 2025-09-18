@@ -171,7 +171,7 @@ fn from_protobuf_value<'a>(
             }
         }
         Value::List(values) => {
-            let DataType::Ljst(list_type) = type_expected else {
+            let DataType::List(list_type) = type_expected else {
                 return Err(AccessError::TypeError {
                     expected: type_expected.to_string(),
                     got: format!("repeated {:?}", kind),
