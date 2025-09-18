@@ -392,7 +392,7 @@ pub struct ConnectorSourceWorkerHandle {
     pub enable_adaptive_splits: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SourceWorkerProperties {
     pub enable_drop_split: bool,
     pub enable_adaptive_splits: bool,

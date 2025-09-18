@@ -29,7 +29,6 @@ use crate::stream::GlobalStreamManagerRef;
 pub struct ScaleServiceImpl {
     metadata_manager: MetadataManager,
     stream_manager: GlobalStreamManagerRef,
-    barrier_manager: BarrierManagerRef,
     env: MetaSrvEnv,
 }
 
@@ -37,13 +36,12 @@ impl ScaleServiceImpl {
     pub fn new(
         metadata_manager: MetadataManager,
         stream_manager: GlobalStreamManagerRef,
-        barrier_manager: BarrierManagerRef,
+        _barrier_manager: BarrierManagerRef,
         env: MetaSrvEnv,
     ) -> Self {
         Self {
             metadata_manager,
             stream_manager,
-            barrier_manager,
             env,
         }
     }
