@@ -506,7 +506,7 @@ mod tests {
                 ])),
                 "nested_message_field",
             ),
-            Field::with_name(DataType::List(DataType::Int32.into()), "repeated_int_field"),
+            Field::with_name(DataType::list(DataType::Int32), "repeated_int_field"),
             Field::with_name(DataType::Timestamptz, "timestamp_field"),
             Field::with_name(
                 DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
@@ -906,7 +906,7 @@ mod tests {
         let message_descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
 
         let schema = Schema::new(vec![Field::with_name(
-            DataType::List(DataType::List(DataType::Int32.into()).into()),
+            DataType::list(DataType::list(DataType::Int32)),
             "repeated_int_field",
         )]);
 
@@ -924,7 +924,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![Field::with_name(
-            DataType::List(DataType::Int32.into()),
+            DataType::list(DataType::Int32),
             "repeated_int_field",
         )]);
         let row = OwnedRow::new(vec![Some(ScalarImpl::List(ListValue::from_iter([

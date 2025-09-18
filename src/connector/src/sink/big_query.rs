@@ -994,7 +994,7 @@ mod test {
     #[tokio::test]
     async fn test_type_check() {
         let big_query_type_string = "ARRAY<STRUCT<v1 ARRAY<INT64>, v2 STRUCT<v1 INT64, v2 INT64>>>";
-        let rw_datatype = DataType::List(Box::new(DataType::Struct(StructType::new(vec![
+        let rw_datatype = DataType::list(DataType::Struct(StructType::new(vec![
             ("v1".to_owned(), DataType::Int64.list()),
             (
                 "v2".to_owned(),
@@ -1003,7 +1003,7 @@ mod test {
                     ("v2".to_owned(), DataType::Int64),
                 ])),
             ),
-        ]))));
+        ])));
         assert_eq!(
             BigQuerySink::get_string_and_check_support_from_datatype(&rw_datatype).unwrap(),
             big_query_type_string
@@ -1017,7 +1017,7 @@ mod test {
                 Field::with_name(DataType::Int64, "v1"),
                 Field::with_name(DataType::Float64, "v2"),
                 Field::with_name(
-                    DataType::List(Box::new(DataType::Struct(StructType::new(vec![
+                    DataType::list(DataType::Struct(StructType::new(vec![
                         ("v1".to_owned(), DataType::Int64.list()),
                         (
                             "v3".to_owned(),
@@ -1026,7 +1026,7 @@ mod test {
                                 ("v2".to_owned(), DataType::Int64),
                             ])),
                         ),
-                    ])))),
+                    ]))),
                     "v3",
                 ),
             ],

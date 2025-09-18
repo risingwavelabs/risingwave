@@ -559,7 +559,7 @@ pub trait FromArrow {
             Binary => DataType::Bytea,
             LargeUtf8 => self.from_large_utf8()?,
             LargeBinary => self.from_large_binary()?,
-            List(field) => DataType::List(Box::new(self.from_field(field)?)),
+            List(field) => DataType::list(self.from_field(field)?),
             Struct(fields) => DataType::Struct(self.from_fields(fields)?),
             Map(field, _is_sorted) => {
                 let entries = self.from_field(field)?;

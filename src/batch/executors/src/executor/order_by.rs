@@ -862,8 +862,7 @@ mod tests {
                 DataType::Float32,
             ])),
         );
-        let mut list_builder =
-            ListArrayBuilder::with_type(0, DataType::Int64.list());
+        let mut list_builder = ListArrayBuilder::with_type(0, DataType::Int64.list());
         // {abcd, -1.2}   .
         // {c, 0}         [1, ., 3]
         // {c, .}         .
@@ -918,8 +917,7 @@ mod tests {
                 DataType::Float32,
             ])),
         );
-        let mut list_builder =
-            ListArrayBuilder::with_type(0, DataType::Int64.list());
+        let mut list_builder = ListArrayBuilder::with_type(0, DataType::Int64.list());
         // {abcd, -1.2}   .
         // {c, 0}         [2]
         // {c, 0}         [1, ., 3]

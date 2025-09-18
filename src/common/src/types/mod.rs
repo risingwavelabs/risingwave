@@ -205,15 +205,6 @@ impl DataType {
 
 impl !PartialOrd for DataType {}
 
-// For DataType::List
-impl std::str::FromStr for Box<DataType> {
-    type Err = BoxedError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Box::new(DataType::from_str(s)?))
-    }
-}
-
 impl ZeroHeapSize for DataType {}
 
 impl TryFrom<DataTypeName> for DataType {
@@ -292,9 +283,9 @@ impl From<&PbDataType> for DataType {
                 }
                 struct_type.into()
             }
-            PbTypeName::List => DataType::List(
+            PbTypeName::List => DataType::list(
                 // The first (and only) item is the list element type.
-                Box::new((&proto.field_type[0]).into()),
+                proto.field_type[0].clone().into(),
             ),
             PbTypeName::Map => {
                 // Map is physically the same as a list.
@@ -1572,10 +1563,7 @@ mod tests {
             DataType::from_str("int2[]").unwrap(),
             DataType::Int16.list()
         );
-        assert_eq!(
-            DataType::from_str("int[]").unwrap(),
-            DataType::Int32.list()
-        );
+        assert_eq!(DataType::from_str("int[]").unwrap(), DataType::Int32.list());
         assert_eq!(
             DataType::from_str("int8[]").unwrap(),
             DataType::Int64.list()
@@ -1596,14 +1584,8 @@ mod tests {
             DataType::from_str("varchar[]").unwrap(),
             DataType::Varchar.list()
         );
-        assert_eq!(
-            DataType::from_str("date[]").unwrap(),
-            DataType::Date.list()
-        );
-        assert_eq!(
-            DataType::from_str("time[]").unwrap(),
-            DataType::Time.list()
-        );
+        assert_eq!(DataType::from_str("date[]").unwrap(), DataType::Date.list());
+        assert_eq!(DataType::from_str("time[]").unwrap(), DataType::Time.list());
         assert_eq!(
             DataType::from_str("timestamp[]").unwrap(),
             DataType::Timestamp.list()
@@ -1634,9 +1616,9 @@ mod tests {
     fn test_can_alter() {
         let cannots = [
             (DataType::Int32, None),
-            (DataType::List(DataType::Int32.into()), None),
+            (DataType::list(DataType::Int32), None),
             (
-                MapType::from_kv(DataType::Varchar, DataType::List(DataType::Int32.into())).into(),
+                MapType::from_kv(DataType::Varchar, DataType::list(DataType::Int32)).into(),
                 None,
             ),
             (
@@ -1659,13 +1641,13 @@ mod tests {
         let cans = [
             StructType::new([
                 ("a", DataType::Int32),
-                ("b", DataType::List(DataType::Int32.into())),
+                ("b", DataType::list(DataType::Int32)),
             ])
             .with_ids([ColumnId::new(1), ColumnId::new(2)])
             .into(),
-            DataType::List(Box::new(DataType::Struct(
+            DataType::list(DataType::Struct(
                 StructType::new([("a", DataType::Int32)]).with_ids([ColumnId::new(1)]),
-            ))),
+            )),
             MapType::from_kv(
                 DataType::Varchar,
                 StructType::new([("a", DataType::Int32)])

@@ -786,9 +786,10 @@ mod tests {
                 name: "v10".into(),
             },
             Field {
-                data_type: DataType::List(Box::new(DataType::List(Box::new(DataType::Struct(
-                    StructType::new(vec![("aa", DataType::Int64), ("bb", DataType::Float64)]),
-                ))))),
+                data_type: DataType::list(DataType::list(DataType::Struct(StructType::new(vec![
+                    ("aa", DataType::Int64),
+                    ("bb", DataType::Float64),
+                ])))),
                 name: "v11".into(),
             },
             Field {

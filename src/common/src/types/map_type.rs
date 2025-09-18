@@ -90,7 +90,7 @@ impl MapType {
     }
 
     pub fn into_list(self) -> DataType {
-        DataType::List(Box::new(self.into_struct()))
+        DataType::list(self.into_struct())
     }
 
     /// String and integral types are allowed.

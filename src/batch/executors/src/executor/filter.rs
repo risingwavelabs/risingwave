@@ -160,11 +160,7 @@ mod tests {
 
         let fields = &filter_executor.schema().fields;
 
-        assert!(
-            fields
-                .iter()
-                .all(|f| f.data_type == DataType::Int32.list())
-        );
+        assert!(fields.iter().all(|f| f.data_type == DataType::Int32.list()));
 
         let mut stream = filter_executor.execute();
 

@@ -1123,7 +1123,7 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
                 } else {
                     vec.push((
                         format!("{}.{}", field.name, name),
-                        DataType::List(Box::new(data_type.clone())),
+                        DataType::list(data_type.clone()),
                     ))
                 }
             }

@@ -58,3 +58,12 @@ impl From<ListType> for DataType {
         Self::Ljst(value)
     }
 }
+
+// For parsing `elem: Box<DataType>`
+impl std::str::FromStr for Box<DataType> {
+    type Err = <DataType as std::str::FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        DataType::from_str(s).map(Box::new)
+    }
+}

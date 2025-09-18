@@ -191,11 +191,7 @@ impl ExprImpl {
     /// A literal list value.
     #[inline(always)]
     pub fn literal_list(v: ListValue, element_type: DataType) -> Self {
-        Literal::new(
-            Some(v.to_scalar_value()),
-            DataType::List(Box::new(element_type)),
-        )
-        .into()
+        Literal::new(Some(v.to_scalar_value()), DataType::list(element_type)).into()
     }
 
     /// Takes the expression, leaving a literal null of the same type in its place.

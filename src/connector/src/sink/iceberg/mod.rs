@@ -2239,27 +2239,27 @@ mod test {
                 "a",
             ),
             Field::with_name(
-                DataType::List(Box::new(DataType::Struct(StructType::new(vec![
+                DataType::list(DataType::Struct(StructType::new(vec![
                     ("b1", DataType::Int32),
                     ("b2", DataType::Bytea),
                     (
                         "b3",
                         DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
                     ),
-                ])))),
+                ]))),
                 "b",
             ),
             Field::with_name(
                 DataType::Map(MapType::from_kv(
                     DataType::Varchar,
-                    DataType::List(Box::new(DataType::Struct(StructType::new([
+                    DataType::list(DataType::Struct(StructType::new([
                         ("c1", DataType::Int32),
                         ("c2", DataType::Bytea),
                         (
                             "c3",
                             DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
                         ),
-                    ])))),
+                    ]))),
                 )),
                 "c",
             ),

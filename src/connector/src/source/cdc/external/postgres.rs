@@ -893,12 +893,11 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::OID => DataType::Int64,
         PgType::OID_ARRAY => DataType::Int64.list(),
         PgType::MONEY_ARRAY => DataType::Decimal.list(),
-        PgType::POINT_ARRAY => DataType::List(Box::new(DataType::Struct(
-            risingwave_common::types::StructType::new(vec![
-                ("x", DataType::Float32),
-                ("y", DataType::Float32),
-            ]),
-        ))),
+        PgType::POINT_ARRAY => {
+            DataType::list(DataType::Struct(risingwave_common::types::StructType::new(
+                vec![("x", DataType::Float32), ("y", DataType::Float32)],
+            )))
+        }
         _ => {
             return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
         }

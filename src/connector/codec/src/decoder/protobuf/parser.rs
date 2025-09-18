@@ -294,7 +294,7 @@ fn protobuf_type_mapping(
     };
     if field_descriptor.cardinality() == Cardinality::Repeated {
         debug_assert!(!field_descriptor.is_map());
-        t = DataType::List(Box::new(t))
+        t = DataType::list(t)
     }
     _ = parse_trace.pop();
     Ok(t)

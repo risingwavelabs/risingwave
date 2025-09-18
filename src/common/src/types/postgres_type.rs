@@ -93,7 +93,7 @@ impl DataType {
                     $oid => Ok(DataType::$enum),
                     )*
                     $(
-                    $oid_array => Ok(DataType::List(Box::new(DataType::$enum))),
+                    $oid_array => Ok(DataType::list(DataType::$enum)),
                     )*
                     // workaround to support text in extended mode.
                     25 => Ok(DataType::Varchar),

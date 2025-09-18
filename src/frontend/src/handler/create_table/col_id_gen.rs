@@ -253,7 +253,7 @@ impl ColumnIdGenerator {
                     let (_, new_inner) = with_segment!(Segment::ListElement, {
                         handle(this, path, list.elem().clone())?
                     });
-                    DataType::List(Box::new(new_inner))
+                    DataType::list(new_inner)
                 }
                 DataType::Map(map) => {
                     let (_, new_key) =
@@ -424,10 +424,10 @@ mod tests {
                     "map",
                     MapType::from_kv(
                         DataType::Varchar,
-                        DataType::List(Box::new(
+                        DataType::list(
                             StructType::new([("f2", DataType::Int32), ("f3", DataType::Boolean)])
                                 .into(),
-                        )),
+                        ),
                     )
                     .into(),
                 ),
@@ -441,14 +441,14 @@ mod tests {
                     "map",
                     MapType::from_kv(
                         DataType::Varchar,
-                        DataType::List(Box::new(
+                        DataType::list(
                             StructType::new([
                                 ("f5", DataType::Int32),
                                 ("f3", DataType::Boolean),
                                 ("f6", DataType::Float32),
                             ])
                             .into(),
-                        )),
+                        ),
                     )
                     .into(),
                 ),
@@ -460,9 +460,7 @@ mod tests {
                 "map",
                 MapType::from_kv(
                     DataType::Varchar,
-                    DataType::List(Box::new(
-                        StructType::new([("f6", DataType::Float64)]).into(),
-                    )),
+                    DataType::list(StructType::new([("f6", DataType::Float64)]).into()),
                 )
                 .into(),
             )]))

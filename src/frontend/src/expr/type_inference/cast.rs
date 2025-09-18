@@ -109,7 +109,7 @@ pub fn align_array_and_element(
             .filter_map(|(i, e)| element_indices.contains(&i).then_some(e))
             .chain(std::iter::once(&mut dummy_element)),
     )?;
-    let array_type = DataType::List(Box::new(common_element_type));
+    let array_type = DataType::list(common_element_type);
 
     // elements are already casted by `align_types`, we cast the array argument here
     inputs[array_idx].cast_implicit_mut(&array_type)?;

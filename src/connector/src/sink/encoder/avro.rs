@@ -1150,21 +1150,21 @@ mod tests {
         }"#;
 
         test_ok(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::list(DataType::Int32),
             Some(ScalarImpl::List(ListValue::from_iter([4, 5]))),
             avro_schema,
             Value::Array(vec![Value::Int(4), Value::Int(5)]),
         );
 
         test_err(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::list(DataType::Int32),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))).to_datum_ref(),
             avro_schema,
             "encode '' error: found null but required",
         );
 
         test_ok(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::list(DataType::Int32),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))),
             r#"{
                 "type": "array",
@@ -1177,7 +1177,7 @@ mod tests {
         );
 
         test_ok(
-            &DataType::List(DataType::List(DataType::Int32.into()).into()),
+            &DataType::list(DataType::list(DataType::Int32)),
             Some(ScalarImpl::List(ListValue::from_iter([
                 ListValue::from_iter([26, 29]),
                 ListValue::from_iter([46, 49]),
@@ -1196,7 +1196,7 @@ mod tests {
         );
 
         test_err(
-            &DataType::List(DataType::Boolean.into()),
+            &DataType::list(DataType::Boolean),
             (),
             r#"{"type": "array", "items": "int"}"#,
             "encode '' error: cannot encode boolean column as \"int\" field",

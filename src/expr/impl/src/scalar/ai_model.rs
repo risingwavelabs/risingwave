@@ -151,10 +151,7 @@ impl Expression for OpenAiEmbedding {
         }
 
         // Map results back to original positions
-        let mut builder = ListArrayBuilder::with_type(
-            input.capacity(),
-            DataType::Float32.list(),
-        );
+        let mut builder = ListArrayBuilder::with_type(input.capacity(), DataType::Float32.list());
         let mut embedding_idx = 0;
 
         for i in 0..input.capacity() {

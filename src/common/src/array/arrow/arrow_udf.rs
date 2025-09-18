@@ -209,8 +209,7 @@ mod tests {
         let mut builder = MapArrayBuilder::with_type(3, rw_map_type.clone());
         builder.append_owned(Some(
             MapValue::try_from_kv(
-                ListValue::from_str("{a,b,c}", &DataType::Varchar.list())
-                    .unwrap(),
+                ListValue::from_str("{a,b,c}", &DataType::Varchar.list()).unwrap(),
                 ListValue::from_str("{1,2,3}", &DataType::Int32.list()).unwrap(),
             )
             .unwrap(),

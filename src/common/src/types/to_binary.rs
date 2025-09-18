@@ -169,7 +169,7 @@ impl ToBinary for ScalarRefImpl<'_> {
                 assert_eq!(&DataType::Vector(v.dimension()), ty);
                 list_to_binary_with_type(
                     v.as_slice().iter().cloned().map(Some),
-                    &DataType::List(DataType::Float32.into()),
+                    &DataType::list(DataType::Float32),
                 )
             }
             ScalarRefImpl::List(v) => v.to_binary_with_type(ty),

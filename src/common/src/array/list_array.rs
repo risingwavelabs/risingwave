@@ -217,7 +217,7 @@ impl Array for ListArray {
     }
 
     fn data_type(&self) -> DataType {
-        DataType::List(Box::new(self.value.data_type()))
+        DataType::list(self.value.data_type())
     }
 }
 
@@ -303,10 +303,8 @@ where
 {
     fn from_iter<I: IntoIterator<Item = Option<L>>>(iter: I) -> Self {
         let iter = iter.into_iter();
-        let mut builder = ListArrayBuilder::with_type(
-            iter.size_hint().0,
-            DataType::List(Box::new(T::DATA_TYPE.clone())),
-        );
+        let mut builder =
+            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(T::DATA_TYPE.clone()));
         for v in iter {
             match v {
                 None => builder.append(None),
@@ -323,10 +321,8 @@ impl FromIterator<ListValue> for ListArray {
     fn from_iter<I: IntoIterator<Item = ListValue>>(iter: I) -> Self {
         let mut iter = iter.into_iter();
         let first = iter.next().expect("empty iterator");
-        let mut builder = ListArrayBuilder::with_type(
-            iter.size_hint().0,
-            DataType::List(Box::new(first.data_type())),
-        );
+        let mut builder =
+            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(first.data_type()));
         builder.append(Some(first.as_scalar_ref()));
         for v in iter {
             builder.append(Some(v.as_scalar_ref()));
@@ -1006,8 +1002,7 @@ mod tests {
         use crate::array::*;
 
         {
-            let mut builder =
-                ListArrayBuilder::with_type(1, DataType::Int32.list());
+            let mut builder = ListArrayBuilder::with_type(1, DataType::Int32.list());
             let val = ListValue::from_iter([1i32, 2, 3]);
             builder.append(Some(val.as_scalar_ref()));
             assert!(builder.pop().is_some());
@@ -1017,7 +1012,7 @@ mod tests {
         }
 
         {
-            let data_type = DataType::List(Box::new(DataType::Int32.list()));
+            let data_type = DataType::list(DataType::Int32.list());
             let mut builder = ListArrayBuilder::with_type(2, data_type);
             let val1 = ListValue::from_iter([1, 2, 3]);
             let val2 = ListValue::from_iter([1, 2, 3]);
@@ -1116,8 +1111,7 @@ mod tests {
             value
         );
 
-        let mut builder =
-            ListArrayBuilder::with_type(0, DataType::Varchar.list());
+        let mut builder = ListArrayBuilder::with_type(0, DataType::Varchar.list());
         builder.append(Some(list_ref));
         let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();

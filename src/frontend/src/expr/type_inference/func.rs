@@ -135,7 +135,7 @@ pub fn infer_some_all(
                 ErrorCode::BindError("array/struct on left are not supported yet".into()).into(),
             );
         };
-        inputs[1].cast_implicit_mut(&DataType::List(Box::new(t.clone())))?;
+        inputs[1].cast_implicit_mut(&DataType::list(t.clone()))?;
     }
 
     let inputs_owned = std::mem::take(inputs);
@@ -466,7 +466,7 @@ fn infer_type_for_special(
                 | (t @ Some(DataType::Ljst(_)), None) => {
                     // when neither type is available, default to `varchar[]`
                     // when one side is unknown and other side is list, use that list type
-                    let t = t.unwrap_or_else(|| DataType::List(DataType::Varchar.into()));
+                    let t = t.unwrap_or_else(|| DataType::list(DataType::Varchar));
                     for input in &mut *inputs {
                         input.cast_implicit_mut(&t)?;
                     }
