@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
@@ -132,39 +133,60 @@ impl StreamLocalityProvider {
             }
         }
 
-        // All non-locality columns are value columns
-        let value_indices: Vec<usize> = (0..input_schema.len())
-            .filter(|&idx| !self.locality_columns().contains(&idx))
-            .collect();
-        catalog_builder.set_value_indices(value_indices);
+        catalog_builder.set_value_indices((0..input_schema.len()).into_iter().collect());
 
         catalog_builder
             .build(
-                self.locality_columns().to_vec(),
-                self.locality_columns().len(),
+                self.input().distribution().dist_column_indices().to_vec(),
+                0,
             )
             .with_id(state.gen_table_id_wrapped())
     }
 
     /// Build the progress table catalog for tracking backfill progress
-    /// Schema: | vnode | backfill_finished |
-    /// Key: | vnode |
+    /// Schema: | vnode | pk(locality columns + input stream keys) | backfill_finished | row_count |
+    /// Key: | vnode | pk(locality columns + input stream keys) |
     fn build_progress_catalog(&self, state: &mut BuildFragmentGraphState) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();
+        let input = self.input();
+        let input_schema = input.schema();
 
         // Add vnode column as primary key
         catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
+        // Add locality columns as part of primary key
+        for &locality_col_idx in self.locality_columns() {
+            let field = &input_schema.fields[locality_col_idx];
+            catalog_builder.add_column(field);
+            catalog_builder
+                .add_order_column(catalog_builder.columns().len() - 1, OrderType::ascending());
+        }
+
+        // Add stream key columns as part of primary key (excluding those already added as locality columns)
+        if let Some(stream_key) = input.stream_key() {
+            for &key_col_idx in stream_key {
+                if !self.locality_columns().contains(&key_col_idx) {
+                    let field = &input_schema.fields[key_col_idx];
+                    catalog_builder.add_column(field);
+                    catalog_builder
+                        .add_order_column(catalog_builder.columns().len() - 1, OrderType::ascending());
+                }
+            }
+        }
+
         // Add backfill_finished column
         catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+
+        // Add row_count column
+        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
 
         // Set vnode column index and distribution key
         catalog_builder.set_vnode_col_idx(0);
         catalog_builder.set_dist_key_in_pk(vec![0]);
 
-        // backfill_finished is the value column
-        catalog_builder.set_value_indices(vec![1]);
+        let num_of_columns = catalog_builder.columns().len();
+        catalog_builder.set_value_indices((1..num_of_columns).collect_vec());
 
         catalog_builder
             .build(vec![0], 1)

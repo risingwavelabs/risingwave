@@ -18,6 +18,7 @@ use futures::{TryStreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
@@ -132,17 +133,30 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     /// Update progress and persist state (static method)
     fn update_progress(
         progress_table: &mut StateTable<S>,
+        locality_columns: &[usize],
+        input_schema: &Schema,
         _epoch: EpochPair,
     ) -> StreamExecutorResult<()> {
         // For LocalityProvider, we use a simple boolean flag to indicate completion
         // Insert a single row into progress table to mark backfill as finished
         let vnodes: Vec<_> = progress_table.vnodes().iter_vnodes().collect();
         for vnode in vnodes {
-            let row = [
-                Some(vnode.to_scalar().into()),
-                Some(risingwave_common::types::ScalarImpl::Bool(true)),
-            ];
-            progress_table.insert(&row);
+            // Build the full primary key: vnode + locality columns (defaulted to NULL for now)
+            let mut row_data = vec![Some(vnode.to_scalar().into())];
+
+            // Add locality column values (NULL for now since this is just marking completion)
+            for _ in locality_columns {
+                row_data.push(None); // NULL value for the locality column
+            }
+
+            // Add backfill_finished = true
+            row_data.push(Some(risingwave_common::types::ScalarImpl::Bool(true)));
+
+            // Add row_count = 0 (we don't track actual row count for now)
+            row_data.push(Some(risingwave_common::types::ScalarImpl::Int64(0)));
+
+            let row = OwnedRow::new(row_data);
+            progress_table.insert(row);
         }
         Ok(())
     }
@@ -153,14 +167,22 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     /// - `is_backfill_finished`: true if backfill is completed (only valid when `has_progress_state` is true)
     async fn check_backfill_progress(
         progress_table: &StateTable<S>,
+        locality_columns: &[usize],
     ) -> StreamExecutorResult<(bool, bool)> {
         let mut vnodes = progress_table.vnodes().iter_vnodes_scalar();
         let first_vnode = vnodes.next().unwrap();
-        let key: &[risingwave_common::types::Datum] = &[Some(first_vnode.into())];
 
-        if let Some(row) = progress_table.get_row(key).await? {
-            // Row exists, check the finished flag
-            let is_finished: bool = row.datum_at(1).unwrap().into_bool();
+        // Build key with vnode + NULL values for locality columns (to check any progress entry)
+        let mut key_data = vec![Some(first_vnode.into())];
+        for _ in locality_columns {
+            key_data.push(None); // NULL value for locality column
+        }
+        let key = OwnedRow::new(key_data);
+
+        if let Some(row) = progress_table.get_row(&key).await? {
+            // Row exists, check the finished flag (it's at position 1 + locality_columns.len())
+            let finished_col_idx = 1 + locality_columns.len();
+            let is_finished: bool = row.datum_at(finished_col_idx).unwrap().into_bool();
             Ok((true, is_finished))
         } else {
             // No row exists, backfill not started yet
@@ -197,7 +219,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
         // Check progress state using static method to avoid borrowing issues
         let (has_progress_state, is_backfill_finished) =
-            Self::check_backfill_progress(&self.progress_table).await?;
+            Self::check_backfill_progress(&self.progress_table, &self.locality_columns).await?;
 
         // Determine what to do based on progress state:
         // - If no progress state exists: need to buffer chunks (backfill not started)
@@ -228,8 +250,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
                 match msg {
                     Message::Watermark(_) => {
-                        // Forward watermarks
-                        yield msg;
+                        // Ignore watermarks during backfill
                     }
                     Message::Chunk(chunk) => {
                         for (op, row_ref) in chunk.rows() {
@@ -263,7 +284,12 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                 );
 
                                 // Update progress to completed
-                                Self::update_progress(&mut self.progress_table, epoch)?;
+                                Self::update_progress(
+                                    &mut self.progress_table,
+                                    &self.locality_columns,
+                                    &self.input_schema,
+                                    epoch,
+                                )?;
                                 let progress_post_commit =
                                     self.progress_table.commit(epoch).await?;
 
@@ -314,22 +340,5 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
-    use risingwave_storage::memory::MemoryStateStore;
-
-    use super::*;
-    use crate::executor::test_utils::MockSource;
-
-    #[tokio::test]
-    async fn test_locality_provider_basic() {
-        // This is a basic test structure
-        // TODO: Implement comprehensive tests
     }
 }
