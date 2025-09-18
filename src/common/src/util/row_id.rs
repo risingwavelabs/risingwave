@@ -318,11 +318,7 @@ impl ChangelogRowIdGenerator {
 
             // Reset states: reset all vnode sequences to 0.
             self.last_timestamp_ms = current_timestamp_ms;
-            self.vnodes_sequence = self
-                .vnodes_sequence
-                .iter_mut()
-                .map(|(vnode, _)| (*vnode, 0))
-                .collect();
+            self.vnodes_sequence.iter_mut().for_each(|(_, seq)| *seq = 0);
         }
     }
 
