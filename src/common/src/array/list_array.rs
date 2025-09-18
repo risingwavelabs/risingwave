@@ -59,7 +59,7 @@ impl ArrayBuilder for ListArrayBuilder {
         Self::with_type(
             capacity,
             // Default datatype
-            DataType::List(Box::new(DataType::Int16)),
+            DataType::Int16.list(),
         )
     }
 
@@ -979,7 +979,7 @@ mod tests {
         let part1 = ListArray::from_iter([Some([12i32, -7, 25]), None]);
         let part2 = ListArray::from_iter([Some(vec![0, -127, 127, 50]), Some(vec![])]);
 
-        let mut builder = ListArrayBuilder::with_type(4, DataType::List(Box::new(DataType::Int32)));
+        let mut builder = ListArrayBuilder::with_type(4, DataType::Int32.list());
         builder.append_array(&part1);
         builder.append_array(&part2);
 
@@ -1007,7 +1007,7 @@ mod tests {
 
         {
             let mut builder =
-                ListArrayBuilder::with_type(1, DataType::List(Box::new(DataType::Int32)));
+                ListArrayBuilder::with_type(1, DataType::Int32.list());
             let val = ListValue::from_iter([1i32, 2, 3]);
             builder.append(Some(val.as_scalar_ref()));
             assert!(builder.pop().is_some());
@@ -1017,7 +1017,7 @@ mod tests {
         }
 
         {
-            let data_type = DataType::List(Box::new(DataType::List(Box::new(DataType::Int32))));
+            let data_type = DataType::List(Box::new(DataType::Int32.list()));
             let mut builder = ListArrayBuilder::with_type(2, data_type);
             let val1 = ListValue::from_iter([1, 2, 3]);
             let val2 = ListValue::from_iter([1, 2, 3]);
@@ -1117,7 +1117,7 @@ mod tests {
         );
 
         let mut builder =
-            ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Varchar)));
+            ListArrayBuilder::with_type(0, DataType::Varchar.list());
         builder.append(Some(list_ref));
         let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();

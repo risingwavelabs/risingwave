@@ -744,7 +744,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
             ColumnDesc::named(
                 "hobbies",
                 ColumnId::new(1),
-                DataType::List(Box::new(DataType::Varchar)),
+                DataType::Varchar.list(),
             ),
         ];
 

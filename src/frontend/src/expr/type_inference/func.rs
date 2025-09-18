@@ -562,7 +562,7 @@ fn infer_type_for_special(
             ensure_arity!("array_positions", | inputs | == 2);
             let common_type = align_array_and_element(0, &[1], inputs);
             match common_type {
-                Ok(_) => Ok(Some(DataType::List(Box::new(DataType::Int32)))),
+                Ok(_) => Ok(Some(DataType::Int32.list())),
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot get position of {} in {}",
                     inputs[1].return_type(),

@@ -995,7 +995,7 @@ mod test {
     async fn test_type_check() {
         let big_query_type_string = "ARRAY<STRUCT<v1 ARRAY<INT64>, v2 STRUCT<v1 INT64, v2 INT64>>>";
         let rw_datatype = DataType::List(Box::new(DataType::Struct(StructType::new(vec![
-            ("v1".to_owned(), DataType::List(Box::new(DataType::Int64))),
+            ("v1".to_owned(), DataType::Int64.list()),
             (
                 "v2".to_owned(),
                 DataType::Struct(StructType::new(vec![
@@ -1018,7 +1018,7 @@ mod test {
                 Field::with_name(DataType::Float64, "v2"),
                 Field::with_name(
                     DataType::List(Box::new(DataType::Struct(StructType::new(vec![
-                        ("v1".to_owned(), DataType::List(Box::new(DataType::Int64))),
+                        ("v1".to_owned(), DataType::Int64.list()),
                         (
                             "v3".to_owned(),
                             DataType::Struct(StructType::new(vec![

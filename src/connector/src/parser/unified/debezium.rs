@@ -204,7 +204,7 @@ pub fn parse_schema_change(
         .to_string();
 
     if let Some(ScalarRefImpl::List(table_changes)) = accessor
-        .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?
+        .access(&[TABLE_CHANGES], &DataType::Jsonb.list())?
         .to_datum_ref()
     {
         for datum in table_changes.iter() {

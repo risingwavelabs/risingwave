@@ -413,7 +413,7 @@ mod tests {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11)],
-            DataType::List(Box::new(DataType::Int32)),
+            DataType::Int32.list(),
         )
         .into();
         let expr_pb = expr.to_expr_proto();
@@ -431,7 +431,7 @@ mod tests {
         let array_expr = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11), ExprImpl::literal_int(22)],
-            DataType::List(Box::new(DataType::Int32)),
+            DataType::Int32.list(),
         )
         .into();
 

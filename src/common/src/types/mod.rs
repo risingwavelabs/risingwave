@@ -1446,7 +1446,7 @@ mod tests {
                 ),
                 DataTypeName::Ljst => (
                     ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
-                    DataType::List(Box::new(DataType::Int64)),
+                    DataType::Int64.list(),
                 ),
                 DataTypeName::Vector => (
                     ScalarImpl::Vector(VectorVal::from_iter(
@@ -1570,51 +1570,51 @@ mod tests {
 
         assert_eq!(
             DataType::from_str("int2[]").unwrap(),
-            DataType::List(Box::new(DataType::Int16))
+            DataType::Int16.list()
         );
         assert_eq!(
             DataType::from_str("int[]").unwrap(),
-            DataType::List(Box::new(DataType::Int32))
+            DataType::Int32.list()
         );
         assert_eq!(
             DataType::from_str("int8[]").unwrap(),
-            DataType::List(Box::new(DataType::Int64))
+            DataType::Int64.list()
         );
         assert_eq!(
             DataType::from_str("float4[]").unwrap(),
-            DataType::List(Box::new(DataType::Float32))
+            DataType::Float32.list()
         );
         assert_eq!(
             DataType::from_str("float8[]").unwrap(),
-            DataType::List(Box::new(DataType::Float64))
+            DataType::Float64.list()
         );
         assert_eq!(
             DataType::from_str("decimal[]").unwrap(),
-            DataType::List(Box::new(DataType::Decimal))
+            DataType::Decimal.list()
         );
         assert_eq!(
             DataType::from_str("varchar[]").unwrap(),
-            DataType::List(Box::new(DataType::Varchar))
+            DataType::Varchar.list()
         );
         assert_eq!(
             DataType::from_str("date[]").unwrap(),
-            DataType::List(Box::new(DataType::Date))
+            DataType::Date.list()
         );
         assert_eq!(
             DataType::from_str("time[]").unwrap(),
-            DataType::List(Box::new(DataType::Time))
+            DataType::Time.list()
         );
         assert_eq!(
             DataType::from_str("timestamp[]").unwrap(),
-            DataType::List(Box::new(DataType::Timestamp))
+            DataType::Timestamp.list()
         );
         assert_eq!(
             DataType::from_str("timestamptz[]").unwrap(),
-            DataType::List(Box::new(DataType::Timestamptz))
+            DataType::Timestamptz.list()
         );
         assert_eq!(
             DataType::from_str("interval[]").unwrap(),
-            DataType::List(Box::new(DataType::Interval))
+            DataType::Interval.list()
         );
 
         assert_eq!(

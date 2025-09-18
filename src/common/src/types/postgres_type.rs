@@ -97,7 +97,7 @@ impl DataType {
                     )*
                     // workaround to support text in extended mode.
                     25 => Ok(DataType::Varchar),
-                    1009 => Ok(DataType::List(Box::new(DataType::Varchar))),
+                    1009 => Ok(DataType::Varchar.list()),
                     _ => Err(UnsupportedOid(oid)),
                 }
             }
