@@ -86,7 +86,6 @@ use risingwave_pb::plan_common::PbExprContext;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait};
 
-use super::SourceChange;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::compose_dispatchers;
 
@@ -247,13 +246,13 @@ impl ScaleController {
                     .iter()
                     .map(
                         |(
-                             actor_id,
-                             InflightActorInfo {
-                                 worker_id: _,
-                                 vnode_bitmap,
-                                 ..
-                             },
-                         )| {
+                            actor_id,
+                            InflightActorInfo {
+                                worker_id: _,
+                                vnode_bitmap,
+                                ..
+                            },
+                        )| {
                             (*actor_id as hash::ActorId, vnode_bitmap.clone().unwrap())
                         },
                     )
@@ -494,7 +493,7 @@ impl ScaleController {
             adaptive_parallelism_strategy,
             Default::default(),
         )
-            .await?;
+        .await?;
 
         for (db, jobs) in &render_result {
             println!("\tdb: {db}");

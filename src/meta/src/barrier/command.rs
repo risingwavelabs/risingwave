@@ -39,8 +39,7 @@ use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{
-    ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration, PbConnectorSplit,
-    PbConnectorSplits,
+    ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
 };
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
