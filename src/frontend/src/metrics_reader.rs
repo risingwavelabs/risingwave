@@ -186,19 +186,3 @@ impl MetricsReader for MetricsReaderImpl {
         Ok(channel_data)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[tokio::test]
-    async fn test_metrics_reader_impl_creation() {
-        // This test just verifies that we can create the parameters for get_channel_delta_stats
-        // In a real test, you would need to provide a mock MetaClient
-        // For now, we'll just test that the parameter structure is correct
-        let at = Some(0i64);
-        let time_offset = Some(60i64);
-
-        // Verify the parameter structure is correct
-        assert_eq!(at, Some(0i64));
-        assert_eq!(time_offset, Some(60i64));
-    }
-}
