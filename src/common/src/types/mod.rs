@@ -573,10 +573,9 @@ impl DataType {
     ///
     /// ```
     /// use risingwave_common::types::DataType::*;
-    /// assert_eq!(List(Box::new(Int32)).unnest_list(), &Int32);
-    /// assert_eq!(List(Box::new(List(Box::new(Int32)))).unnest_list(), &Int32);
+    /// assert_eq!(Int32.list().unnest_list(), &Int32);
+    /// assert_eq!(Int32.list().list().unnest_list(), &Int32);
     /// ```
-    // TODO(list): shall we implement on `ListType`?
     pub fn unnest_list(&self) -> &Self {
         match self {
             DataType::List(list) => list.elem().unnest_list(),
