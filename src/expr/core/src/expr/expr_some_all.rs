@@ -93,7 +93,7 @@ impl Expression for SomeAllExpression {
         let mut num_array = Vec::with_capacity(data_chunk.capacity());
 
         let arr_right_inner = arr_right.as_list();
-        let elem_type = arr_right_inner.data_type().into_list_element_type();
+        let elem_type = arr_right_inner.data_type().into_list_elem();
         let capacity = arr_right_inner.flatten().len();
 
         let mut unfolded_arr_left_builder = arr_left.create_builder(capacity);

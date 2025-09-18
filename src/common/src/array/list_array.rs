@@ -32,8 +32,8 @@ use super::{
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
-    DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl, ToDatumRef, ToText,
-    hash_datum,
+    DataType, Datum, DatumRef, DefaultOrd, ListType, Scalar, ScalarImpl, ScalarRefImpl, ToDatumRef,
+    ToText, hash_datum,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -322,7 +322,7 @@ impl FromIterator<ListValue> for ListArray {
         let mut iter = iter.into_iter();
         let first = iter.next().expect("empty iterator");
         let mut builder =
-            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(first.data_type()));
+            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(first.elem_type()));
         builder.append(Some(first.as_scalar_ref()));
         for v in iter {
             builder.append(Some(v.as_scalar_ref()));
@@ -359,11 +359,11 @@ impl ListValue {
         *self.values
     }
 
-    pub fn empty(datatype: &DataType) -> Self {
-        Self::new(datatype.create_array_builder(0).finish())
+    pub fn empty(elem_datatype: &DataType) -> Self {
+        Self::new(elem_datatype.create_array_builder(0).finish())
     }
 
-    /// Creates a new `ListValue` from an iterator of `Datum`.
+    /// Creates a new `ListValue` from an iterator of elements with the given element type.
     pub fn from_datum_iter<T: ToDatumRef>(
         elem_datatype: &DataType,
         iter: impl IntoIterator<Item = T>,
@@ -401,21 +401,22 @@ impl ListValue {
     }
 
     /// Returns the data type of the elements in the list.
-    pub fn data_type(&self) -> DataType {
+    pub fn elem_type(&self) -> DataType {
         self.values.data_type()
     }
 
-    // TODO(list): pass `ListType`
     pub fn memcmp_deserialize(
-        item_datatype: &DataType,
+        list_type: &ListType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
+        let elem_datatype = list_type.elem();
+
         let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
-        let mut builder = item_datatype.create_array_builder(0);
+        let mut builder = elem_datatype.create_array_builder(0);
         while inner_deserializer.has_remaining() {
             builder.append(memcmp_encoding::deserialize_datum_in_composite(
-                item_datatype,
+                elem_datatype,
                 &mut inner_deserializer,
             )?)
         }
@@ -521,7 +522,7 @@ impl<'a> ListRef<'a> {
     }
 
     /// Returns the data type of the elements in the list.
-    pub fn data_type(&self) -> DataType {
+    pub fn elem_type(&self) -> DataType {
         self.array.data_type()
     }
 
@@ -718,7 +719,7 @@ impl From<ListRef<'_>> for ListValue {
 }
 
 impl ListValue {
-    /// Construct an array from literal string.
+    /// Construct an array from literal string and the data type of the list.
     pub fn from_str(input: &str, data_type: &DataType) -> Result<Self, String> {
         struct Parser<'a> {
             input: &'a str,
@@ -747,14 +748,14 @@ impl ListValue {
                 }
                 self.skip_whitespace();
                 if self.try_consume('}') {
-                    return Ok(ListValue::empty(self.data_type.as_list_element_type()));
+                    return Ok(ListValue::empty(self.data_type.as_list_elem()));
                 }
                 let mut builder =
-                    ArrayBuilderImpl::with_type(0, self.data_type.as_list_element_type().clone());
+                    ArrayBuilderImpl::with_type(0, self.data_type.as_list_elem().clone());
                 loop {
                     let mut parser = Self {
                         input: self.input,
-                        data_type: self.data_type.as_list_element_type(),
+                        data_type: self.data_type.as_list_elem(),
                     };
                     builder.append(parser.parse()?);
                     self.input = parser.input;
@@ -1107,7 +1108,8 @@ mod tests {
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         deserializer.set_reverse(true);
         assert_eq!(
-            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&ListType::new(DataType::Varchar), &mut deserializer)
+                .unwrap(),
             value
         );
 
@@ -1120,7 +1122,8 @@ mod tests {
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&ListType::new(DataType::Varchar), &mut deserializer)
+                .unwrap(),
             value
         );
     }
