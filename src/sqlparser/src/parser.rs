@@ -4387,13 +4387,9 @@ impl Parser<'_> {
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
             match parser.parse_identifier()?.real_value().as_str() {
-                VERBOSE => {
-                    options.verbose = parser.parse_optional_boolean(true)
-                }
+                VERBOSE => options.verbose = parser.parse_optional_boolean(true),
                 TRACE => options.trace = parser.parse_optional_boolean(true),
-                BACKFILL => {
-                    options.backfill = parser.parse_optional_boolean(true)
-                }
+                BACKFILL => options.backfill = parser.parse_optional_boolean(true),
                 TYPE => {
                     let explain_type = parser.parse_identifier()?.real_value();
                     match explain_type.as_str() {
