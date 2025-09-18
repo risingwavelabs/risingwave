@@ -493,26 +493,24 @@ mod tests {
                                             (
                                                 Varchar,
                                                 List(
-                                                    ListType {
-                                                        elem: Struct(
-                                                            StructType {
-                                                                fields: [
-                                                                    (
-                                                                        "f2",
-                                                                        Int32,
-                                                                    ),
-                                                                    (
-                                                                        "f3",
-                                                                        Boolean,
-                                                                    ),
-                                                                ],
-                                                                field_ids: [
-                                                                    #4,
-                                                                    #5,
-                                                                ],
-                                                            },
-                                                        ),
-                                                    },
+                                                    Struct(
+                                                        StructType {
+                                                            fields: [
+                                                                (
+                                                                    "f2",
+                                                                    Int32,
+                                                                ),
+                                                                (
+                                                                    "f3",
+                                                                    Boolean,
+                                                                ),
+                                                            ],
+                                                            field_ids: [
+                                                                #4,
+                                                                #5,
+                                                            ],
+                                                        },
+                                                    ),
                                                 ),
                                             ),
                                         ),
@@ -573,31 +571,29 @@ mod tests {
                                             (
                                                 Varchar,
                                                 List(
-                                                    ListType {
-                                                        elem: Struct(
-                                                            StructType {
-                                                                fields: [
-                                                                    (
-                                                                        "f5",
-                                                                        Int32,
-                                                                    ),
-                                                                    (
-                                                                        "f3",
-                                                                        Boolean,
-                                                                    ),
-                                                                    (
-                                                                        "f6",
-                                                                        Float32,
-                                                                    ),
-                                                                ],
-                                                                field_ids: [
-                                                                    #7,
-                                                                    #5,
-                                                                    #8,
-                                                                ],
-                                                            },
-                                                        ),
-                                                    },
+                                                    Struct(
+                                                        StructType {
+                                                            fields: [
+                                                                (
+                                                                    "f5",
+                                                                    Int32,
+                                                                ),
+                                                                (
+                                                                    "f3",
+                                                                    Boolean,
+                                                                ),
+                                                                (
+                                                                    "f6",
+                                                                    Float32,
+                                                                ),
+                                                            ],
+                                                            field_ids: [
+                                                                #7,
+                                                                #5,
+                                                                #8,
+                                                            ],
+                                                        },
+                                                    ),
                                                 ),
                                             ),
                                         ),

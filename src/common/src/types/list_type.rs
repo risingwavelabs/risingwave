@@ -17,13 +17,20 @@ use parse_display::{Display, FromStr};
 use crate::types::DataType;
 
 /// A list type, or `ARRAY` type in PostgreSQL.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Display, FromStr)]
+#[derive(Clone, PartialEq, Eq, Hash, Display, FromStr)]
 #[display("{elem}[]")]
 #[from_str(regex = r"(?i)^(?P<elem>.+)\[\]$")]
-#[repr(transparent)]
 pub struct ListType {
     /// The element type of the list.
     elem: Box<DataType>,
+}
+
+// TODO(list): debug impl of list is made transparent to maintain the old output.
+// We may change this if it's found confusing.
+impl std::fmt::Debug for ListType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.elem().fmt(f)
+    }
 }
 
 impl ListType {
