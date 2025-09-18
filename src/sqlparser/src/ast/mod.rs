@@ -1921,7 +1921,7 @@ impl Statement {
                         write!(f, "\n\\.")
                     }
                     CopyTarget::Stdout => {
-                        write!(f, " TO STDOUT;")
+                        write!(f, " TO STDOUT")
                     }
                 }
             }
