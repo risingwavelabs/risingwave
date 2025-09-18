@@ -1604,10 +1604,10 @@ mod tests {
         let arrow_list =
             ArrowType::List(Box::new(ArrowField::new("item", ArrowType::Float64, true)).into());
         // RW: list<double>
-        let rw_list = RwType::List(Box::new(RwType::Float64));
+        let rw_list = RwType::Float64.list();
         assert!(is_parquet_schema_match_source_schema(&arrow_list, &rw_list));
 
-        let rw_list2 = RwType::List(Box::new(RwType::Int32));
+        let rw_list2 = RwType::Int32.list();
         assert!(!is_parquet_schema_match_source_schema(
             &arrow_list,
             &rw_list2

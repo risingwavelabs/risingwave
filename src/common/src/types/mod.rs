@@ -195,14 +195,6 @@ pub enum DataType {
     Vector(usize),
 }
 
-impl DataType {
-    /// Construct a [`DataType::Ljst`] from the element type.
-    #[allow(non_snake_case)] // to be compatible with the old `List(/* elem */)` variant
-    pub fn List(elem: Box<DataType>) -> Self {
-        Self::Ljst(ListType::from_elem(elem))
-    }
-}
-
 impl !PartialOrd for DataType {}
 
 impl ZeroHeapSize for DataType {}
