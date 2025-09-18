@@ -34,7 +34,7 @@ impl ExecutorBuilder for ChangeLogExecutorBuilder {
 
         let vnodes = params
             .vnode_bitmap
-            .expect("vnodes not set for row id gen executor");
+            .expect("vnodes not set for changelog executor");
         let vnode_count = node.vnode_count as usize;
         let exec = ChangeLogExecutor::new(
             params.actor_context,

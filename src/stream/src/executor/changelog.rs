@@ -20,14 +20,14 @@ use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{ArrayImpl, I16Array, Op, SerialArray, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::Serial;
 use risingwave_common::util::row_id::ChangelogRowIdGenerator;
 
 use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 
 pub struct ChangeLogExecutor {
-    _ctx: ActorContextRef,
+    ctx: ActorContextRef,
     input: Executor,
     need_op: bool,
     all_vnode_count: usize,
@@ -54,11 +54,10 @@ impl ChangeLogExecutor {
         all_vnode_count: usize,
         vnodes: Bitmap,
     ) -> Self {
-        let changelog_row_id_generator =
-            ChangelogRowIdGenerator::new(vnodes.iter_vnodes(), vnodes.len());
+        let changelog_row_id_generator = ChangelogRowIdGenerator::new(vnodes);
         let pk_indices = input.pk_indices().to_vec();
         Self {
-            _ctx: ctx,
+            ctx,
             input,
             need_op,
             all_vnode_count,
@@ -104,7 +103,13 @@ impl ChangeLogExecutor {
                     yield Message::Chunk(new_chunk);
                 }
                 Message::Watermark(_w) => {}
-                m => yield m,
+                Message::Barrier(barrier) => {
+                    if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+                        self.changelog_row_id_generator =
+                            ChangelogRowIdGenerator::new(vnodes.as_ref().clone());
+                    }
+                    yield Message::Barrier(barrier);
+                }
             }
         }
     }

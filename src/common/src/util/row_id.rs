@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use super::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
+use crate::bitmap::Bitmap;
 use crate::hash::VirtualNode;
 
 /// The number of bits occupied by the vnode part and the sequence part of a row id.
@@ -248,24 +249,25 @@ pub struct ChangelogRowIdGenerator {
 
     /// Sequence for each vnode. Key is vnode index, value is sequence.
     vnodes_sequence: HashMap<VirtualNode, u16>,
+
+    vnodes: Bitmap,
 }
 
 impl ChangelogRowIdGenerator {
     /// Create a new `ChangelogRowIdGenerator` with given vnode count.
-    pub fn new(vnodes: impl IntoIterator<Item = VirtualNode>, vnode_count: usize) -> Self {
+    pub fn new(vnodes: Bitmap) -> Self {
         let base = *UNIX_RISINGWAVE_DATE_EPOCH;
+        let vnode_count = vnodes.count_ones();
         let vnode_bit = bit_for_vnode(vnode_count);
-
-        let vnodes_sequence = vnodes
-            .into_iter()
-            .map(|vnode| (vnode, 0))
-            .collect::<HashMap<_, _>>();
-        Self {
+        let mut generator = Self {
             base,
             last_timestamp_ms: base.elapsed().unwrap().as_millis() as i64,
             vnode_bit,
-            vnodes_sequence,
-        }
+            vnodes_sequence: HashMap::default(),
+            vnodes,
+        };
+        generator.try_update_timestamp();
+        generator
     }
 
     /// The upper bound of the sequence part for changelog, exclusive.
@@ -277,13 +279,6 @@ impl ChangelogRowIdGenerator {
         let get_current_timestamp_ms = || self.base.elapsed().unwrap().as_millis() as i64;
 
         let current_timestamp_ms = get_current_timestamp_ms();
-        let sequence_upper_bound = self.sequence_upper_bound();
-
-        // Check if any vnode has reached the upper bound
-        let any_vnode_at_limit = self
-            .vnodes_sequence
-            .values()
-            .any(|&seq| seq >= sequence_upper_bound);
 
         let to_update = match current_timestamp_ms.cmp(&self.last_timestamp_ms) {
             Ordering::Less => {
@@ -294,11 +289,7 @@ impl ChangelogRowIdGenerator {
                 );
                 true
             }
-            Ordering::Equal => {
-                // Update the timestamp if any vnode sequence reaches the upper bound.
-                any_vnode_at_limit
-            }
-            Ordering::Greater => true,
+            Ordering::Equal | Ordering::Greater => true,
         };
 
         if to_update {
@@ -318,17 +309,15 @@ impl ChangelogRowIdGenerator {
 
             // Reset states: reset all vnode sequences to 0.
             self.last_timestamp_ms = current_timestamp_ms;
-            self.vnodes_sequence
-                .iter_mut()
-                .for_each(|(_, seq)| *seq = 0);
+            self.vnodes_sequence = HashMap::default();
         }
     }
 
     fn next_changelog_row_id_in_current_timestamp(&mut self, vnode: &VirtualNode) -> Option<RowId> {
-        let current_sequence = *self
-            .vnodes_sequence
-            .get(vnode)
-            .expect(&format!("vnode {:?} not found in generator", vnode));
+        if !self.vnodes.is_set(vnode.to_index()) {
+            panic!("vnode {:?} not in generator", vnode);
+        }
+        let current_sequence = *self.vnodes_sequence.get(vnode).unwrap_or(&1);
 
         if current_sequence >= self.sequence_upper_bound() {
             return None;
@@ -344,10 +333,7 @@ impl ChangelogRowIdGenerator {
         )
     }
 
-    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self, vnode: &VirtualNode) -> RowId {
-        self.try_update_timestamp();
-
         if let Some(row_id) = self.next_changelog_row_id_in_current_timestamp(vnode) {
             row_id
         } else {
