@@ -67,6 +67,7 @@ impl StreamNode for StreamChangeLog {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         PbNodeBody::Changelog(Box::new(ChangeLogNode {
             need_op: self.core.need_op,
+            vnode_count: self.core.vnode_count as u32,
         }))
     }
 }

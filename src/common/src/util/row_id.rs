@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use super::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
@@ -228,6 +229,148 @@ impl RowIdGenerator {
         self.try_update_timestamp();
 
         self.gen_iter().next().unwrap()
+    }
+}
+
+/// `ChangelogRowIdGenerator` generates unique changelog row ids using snowflake algorithm.
+/// Unlike `RowIdGenerator`, it maintains a separate sequence for each vnode and generates
+/// row ids based on the input vnode.
+#[derive(Debug)]
+pub struct ChangelogRowIdGenerator {
+    /// Specific base timestamp using for generating row ids.
+    base: SystemTime,
+
+    /// Last timestamp part of row id, based on `base`.
+    last_timestamp_ms: i64,
+
+    /// The number of bits used for vnode.
+    vnode_bit: u32,
+
+    /// Sequence for each vnode. Key is vnode index, value is sequence.
+    vnodes_sequence: HashMap<VirtualNode, u16>,
+}
+
+impl ChangelogRowIdGenerator {
+    /// Create a new `ChangelogRowIdGenerator` with given vnode count.
+    pub fn new(vnodes: impl IntoIterator<Item = VirtualNode>, vnode_count: usize) -> Self {
+        let base = *UNIX_RISINGWAVE_DATE_EPOCH;
+        let vnode_bit = bit_for_vnode(vnode_count);
+
+        let vnodes_sequence = vnodes
+            .into_iter()
+            .map(|vnode| (vnode, 0))
+            .collect::<HashMap<_, _>>();
+        Self {
+            base,
+            last_timestamp_ms: base.elapsed().unwrap().as_millis() as i64,
+            vnode_bit,
+            vnodes_sequence,
+        }
+    }
+
+    /// The upper bound of the sequence part for changelog, exclusive.
+    fn sequence_upper_bound(&self) -> u16 {
+        1 << (TIMESTAMP_SHIFT_BITS - self.vnode_bit)
+    }
+
+    fn try_update_timestamp(&mut self) {
+        let get_current_timestamp_ms = || self.base.elapsed().unwrap().as_millis() as i64;
+
+        let current_timestamp_ms = get_current_timestamp_ms();
+        let sequence_upper_bound = self.sequence_upper_bound();
+
+        // Check if any vnode has reached the upper bound
+        let any_vnode_at_limit = self
+            .vnodes_sequence
+            .values()
+            .any(|&seq| seq >= sequence_upper_bound);
+
+        let to_update = match current_timestamp_ms.cmp(&self.last_timestamp_ms) {
+            Ordering::Less => {
+                tracing::warn!(
+                    "Clock moved backwards: last={}, current={}",
+                    self.last_timestamp_ms,
+                    current_timestamp_ms,
+                );
+                true
+            }
+            Ordering::Equal => {
+                // Update the timestamp if any vnode sequence reaches the upper bound.
+                any_vnode_at_limit
+            }
+            Ordering::Greater => true,
+        };
+
+        if to_update {
+            // If the timestamp is not increased, spin loop here and wait for next millisecond.
+            let mut current_timestamp_ms = current_timestamp_ms;
+            loop {
+                if current_timestamp_ms > self.last_timestamp_ms {
+                    break;
+                }
+                current_timestamp_ms = get_current_timestamp_ms();
+
+                #[cfg(madsim)]
+                tokio::time::advance(std::time::Duration::from_micros(10));
+                #[cfg(not(madsim))]
+                std::hint::spin_loop();
+            }
+
+            // Reset states: reset all vnode sequences to 0.
+            self.last_timestamp_ms = current_timestamp_ms;
+            self.vnodes_sequence = self
+                .vnodes_sequence
+                .iter_mut()
+                .map(|(vnode, _)| (*vnode, 0))
+                .collect();
+        }
+    }
+
+    fn next_changelog_row_id_in_current_timestamp(&mut self, vnode: &VirtualNode) -> Option<RowId> {
+        let current_sequence = *self
+            .vnodes_sequence
+            .get(vnode)
+            .expect("vnode not found in generator");
+
+        if current_sequence >= self.sequence_upper_bound() {
+            return None;
+        }
+
+        let sequence = current_sequence;
+        self.vnodes_sequence.insert(*vnode, current_sequence + 1);
+
+        Some(
+            self.last_timestamp_ms << TIMESTAMP_SHIFT_BITS
+                | (vnode.to_index() << (TIMESTAMP_SHIFT_BITS - self.vnode_bit)) as i64
+                | sequence as i64,
+        )
+    }
+
+    // fn gen_iter(&mut self) -> impl Iterator<Item = RowId> + '_ {
+    //     std::iter::from_fn(move || {
+    //         if let Some(next) = self.next_changelog_row_id_in_current_timestamp() {
+    //             Some(next)
+    //         } else {
+    //             self.try_update_timestamp();
+    //             Some(
+    //                 self.next_changelog_row_id_in_current_timestamp()
+    //                     .expect("timestamp should be updated"),
+    //             )
+    //         }
+    //     })
+    // }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self, vnode: &VirtualNode) -> RowId {
+        self.try_update_timestamp();
+
+        if let Some(row_id) = self.next_changelog_row_id_in_current_timestamp(vnode) {
+            row_id
+        } else {
+            self.try_update_timestamp();
+            self.next_changelog_row_id_in_current_timestamp(vnode)
+                .expect("timestamp should be updated")
+        }
     }
 }
 

@@ -32,7 +32,17 @@ impl ExecutorBuilder for ChangeLogExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
-        let exec = ChangeLogExecutor::new(params.actor_context, input, node.need_op);
+        let vnodes = params
+            .vnode_bitmap
+            .expect("vnodes not set for row id gen executor");
+        let vnode_count = node.vnode_count as usize;
+        let exec = ChangeLogExecutor::new(
+            params.actor_context,
+            input,
+            node.need_op,
+            vnode_count,
+            vnodes,
+        );
         Ok((params.info, exec).into())
     }
 }

@@ -20,13 +20,12 @@ use super::utils::impl_distill_by_unit;
 use super::{
     BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
     LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
-    RewriteStreamContext, StreamChangeLog, StreamPlanRef, StreamRowIdGen, ToBatch, ToStream,
-    ToStreamContext, gen_filter_and_pushdown, generic,
+    RewriteStreamContext, StreamChangeLog, StreamPlanRef, ToBatch, ToStream, ToStreamContext,
+    gen_filter_and_pushdown, generic,
 };
 use crate::error::ErrorCode::BindError;
 use crate::error::Result;
 use crate::expr::{ExprImpl, InputRef};
-use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -36,12 +35,17 @@ pub struct LogicalChangeLog {
 }
 
 impl LogicalChangeLog {
-    pub fn create(input: PlanRef) -> PlanRef {
-        Self::new(input, true, true).into()
+    pub fn create(input: PlanRef, vnode_count: usize) -> PlanRef {
+        Self::new(input, true, true, vnode_count).into()
     }
 
-    pub fn new(input: PlanRef, need_op: bool, need_changelog_row_id: bool) -> Self {
-        let core = generic::ChangeLog::new(input, need_op, need_changelog_row_id);
+    pub fn new(
+        input: PlanRef,
+        need_op: bool,
+        need_changelog_row_id: bool,
+        vnode_count: usize,
+    ) -> Self {
+        let core = generic::ChangeLog::new(input, need_op, need_changelog_row_id, vnode_count);
         Self::with_core(core)
     }
 
@@ -57,7 +61,12 @@ impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.core.need_op, self.core.need_changelog_row_id)
+        Self::new(
+            input,
+            self.core.need_op,
+            self.core.need_changelog_row_id,
+            self.core.vnode_count,
+        )
     }
 
     fn rewrite_with_input(
@@ -65,7 +74,7 @@ impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let changelog = Self::new(input, self.core.need_op, true);
+        let changelog = Self::new(input, self.core.need_op, true, self.core.vnode_count);
 
         let out_col_change = if self.core.need_op {
             let (mut output_vec, len) = input_col_change.into_parts();
@@ -129,7 +138,13 @@ impl ColPrunable for LogicalChangeLog {
             .collect();
 
         let new_input = self.input().prune_col(&new_required_cols, ctx);
-        Self::new(new_input, need_op, need_changelog_row_id).into()
+        Self::new(
+            new_input,
+            need_op,
+            need_changelog_row_id,
+            self.core.vnode_count,
+        )
+        .into()
     }
 }
 
@@ -145,13 +160,6 @@ impl ToStream for LogicalChangeLog {
 
         let core = self.core.clone_with_input(new_input);
         let plan = StreamChangeLog::new(core).into();
-        let row_id_index = self.schema().fields().len() - 1;
-        let plan = StreamRowIdGen::new_with_dist(
-            plan,
-            row_id_index,
-            Distribution::HashShard(vec![row_id_index]),
-        )
-        .into();
 
         Ok(plan)
     }

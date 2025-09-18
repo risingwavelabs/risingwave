@@ -33,6 +33,8 @@ pub struct ChangeLog<PlanRef> {
     // Before rewrite. If there is no changelog_row_id in the output result, it is false.
     // After rewrite. It is always true.
     pub need_changelog_row_id: bool,
+
+    pub vnode_count: usize,
 }
 impl<PlanRef: GenericPlanRef> DistillUnit for ChangeLog<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
@@ -40,11 +42,17 @@ impl<PlanRef: GenericPlanRef> DistillUnit for ChangeLog<PlanRef> {
     }
 }
 impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
-    pub fn new(input: PlanRef, need_op: bool, need_changelog_row_id: bool) -> Self {
+    pub fn new(
+        input: PlanRef,
+        need_op: bool,
+        need_changelog_row_id: bool,
+        vnode_count: usize,
+    ) -> Self {
         ChangeLog {
             input,
             need_op,
             need_changelog_row_id,
+            vnode_count,
         }
     }
 
@@ -53,6 +61,7 @@ impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
             input,
             need_op: self.need_op,
             need_changelog_row_id: self.need_changelog_row_id,
+            vnode_count: self.vnode_count,
         }
     }
 
