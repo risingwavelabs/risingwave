@@ -347,6 +347,7 @@ pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
     pool: mysql_async::Pool,
+    mysql_column_infos: Vec<sea_schema::mysql::def::ColumnInfo>,
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
@@ -401,7 +402,10 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+        let database = config.database.clone();
+        let table = config.table.clone();
+        
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -428,10 +432,21 @@ impl MySqlExternalTableReader {
             .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 
+        // Query MySQL column infos
+        let mysql_column_infos = Self::query_column_infos(&pool, &database, &table).await?;
+        
+        // Print column infos for verification
+        println!("=== MySQL Column Infos ===");
+        for col_info in &mysql_column_infos {
+            println!("这里{:?}", col_info);
+        }
+        println!("=== End Column Infos ===");
+
         Ok(Self {
             rw_schema,
             field_names,
             pool,
+            mysql_column_infos,
         })
     }
 
@@ -446,6 +461,34 @@ impl MySqlExternalTableReader {
                 offset,
             )?))
         })
+    }
+
+    /// Query MySQL column infos using schema discovery (same as MySqlExternalTable::connect)
+    async fn query_column_infos(
+        _pool: &mysql_async::Pool,
+        database: &str,
+        table: &str,
+    ) -> ConnectorResult<Vec<sea_schema::mysql::def::ColumnInfo>> {
+        // Create a connection for schema discovery
+        let connection = sqlx::MySqlPool::connect_with(
+            sqlx::mysql::MySqlConnectOptions::new()
+                .host("localhost") // This will be overridden by the pool's connection
+                .database(database)
+        ).await?;
+        
+        let mut schema_discovery = SchemaDiscovery::new(connection, database);
+        
+        // Discover system version first
+        let system_info = schema_discovery.discover_system().await?;
+        schema_discovery.query = SchemaQueryBuilder::new(system_info.clone());
+        
+        let schema = Alias::new(database).into_iden();
+        let table_ident = Alias::new(table).into_iden();
+        let columns = schema_discovery
+            .discover_columns(schema, table_ident, &system_info)
+            .await?;
+        
+        Ok(columns)
     }
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
@@ -719,7 +762,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema).unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema).await.unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 
