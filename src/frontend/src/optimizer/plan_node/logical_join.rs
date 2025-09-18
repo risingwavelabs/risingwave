@@ -28,9 +28,9 @@ use super::generic::{
 };
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject, ToBatch,
-    ToStream, generic,
+    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalLocalityProvider,
+    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin,
+    StreamPlanRef, StreamProject, ToBatch, ToStream, generic,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -1770,7 +1770,14 @@ impl ToStream for LogicalJoin {
                 );
             }
         }
-        None
+
+        Some(
+            LogicalLocalityProvider::new(
+                self.clone_with_left_right(self.left(), self.right()).into(),
+                columns.to_owned(),
+            )
+            .into(),
+        )
     }
 }
 

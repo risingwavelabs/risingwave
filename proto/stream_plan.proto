@@ -997,6 +997,15 @@ message UpstreamSinkUnionNode {
   repeated UpstreamSinkInfo init_upstreams = 1;
 }
 
+message LocalityProviderNode {
+  // Column indices that define locality
+  repeated uint32 locality_columns = 1;
+  // State table for buffering input data
+  optional catalog.Table state_table = 2;
+  // Progress table for tracking backfill progress
+  optional catalog.Table progress_table = 3;
+}
+
 message StreamNode {
   // This field used to be a `bool append_only`.
   // Enum variants are ordered for backwards compatibility.
@@ -1059,6 +1068,7 @@ message StreamNode {
     MaterializedExprsNode materialized_exprs = 149;
     VectorIndexWriteNode vector_index_write = 150;
     UpstreamSinkUnionNode upstream_sink_union = 151;
+    LocalityProviderNode locality_provider = 152;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
