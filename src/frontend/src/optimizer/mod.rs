@@ -393,12 +393,6 @@ impl BatchPlanRoot {
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
 
-        // Add Project if the any position of `self.out_fields` is set to zero.
-        if self.out_fields.count_ones(..) != self.out_fields.len() {
-            plan =
-                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
-        }
-
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:");
@@ -407,6 +401,12 @@ impl BatchPlanRoot {
         if require_additional_exchange_on_root_in_distributed_mode(plan.clone()) {
             plan =
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
+        }
+
+        // Add Project if the any position of `self.out_fields` is set to zero.
+        if self.out_fields.count_ones(..) != self.out_fields.len() {
+            plan =
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
         }
 
         // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
