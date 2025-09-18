@@ -40,23 +40,21 @@ impl ListType {
         *self.elem
     }
 
-    /// Wrap `self` into a nested list type.
+    /// Wrap `self` into a nested list type where the element type is `self`.
     pub fn list(self) -> Self {
         Self::from_elem(DataType::from(self))
     }
 }
 
 impl DataType {
-    /// Wrap `self` into a list type.
-    pub fn list(self) -> ListType {
-        ListType {
-            elem: Box::new(self),
-        }
+    /// Wrap `self` into a list type where the element type is `self`.
+    pub fn list(self) -> DataType {
+        ListType::from_elem(self).into()
     }
 }
 
 impl From<ListType> for DataType {
     fn from(value: ListType) -> Self {
-        Self::List(Box::new(*value.elem))
+        Self::Ljst(value)
     }
 }
