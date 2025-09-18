@@ -359,17 +359,17 @@ impl ListValue {
         *self.values
     }
 
-    pub fn empty(elem_datatype: &DataType) -> Self {
-        Self::new(elem_datatype.create_array_builder(0).finish())
+    pub fn empty(elem_type: &DataType) -> Self {
+        Self::new(elem_type.create_array_builder(0).finish())
     }
 
     /// Creates a new `ListValue` from an iterator of elements with the given element type.
     pub fn from_datum_iter<T: ToDatumRef>(
-        elem_datatype: &DataType,
+        elem_type: &DataType,
         iter: impl IntoIterator<Item = T>,
     ) -> Self {
         let iter = iter.into_iter();
-        let mut builder = elem_datatype.create_array_builder(iter.size_hint().0);
+        let mut builder = elem_type.create_array_builder(iter.size_hint().0);
         for datum in iter {
             builder.append(datum);
         }
@@ -409,14 +409,14 @@ impl ListValue {
         list_type: &ListType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
-        let elem_datatype = list_type.elem();
+        let elem_type = list_type.elem();
 
         let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
-        let mut builder = elem_datatype.create_array_builder(0);
+        let mut builder = elem_type.create_array_builder(0);
         while inner_deserializer.has_remaining() {
             builder.append(memcmp_encoding::deserialize_datum_in_composite(
-                elem_datatype,
+                elem_type,
                 &mut inner_deserializer,
             )?)
         }
