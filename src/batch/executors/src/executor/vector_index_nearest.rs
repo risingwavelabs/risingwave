@@ -97,7 +97,7 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
         let mut schema = input.schema().clone();
         schema.fields.push(Field::new(
             "vector_info",
-            DataType::List(DataType::Struct(vector_info_struct_type.clone()).into()),
+            DataType::list(DataType::Struct(vector_info_struct_type.clone())),
         ));
 
         let epoch = source.epoch();
@@ -170,7 +170,7 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
         while let Some(chunk) = input.try_next().await? {
             let mut vector_info_columns_builder = ListArrayBuilder::with_type(
                 chunk.cardinality(),
-                DataType::List(DataType::Struct(vector_info_struct_type.clone()).into()),
+                DataType::list(DataType::Struct(vector_info_struct_type.clone())),
             );
             let (mut columns, vis) = chunk.into_parts();
             let vector_column = columns[vector_column_idx].as_vector();

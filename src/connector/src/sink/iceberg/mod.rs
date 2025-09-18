@@ -2011,12 +2011,15 @@ fn get_fields<'a>(
                     schema_fields.insert(MAP_KEY, map_fields.key());
                     schema_fields.insert(MAP_VALUE, map_fields.value());
                 }
-                risingwave_common::types::DataType::List(list_field) => {
-                    list_field.as_struct().iter().for_each(|(name, data_type)| {
-                        let res = schema_fields.insert(name, data_type);
-                        // This assert is to make sure there is no duplicate field name in the schema.
-                        assert!(res.is_none())
-                    });
+                risingwave_common::types::DataType::List(list) => {
+                    list.elem()
+                        .as_struct()
+                        .iter()
+                        .for_each(|(name, data_type)| {
+                            let res = schema_fields.insert(name, data_type);
+                            // This assert is to make sure there is no duplicate field name in the schema.
+                            assert!(res.is_none())
+                        });
                 }
                 _ => {}
             };
@@ -2236,27 +2239,27 @@ mod test {
                 "a",
             ),
             Field::with_name(
-                DataType::List(Box::new(DataType::Struct(StructType::new(vec![
+                DataType::list(DataType::Struct(StructType::new(vec![
                     ("b1", DataType::Int32),
                     ("b2", DataType::Bytea),
                     (
                         "b3",
                         DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
                     ),
-                ])))),
+                ]))),
                 "b",
             ),
             Field::with_name(
                 DataType::Map(MapType::from_kv(
                     DataType::Varchar,
-                    DataType::List(Box::new(DataType::Struct(StructType::new([
+                    DataType::list(DataType::Struct(StructType::new([
                         ("c1", DataType::Int32),
                         ("c2", DataType::Bytea),
                         (
                             "c3",
                             DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
                         ),
-                    ])))),
+                    ]))),
                 )),
                 "c",
             ),

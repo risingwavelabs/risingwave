@@ -87,10 +87,7 @@ fn list_to_binary_with_type(
     {
         // Reference: Postgres code `src/backend/utils/adt/arrayfuncs.c`
         // https://github.com/postgres/postgres/blob/c1c09007e219ae68d1f8428a54baf68ccc1f8683/src/backend/utils/adt/arrayfuncs.c#L1548
-        let element_ty = match ty {
-            DataType::List(ty) => ty.as_ref(),
-            _ => unreachable!(),
-        };
+        let element_ty = ty.as_list_element_type();
         if matches!(element_ty, DataType::List(_)) {
             bail_not_implemented!(
                 issue = 7949,
@@ -172,7 +169,7 @@ impl ToBinary for ScalarRefImpl<'_> {
                 assert_eq!(&DataType::Vector(v.dimension()), ty);
                 list_to_binary_with_type(
                     v.as_slice().iter().cloned().map(Some),
-                    &DataType::List(DataType::Float32.into()),
+                    &DataType::Float32.list(),
                 )
             }
             ScalarRefImpl::List(v) => v.to_binary_with_type(ty),

@@ -274,7 +274,7 @@ fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>) -> MapValue {
 #[function(
     "map_keys(anymap) -> anyarray",
     type_infer = "|args|{
-        Ok(DataType::List(Box::new(args[0].as_map().key().clone())))
+        Ok(DataType::list(args[0].as_map().key().clone()))
     }"
 )]
 fn map_keys(map: MapRef<'_>) -> ListValue {
@@ -292,7 +292,7 @@ fn map_keys(map: MapRef<'_>) -> ListValue {
 #[function(
     "map_values(anymap) -> anyarray",
     type_infer = "|args|{
-        Ok(DataType::List(Box::new(args[0].as_map().value().clone())))
+        Ok(DataType::list(args[0].as_map().value().clone()))
     }"
 )]
 fn map_values(map: MapRef<'_>) -> ListValue {

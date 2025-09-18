@@ -471,7 +471,7 @@ impl Binder {
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
-                        return Ok(ExprImpl::literal_null(DataType::List(Box::new(DataType::Varchar))));
+                        return Ok(ExprImpl::literal_null(DataType::Varchar.list()));
                     };
 
                     let paths = if bool {
