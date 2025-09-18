@@ -532,7 +532,7 @@ impl MySqlExternalTableReader {
                 order_key,
             )
         } else {
-            let filter_expr = self.filter_expression(&primary_keys);
+            let filter_expr = Self::filter_expression(&primary_keys);
             format!(
                 "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
@@ -638,7 +638,7 @@ impl MySqlExternalTableReader {
     // mysql cannot leverage the given key to narrow down the range of scan,
     // we need to rewrite the comparison conditions by our own.
     // (a, b) > (x, y) => (`a` > x) OR ((`a` = x) AND (`b` > y))
-    fn filter_expression(&self, columns: &[String]) -> String {
+    fn filter_expression(columns: &[String]) -> String {
         let mut conditions = vec![];
         // push the first condition
         conditions.push(format!(
@@ -721,21 +721,22 @@ mod tests {
         println!("columns: {:?}", &table.column_descs);
         println!("primary keys: {:?}", &table.pk_names);
     }
-    // #[test]
-    // fn test_mysql_filter_expr() {
-    //     // This test is commented out because filter_expression now requires &self
-    //     // and we need a proper MySqlExternalTableReader instance to test it
-    //     let cols = vec!["id".to_owned()];
-    //     let expr = MySqlExternalTableReader::filter_expression(&cols);
-    //     assert_eq!(expr, "(`id` > :id)");
 
-    //     let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
-    //     let expr = MySqlExternalTableReader::filter_expression(&cols);
-    //     assert_eq!(
-    //         expr,
-    //         "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
-    //     );
-    // }
+    #[test]
+    fn test_mysql_filter_expr() {
+        // This test is commented out because filter_expression now requires &self
+        // and we need a proper MySqlExternalTableReader instance to test it
+        let cols = vec!["id".to_owned()];
+        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(expr, "(`id` > :id)");
+
+        let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
+        let expr = MySqlExternalTableReader::filter_expression(&cols);
+        assert_eq!(
+            expr,
+            "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
+        );
+    }
 
     #[test]
     fn test_mysql_binlog_offset() {
