@@ -344,7 +344,7 @@ pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
     pool: mysql_async::Pool,
-    mysql_column_infos: Vec<(String, String)>, // (column_name, column_type)
+    upstream_mysql_pk_infos: Vec<(String, String)>, // (column_name, column_type)
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
@@ -402,7 +402,7 @@ impl MySqlExternalTableReader {
     pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let database = config.database.clone();
         let table = config.table.clone();
-        
+
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -429,21 +429,15 @@ impl MySqlExternalTableReader {
             .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 
-        // Query MySQL column infos
-        let mysql_column_infos = Self::query_column_infos(&pool, &database, &table).await?;
-        
-        // Print column infos for verification
-        println!("=== MySQL Column Infos ===");
-        for (col_name, col_type) in &mysql_column_infos {
-            println!("PK Column: {} -> Type: {}", col_name, col_type);
-        }
-        println!("=== End Column Infos ===");
+        // Query MySQL primary key infos for type casting.
+        let upstream_mysql_pk_infos =
+            Self::query_upstream_pk_infos(&pool, &database, &table).await?;
 
         Ok(Self {
             rw_schema,
             field_names,
             pool,
-            mysql_column_infos,
+            upstream_mysql_pk_infos,
         })
     }
 
@@ -460,25 +454,17 @@ impl MySqlExternalTableReader {
         })
     }
 
-    /// Query MySQL primary key column types using direct SQL
-    async fn query_column_infos(
+    /// Query upstream primary key data types, used for generating filter conditions with proper type casting.
+    async fn query_upstream_pk_infos(
         pool: &mysql_async::Pool,
         database: &str,
         table: &str,
     ) -> ConnectorResult<Vec<(String, String)>> {
         let mut conn = pool.get_conn().await?;
-        
+
         // Query primary key columns and their data types
         let sql = format!(
-            "SELECT 
-                COLUMN_NAME, 
-                DATA_TYPE, 
-                COLUMN_TYPE,
-                IS_NULLABLE,
-                COLUMN_KEY,
-                COLUMN_DEFAULT,
-                EXTRA,
-                COLUMN_COMMENT
+            "SELECT COLUMN_NAME, COLUMN_TYPE
             FROM INFORMATION_SCHEMA.COLUMNS 
             WHERE TABLE_SCHEMA = '{}' 
             AND TABLE_NAME = '{}' 
@@ -486,69 +472,65 @@ impl MySqlExternalTableReader {
             ORDER BY ORDINAL_POSITION",
             database, table
         );
-        
+
         let rs = conn.query::<mysql_async::Row, _>(sql).await?;
-        
+
         let mut column_infos = Vec::new();
-        
-        println!("=== Primary Key Column Types ===");
-        for row in rs.iter() {
+        for row in &rs {
             let column_name: String = row.get(0).unwrap();
-            let data_type: String = row.get(1).unwrap();
-            let column_type: String = row.get(2).unwrap();
-            let is_nullable: String = row.get(3).unwrap();
-            let column_key: String = row.get(4).unwrap();
-            let column_default: Option<String> = row.get(5).unwrap();
-            let extra: String = row.get(6).unwrap();
-            let column_comment: String = row.get(7).unwrap();
-            
-            println!("PK Column: {}", column_name);
-            println!("  DATA_TYPE: {}", data_type);
-            println!("  COLUMN_TYPE: {}", column_type);
-            println!("  IS_NULLABLE: {}", is_nullable);
-            println!("  COLUMN_KEY: {}", column_key);
-            println!("  COLUMN_DEFAULT: {:?}", column_default);
-            println!("  EXTRA: {}", extra);
-            println!("  COLUMN_COMMENT: {}", column_comment);
-            println!("---");
-            
-            // Store column name and type
+            let column_type: String = row.get(1).unwrap();
             column_infos.push((column_name, column_type));
         }
-        println!("=== End Primary Key Column Types ===");
-        
+
         drop(conn);
-        
+
         Ok(column_infos)
     }
 
-    /// Check if a column is unsigned based on its MySQL column type
-    fn is_unsigned_column(&self, column_name: &str) -> bool {
-        for (col_name, col_type) in &self.mysql_column_infos {
+    /// Get the MySQL column type for a given column name, converting to CAST-compatible type
+    fn get_column_type(&self, column_name: &str) -> &str {
+        for (col_name, col_type) in &self.upstream_mysql_pk_infos {
             if col_name == column_name {
-                return col_type.contains("unsigned");
+                // Convert MySQL column types to CAST-compatible types
+                return match col_type.as_str() {
+                    "bigint unsigned" => "UNSIGNED",
+                    "int unsigned" => "UNSIGNED",
+                    "mediumint unsigned" => "UNSIGNED",
+                    "smallint unsigned" => "UNSIGNED",
+                    "tinyint unsigned" => "UNSIGNED",
+                    "bigint" => "SIGNED",
+                    "int" => "SIGNED",
+                    "mediumint" => "SIGNED",
+                    "smallint" => "SIGNED",
+                    "tinyint" => "SIGNED",
+                    _ => "SIGNED", // Default fallback
+                };
             }
         }
-        false
+        "" // Return empty string if not found
     }
 
-    /// Quote a column with potential CAST for unsigned types
+    /// Quote a column with CAST to its original MySQL type
     fn quote_column_with_cast(&self, column_name: &str) -> String {
-        // 为 unsigned 列添加 CAST 以处理 BIGINT UNSIGNED 溢出问题
-        if self.is_unsigned_column(column_name) {
-            format!("CAST({} AS UNSIGNED)", Self::quote_column(column_name))
-        } else {
+        let column_type = self.get_column_type(column_name);
+        if column_type.is_empty() {
             Self::quote_column(column_name)
+        } else {
+            format!(
+                "CAST({} AS {})",
+                Self::quote_column(column_name),
+                column_type
+            )
         }
     }
 
-    /// Quote a parameter with potential CAST for unsigned types
+    /// Quote a parameter with CAST to its original MySQL type
     fn quote_param_with_cast(&self, column_name: &str) -> String {
-        // 为 unsigned 列添加 CAST 以处理 BIGINT UNSIGNED 溢出问题
-        if self.is_unsigned_column(column_name) {
-            format!("CAST(:{} AS UNSIGNED)", column_name.to_lowercase())
-        } else {
+        let column_type = self.get_column_type(column_name);
+        if column_type.is_empty() {
             format!(":{}", column_name.to_lowercase())
+        } else {
+            format!("CAST(:{} AS {})", column_name.to_lowercase(), column_type)
         }
     }
 
@@ -581,7 +563,6 @@ impl MySqlExternalTableReader {
                 order_key,
             )
         };
-        println!("完整sql: {}", sql);
         let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
@@ -792,7 +773,9 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema).await.unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema)
+            .await
+            .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 
