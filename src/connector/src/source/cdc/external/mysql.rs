@@ -492,28 +492,14 @@ impl MySqlExternalTableReader {
         for (col_name, col_type) in &self.upstream_mysql_pk_infos {
             if col_name == column_name {
                 // Only CAST unsigned integer types, others return empty string (no CAST)
-                return match col_type.as_str() {
-                    "bigint unsigned" | "int unsigned" | "mediumint unsigned"
-                    | "smallint unsigned" | "tinyint unsigned" => "UNSIGNED",
-                    _ => "", // No CAST for signed types, varchar, timestamp, date, etc.
-                };
+                if col_type.to_lowercase().contains("unsigned") {
+                    return "UNSIGNED";
+                } else {
+                    return "";
+                }
             }
         }
         "" // Return empty string if not found
-    }
-
-    /// Quote a column with CAST to its original MySQL type
-    fn quote_column_with_cast(&self, column_name: &str) -> String {
-        let column_type = self.get_column_type(column_name);
-        if column_type.is_empty() {
-            Self::quote_column(column_name)
-        } else {
-            format!(
-                "CAST({} AS {})",
-                Self::quote_column(column_name),
-                column_type
-            )
-        }
     }
 
     /// Quote a parameter with CAST to its original MySQL type
@@ -636,7 +622,7 @@ impl MySqlExternalTableReader {
         // push the first condition
         conditions.push(format!(
             "({} > {})",
-            self.quote_column_with_cast(&columns[0]),
+            Self::quote_column(&columns[0]),
             self.quote_param_with_cast(&columns[0])
         ));
         for i in 2..=columns.len() {
@@ -646,13 +632,13 @@ impl MySqlExternalTableReader {
                 if j == 0 {
                     condition.push_str(&format!(
                         "({} = {})",
-                        self.quote_column_with_cast(col),
+                        Self::quote_column(col),
                         self.quote_param_with_cast(col)
                     ));
                 } else {
                     condition.push_str(&format!(
                         " AND ({} = {})",
-                        self.quote_column_with_cast(col),
+                        Self::quote_column(col),
                         self.quote_param_with_cast(col)
                     ));
                 }
@@ -660,7 +646,7 @@ impl MySqlExternalTableReader {
             // '>' condition
             condition.push_str(&format!(
                 " AND ({} > {})",
-                self.quote_column_with_cast(&columns[i - 1]),
+                Self::quote_column(&columns[i - 1]),
                 self.quote_param_with_cast(&columns[i - 1])
             ));
             conditions.push(format!("({})", condition));
