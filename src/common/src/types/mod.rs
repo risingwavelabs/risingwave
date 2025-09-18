@@ -1608,9 +1608,9 @@ mod tests {
     fn test_can_alter() {
         let cannots = [
             (DataType::Int32, None),
-            (DataType::list(DataType::Int32), None),
+            (DataType::Int32.list(), None),
             (
-                MapType::from_kv(DataType::Varchar, DataType::list(DataType::Int32)).into(),
+                MapType::from_kv(DataType::Varchar, DataType::Int32.list()).into(),
                 None,
             ),
             (
@@ -1631,12 +1631,9 @@ mod tests {
         }
 
         let cans = [
-            StructType::new([
-                ("a", DataType::Int32),
-                ("b", DataType::list(DataType::Int32)),
-            ])
-            .with_ids([ColumnId::new(1), ColumnId::new(2)])
-            .into(),
+            StructType::new([("a", DataType::Int32), ("b", DataType::Int32.list())])
+                .with_ids([ColumnId::new(1), ColumnId::new(2)])
+                .into(),
             DataType::list(DataType::Struct(
                 StructType::new([("a", DataType::Int32)]).with_ids([ColumnId::new(1)]),
             )),

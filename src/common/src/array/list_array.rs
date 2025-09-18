@@ -1012,7 +1012,7 @@ mod tests {
         }
 
         {
-            let data_type = DataType::list(DataType::Int32.list());
+            let data_type = DataType::Int32.list().list();
             let mut builder = ListArrayBuilder::with_type(2, data_type);
             let val1 = ListValue::from_iter([1, 2, 3]);
             let val2 = ListValue::from_iter([1, 2, 3]);

@@ -466,7 +466,7 @@ fn infer_type_for_special(
                 | (t @ Some(DataType::List(_)), None) => {
                     // when neither type is available, default to `varchar[]`
                     // when one side is unknown and other side is list, use that list type
-                    let t = t.unwrap_or_else(|| DataType::list(DataType::Varchar));
+                    let t = t.unwrap_or_else(|| DataType::Varchar.list());
                     for input in &mut *inputs {
                         input.cast_implicit_mut(&t)?;
                     }
