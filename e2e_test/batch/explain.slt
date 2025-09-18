@@ -60,6 +60,11 @@ explain (VERBOSE) select 1;
 ----
 BatchValues { rows: [[1:Int32]] }
 
+query ok
+explain ("verbose") select 1;
+----
+BatchValues { rows: [[1:Int32]] }
+
 query error
 explain ("VERBOSE") select 1;
 ----

@@ -4363,60 +4363,67 @@ impl Parser<'_> {
         let mut options = ExplainOptions::default();
         let mut analyze_duration = None;
 
+        const BACKFILL: &str = "backfill";
+        const VERBOSE: &str = "verbose";
+        const TRACE: &str = "trace";
+        const TYPE: &str = "type";
+        const LOGICAL: &str = "logical";
+        const PHYSICAL: &str = "physical";
+        const DISTSQL: &str = "distsql";
+        const FORMAT: &str = "format";
+        const DURATION_SECS: &str = "duration_secs";
+
         let explain_options_identifiers = [
-            "BACKFILL",
-            "VERBOSE",
-            "TRACE",
-            "TYPE",
-            "LOGICAL",
-            "PHYSICAL",
-            "DISTSQL",
-            "FORMAT",
-            "DURATION_SECS",
+            BACKFILL,
+            VERBOSE,
+            TRACE,
+            TYPE,
+            LOGICAL,
+            PHYSICAL,
+            DISTSQL,
+            FORMAT,
+            DURATION_SECS,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
-            fn parse_unquote_ident_to_upper(parser: &mut Parser<'_>) -> ModalResult<String> {
-                let ident = parser.parse_identifier()?;
-                if ident.quote_style.is_some() {
-                    parser_err!("quoted explain options not allowed: {}", ident);
+            match parser.parse_identifier()?.real_value().as_str() {
+                VERBOSE => {
+                    options.verbose = parser.parse_optional_boolean(true)
                 }
-                Ok(ident.value.to_ascii_uppercase())
-            }
-            match parse_unquote_ident_to_upper(parser)?.as_str() {
-                "VERBOSE" => options.verbose = parser.parse_optional_boolean(true),
-                "TRACE" => options.trace = parser.parse_optional_boolean(true),
-                "BACKFILL" => options.backfill = parser.parse_optional_boolean(true),
-                "TYPE" => {
-                    let explain_type = parse_unquote_ident_to_upper(parser)?;
+                TRACE => options.trace = parser.parse_optional_boolean(true),
+                BACKFILL => {
+                    options.backfill = parser.parse_optional_boolean(true)
+                }
+                TYPE => {
+                    let explain_type = parser.parse_identifier()?.real_value();
                     match explain_type.as_str() {
-                        "LOGICAL" => options.explain_type = ExplainType::Logical,
-                        "PHYSICAL" => options.explain_type = ExplainType::Physical,
-                        "DISTSQL" => options.explain_type = ExplainType::DistSql,
+                        LOGICAL => options.explain_type = ExplainType::Logical,
+                        PHYSICAL => options.explain_type = ExplainType::Physical,
+                        DISTSQL => options.explain_type = ExplainType::DistSql,
                         unexpected => {
                             parser_err!("unexpected explain type: [{unexpected}]")
                         }
                     }
                 }
-                "LOGICAL" => options.explain_type = ExplainType::Logical,
-                "PHYSICAL" => options.explain_type = ExplainType::Physical,
-                "DISTSQL" => options.explain_type = ExplainType::DistSql,
-                "FORMAT" => {
+                LOGICAL => options.explain_type = ExplainType::Logical,
+                PHYSICAL => options.explain_type = ExplainType::Physical,
+                DISTSQL => options.explain_type = ExplainType::DistSql,
+                FORMAT => {
                     options.explain_format = {
-                        let format = parse_unquote_ident_to_upper(parser)?;
+                        let format = parser.parse_identifier()?.real_value();
                         match format.as_str() {
-                            "TEXT" => ExplainFormat::Text,
-                            "JSON" => ExplainFormat::Json,
-                            "XML" => ExplainFormat::Xml,
-                            "YAML" => ExplainFormat::Yaml,
-                            "DOT" => ExplainFormat::Dot,
+                            "text" => ExplainFormat::Text,
+                            "json" => ExplainFormat::Json,
+                            "xml" => ExplainFormat::Xml,
+                            "yaml" => ExplainFormat::Yaml,
+                            "dot" => ExplainFormat::Dot,
                             unexpected => {
                                 parser_err!("unexpected explain format [{unexpected}]")
                             }
                         }
                     }
                 }
-                "DURATION_SECS" => {
+                DURATION_SECS => {
                     analyze_duration = Some(parser.parse_literal_u64()?);
                 }
                 unexpected => {
@@ -4430,8 +4437,8 @@ impl Parser<'_> {
         // explain (select 1) union (select 1)
         if self.peek_token() == Token::LParen
             && let Token::Word(word) = self.peek_nth_token(1).token
-            && word.quote_style.is_none()
-            && explain_options_identifiers.contains(&word.value.to_ascii_uppercase().as_str())
+            && let Ok(ident) = word.to_ident()
+            && explain_options_identifiers.contains(&ident.real_value().as_str())
         {
             assert!(self.consume_token(&Token::LParen));
             self.parse_comma_separated(parse_explain_option)?;
