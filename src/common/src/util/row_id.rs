@@ -326,7 +326,7 @@ impl ChangelogRowIdGenerator {
         let current_sequence = *self
             .vnodes_sequence
             .get(vnode)
-            .expect("vnode not found in generator");
+            .expect(&format!("vnode {:?} not found in generator", vnode));
 
         if current_sequence >= self.sequence_upper_bound() {
             return None;
