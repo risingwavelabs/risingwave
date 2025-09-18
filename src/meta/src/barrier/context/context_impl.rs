@@ -329,7 +329,6 @@ impl CommandContext {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
                     ..
                 } = info;
                 let new_sink_downstream =

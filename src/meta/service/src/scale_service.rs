@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
-use risingwave_meta::stream::ScaleControllerRef;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
@@ -25,7 +24,7 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
-use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
+use crate::stream::GlobalStreamManagerRef;
 
 pub struct ScaleServiceImpl {
     metadata_manager: MetadataManager,

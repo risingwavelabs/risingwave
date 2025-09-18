@@ -442,7 +442,6 @@ impl SourceManager {
         Ok(())
     }
 
-
     pub async fn list_sources_special_props(&self) -> HashMap<SourceId, SourceWorkerProperties> {
         let core = self.core.lock().await;
         core.managed_sources

@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use futures::TryStreamExt;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
@@ -26,7 +27,6 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
-use risingwave_common::{bail, catalog};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::actor::{ActorModel, ActorStatus};
 use risingwave_meta_model::fragment::DistributionType;
@@ -69,6 +69,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
+use crate::MetaResult;
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
@@ -83,8 +84,7 @@ use crate::model::{
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
-use crate::stream::{SourceManagerRef, SplitAssignment, UpstreamSinkInfo, build_actor_split_impls};
-use crate::{MetaError, MetaResult};
+use crate::stream::{SourceManagerRef, SplitAssignment, UpstreamSinkInfo};
 
 /// Some information of running (inflight) actors.
 #[derive(Clone, Debug)]
@@ -1228,7 +1228,7 @@ impl CatalogController {
                             fragment_id,
                             actors,
                             ..
-                        } = info.get_fragment(*&(fragment_id as _)).unwrap();
+                        } = info.get_fragment(fragment_id as _).unwrap();
                         actors.keys().map(move |actor_id| {
                             (
                                 *actor_id as _,
