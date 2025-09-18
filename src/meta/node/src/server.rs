@@ -398,7 +398,6 @@ pub async fn start_service_as_election_leader(
         prometheus_http_query::Client::from_str(x).unwrap()
     });
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
-
     let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
         metadata_manager.clone(),
         env.await_tree_reg().clone(),
