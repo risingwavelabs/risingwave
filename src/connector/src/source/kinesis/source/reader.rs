@@ -364,7 +364,7 @@ impl KinesisSplitReader {
 
         self.shard_iter = Some(
             tokio_retry::Retry::spawn(
-                tokio_retry::strategy::ExponentialBackoff::from_millis(200).take(3),
+                tokio_retry::strategy::ExponentialBackoff::from_millis(100).take(3),
                 || {
                     get_shard_iter_inner(
                         &self.client,
