@@ -44,11 +44,10 @@ impl MetricsReaderImpl {
 impl MetricsReader for MetricsReaderImpl {
     async fn get_channel_delta_stats(
         &self,
-        at: Option<i64>,
+        at_time: Option<i64>,
         time_offset: Option<i64>,
     ) -> Result<HashMap<ChannelKey, ChannelDeltaStats>> {
         let time_offset = time_offset.unwrap_or(DEFAULT_TIME_OFFSET_SECONDS);
-        let at_time = at;
 
         // Check if Prometheus client is available
         let prometheus_client = self
