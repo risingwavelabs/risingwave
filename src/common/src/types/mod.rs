@@ -173,7 +173,7 @@ pub enum DataType {
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Struct(StructType),
     #[display("{0}")]
-    #[from_str(regex = r"(?i)^(?P<0>.+)$")]
+    #[from_str(regex = "(?i)^(?P<0>.+)$")]
     List(ListType),
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
@@ -439,12 +439,12 @@ impl DataType {
                     pb.field_ids = ids.map(|id| id.get_id()).collect();
                 }
             }
-            DataType::List(datatype) => {
-                pb.field_type = vec![datatype.elem().to_protobuf()];
+            DataType::List(list) => {
+                pb.field_type = vec![list.elem().to_protobuf()];
             }
-            DataType::Map(datatype) => {
+            DataType::Map(map) => {
                 // Same as List<Struct<K,V>>
-                pb.field_type = vec![datatype.clone().into_struct().to_protobuf()];
+                pb.field_type = vec![map.clone().into_struct().to_protobuf()];
             }
             DataType::Vector(size) => {
                 pb.precision = *size as _;

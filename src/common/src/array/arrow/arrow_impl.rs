@@ -354,8 +354,8 @@ pub trait ToArrow {
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::List(datatype) => self.list_type_to_arrow(datatype.elem())?,
-            DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
+            DataType::List(list) => self.list_type_to_arrow(list.elem())?,
+            DataType::Map(map) => self.map_type_to_arrow(map)?,
             DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
@@ -451,7 +451,7 @@ pub trait ToArrow {
         arrow_schema::DataType::Int64
     }
 
-    // TODO(list): use list type
+    // TODO(list): pass `ListType`
     #[inline]
     fn list_type_to_arrow(
         &self,

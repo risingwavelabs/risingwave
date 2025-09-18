@@ -84,6 +84,10 @@ impl MapType {
         &self.0.1
     }
 
+    pub fn into_kv(self) -> (DataType, DataType) {
+        *self.0
+    }
+
     pub fn into_struct(self) -> DataType {
         let (key, value) = *self.0;
         DataType::Struct(Self::struct_type_for_map(key, value))

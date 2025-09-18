@@ -264,7 +264,6 @@ impl StarrocksSink {
                 if starrocks_data_type.contains("unknown") {
                     return Ok(true);
                 }
-                // TODO(list): is comparing element type correct?
                 let check_result = Self::check_and_correct_column_type(list.elem(), starrocks_data_type)?;
                 Ok(check_result && starrocks_data_type.contains("array"))
             }

@@ -251,16 +251,15 @@ impl ColumnIdGenerator {
                 }
                 DataType::List(list) => {
                     let (_, new_inner) = with_segment!(Segment::ListElement, {
-                        handle(this, path, list.elem().clone())?
+                        handle(this, path, list.into_elem())?
                     });
                     DataType::list(new_inner)
                 }
                 DataType::Map(map) => {
-                    let (_, new_key) =
-                        with_segment!(Segment::MapKey, { handle(this, path, map.key().clone())? });
-                    let (_, new_value) = with_segment!(Segment::MapValue, {
-                        handle(this, path, map.value().clone())?
-                    });
+                    let (key, value) = map.into_kv();
+                    let (_, new_key) = with_segment!(Segment::MapKey, { handle(this, path, key)? });
+                    let (_, new_value) =
+                        with_segment!(Segment::MapValue, { handle(this, path, value)? });
                     DataType::Map(MapType::from_kv(new_key, new_value))
                 }
 
