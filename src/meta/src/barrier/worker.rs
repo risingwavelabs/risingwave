@@ -73,9 +73,6 @@ pub(super) struct GlobalBarrierWorker<C> {
     /// The queue of scheduled barriers.
     periodic_barriers: PeriodicBarriers,
 
-    /// The max barrier nums in flight
-    in_flight_barrier_nums: usize,
-
     /// Whether per database failure isolation is enabled in system parameters.
     system_enable_per_database_isolation: bool,
 
@@ -113,7 +110,6 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
-        let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::uninitialized(metadata_manager.clone());
@@ -141,7 +137,6 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         Self {
             enable_recovery,
             periodic_barriers,
-            in_flight_barrier_nums,
             system_enable_per_database_isolation,
             context,
             env,
@@ -192,7 +187,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         tracing::info!(
             "Starting barrier manager with: enable_recovery={}, in_flight_barrier_nums={}",
             self.enable_recovery,
-            self.in_flight_barrier_nums,
+            self.checkpoint_control.in_flight_barrier_nums,
         );
 
         if !self.enable_recovery {
@@ -455,10 +450,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         self.failure_recovery(e).await;
                     }
                 }
-                new_barrier = self.periodic_barriers.next_barrier(&*self.context),
-                    if self
-                        .checkpoint_control
-                        .can_inject_barrier(self.in_flight_barrier_nums) => {
+                new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
                     if let Some((Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
                         let worker_ids: HashSet<_> =
                             info.stream_job_fragments.inner
