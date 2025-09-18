@@ -15,9 +15,8 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::catalog::ColumnCatalog;
-
-use risingwave_meta_model::table::RefreshState;
 use risingwave_common::hash::ActorAlignmentId;
+use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::plan_common::ExprContext;
 
 use super::*;
