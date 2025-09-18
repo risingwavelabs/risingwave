@@ -487,30 +487,31 @@ impl MySqlExternalTableReader {
         Ok(column_infos)
     }
 
-    /// Get the MySQL column type for a given column name, only return CAST type for unsigned integers
-    fn get_column_type(&self, column_name: &str) -> &str {
+    /// Check if a column is unsigned type
+    fn is_unsigned_type(&self, column_name: &str) -> bool {
         for (col_name, col_type) in &self.upstream_mysql_pk_infos {
             if col_name == column_name {
-                // Only CAST unsigned integer types, others return empty string (no CAST)
-                if col_type.to_lowercase().contains("unsigned") {
-                    return "UNSIGNED";
-                } else {
-                    return "";
-                }
+                return col_type.to_lowercase().contains("unsigned");
             }
         }
-        "" // Return empty string if not found
+        false
     }
 
-    /// Quote a parameter with CAST to its original MySQL type
-    fn quote_param_with_cast(&self, column_name: &str) -> String {
-        let column_type = self.get_column_type(column_name);
-        if column_type.is_empty() {
-            format!(":{}", column_name.to_lowercase())
-        } else {
-            format!("CAST(:{} AS {})", column_name.to_lowercase(), column_type)
-        }
+    /// Convert negative i64 to unsigned u64 based on column type
+    fn convert_negative_to_unsigned(&self, negative_val: i64, _column_name: &str) -> u64 {
+        negative_val as u64
     }
+
+    /// Convert negative i32 to unsigned u32 based on column type  
+    fn convert_negative_to_unsigned_i32(&self, negative_val: i32, _column_name: &str) -> u32 {
+        negative_val as u32
+    }
+
+    /// Convert negative i16 to unsigned u16 based on column type
+    fn convert_negative_to_unsigned_i16(&self, negative_val: i16, _column_name: &str) -> u16 {
+        negative_val as u16
+    }
+
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
     async fn snapshot_read_inner(
@@ -575,9 +576,30 @@ impl MySqlExternalTableReader {
                         let ty = field_map.get(pk.as_str()).unwrap();
                         let val = match ty {
                             DataType::Boolean => Value::from(value.into_bool()),
-                            DataType::Int16 => Value::from(value.into_int16()),
-                            DataType::Int32 => Value::from(value.into_int32()),
-                            DataType::Int64 => Value::from(value.into_int64()),
+                            DataType::Int16 => {
+                                let int16_val = value.into_int16();
+                                if int16_val < 0 && self.is_unsigned_type(pk.as_str()) {
+                                    Value::from(self.convert_negative_to_unsigned_i16(int16_val, pk.as_str()))
+                                } else {
+                                    Value::from(int16_val)
+                                }
+                            },
+                            DataType::Int32 => {
+                                let int32_val = value.into_int32();
+                                if int32_val < 0 && self.is_unsigned_type(pk.as_str()) {
+                                    Value::from(self.convert_negative_to_unsigned_i32(int32_val, pk.as_str()))
+                                } else {
+                                    Value::from(int32_val)
+                                }
+                            },
+                            DataType::Int64 => {
+                                let int64_val = value.into_int64();
+                                if int64_val < 0 && self.is_unsigned_type(pk.as_str()) {
+                                    Value::from(self.convert_negative_to_unsigned(int64_val, pk.as_str()))
+                                } else {
+                                    Value::from(int64_val)
+                                }
+                            },
                             DataType::Float32 => Value::from(value.into_float32().into_inner()),
                             DataType::Float64 => Value::from(value.into_float64().into_inner()),
                             DataType::Varchar => Value::from(String::from(value.into_utf8())),
@@ -621,9 +643,9 @@ impl MySqlExternalTableReader {
         let mut conditions = vec![];
         // push the first condition
         conditions.push(format!(
-            "({} > {})",
+            "({} > :{})",
             Self::quote_column(&columns[0]),
-            self.quote_param_with_cast(&columns[0])
+            columns[0].to_lowercase()
         ));
         for i in 2..=columns.len() {
             // '=' condition
@@ -631,23 +653,23 @@ impl MySqlExternalTableReader {
             for (j, col) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
                     condition.push_str(&format!(
-                        "({} = {})",
+                        "({} = :{})",
                         Self::quote_column(col),
-                        self.quote_param_with_cast(col)
+                        col.to_lowercase()
                     ));
                 } else {
                     condition.push_str(&format!(
-                        " AND ({} = {})",
+                        " AND ({} = :{})",
                         Self::quote_column(col),
-                        self.quote_param_with_cast(col)
+                        col.to_lowercase()
                     ));
                 }
             }
             // '>' condition
             condition.push_str(&format!(
-                " AND ({} > {})",
+                " AND ({} > :{})",
                 Self::quote_column(&columns[i - 1]),
-                self.quote_param_with_cast(&columns[i - 1])
+                columns[i - 1].to_lowercase()
             ));
             conditions.push(format!("({})", condition));
         }
