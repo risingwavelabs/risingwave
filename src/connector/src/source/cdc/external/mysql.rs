@@ -534,10 +534,21 @@ impl MySqlExternalTableReader {
 
     /// Quote a column with potential CAST for unsigned types
     fn quote_column_with_cast(&self, column_name: &str) -> String {
+        // 为 unsigned 列添加 CAST 以处理 BIGINT UNSIGNED 溢出问题
         if self.is_unsigned_column(column_name) {
             format!("CAST({} AS UNSIGNED)", Self::quote_column(column_name))
         } else {
             Self::quote_column(column_name)
+        }
+    }
+
+    /// Quote a parameter with potential CAST for unsigned types
+    fn quote_param_with_cast(&self, column_name: &str) -> String {
+        // 为 unsigned 列添加 CAST 以处理 BIGINT UNSIGNED 溢出问题
+        if self.is_unsigned_column(column_name) {
+            format!("CAST(:{} AS UNSIGNED)", column_name.to_lowercase())
+        } else {
+            format!(":{}", column_name.to_lowercase())
         }
     }
 
@@ -570,7 +581,7 @@ impl MySqlExternalTableReader {
                 order_key,
             )
         };
-
+        println!("完整sql: {}", sql);
         let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
@@ -651,9 +662,9 @@ impl MySqlExternalTableReader {
         let mut conditions = vec![];
         // push the first condition
         conditions.push(format!(
-            "({} > :{})",
+            "({} > {})",
             self.quote_column_with_cast(&columns[0]),
-            columns[0].to_lowercase()
+            self.quote_param_with_cast(&columns[0])
         ));
         for i in 2..=columns.len() {
             // '=' condition
@@ -661,23 +672,23 @@ impl MySqlExternalTableReader {
             for (j, col) in columns.iter().enumerate().take(i - 1) {
                 if j == 0 {
                     condition.push_str(&format!(
-                        "({} = :{})",
+                        "({} = {})",
                         self.quote_column_with_cast(col),
-                        col.to_lowercase()
+                        self.quote_param_with_cast(col)
                     ));
                 } else {
                     condition.push_str(&format!(
-                        " AND ({} = :{})",
+                        " AND ({} = {})",
                         self.quote_column_with_cast(col),
-                        col.to_lowercase()
+                        self.quote_param_with_cast(col)
                     ));
                 }
             }
             // '>' condition
             condition.push_str(&format!(
-                " AND ({} > :{})",
+                " AND ({} > {})",
                 self.quote_column_with_cast(&columns[i - 1]),
-                columns[i - 1].to_lowercase()
+                self.quote_param_with_cast(&columns[i - 1])
             ));
             conditions.push(format!("({})", condition));
         }
