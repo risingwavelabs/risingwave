@@ -223,6 +223,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                                     InflightActorInfo {
                                         worker_id: worker1.id as _,
                                         vnode_bitmap: None,
+                                        splits: vec![],
                                     },
                                 )]),
                                 state_table_ids: HashSet::from_iter([table1]),
@@ -239,6 +240,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                                     InflightActorInfo {
                                         worker_id: worker2.id as _,
                                         vnode_bitmap: None,
+                                        splits: vec![],
                                     },
                                 )]),
                                 state_table_ids: HashSet::from_iter([table2]),
