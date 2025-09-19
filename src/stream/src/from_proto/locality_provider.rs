@@ -71,10 +71,8 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             state_table,
             progress_table,
             input_schema,
-            params.info.id.try_into().unwrap(), // Use executor id as actor id
             params.executor_stats.clone(),
             1024, // default chunk size
-            params.fragment_id,
         );
 
         Ok((params.info, exec).into())

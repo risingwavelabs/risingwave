@@ -25,7 +25,7 @@ use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::prelude::*;
-use crate::task::{ActorId, FragmentId};
+
 
 /// The `LocalityProviderExecutor` provides locality for operators during backfilling.
 /// It buffers input data into a state table using locality columns as primary key prefix.
@@ -49,12 +49,6 @@ pub struct LocalityProviderExecutor<S: StateStore> {
     /// Schema of the input
     input_schema: Schema,
 
-    /// Actor ID
-    actor_id: ActorId,
-
-    /// Fragment ID
-    fragment_id: FragmentId,
-
     /// Metrics
     metrics: Arc<StreamingMetrics>,
 
@@ -70,10 +64,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         state_table: StateTable<S>,
         progress_table: StateTable<S>,
         input_schema: Schema,
-        actor_id: ActorId,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        fragment_id: FragmentId,
     ) -> Self {
         Self {
             upstream,
@@ -81,8 +73,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             state_table,
             progress_table,
             input_schema,
-            actor_id,
-            fragment_id,
             metrics,
             chunk_size,
         }
@@ -167,21 +157,17 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     /// - `is_backfill_finished`: true if backfill is completed (only valid when `has_progress_state` is true)
     async fn check_backfill_progress(
         progress_table: &StateTable<S>,
-        locality_columns: &[usize],
     ) -> StreamExecutorResult<(bool, bool)> {
         let mut vnodes = progress_table.vnodes().iter_vnodes_scalar();
         let first_vnode = vnodes.next().unwrap();
 
         // Build key with vnode + NULL values for locality columns (to check any progress entry)
         let mut key_data = vec![Some(first_vnode.into())];
-        for _ in locality_columns {
-            key_data.push(None); // NULL value for locality column
-        }
         let key = OwnedRow::new(key_data);
 
         if let Some(row) = progress_table.get_row(&key).await? {
             // Row exists, check the finished flag (it's at position 1 + locality_columns.len())
-            let finished_col_idx = 1 + locality_columns.len();
+            let finished_col_idx = row.len() - 2; // backfill_finished is second last column
             let is_finished: bool = row.datum_at(finished_col_idx).unwrap().into_bool();
             Ok((true, is_finished))
         } else {
@@ -200,26 +186,23 @@ impl<S: StateStore> Execute for LocalityProviderExecutor<S> {
 impl<S: StateStore> LocalityProviderExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // Extract actor_id before we consume self
-        let actor_id = self.actor_id;
-
         let mut upstream = self.upstream.execute();
+
 
         // Wait for first barrier to initialize
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let first_epoch = first_barrier.epoch;
-        let is_newly_added = first_barrier.is_newly_added(actor_id);
+
+        // Propagate the first barrier
+        yield Message::Barrier(first_barrier);
 
         // Initialize state tables
         self.state_table.init_epoch(first_epoch).await?;
         self.progress_table.init_epoch(first_epoch).await?;
 
-        // Propagate the first barrier
-        yield Message::Barrier(first_barrier);
-
         // Check progress state using static method to avoid borrowing issues
         let (has_progress_state, is_backfill_finished) =
-            Self::check_backfill_progress(&self.progress_table, &self.locality_columns).await?;
+            Self::check_backfill_progress(&self.progress_table).await?;
 
         // Determine what to do based on progress state:
         // - If no progress state exists: need to buffer chunks (backfill not started)
@@ -228,17 +211,14 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         let need_buffering = !has_progress_state;
         let is_completely_finished = has_progress_state && is_backfill_finished;
 
-        if is_completely_finished {
-            assert!(!is_newly_added);
-        }
-
         tracing::info!(
-            actor_id = actor_id,
             has_progress_state = has_progress_state,
             is_backfill_finished = is_backfill_finished,
             need_buffering = need_buffering,
             "LocalityProvider initialized"
         );
+
+        let mut barrier_count = 0;
 
         if need_buffering {
             // Enter buffering phase - buffer data until backfill completion signal
@@ -253,70 +233,57 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         // Ignore watermarks during backfill
                     }
                     Message::Chunk(chunk) => {
-                        for (op, row_ref) in chunk.rows() {
-                            match op {
-                                Op::Insert | Op::UpdateInsert => {
-                                    self.state_table.insert(row_ref);
-                                }
-                                Op::Delete | Op::UpdateDelete => {
-                                    self.state_table.delete(row_ref);
-                                }
-                            }
-                        }
+                        self.state_table.write_chunk(chunk);
+                        self.state_table.try_flush().await?;
                     }
                     Message::Barrier(barrier) => {
                         let epoch = barrier.epoch;
 
                         // Commit state tables
-                        let post_commit = self.state_table.commit(epoch).await?;
-
-                        // Check if this is a backfill completion signal
-                        // For now, use a simple heuristic (in practice, this should be a proper signal)
-                        if !backfill_complete {
-                            // TODO: Replace with actual backfill completion detection
-                            // For now, assume backfill completes after receiving some data
-                            backfill_complete = true; // Simplified for demo
-
-                            if backfill_complete {
-                                tracing::info!(
-                                    actor_id = actor_id,
-                                    "LocalityProvider backfill completed, updating progress"
-                                );
-
-                                // Update progress to completed
-                                Self::update_progress(
-                                    &mut self.progress_table,
-                                    &self.locality_columns,
-                                    &self.input_schema,
-                                    epoch,
-                                )?;
-                                let progress_post_commit =
-                                    self.progress_table.commit(epoch).await?;
-
-                                // Provide buffered data with locality
-                                // if let Some(locality_chunk) =
-                                //     self.provide_locality_data(epoch).await?
-                                // {
-                                //     yield Message::Chunk(locality_chunk);
-                                // }
-
-                                yield Message::Barrier(barrier);
-                                progress_post_commit.post_yield_barrier(None).await?;
-                                break; // Exit buffering phase
-                            }
-                        }
+                        let post_commit1 = self.state_table.commit(epoch).await?;
+                        let post_commit2 =  self.progress_table.commit(epoch).await?;
 
                         yield Message::Barrier(barrier);
-                        post_commit.post_yield_barrier(None).await?;
+                        post_commit1.post_yield_barrier(None).await?;
+                        post_commit2.post_yield_barrier(None).await?;
+                        barrier_count += 1;
+                        if barrier_count >= 100 {
+                            break;
+                        }
                     }
                 }
             }
-
-            tracing::debug!(
-                actor_id = actor_id,
-                "LocalityProvider backfill finished, entering passthrough mode"
-            );
         }
+
+        // TODO: implement backfill loop here
+
+        // Arrangement Backfill Algorithm:
+        //
+        //   backfill_stream
+        //  /               \
+        // upstream       snapshot
+        //
+        // We construct a backfill stream with upstream as its left input and mv snapshot read
+        // stream as its right input. When a chunk comes from upstream, we will buffer it.
+        //
+        // When a barrier comes from upstream:
+        //  Immediately break out of backfill loop.
+        //  - For each row of the upstream chunk buffer, compute vnode.
+        //  - Get the `current_pos` corresponding to the vnode. Forward it to downstream if its pk
+        //    <= `current_pos`, otherwise ignore it.
+        //  - Flush all buffered upstream_chunks to replicated state table.
+        //  - Update the `snapshot_read_epoch`.
+        //  - Reconstruct the whole backfill stream with upstream and new mv snapshot read stream
+        //    with the `snapshot_read_epoch`.
+        //
+        // When a chunk comes from snapshot, we forward it to the downstream and raise
+        // `current_pos`.
+        //
+        // When we reach the end of the snapshot read stream, it means backfill has been
+        // finished.
+        //
+        // Once the backfill loop ends, we forward the upstream directly to the downstream.
+
 
         // After backfill completion (or if already completed), forward messages directly
         #[for_await]

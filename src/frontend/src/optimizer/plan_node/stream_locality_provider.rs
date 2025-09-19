@@ -159,19 +159,13 @@ impl StreamLocalityProvider {
         for &locality_col_idx in self.locality_columns() {
             let field = &input_schema.fields[locality_col_idx];
             catalog_builder.add_column(field);
-            catalog_builder
-                .add_order_column(catalog_builder.columns().len() - 1, OrderType::ascending());
         }
 
         // Add stream key columns as part of primary key (excluding those already added as locality columns)
         if let Some(stream_key) = input.stream_key() {
             for &key_col_idx in stream_key {
-                if !self.locality_columns().contains(&key_col_idx) {
-                    let field = &input_schema.fields[key_col_idx];
-                    catalog_builder.add_column(field);
-                    catalog_builder
-                        .add_order_column(catalog_builder.columns().len() - 1, OrderType::ascending());
-                }
+                let field = &input_schema.fields[key_col_idx];
+                catalog_builder.add_column(field);
             }
         }
 
