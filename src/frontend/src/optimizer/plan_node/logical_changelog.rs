@@ -12,21 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::bail_not_implemented;
-
 use super::expr_visitable::ExprVisitable;
 use super::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
-    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     RewriteStreamContext, StreamChangeLog, StreamPlanRef, ToBatch, ToStream, ToStreamContext,
     gen_filter_and_pushdown, generic,
 };
 use crate::error::ErrorCode::BindError;
 use crate::error::Result;
-use crate::expr::{ExprImpl, InputRef};
+use crate::optimizer::plan_node::StreamExchange;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
@@ -143,16 +140,24 @@ impl ToBatch for LogicalChangeLog {
 
 impl ToStream for LogicalChangeLog {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
-        let new_input = self.input().to_stream(ctx)?;
-
-        let core = self.core.clone_with_input(new_input);
-        let distribution_keys = match core.input.distribution() {
+        let input = self.input().to_stream(ctx)?;
+        let dist = input.distribution();
+        let (distribution_keys, new_input) = match dist {
             Distribution::HashShard(distribution_keys)
-            | Distribution::UpstreamHashShard(distribution_keys, _) => distribution_keys.clone(),
+            | Distribution::UpstreamHashShard(distribution_keys, _) => {
+                (distribution_keys.clone(), input)
+            }
             _ => {
-                bail_not_implemented!("Changelog only support input with hash distribution");
+                let stream_key = input
+                    .stream_key()
+                    .ok_or_else(|| anyhow::anyhow!("changelog input must have a stream key"))?
+                    .to_vec();
+                let new_input =
+                    StreamExchange::new(input, Distribution::HashShard(stream_key.clone())).into();
+                (stream_key, new_input)
             }
         };
+        let core = self.core.clone_with_input(new_input);
         let row_id_index = self.schema().fields().len() - 1;
         let plan = StreamChangeLog::new_with_dist(
             core,
@@ -168,22 +173,8 @@ impl ToStream for LogicalChangeLog {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let original_schema = self.input().schema().clone();
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
-        let exprs = (0..original_schema.len())
-            .map(|x| {
-                ExprImpl::InputRef(
-                    InputRef::new(
-                        input_col_change.map(x),
-                        original_schema.fields[x].data_type.clone(),
-                    )
-                    .into(),
-                )
-            })
-            .collect_vec();
-        let project = LogicalProject::new(input.clone(), exprs);
-        let (project, out_col_change) = project.rewrite_with_input(input, input_col_change);
-        let (changelog, out_col_change) = self.rewrite_with_input(project.into(), out_col_change);
+        let (changelog, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((changelog.into(), out_col_change))
     }
 }
