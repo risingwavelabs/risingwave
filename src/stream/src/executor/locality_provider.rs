@@ -413,15 +413,49 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         // Get pk info from state table
         let pk_indices = state_table.pk_indices().iter().cloned().collect_vec();
 
-        let is_completely_finished = backfill_state.is_completed();
-        let to_backfill = !is_completely_finished;
+        let need_backfill = ! backfill_state.is_completed();
 
-        tracing::info!(
-            is_completely_finished = is_completely_finished,
-            to_backfill = to_backfill,
-            total_snapshot_rows = backfill_state.total_snapshot_rows,
-            "LocalityProvider initialized"
-        );
+        let need_buffering = backfill_state.per_vnode.values().all(|progress| {
+            matches!(progress, LocalityBackfillProgress::NotStarted)
+        });
+
+        // Initial buffering phase before backfill (if needed)
+        if need_buffering {
+            // Enter buffering phase - buffer data until we have sufficient data for backfill
+            let mut barrier_count = 0;
+
+            #[for_await]
+            for msg in upstream.by_ref() {
+                let msg = msg?;
+
+                match msg {
+                    Message::Watermark(_) => {
+                        // Ignore watermarks during initial buffering
+                    }
+                    Message::Chunk(chunk) => {
+                        state_table.write_chunk(chunk);
+                        state_table.try_flush().await?;
+                    }
+                    Message::Barrier(barrier) => {
+                        let epoch = barrier.epoch;
+
+                        // Commit state tables
+                        let post_commit1 = state_table.commit(epoch).await?;
+                        let post_commit2 = progress_table.commit(epoch).await?;
+
+                        yield Message::Barrier(barrier);
+                        post_commit1.post_yield_barrier(None).await?;
+                        post_commit2.post_yield_barrier(None).await?;
+
+                        barrier_count += 1;
+                        // Start backfill after buffering some data
+                        if barrier_count >= 10 {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
 
         // Locality Provider Backfill Algorithm (adapted from Arrangement Backfill):
         //
@@ -448,7 +482,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
 
-        if to_backfill {
+        if need_backfill {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
 
@@ -586,7 +620,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         tracing::debug!("Locality provider backfill finished, forwarding upstream directly");
 
         // Wait for first barrier after backfill completion to mark progress as finished
-        if to_backfill && !backfill_state.is_completed() {
+        if need_backfill && !backfill_state.is_completed() {
             if let Some(Ok(msg)) = upstream.next().await {
                 if let Message::Barrier(barrier) = msg {
                     // Mark all vnodes as completed
