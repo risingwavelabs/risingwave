@@ -68,8 +68,8 @@ mod tests {
         let actual = array_distinct(
             array.as_scalar_ref(),
             &Context {
-                arg_types: vec![DataType::List(DataType::Int32.into())],
-                return_type: DataType::List(DataType::Int32.into()),
+                arg_types: vec![DataType::Int32.list()],
+                return_type: DataType::Int32.list(),
                 variadic: false,
             },
         );
