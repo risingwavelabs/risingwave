@@ -386,17 +386,14 @@ impl ListValue {
         Self::new(builder.finish())
     }
 
-    /// Creates a new `ListValue` from an iterator of `ListValue` to nest them.
-    ///
-    /// Note that `nested_data_type` should be `DataType::List(..)`, i.e., the data type of the list value
-    /// in `iter`.
-    pub fn from_nested_iter(
-        nested_data_type: &DataType,
-        iter: impl IntoIterator<Item = ListValue>,
+    /// Creates a new `ListValue` from an iterator of elements with the given element type.
+    pub fn from_scalar_iter<T: Scalar>(
+        elem_type: &DataType,
+        iter: impl IntoIterator<Item = T>,
     ) -> Self {
         Self::from_datum_iter(
-            nested_data_type,
-            iter.into_iter().map(|v| Some(ScalarImpl::List(v))),
+            elem_type,
+            iter.into_iter().map(|v| Datum::Some(v.to_scalar_value())),
         )
     }
 

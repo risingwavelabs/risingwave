@@ -340,7 +340,7 @@ mod tests {
         assert_eq!(str_to_list("{1, 2, 3}", &ctx).unwrap(), list123);
 
         // Nested List
-        let nested_list123 = ListValue::from_nested_iter(&DataType::Int32.list(), [list123]);
+        let nested_list123 = ListValue::from_scalar_iter(&DataType::Int32.list(), [list123]);
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[][]").unwrap(),
@@ -348,12 +348,12 @@ mod tests {
         };
         assert_eq!(str_to_list("{{1, 2, 3}}", &ctx).unwrap(), nested_list123);
 
-        let nested_list445566 = ListValue::from_nested_iter(
+        let nested_list445566 = ListValue::from_scalar_iter(
             &DataType::Int32.list(),
             [ListValue::from_iter([44, 55, 66])],
         );
 
-        let double_nested_list123_445566 = ListValue::from_nested_iter(
+        let double_nested_list123_445566 = ListValue::from_scalar_iter(
             &DataType::Int32.list().list(),
             [nested_list123.clone(), nested_list445566.clone()],
         );
@@ -375,7 +375,7 @@ mod tests {
             return_type: DataType::from_str("varchar[][]").unwrap(),
             variadic: false,
         };
-        let double_nested_varchar_list123_445566 = ListValue::from_nested_iter(
+        let double_nested_varchar_list123_445566 = ListValue::from_scalar_iter(
             &DataType::Varchar.list().list(),
             [
                 list_cast(nested_list123.as_scalar_ref(), &ctx).unwrap(),

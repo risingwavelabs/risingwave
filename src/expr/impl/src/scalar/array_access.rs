@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn test_nested_array_access() {
-        let v = ListValue::from_nested_iter(
+        let v = ListValue::from_scalar_iter(
             &DataType::Varchar.list(),
             [
                 ListValue::from_iter(["foo", "bar"]),

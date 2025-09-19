@@ -1177,7 +1177,7 @@ mod tests {
 
         test_ok(
             &DataType::Int32.list().list(),
-            Some(ScalarImpl::List(ListValue::from_nested_iter(
+            Some(ScalarImpl::List(ListValue::from_scalar_iter(
                 &DataType::Int32.list(),
                 [
                     ListValue::from_iter([26, 29]),
