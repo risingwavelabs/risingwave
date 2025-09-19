@@ -637,7 +637,8 @@ macro_rules! for_all_fragment_type_flags {
                 CrossDbSnapshotBackfillStreamScan,
                 StreamCdcScan,
                 VectorIndexWrite,
-                UpstreamSinkUnion
+                UpstreamSinkUnion,
+                LocalityProvider
             },
             {},
             0
