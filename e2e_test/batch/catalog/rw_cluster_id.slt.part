@@ -1,0 +1,23 @@
+# Test that rw_cluster_id() returns a non-null string
+query T
+select rw_cluster_id() is not null;
+----
+t
+
+# Test that rw_cluster_id() returns a string with proper length (UUID v4 format: 36 characters)
+query T
+select length(rw_cluster_id()) = 36;
+----
+t
+
+# Test that rw_cluster_id() matches UUID v4 pattern (8-4-4-4-12 hex digits separated by hyphens)
+query T
+select regexp_match(rw_cluster_id(), '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') is not null;
+----
+t
+
+# Test that rw_cluster_id() returns the same value consistently within a session
+query T
+select rw_cluster_id() = rw_cluster_id();
+----
+t
