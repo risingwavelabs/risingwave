@@ -297,6 +297,18 @@ impl Parser<'_> {
                 }
             }
             Ok(expected.into())
+        } else if connector.contains("bigquery") {
+            let expected = FormatEncodeOptions::none();
+            if self.peek_format_encode_format() {
+                let schema = parse_format_encode(self)?.into_v2();
+                if schema != expected {
+                    parser_err!(
+                        "Row format for bigquery connectors should be \
+                         either omitted or set to `{expected}`",
+                    );
+                }
+            }
+            Ok(expected.into())
         } else if connector.contains("webhook") {
             parser_err!(
                 "Source with webhook connector is not supported. \
