@@ -24,9 +24,11 @@ use super::stream::prelude::*;
 use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
 use super::{ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::TableCatalog;
+use crate::catalog::TableId;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamLocalityProvider` implements [`super::LogicalLocalityProvider`]
@@ -39,7 +41,20 @@ pub struct StreamLocalityProvider {
 impl StreamLocalityProvider {
     pub fn new(core: generic::LocalityProvider<PlanRef>) -> Self {
         let input = core.input.clone();
-        let dist = input.distribution().clone();
+
+        let dist = match input.distribution() {
+            Distribution::HashShard(keys) => {
+                // If the input is hash-distributed, we make it a UpstreamHashShard distribution
+                // just like a normal table scan. It is used to ensure locality provider is in its own fragment
+                Distribution::UpstreamHashShard(keys.clone(), TableId::placeholder())
+            }
+            Distribution::UpstreamHashShard(keys, table_id) => {
+                Distribution::UpstreamHashShard(keys.clone(), *table_id)
+            }
+            _ => {
+                panic!("LocalityProvider input must be hash-distributed");
+            }
+        };
 
         // LocalityProvider maintains the append-only behavior if input is append-only
         let base = PlanBase::new_stream_with_core(

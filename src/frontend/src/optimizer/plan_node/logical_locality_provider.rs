@@ -18,7 +18,8 @@ use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject,
-    PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamPlanRef, ToBatch, ToStream, generic,
+    PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamExchange, StreamPlanRef, ToBatch,
+    ToStream, generic,
 };
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
@@ -26,6 +27,7 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalLocalityProvider` provides locality for operators during backfilling.
@@ -120,7 +122,17 @@ impl ToBatch for LogicalLocalityProvider {
 impl ToStream for LogicalLocalityProvider {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         use super::StreamLocalityProvider;
+
         let input = self.input().to_stream(ctx)?;
+        let required_dist =
+            RequiredDist::shard_by_key(self.input().schema().len(), self.locality_columns());
+        let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
+        let input = if input.as_stream_exchange().is_none() {
+            // force a no shuffle exchange to ensure locality provider is in its own fragment
+            StreamExchange::new_no_shuffle(input).into()
+        } else {
+            input
+        };
         let stream_core = generic::LocalityProvider::new(input, self.locality_columns().to_vec());
         Ok(StreamLocalityProvider::new(stream_core).into())
     }
