@@ -112,12 +112,14 @@ impl LocalityBackfillState {
         self.total_snapshot_rows += row_count_delta;
     }
 
-    fn finish_vnode(&mut self, vnode: VirtualNode) {
+    fn finish_vnode(&mut self, vnode: VirtualNode, pk_len: usize) {
         let progress = self.per_vnode.get_mut(&vnode).unwrap();
         match progress {
             LocalityBackfillProgress::NotStarted => {
+                // Create a final position with pk_len NULL values to indicate completion
+                let final_pos = OwnedRow::new(vec![None; pk_len]);
                 *progress = LocalityBackfillProgress::Completed {
-                    final_pos: OwnedRow::empty(),
+                    final_pos,
                     total_rows: 0,
                 };
             }
@@ -150,7 +152,7 @@ impl LocalityBackfillState {
 /// 2. Forward phase: Once backfill is complete, forward upstream messages directly
 ///
 /// Key improvements over the original implementation:
-/// - Removes arbitrary 100-barrier buffer limit
+/// - Removes arbitrary barrier buffer limit
 /// - Implements proper upstream chunk tracking during backfill
 /// - Uses per-vnode progress tracking for better state management
 pub struct LocalityProviderExecutor<S: StateStore> {
@@ -271,19 +273,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
             // Build progress row: vnode + current_pos + is_finished + row_count
             let mut row_data = vec![Some(vnode.to_scalar().into())];
-
-            // Add current position values
-            row_data.extend_from_slice(current_pos.as_inner());
-
-            // Pad with NULLs if position is shorter than locality columns
-            while row_data.len() < 1 + locality_columns.len() {
-                row_data.push(None);
-            }
-
-            // Add is_finished flag
+            row_data.extend(current_pos);
             row_data.push(Some(risingwave_common::types::ScalarImpl::Bool(is_finished)));
-
-            // Add row count
             row_data.push(Some(risingwave_common::types::ScalarImpl::Int64(row_count as i64)));
 
             let row = OwnedRow::new(row_data);
@@ -302,65 +293,49 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         );
         let mut total_snapshot_rows = 0;
 
-        // Scan progress table to restore state
-        let empty_prefix: &[Datum] = &[];
-        let iter = progress_table
-            .iter_with_prefix(
-                empty_prefix,
-                &(
-                    std::ops::Bound::<&[Datum]>::Unbounded,
-                    std::ops::Bound::<&[Datum]>::Unbounded,
-                ),
-                PrefetchOptions::default(),
-            )
-            .await?;
-        pin_mut!(iter);
+        // For each vnode, try to get its progress state
+        for vnode in progress_table.vnodes().iter_vnodes() {
+            // Build key: vnode + NULL values for locality columns (to match progress table schema)
+            let key_data = vec![Some(vnode.to_scalar().into())];
 
-        while let Some(row) = iter.try_next().await? {
-            if row.len() < 3 {
-                continue; // Skip malformed rows
+            let key = OwnedRow::new(key_data);
+
+            if let Some(row) = progress_table.get_row(&key).await? {
+                // Parse is_finished flag (second to last column)
+                let finished_col_idx = row.len() - 2;
+                let is_finished = row.datum_at(finished_col_idx)
+                    .map(|d| d.into_bool())
+                    .unwrap_or(false);
+
+                // Parse row count (last column)
+                let row_count = row.datum_at(row.len() - 1)
+                    .map(|d| d.into_int64() as u64)
+                    .unwrap_or(0);
+
+                // Extract current position (columns 1 to 1+locality_columns.len())
+                let pos_end = std::cmp::min(1 + locality_columns.len(), finished_col_idx);
+                let current_pos_data: Vec<Datum> = (1..pos_end)
+                    .map(|i| row.datum_at(i).to_owned_datum())
+                    .collect();
+                let current_pos = OwnedRow::new(current_pos_data);
+
+                // Set progress based on is_finished flag
+                let progress = if is_finished {
+                    LocalityBackfillProgress::Completed {
+                        final_pos: current_pos,
+                        total_rows: row_count,
+                    }
+                } else {
+                    LocalityBackfillProgress::InProgress {
+                        current_pos,
+                        processed_rows: row_count,
+                    }
+                };
+
+                backfill_state.per_vnode.insert(vnode, progress);
+                total_snapshot_rows += row_count;
             }
-
-            // Parse vnode (first column)
-            let vnode_datum = row.datum_at(0);
-            if vnode_datum.is_none() {
-                continue;
-            }
-            let vnode = VirtualNode::from_scalar(vnode_datum.unwrap().into_int16());
-
-            // Parse is_finished flag (second to last column)
-            let finished_col_idx = row.len() - 2;
-            let is_finished = row.datum_at(finished_col_idx)
-                .map(|d| d.into_bool())
-                .unwrap_or(false);
-
-            // Parse row count (last column)
-            let row_count = row.datum_at(row.len() - 1)
-                .map(|d| d.into_int64() as u64)
-                .unwrap_or(0);
-
-            // Extract current position (columns 1 to 1+locality_columns.len())
-            let pos_end = std::cmp::min(1 + locality_columns.len(), finished_col_idx);
-            let current_pos_data: Vec<Datum> = (1..pos_end)
-                .map(|i| row.datum_at(i).to_owned_datum())
-                .collect();
-            let current_pos = OwnedRow::new(current_pos_data);
-
-            // Set progress based on is_finished flag
-            let progress = if is_finished {
-                LocalityBackfillProgress::Completed {
-                    final_pos: current_pos,
-                    total_rows: row_count,
-                }
-            } else {
-                LocalityBackfillProgress::InProgress {
-                    current_pos,
-                    processed_rows: row_count,
-                }
-            };
-
-            backfill_state.per_vnode.insert(vnode, progress);
-            total_snapshot_rows += row_count;
+            // If no row found, keep the default NotStarted state
         }
 
         backfill_state.total_snapshot_rows = total_snapshot_rows;
@@ -616,7 +591,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 if let Message::Barrier(barrier) = msg {
                     // Mark all vnodes as completed
                     for vnode in state_table.vnodes().iter_vnodes() {
-                        backfill_state.finish_vnode(vnode);
+                        backfill_state.finish_vnode(vnode, pk_indices.len());
                     }
 
                     // Persist final state
