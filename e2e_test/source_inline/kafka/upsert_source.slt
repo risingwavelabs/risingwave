@@ -28,6 +28,7 @@ SHOW CREATE SOURCE upsert_students
 ----
 public.upsert_students CREATE SOURCE upsert_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL, PRIMARY KEY (rw_key)) INCLUDE KEY AS rw_key WITH (<slt:ignore>) FORMAT UPSERT ENCODE JSON
 
+# 1. Sink-into-table
 statement ok
 CREATE TABLE students (
     rw_key BYTEA PRIMARY KEY,
@@ -45,6 +46,17 @@ CREATE SINK sk INTO students AS
     age
   FROM upsert_students;
 
+# 2. MV
+statement ok
+CREATE MATERIALIZED VIEW filtered_students_mv AS
+  SELECT
+    "ID",
+    "firstName" || ' ' || "lastName" AS name,
+    age
+  FROM upsert_students
+  WHERE age >= 20;
+
+# Start producing data and check results
 system ok
 cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\n"
 {"ID": 1}^{"ID": 1, "firstName": "John", "lastName": "Doe", "age": 18, "height": 5.10, "weight": 150}
@@ -71,10 +83,18 @@ SELECT id, name, age FROM students;
 8 Ava Garcia 21
 9 Jacob Anderson 20
 
+query ITI rowsort
+SELECT * FROM filtered_students_mv;
+----
+3 Ben Johnson 21
+4 Emma Brown 20
+5 Michael Williams 22
+8 Ava Garcia 21
+9 Jacob Anderson 20
+
 system ok
 cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\n"
 {"ID": 1}^{"ID": 1, "firstName": "Olivia", "lastName": "Hernandez", "age": 22, "height": 5.6, "weight": 125}
-{"ID": 1}^{"ID": 1, "firstName": "Ethan", "lastName": "Martinez", "age": 18, "height": 6.1, "weight": 180}
 {"ID": 2}^{"ID": 2, "firstName": "Emily", "lastName": "Jackson", "age": 19, "height": 5.4, "weight": 110}
 {"ID": 3}^{"ID": 3, "firstName": "Noah", "lastName": "Thompson", "age": 21, "height": 6.3, "weight": 195}
 {"ID": 7}^
@@ -84,7 +104,7 @@ EOF
 query ITI rowsort retry 10 backoff 1s
 SELECT id, name, age FROM students;
 ----
-1 Ethan Martinez 18
+1 Olivia Hernandez 22
 2 Emily Jackson 19
 3 Noah Thompson 21
 4 Emma Brown 20
@@ -92,8 +112,20 @@ SELECT id, name, age FROM students;
 6 Leah Davis 18
 9 Jacob Anderson 20
 
+query ITI rowsort
+SELECT * FROM filtered_students_mv;
+----
+1 Olivia Hernandez 22
+3 Noah Thompson 21
+4 Emma Brown 20
+5 Michael Williams 22
+9 Jacob Anderson 20
+
 statement ok
 DROP TABLE students;
+
+statement ok
+DROP MATERIALIZED VIEW filtered_students_mv;
 
 # Demonstrate that we cannot use a different column as the sink primary key.
 statement ok
