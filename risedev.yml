@@ -537,6 +537,30 @@ profile:
       - use: frontend
       - use: compactor
 
+  # Used for e2e monitoring tests in CI
+  ci-3cn-1fe-with-monitoring:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+
   ci-backfill-3cn-1fe:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
@@ -1197,6 +1221,9 @@ template:
 
     # Tempo used by this frontend instance
     provide-tempo: "tempo*"
+
+    # Prometheus nodes used by frontend for metrics queries
+    provide-prometheus: "prometheus*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false

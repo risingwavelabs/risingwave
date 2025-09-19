@@ -69,6 +69,8 @@ mod utils;
 pub use utils::{WithOptions, WithOptionsSecResolved, explain_stream_graph};
 pub(crate) mod error;
 mod meta_client;
+pub mod metrics_reader;
+pub use metrics_reader::MetricsReaderImpl;
 pub mod test_utils;
 mod user;
 pub mod webhook;
@@ -183,6 +185,17 @@ pub struct FrontendOpts {
     /// Feature disabled by default.
     #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
     pub serverless_backfill_controller_addr: String,
+
+    /// Prometheus endpoint URL for querying metrics.
+    /// Optional, used for querying Prometheus metrics from the frontend.
+    #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
+    pub prometheus_endpoint: Option<String>,
+
+    /// The additional selector used when querying Prometheus.
+    ///
+    /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
+    #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
+    pub prometheus_selector: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
