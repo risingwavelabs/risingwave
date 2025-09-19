@@ -1020,6 +1020,8 @@ impl StreamFragmentGraph {
     pub fn create_fragment_backfill_ordering(&self) -> FragmentBackfillOrder {
         let mapping = self.collect_backfill_mapping();
         let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();
+
+        // 1. Add backfill dependencies
         for (rel_id, downstream_rel_ids) in &self.backfill_order.order {
             let fragment_ids = mapping.get(rel_id).unwrap();
             for fragment_id in fragment_ids {
@@ -1032,7 +1034,131 @@ impl StreamFragmentGraph {
                 fragment_ordering.insert(*fragment_id, downstream_fragment_ids);
             }
         }
+        // println!("{:?}", fragment_ordering);
+        //
+        // // 2. Add dependencies: all backfill fragments should run before LocalityProvider fragments
+        // let locality_provider_dependencies = self.find_locality_provider_dependencies();
+        // println!("{:?}", locality_provider_dependencies);
+        //
+        // let backfill_fragments: HashSet<u32> = mapping.values().flatten().copied().collect();
+        // let locality_provider_root_fragments: Vec<u32> = locality_provider_dependencies.keys().copied().collect();
+        //
+        // // For each backfill fragment, add only the root LocalityProvider fragments as dependents
+        // for &backfill_fragment_id in &backfill_fragments {
+        //     fragment_ordering
+        //         .entry(backfill_fragment_id)
+        //         .or_default()
+        //         .extend(locality_provider_root_fragments.iter().copied());
+        // }
+        //
+        // // 3. Add LocalityProvider internal dependencies
+        // for (fragment_id, downstream_fragments) in locality_provider_dependencies {
+        //     fragment_ordering
+        //         .entry(fragment_id)
+        //         .or_default()
+        //         .extend(downstream_fragments);
+        // }
+
         fragment_ordering
+    }
+
+    /// Find dependency relationships among fragments containing LocalityProvider nodes.
+    /// Returns a mapping where each fragment ID maps to a list of fragment IDs that should be processed after it.
+    /// Following the same semantics as FragmentBackfillOrder:
+    /// `G[10] -> [1, 2, 11]` means LocalityProvider in fragment 10 should be processed
+    /// before LocalityProviders in fragments 1, 2, and 11.
+    ///
+    /// This method assumes each fragment contains at most one LocalityProvider node.
+    pub fn find_locality_provider_dependencies(&self) -> HashMap<FragmentId, Vec<FragmentId>> {
+        let mut locality_provider_fragments = HashSet::new();
+        let mut dependencies: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+
+        // First, identify all fragments that contain LocalityProvider nodes
+        for (fragment_id, fragment) in &self.fragments {
+            let fragment_id = fragment_id.as_global_id();
+            let has_locality_provider = self.fragment_has_locality_provider(fragment);
+
+            if has_locality_provider {
+                locality_provider_fragments.insert(fragment_id);
+                dependencies.entry(fragment_id).or_default();
+            }
+        }
+
+        // Build dependency relationships between LocalityProvider fragments
+        // For each LocalityProvider fragment, find all downstream LocalityProvider fragments
+        // The upstream fragment should be processed before the downstream fragments
+        for &provider_fragment_id in &locality_provider_fragments {
+            let provider_fragment_global_id = GlobalFragmentId::new(provider_fragment_id);
+
+            // Find all fragments downstream from this LocalityProvider fragment
+            let mut visited = HashSet::new();
+            let mut downstream_locality_providers = Vec::new();
+
+            self.collect_downstream_locality_providers(
+                provider_fragment_global_id,
+                &locality_provider_fragments,
+                &mut visited,
+                &mut downstream_locality_providers,
+            );
+
+            // This fragment should be processed before all its downstream LocalityProvider fragments
+            dependencies
+                .entry(provider_fragment_id)
+                .or_default()
+                .extend(downstream_locality_providers);
+        }
+
+        dependencies
+    }
+
+    /// Check if a fragment contains a LocalityProvider node
+    fn fragment_has_locality_provider(&self, fragment: &BuildingFragment) -> bool {
+        let mut has_locality_provider = false;
+
+        if let Some(node) = fragment.node.as_ref() {
+            visit_stream_node_cont(node, |stream_node| {
+                if let Some(NodeBody::LocalityProvider(_)) = stream_node.node_body.as_ref() {
+                    has_locality_provider = true;
+                    false // Stop visiting once we find a LocalityProvider
+                } else {
+                    true // Continue visiting
+                }
+            });
+        }
+
+        has_locality_provider
+    }
+
+    /// Recursively collect downstream LocalityProvider fragments
+    fn collect_downstream_locality_providers(
+        &self,
+        current_fragment_id: GlobalFragmentId,
+        locality_provider_fragments: &HashSet<FragmentId>,
+        visited: &mut HashSet<GlobalFragmentId>,
+        downstream_providers: &mut Vec<FragmentId>,
+    ) {
+        if visited.contains(&current_fragment_id) {
+            return;
+        }
+        visited.insert(current_fragment_id);
+
+        // Check all downstream fragments
+        for (&downstream_id, _edge) in self.get_downstreams(current_fragment_id) {
+            let downstream_fragment_id = downstream_id.as_global_id();
+
+            // If the downstream fragment is a LocalityProvider, add it to results
+            if locality_provider_fragments.contains(&downstream_fragment_id) {
+                downstream_providers.push(downstream_fragment_id);
+            }
+
+            // Recursively check further downstream
+            self.collect_downstream_locality_providers(
+                downstream_id,
+                locality_provider_fragments,
+                visited,
+                downstream_providers,
+            );
+        }
     }
 }
 

@@ -142,9 +142,7 @@ impl StreamLocalityProvider {
         // add streaming key of the input as the rest of the primary key
         if let Some(stream_key) = input.stream_key() {
             for &key_col_idx in stream_key {
-                if !self.locality_columns().contains(&key_col_idx) {
-                    catalog_builder.add_order_column(key_col_idx, OrderType::ascending());
-                }
+                catalog_builder.add_order_column(key_col_idx, OrderType::ascending());
             }
         }
 

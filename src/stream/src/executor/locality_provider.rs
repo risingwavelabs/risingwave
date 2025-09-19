@@ -309,9 +309,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     .map(|d| d.into_int64() as u64)
                     .unwrap_or(0);
 
-                // Extract current position (columns 1 to 1+locality_columns.len())
-                let pos_end = std::cmp::min(1 + locality_columns.len(), finished_col_idx);
-                let current_pos_data: Vec<Datum> = (1..pos_end)
+                let current_pos_data: Vec<Datum> = (1..finished_col_idx)
                     .map(|i| row.datum_at(i).to_owned_datum())
                     .collect();
                 let current_pos = OwnedRow::new(current_pos_data);
