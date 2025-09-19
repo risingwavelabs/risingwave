@@ -191,6 +191,10 @@ pub mod default {
             10
         }
 
+        pub fn stream_topn_cache_min_capacity() -> usize {
+            10
+        }
+
         pub fn stream_chunk_size() -> usize {
             256
         }
