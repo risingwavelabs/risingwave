@@ -121,9 +121,9 @@ mod tests {
                 ("v5", DataType::Float32),
                 ("v6", DataType::Float64),
                 ("v7", DataType::Bytea),
-                ("v8", DataType::List(Box::new(DataType::Int16))),
-                ("v9", DataType::List(Box::new(DataType::Int64))),
-                ("v10", DataType::List(Box::new(DataType::Float32))),
+                ("v8", DataType::Int16.list()),
+                ("v9", DataType::Int64.list()),
+                ("v10", DataType::Float32.list()),
                 ("v11", DataType::Timestamp),
                 (
                     "v14",

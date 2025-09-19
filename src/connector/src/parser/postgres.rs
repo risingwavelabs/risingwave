@@ -96,12 +96,12 @@ pub fn postgres_cell_to_scalar_impl(
                 }
             }
         }
-        DataType::List(dtype) => match **dtype {
+        DataType::List(list) => match list.elem() {
             // TODO(Kexiang): allow DataType::List(_)
-            DataType::Struct(_) | DataType::List(_) | DataType::Serial => {
+            elem @ (DataType::Struct(_) | DataType::List(_) | DataType::Serial) => {
                 tracing::warn!(
                     "unsupported List data type {:?}, set the List to empty",
-                    **dtype
+                    elem
                 );
                 None
             }

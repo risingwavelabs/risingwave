@@ -204,7 +204,7 @@ pub fn parse_schema_change(
         .to_string();
 
     if let Some(ScalarRefImpl::List(table_changes)) = accessor
-        .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?
+        .access(&[TABLE_CHANGES], &DataType::Jsonb.list())?
         .to_datum_ref()
     {
         for datum in table_changes.iter() {
@@ -776,13 +776,14 @@ pub fn extract_bson_field(
         }
 
         DataType::List(list_type) => {
+            let elem_type = list_type.elem();
             let Some(d_array) = datum.as_array() else {
                 return Err(type_error(datum));
             };
 
-            let mut builder = list_type.create_array_builder(d_array.len());
+            let mut builder = elem_type.create_array_builder(d_array.len());
             for item in d_array {
-                builder.append(extract_bson_field(list_type, item, None)?);
+                builder.append(extract_bson_field(elem_type, item, None)?);
             }
             Some(ScalarImpl::from(ListValue::new(builder.finish())))
         }

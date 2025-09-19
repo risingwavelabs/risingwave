@@ -24,7 +24,7 @@ use super::array_positions::array_position;
 
 #[function("array(...) -> anyarray", type_infer = "unreachable")]
 fn array(row: impl Row, ctx: &Context) -> ListValue {
-    ListValue::from_datum_iter(ctx.return_type.as_list_element_type(), row.iter())
+    ListValue::from_datum_iter(ctx.return_type.as_list_elem(), row.iter())
 }
 
 #[function("row(...) -> struct", type_infer = "unreachable")]
@@ -34,16 +34,16 @@ fn row_(row: impl Row) -> StructValue {
 
 fn map_from_key_values_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
     let map = MapType::try_from_kv(
-        args[0].as_list_element_type().clone(),
-        args[1].as_list_element_type().clone(),
+        args[0].as_list_elem().clone(),
+        args[1].as_list_elem().clone(),
     )
     .map_err(ExprError::Custom)?;
     Ok(map.into())
 }
 
 fn map_from_entries_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
-    let map = MapType::try_from_entries(args[0].as_list_element_type().clone())
-        .map_err(ExprError::Custom)?;
+    let map =
+        MapType::try_from_entries(args[0].as_list_elem().clone()).map_err(ExprError::Custom)?;
     Ok(map.into())
 }
 
@@ -134,10 +134,31 @@ fn map_access<'a>(
 /// select
 ///     map_contains(MAP{1:1}, 1),
 ///     map_contains(MAP{1:1}, 2),
-///     map_contains(MAP{1:1}, NULL::varchar),
-///     map_contains(MAP{1:1}, 1.0)
+///     map_contains(MAP{1:1}, NULL),
+///     map_contains(MAP{1:1}, '1'),
+///     map_contains(MAP{'a':'1','b':'2'}, 'ab');
 /// ----
-/// t f NULL f
+/// t f NULL t f
+///
+///
+/// query error
+/// select map_contains(MAP{1:1}, 1.0);
+/// ----
+/// db error: ERROR: Failed to run the query
+///
+/// Caused by these errors (recent errors listed first):
+///   1: Failed to bind expression: map_contains(MAP {1: 1}, 1.0)
+///   2: Bind error: Cannot check if numeric exists in map(integer,integer)
+///
+///
+/// query error
+/// select map_contains(MAP{1:1}, NULL::varchar);
+/// ----
+/// db error: ERROR: Failed to run the query
+///
+/// Caused by these errors (recent errors listed first):
+///   1: Failed to bind expression: map_contains(MAP {1: 1}, CAST(NULL AS CHARACTER VARYING))
+///   2: Bind error: Cannot check if character varying exists in map(integer,integer)
 /// ```
 #[function("map_contains(anymap, any) -> boolean")]
 fn map_contains(map: MapRef<'_>, key: ScalarRefImpl<'_>) -> Result<bool, ExprError> {
@@ -253,7 +274,7 @@ fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>) -> MapValue {
 #[function(
     "map_keys(anymap) -> anyarray",
     type_infer = "|args|{
-        Ok(DataType::List(Box::new(args[0].as_map().key().clone())))
+        Ok(DataType::list(args[0].as_map().key().clone()))
     }"
 )]
 fn map_keys(map: MapRef<'_>) -> ListValue {
@@ -271,7 +292,7 @@ fn map_keys(map: MapRef<'_>) -> ListValue {
 #[function(
     "map_values(anymap) -> anyarray",
     type_infer = "|args|{
-        Ok(DataType::List(Box::new(args[0].as_map().value().clone())))
+        Ok(DataType::list(args[0].as_map().value().clone()))
     }"
 )]
 fn map_values(map: MapRef<'_>) -> ListValue {

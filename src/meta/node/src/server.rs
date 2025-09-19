@@ -470,9 +470,9 @@ pub async fn start_service_as_election_leader(
             barrier_scheduler.clone(),
             metadata_manager.clone(),
             meta_metrics.clone(),
+            env.clone(),
         )
-        .await
-        .unwrap(),
+        .await?,
     );
     tracing::info!("SourceManager started");
 
@@ -566,10 +566,9 @@ pub async fn start_service_as_election_leader(
 
     let scale_srv = ScaleServiceImpl::new(
         metadata_manager.clone(),
-        source_manager,
         stream_manager.clone(),
         barrier_manager.clone(),
-        scale_controller.clone(),
+        env.clone(),
     );
 
     let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.clone());
@@ -736,7 +735,9 @@ pub async fn start_service_as_election_leader(
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
-        .add_service(EventLogServiceServer::new(event_log_srv))
+        .add_service(
+            EventLogServiceServer::new(event_log_srv).max_decoding_message_size(usize::MAX),
+        )
         .add_service(ClusterLimitServiceServer::new(cluster_limit_srv))
         .add_service(HostedIcebergCatalogServiceServer::new(
             hosted_iceberg_catalog_srv,

@@ -47,7 +47,7 @@ fn jsonb_build_array(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
             value.add_to(ty, &mut builder)?;
         }
     } else {
-        let ty = ctx.arg_types[0].as_list_element_type();
+        let ty = ctx.arg_types[0].as_list_elem();
         for value in args.iter() {
             value.add_to(ty, &mut builder)?;
         }
@@ -86,7 +86,7 @@ fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
     let arg_types = match ctx.variadic {
         true => Either::Left(ctx.arg_types.iter()),
         false => Either::Right(itertools::repeat_n(
-            ctx.arg_types[0].as_list_element_type(),
+            ctx.arg_types[0].as_list_elem(),
             args.len(),
         )),
     };
