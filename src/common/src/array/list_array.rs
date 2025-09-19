@@ -464,13 +464,13 @@ impl Ord for ListValue {
 
 // Construction helpers:
 
-// [Some([1,2,3]), None].collect()
+// [Some(1), None].collect()
 impl<T: PrimitiveArrayItemType> FromIterator<Option<T>> for ListValue {
     fn from_iter<I: IntoIterator<Item = Option<T>>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<PrimitiveArray<T>>().into())
     }
 }
-// [[1,2,3], [4,5]].collect()
+// [1, 2].collect()
 impl<T: PrimitiveArrayItemType> FromIterator<T> for ListValue {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<PrimitiveArray<T>>().into())
