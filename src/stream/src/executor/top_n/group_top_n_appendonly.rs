@@ -167,7 +167,7 @@ where
                 self.metrics.group_top_n_cache_miss_count.inc();
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, data_types.clone());
                 self.managed_state
-                    .init_topn_cache(Some(group_key), &mut topn_cache)
+                    .init_append_only_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
                 self.caches.put(group_cache_key.clone(), topn_cache);
             }
