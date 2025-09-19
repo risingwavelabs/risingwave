@@ -187,7 +187,7 @@ impl Progress {
                 BackfillUpstreamType::MView => mv_count += 1,
                 BackfillUpstreamType::Source => source_count += 1,
                 BackfillUpstreamType::Values => (),
-                BackfillUpstreamType::LocalityProvider => mv_count += 1, // Count LocalityProvider as an MView for progress
+                BackfillUpstreamType::LocalityProvider => mv_count += 1, /* Count LocalityProvider as an MView for progress */
             }
         }
 

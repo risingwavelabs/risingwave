@@ -67,10 +67,11 @@ impl BackfillOrderState {
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
         for fragment in stream_job_fragments.fragments() {
-            if fragment
-                .fragment_type_mask
-                .contains_any([FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan, FragmentTypeFlag::LocalityProvider])
-            {
+            if fragment.fragment_type_mask.contains_any([
+                FragmentTypeFlag::StreamScan,
+                FragmentTypeFlag::SourceScan,
+                FragmentTypeFlag::LocalityProvider,
+            ]) {
                 let fragment_id = fragment.fragment_id;
                 backfill_nodes.insert(
                     fragment_id,

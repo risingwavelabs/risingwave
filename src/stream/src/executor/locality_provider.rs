@@ -81,7 +81,9 @@ impl LocalityBackfillState {
     }
 
     fn vnodes(&self) -> impl Iterator<Item = (VirtualNode, &LocalityBackfillProgress)> {
-        self.per_vnode.iter().map(|(&vnode, progress)| (vnode, progress))
+        self.per_vnode
+            .iter()
+            .map(|(&vnode, progress)| (vnode, progress))
     }
 
     fn has_progress(&self) -> bool {
@@ -467,7 +469,10 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         if let Some(mutation) = barrier.mutation.as_deref() {
                             use crate::executor::Mutation;
                             if let Mutation::StartFragmentBackfill { fragment_ids } = mutation {
-                                tracing::info!("Start backfill of locality provider with fragment id: {:?}", &self.fragment_id);
+                                tracing::info!(
+                                    "Start backfill of locality provider with fragment id: {:?}",
+                                    &self.fragment_id
+                                );
                                 if fragment_ids.contains(&self.fragment_id) {
                                     start_backfill = true;
                                 }
@@ -623,13 +628,16 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     .await?;
 
                 // Update progress with current epoch and snapshot read count
-                let total_snapshot_processed_rows: u64 = backfill_state.vnodes().map(|(_, progress)| {
-                    match progress {
-                        &LocalityBackfillProgress::InProgress { processed_rows, .. } => processed_rows,
+                let total_snapshot_processed_rows: u64 = backfill_state
+                    .vnodes()
+                    .map(|(_, progress)| match progress {
+                        &LocalityBackfillProgress::InProgress { processed_rows, .. } => {
+                            processed_rows
+                        }
                         &LocalityBackfillProgress::Completed { total_rows, .. } => total_rows,
                         &LocalityBackfillProgress::NotStarted => 0,
-                    }
-                }).sum();
+                    })
+                    .sum();
 
                 self.progress.update(
                     barrier.epoch,
@@ -653,14 +661,20 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 // Check if all vnodes are complete
                 if backfill_state.is_completed() {
                     // Backfill is complete, finish progress reporting
-                    let total_snapshot_processed_rows: u64 = backfill_state.vnodes().map(|(_, progress)| {
-                        match progress {
-                            &LocalityBackfillProgress::Completed { total_rows, .. } => total_rows,
-                            _ => 0, // Should all be completed at this point
-                        }
-                    }).sum();
+                    let total_snapshot_processed_rows: u64 = backfill_state
+                        .vnodes()
+                        .map(|(_, progress)| {
+                            match progress {
+                                &LocalityBackfillProgress::Completed { total_rows, .. } => {
+                                    total_rows
+                                }
+                                _ => 0, // Should all be completed at this point
+                            }
+                        })
+                        .sum();
 
-                    self.progress.finish(barrier_epoch, total_snapshot_processed_rows);
+                    self.progress
+                        .finish(barrier_epoch, total_snapshot_processed_rows);
                     break 'backfill_loop;
                 }
             }
@@ -684,16 +698,22 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         }
 
                         // Calculate final total processed rows
-                        let total_snapshot_processed_rows: u64 = backfill_state.vnodes().map(|(_, progress)| {
-                            match progress {
-                                &LocalityBackfillProgress::Completed { total_rows, .. } => total_rows,
-                                &LocalityBackfillProgress::InProgress { processed_rows, .. } => processed_rows,
+                        let total_snapshot_processed_rows: u64 = backfill_state
+                            .vnodes()
+                            .map(|(_, progress)| match progress {
+                                &LocalityBackfillProgress::Completed { total_rows, .. } => {
+                                    total_rows
+                                }
+                                &LocalityBackfillProgress::InProgress {
+                                    processed_rows, ..
+                                } => processed_rows,
                                 &LocalityBackfillProgress::NotStarted => 0,
-                            }
-                        }).sum();
+                            })
+                            .sum();
 
                         // Finish progress reporting
-                        self.progress.finish(barrier.epoch, total_snapshot_processed_rows);
+                        self.progress
+                            .finish(barrier.epoch, total_snapshot_processed_rows);
 
                         // Persist final state
                         Self::persist_backfill_state(
@@ -719,6 +739,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 }
             }
         }
+
+        // TODO: truncate the state table after backfill.
 
         // After backfill completion, forward messages directly
         #[for_await]
