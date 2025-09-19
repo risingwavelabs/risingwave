@@ -31,6 +31,7 @@ use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::prelude::*;
+use crate::task::{CreateMviewProgressReporter, FragmentId};
 
 /// Progress state for tracking backfill per vnode
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +78,10 @@ impl LocalityBackfillState {
         self.per_vnode
             .values()
             .all(|progress| matches!(progress, LocalityBackfillProgress::Completed { .. }))
+    }
+
+    fn vnodes(&self) -> impl Iterator<Item = (VirtualNode, &LocalityBackfillProgress)> {
+        self.per_vnode.iter().map(|(&vnode, progress)| (vnode, progress))
     }
 
     fn has_progress(&self) -> bool {
@@ -165,11 +170,20 @@ pub struct LocalityProviderExecutor<S: StateStore> {
     /// Schema of the input
     input_schema: Schema,
 
+    /// Progress reporter for materialized view creation
+    progress: CreateMviewProgressReporter,
+
+    /// Actor ID for this executor
+    actor_id: ActorId,
+
     /// Metrics
     metrics: Arc<StreamingMetrics>,
 
     /// Chunk size for output
     chunk_size: usize,
+
+    /// Fragment ID of the fragment this LocalityProvider belongs to
+    fragment_id: FragmentId,
 }
 
 impl<S: StateStore> LocalityProviderExecutor<S> {
@@ -180,8 +194,10 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         state_table: StateTable<S>,
         progress_table: StateTable<S>,
         input_schema: Schema,
+        progress: CreateMviewProgressReporter,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        fragment_id: FragmentId,
     ) -> Self {
         Self {
             upstream,
@@ -189,8 +205,11 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             state_table,
             progress_table,
             input_schema,
+            actor_id: progress.actor_id(),
+            progress,
             metrics,
             chunk_size,
+            fragment_id,
         }
     }
 
@@ -249,7 +268,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     async fn persist_backfill_state(
         progress_table: &mut StateTable<S>,
         backfill_state: &LocalityBackfillState,
-        locality_columns: &[usize],
+        _locality_columns: &[usize],
     ) -> StreamExecutorResult<()> {
         for (vnode, progress) in &backfill_state.per_vnode {
             let (is_finished, current_pos, row_count) = match progress {
@@ -283,7 +302,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     /// Load backfill state from progress table
     async fn load_backfill_state(
         progress_table: &StateTable<S>,
-        locality_columns: &[usize],
+        _locality_columns: &[usize],
     ) -> StreamExecutorResult<LocalityBackfillState> {
         let mut backfill_state = LocalityBackfillState::new(progress_table.vnodes().iter_vnodes());
         let mut total_snapshot_rows = 0;
@@ -381,7 +400,7 @@ impl<S: StateStore> Execute for LocalityProviderExecutor<S> {
 
 impl<S: StateStore> LocalityProviderExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         let mut upstream = self.upstream.execute();
 
         // Wait for first barrier to initialize
@@ -482,7 +501,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
-                let mut snapshot_read_complete = false;
+                let _snapshot_read_complete = false;
 
                 // Create the backfill stream with upstream and snapshot
                 {
@@ -581,6 +600,21 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                     .await?;
 
+                // Update progress with current epoch and snapshot read count
+                let total_snapshot_processed_rows: u64 = backfill_state.vnodes().map(|(_, progress)| {
+                    match progress {
+                        &LocalityBackfillProgress::InProgress { processed_rows, .. } => processed_rows,
+                        &LocalityBackfillProgress::Completed { total_rows, .. } => total_rows,
+                        &LocalityBackfillProgress::NotStarted => 0,
+                    }
+                }).sum();
+
+                self.progress.update(
+                    barrier.epoch,
+                    barrier.epoch.curr, // Use barrier epoch as snapshot read epoch
+                    total_snapshot_processed_rows,
+                );
+
                 // Persist backfill progress
                 Self::persist_backfill_state(
                     &mut progress_table,
@@ -588,13 +622,23 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     &self.locality_columns,
                 )
                 .await?;
-                let post_commit = progress_table.commit(barrier.epoch).await?;
+                let barrier_epoch = barrier.epoch;
+                let post_commit = progress_table.commit(barrier_epoch).await?;
 
                 yield Message::Barrier(barrier);
                 post_commit.post_yield_barrier(None).await?;
 
                 // Check if all vnodes are complete
                 if backfill_state.is_completed() {
+                    // Backfill is complete, finish progress reporting
+                    let total_snapshot_processed_rows: u64 = backfill_state.vnodes().map(|(_, progress)| {
+                        match progress {
+                            &LocalityBackfillProgress::Completed { total_rows, .. } => total_rows,
+                            _ => 0, // Should all be completed at this point
+                        }
+                    }).sum();
+
+                    self.progress.finish(barrier_epoch, total_snapshot_processed_rows);
                     break 'backfill_loop;
                 }
             }
@@ -616,6 +660,18 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         for vnode in state_table.vnodes().iter_vnodes() {
                             backfill_state.finish_vnode(vnode, pk_indices.len());
                         }
+
+                        // Calculate final total processed rows
+                        let total_snapshot_processed_rows: u64 = backfill_state.vnodes().map(|(_, progress)| {
+                            match progress {
+                                &LocalityBackfillProgress::Completed { total_rows, .. } => total_rows,
+                                &LocalityBackfillProgress::InProgress { processed_rows, .. } => processed_rows,
+                                &LocalityBackfillProgress::NotStarted => 0,
+                            }
+                        }).sum();
+
+                        // Finish progress reporting
+                        self.progress.finish(barrier.epoch, total_snapshot_processed_rows);
 
                         // Persist final state
                         Self::persist_backfill_state(

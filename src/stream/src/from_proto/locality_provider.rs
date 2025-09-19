@@ -65,14 +65,20 @@ impl ExecutorBuilder for LocalityProviderBuilder {
                 .build()
                 .await;
 
+        let progress = params
+            .local_barrier_manager
+            .register_create_mview_progress(params.actor_context.id);
+
         let exec = LocalityProviderExecutor::new(
             input,
             locality_columns,
             state_table,
             progress_table,
             input_schema,
+            progress,
             params.executor_stats.clone(),
             1024, // default chunk size
+            params.actor_context.fragment_id,
         );
 
         Ok((params.info, exec).into())
