@@ -343,7 +343,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     }
 
     /// Mark chunk for forwarding based on backfill progress
-    fn mark_chunk_for_locality(
+    fn mark_chunk(
         chunk: StreamChunk,
         backfill_state: &LocalityBackfillState,
         state_table: &StateTable<S>,
@@ -583,20 +583,19 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
                     // Mark chunk based on backfill progress
                     if backfill_state.has_progress() {
-                        let marked_chunk = Self::mark_chunk_for_locality(
+                        let marked_chunk = Self::mark_chunk(
                             chunk.clone(),
                             &backfill_state,
                             &state_table,
                         )?;
                         yield Message::Chunk(marked_chunk);
                     }
-
-                    // Buffer chunk to state table
-                    state_table.write_chunk(chunk);
                 }
 
-                // Commit state table
-                let post_commit1 = state_table.commit(barrier.epoch).await?;
+                // no-op commit state table
+                state_table
+                    .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                    .await?;
 
                 // Persist backfill progress
                 Self::persist_backfill_state(
@@ -604,11 +603,10 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     &backfill_state,
                     &self.locality_columns,
                 ).await?;
-                let post_commit2 = progress_table.commit(barrier.epoch).await?;
+                let post_commit = progress_table.commit(barrier.epoch).await?;
 
                 yield Message::Barrier(barrier);
-                post_commit1.post_yield_barrier(None).await?;
-                post_commit2.post_yield_barrier(None).await?;
+                post_commit.post_yield_barrier(None).await?;
 
                 // Check if all vnodes are complete
                 if backfill_state.is_completed() {
@@ -621,23 +619,39 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
         // Wait for first barrier after backfill completion to mark progress as finished
         if need_backfill && !backfill_state.is_completed() {
-            if let Some(Ok(msg)) = upstream.next().await {
-                if let Message::Barrier(barrier) = msg {
-                    // Mark all vnodes as completed
-                    for vnode in state_table.vnodes().iter_vnodes() {
-                        backfill_state.finish_vnode(vnode, pk_indices.len());
+            while let Some(Ok(msg)) = upstream.next().await {
+                match msg {
+                    Message::Barrier(barrier) => {
+                        // no-op commit state table
+                        state_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+
+                        // Mark all vnodes as completed
+                        for vnode in state_table.vnodes().iter_vnodes() {
+                            backfill_state.finish_vnode(vnode, pk_indices.len());
+                        }
+
+                        // Persist final state
+                        Self::persist_backfill_state(
+                            &mut progress_table,
+                            &backfill_state,
+                            &self.locality_columns,
+                        ).await?;
+                        let post_commit = progress_table.commit(barrier.epoch).await?;
+
+                        yield Message::Barrier(barrier);
+                        post_commit.post_yield_barrier(None).await?;
+                        break; // Exit the loop after processing the barrier
                     }
-
-                    // Persist final state
-                    Self::persist_backfill_state(
-                        &mut progress_table,
-                        &backfill_state,
-                        &self.locality_columns,
-                    ).await?;
-                    let post_commit = progress_table.commit(barrier.epoch).await?;
-
-                    yield Message::Barrier(barrier);
-                    post_commit.post_yield_barrier(None).await?;
+                    Message::Chunk(chunk) => {
+                        // Forward chunks directly during completion phase
+                        yield Message::Chunk(chunk);
+                    }
+                    Message::Watermark(watermark) => {
+                        // Forward watermarks directly during completion phase
+                        yield Message::Watermark(watermark);
+                    }
                 }
             }
         }
