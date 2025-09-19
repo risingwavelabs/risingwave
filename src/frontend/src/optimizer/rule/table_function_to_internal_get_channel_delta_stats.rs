@@ -14,7 +14,7 @@
 
 use std::rc::Rc;
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, ScalarImpl};
 
@@ -42,18 +42,18 @@ fn expr_impl_to_u64_fn(arg: &crate::expr::ExprImpl) -> anyhow::Result<Option<u64
                 ScalarImpl::Int64(value) => {
                     if value < 0 {
                         Err(anyhow::anyhow!(
-                            "Time parameter cannot be negative, got {}",
+                            "time parameter cannot be negative, got {}",
                             value
                         ))
                     } else {
                         Ok(Some(value as u64))
                     }
                 }
-                _ => Err(anyhow::anyhow!("Expected int64, got {:?}", scalar)),
+                _ => Err(anyhow::anyhow!("expected int64, got {:?}", scalar)),
             }
         }
-        Some(Err(err)) => Err(anyhow::anyhow!("Failed to fold constant: {}", err)),
-        None => Err(anyhow::anyhow!("Expression must be a constant value")),
+        Some(Err(err)) => Err(anyhow!(err).context("failed to fold constant")),
+        None => Err(anyhow::anyhow!("expression must be a constant value")),
     }
 }
 

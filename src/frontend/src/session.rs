@@ -82,13 +82,13 @@ use risingwave_rpc_client::{
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
-use tracing::log::error;
+use tracing::{error, info};
 
 use self::cursor_manager::CursorManager;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
@@ -503,7 +503,10 @@ impl FrontendEnv {
                     Some(client)
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to initialize Prometheus client: {}", e);
+                    error!(
+                        error = %e.as_report(),
+                        "failed to initialize Prometheus client",
+                    );
                     None
                 }
             }

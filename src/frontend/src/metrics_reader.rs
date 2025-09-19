@@ -92,7 +92,7 @@ impl MetricsReader for MetricsReaderImpl {
                 output_query.get(),
                 backpressure_query.get(),
             )
-            .map_err(|e| anyhow!("Failed to query Prometheus: {}", e))?
+            .map_err(|e| anyhow!(e).context("failed to query Prometheus"))?
         };
 
         // Process channel delta stats
