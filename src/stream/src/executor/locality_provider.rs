@@ -431,10 +431,10 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             .values()
             .all(|progress| matches!(progress, LocalityBackfillProgress::NotStarted));
 
-        // Initial buffering phase before backfill (if needed)
+        // Initial buffering phase before backfill - wait for StartFragmentBackfill mutation (if needed)
         if need_buffering {
-            // Enter buffering phase - buffer data until we have sufficient data for backfill
-            let mut barrier_count = 0;
+            // Enter buffering phase - buffer data until StartFragmentBackfill is received
+            let mut start_backfill = false;
 
             #[for_await]
             for msg in upstream.by_ref() {
@@ -451,6 +451,16 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     Message::Barrier(barrier) => {
                         let epoch = barrier.epoch;
 
+                        // Check for StartFragmentBackfill mutation
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            use crate::executor::Mutation;
+                            if let Mutation::StartFragmentBackfill { fragment_ids } = mutation {
+                                if fragment_ids.contains(&self.fragment_id) {
+                                    start_backfill = true;
+                                }
+                            }
+                        }
+
                         // Commit state tables
                         let post_commit1 = state_table.commit(epoch).await?;
                         let post_commit2 = progress_table.commit(epoch).await?;
@@ -459,9 +469,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         post_commit1.post_yield_barrier(None).await?;
                         post_commit2.post_yield_barrier(None).await?;
 
-                        barrier_count += 1;
-                        // Start backfill after buffering some data
-                        if barrier_count >= 10 {
+                        // Start backfill when StartFragmentBackfill mutation is received
+                        if start_backfill {
                             break;
                         }
                     }

@@ -1034,30 +1034,30 @@ impl StreamFragmentGraph {
                 fragment_ordering.insert(*fragment_id, downstream_fragment_ids);
             }
         }
-        // println!("{:?}", fragment_ordering);
-        //
-        // // 2. Add dependencies: all backfill fragments should run before LocalityProvider fragments
-        // let locality_provider_dependencies = self.find_locality_provider_dependencies();
-        // println!("{:?}", locality_provider_dependencies);
-        //
-        // let backfill_fragments: HashSet<u32> = mapping.values().flatten().copied().collect();
-        // let locality_provider_root_fragments: Vec<u32> = locality_provider_dependencies.keys().copied().collect();
-        //
-        // // For each backfill fragment, add only the root LocalityProvider fragments as dependents
-        // for &backfill_fragment_id in &backfill_fragments {
-        //     fragment_ordering
-        //         .entry(backfill_fragment_id)
-        //         .or_default()
-        //         .extend(locality_provider_root_fragments.iter().copied());
-        // }
-        //
-        // // 3. Add LocalityProvider internal dependencies
-        // for (fragment_id, downstream_fragments) in locality_provider_dependencies {
-        //     fragment_ordering
-        //         .entry(fragment_id)
-        //         .or_default()
-        //         .extend(downstream_fragments);
-        // }
+        println!("{:?}", fragment_ordering);
+
+        // 2. Add dependencies: all backfill fragments should run before LocalityProvider fragments
+        let locality_provider_dependencies = self.find_locality_provider_dependencies();
+        println!("{:?}", locality_provider_dependencies);
+
+        let backfill_fragments: HashSet<u32> = mapping.values().flatten().copied().collect();
+        let locality_provider_root_fragments: Vec<u32> = locality_provider_dependencies.keys().copied().collect();
+
+        // For each backfill fragment, add only the root LocalityProvider fragments as dependents
+        for &backfill_fragment_id in &backfill_fragments {
+            fragment_ordering
+                .entry(backfill_fragment_id)
+                .or_default()
+                .extend(locality_provider_root_fragments.iter().copied());
+        }
+
+        // 3. Add LocalityProvider internal dependencies
+        for (fragment_id, downstream_fragments) in locality_provider_dependencies {
+            fragment_ordering
+                .entry(fragment_id)
+                .or_default()
+                .extend(downstream_fragments);
+        }
 
         fragment_ordering
     }
