@@ -15,10 +15,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures_async_stream::try_stream;
 use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{TryStreamExt, pin_mut, stream};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -74,23 +74,18 @@ impl LocalityBackfillState {
     }
 
     fn is_completed(&self) -> bool {
-        self.per_vnode.values().all(|progress| {
-            matches!(progress, LocalityBackfillProgress::Completed { .. })
-        })
+        self.per_vnode
+            .values()
+            .all(|progress| matches!(progress, LocalityBackfillProgress::Completed { .. }))
     }
 
     fn has_progress(&self) -> bool {
-        self.per_vnode.values().any(|progress| {
-            matches!(progress, LocalityBackfillProgress::InProgress { .. })
-        })
+        self.per_vnode
+            .values()
+            .any(|progress| matches!(progress, LocalityBackfillProgress::InProgress { .. }))
     }
 
-    fn update_progress(
-        &mut self,
-        vnode: VirtualNode,
-        new_pos: OwnedRow,
-        row_count_delta: u64,
-    ) {
+    fn update_progress(&mut self, vnode: VirtualNode, new_pos: OwnedRow, row_count_delta: u64) {
         let progress = self.per_vnode.get_mut(&vnode).unwrap();
         match progress {
             LocalityBackfillProgress::NotStarted => {
@@ -143,7 +138,6 @@ impl LocalityBackfillState {
     }
 }
 
-
 /// The `LocalityProviderExecutor` provides locality for operators during backfilling.
 /// It buffers input data into a state table using locality columns as primary key prefix.
 ///
@@ -176,7 +170,6 @@ pub struct LocalityProviderExecutor<S: StateStore> {
 
     /// Chunk size for output
     chunk_size: usize,
-
 }
 
 impl<S: StateStore> LocalityProviderExecutor<S> {
@@ -274,8 +267,12 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             // Build progress row: vnode + current_pos + is_finished + row_count
             let mut row_data = vec![Some(vnode.to_scalar().into())];
             row_data.extend(current_pos);
-            row_data.push(Some(risingwave_common::types::ScalarImpl::Bool(is_finished)));
-            row_data.push(Some(risingwave_common::types::ScalarImpl::Int64(row_count as i64)));
+            row_data.push(Some(risingwave_common::types::ScalarImpl::Bool(
+                is_finished,
+            )));
+            row_data.push(Some(risingwave_common::types::ScalarImpl::Int64(
+                row_count as i64,
+            )));
 
             let row = OwnedRow::new(row_data);
             progress_table.insert(row);
@@ -288,9 +285,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         progress_table: &StateTable<S>,
         locality_columns: &[usize],
     ) -> StreamExecutorResult<LocalityBackfillState> {
-        let mut backfill_state = LocalityBackfillState::new(
-            progress_table.vnodes().iter_vnodes()
-        );
+        let mut backfill_state = LocalityBackfillState::new(progress_table.vnodes().iter_vnodes());
         let mut total_snapshot_rows = 0;
 
         // For each vnode, try to get its progress state
@@ -303,12 +298,14 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             if let Some(row) = progress_table.get_row(&key).await? {
                 // Parse is_finished flag (second to last column)
                 let finished_col_idx = row.len() - 2;
-                let is_finished = row.datum_at(finished_col_idx)
+                let is_finished = row
+                    .datum_at(finished_col_idx)
                     .map(|d| d.into_bool())
                     .unwrap_or(false);
 
                 // Parse row count (last column)
-                let row_count = row.datum_at(row.len() - 1)
+                let row_count = row
+                    .datum_at(row.len() - 1)
                     .map(|d| d.into_int64() as u64)
                     .unwrap_or(0);
 
@@ -365,11 +362,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 LocalityBackfillProgress::NotStarted => false,
                 LocalityBackfillProgress::InProgress { current_pos, .. } => {
                     // Compare primary key with current position
-                    cmp_datum_iter(
-                        pk.iter(),
-                        current_pos.iter(),
-                        pk_order.iter().copied(),
-                    ).is_le()
+                    cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()).is_le()
                 }
             };
 
@@ -399,7 +392,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
         // Propagate the first barrier
         yield Message::Barrier(first_barrier);
-        
+
         let mut state_table = self.state_table;
         let mut progress_table = self.progress_table;
 
@@ -408,16 +401,18 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         progress_table.init_epoch(first_epoch).await?;
 
         // Load backfill state from progress table
-        let mut backfill_state = Self::load_backfill_state(&progress_table, &self.locality_columns).await?;
+        let mut backfill_state =
+            Self::load_backfill_state(&progress_table, &self.locality_columns).await?;
 
         // Get pk info from state table
         let pk_indices = state_table.pk_indices().iter().cloned().collect_vec();
 
-        let need_backfill = ! backfill_state.is_completed();
+        let need_backfill = !backfill_state.is_completed();
 
-        let need_buffering = backfill_state.per_vnode.values().all(|progress| {
-            matches!(progress, LocalityBackfillProgress::NotStarted)
-        });
+        let need_buffering = backfill_state
+            .per_vnode
+            .values()
+            .all(|progress| matches!(progress, LocalityBackfillProgress::NotStarted));
 
         // Initial buffering phase before backfill (if needed)
         if need_buffering {
@@ -495,11 +490,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
                     let right_snapshot = pin!(
-                        Self::make_snapshot_stream(
-                            &state_table,
-                            backfill_state.clone(),
-                        )
-                        .map(Either::Right)
+                        Self::make_snapshot_stream(&state_table, backfill_state.clone(),)
+                            .map(Either::Right)
                     );
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
@@ -537,7 +529,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                         // Consume remaining rows in the buffer.
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             let chunk_cardinality = chunk.cardinality() as u64;
-                                            cur_barrier_upstream_processed_rows += chunk_cardinality;
+                                            cur_barrier_upstream_processed_rows +=
+                                                chunk_cardinality;
                                             yield Message::Chunk(chunk);
                                         }
                                         break 'backfill_loop;
@@ -550,11 +543,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                         let pk_owned = pk.into_owned_row();
 
                                         // Update progress for this vnode
-                                        backfill_state.update_progress(
-                                            vnode,
-                                            pk_owned,
-                                            1,
-                                        );
+                                        backfill_state.update_progress(vnode, pk_owned, 1);
 
                                         cur_barrier_snapshot_processed_rows += 1;
 
@@ -583,11 +572,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
                     // Mark chunk based on backfill progress
                     if backfill_state.has_progress() {
-                        let marked_chunk = Self::mark_chunk(
-                            chunk.clone(),
-                            &backfill_state,
-                            &state_table,
-                        )?;
+                        let marked_chunk =
+                            Self::mark_chunk(chunk.clone(), &backfill_state, &state_table)?;
                         yield Message::Chunk(marked_chunk);
                     }
                 }
@@ -602,7 +588,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     &mut progress_table,
                     &backfill_state,
                     &self.locality_columns,
-                ).await?;
+                )
+                .await?;
                 let post_commit = progress_table.commit(barrier.epoch).await?;
 
                 yield Message::Barrier(barrier);
@@ -637,7 +624,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                             &mut progress_table,
                             &backfill_state,
                             &self.locality_columns,
-                        ).await?;
+                        )
+                        .await?;
                         let post_commit = progress_table.commit(barrier.epoch).await?;
 
                         yield Message::Barrier(barrier);
