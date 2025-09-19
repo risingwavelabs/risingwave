@@ -45,7 +45,6 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
 use risingwave_pb::ddl_service::{PbTableJobType, TableJobType};
-use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
@@ -55,14 +54,14 @@ use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, ConnectionRefValue, CreateSink,
-    CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format,
-    FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
+    CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions,
+    Format, FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use super::{RwPgResponse, alter_streaming_rate_limit, create_sink, create_source};
+use super::RwPgResponse;
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -97,8 +96,9 @@ use risingwave_connector::sink::iceberg::{
     SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     parse_partition_by_exprs,
 };
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
-use crate::handler::drop_table::handle_drop_table;
+use crate::handler::create_sink::{SinkPlanContext, gen_sink_plan};
 
 fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
@@ -1510,7 +1510,7 @@ pub async fn create_iceberg_engine_table(
     table: TableCatalog,
     graph: StreamFragmentGraph,
     table_name: ObjectName,
-    job_type: PbTableJobType,
+    _job_type: PbTableJobType,
     if_not_exists: bool,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
@@ -1999,6 +1999,12 @@ pub async fn create_iceberg_engine_table(
 
     sink_handler_args.with_options =
         WithOptions::new(sink_with, Default::default(), connection_ref.clone());
+    let SinkPlanContext {
+        sink_plan,
+        sink_catalog,
+        ..
+    } = gen_sink_plan(sink_handler_args, create_sink_stmt, None, true).await?;
+    let sink_graph = build_graph(sink_plan, Some(GraphJobType::Sink))?;
 
     let mut source_name = table_name.clone();
     *source_name.0.last_mut().unwrap() = Ident::from(
@@ -2022,45 +2028,59 @@ pub async fn create_iceberg_engine_table(
     source_handler_args.with_options =
         WithOptions::new(source_with, Default::default(), connection_ref);
 
+    let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
+    let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
+    let with_properties = bind_connector_props(&source_handler_args, &format_encode, true)?;
+
+    let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        &session,
+        &format_encode,
+        Either::Left(&with_properties),
+        create_source_type,
+    )
+    .await?;
+    let mut col_id_gen = ColumnIdGenerator::new_initial();
+
+    let iceberg_source_catalog = bind_create_source_or_table_with_connector(
+        source_handler_args,
+        create_source_stmt.source_name,
+        format_encode,
+        with_properties,
+        &create_source_stmt.columns,
+        create_source_stmt.constraints,
+        create_source_stmt.wildcard_idx,
+        create_source_stmt.source_watermarks,
+        columns_from_resolve_source,
+        source_info,
+        create_source_stmt.include_column_options,
+        &mut col_id_gen,
+        create_source_type,
+        overwrite_options.source_rate_limit,
+        SqlColumnStrategy::FollowChecked,
+    )
+    .await?;
+
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
     let _ = Jvm::get_or_init()?;
 
     let catalog_writer = session.catalog_writer()?;
-    // TODO(iceberg): make iceberg engine table creation ddl atomic
-    let has_connector = source.is_some();
     catalog_writer
-        .create_table(
-            source,
-            table.to_prost(),
-            graph,
-            job_type,
+        .create_iceberg_table(
+            PbTableJobInfo {
+                source,
+                table: Some(table.to_prost()),
+                fragment_graph: Some(graph),
+            },
+            PbSinkJobInfo {
+                sink: Some(sink_catalog.to_proto()),
+                fragment_graph: Some(sink_graph),
+            },
+            iceberg_source_catalog.to_prost(),
             if_not_exists,
-            HashSet::default(),
         )
         .await?;
-    let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
-    if res.is_err() {
-        // Since we don't support ddl atomicity, we need to drop the partial created table.
-        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
-        res?;
-    }
-    let res = create_source::handle_create_source(source_handler_args, create_source_stmt).await;
-    if res.is_err() {
-        // Since we don't support ddl atomicity, we need to drop the partial created table.
-        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
-        res?;
-    }
-
-    if has_connector {
-        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-            handler_args,
-            PbThrottleTarget::TableWithSource,
-            table_name,
-            -1,
-        )
-        .await?;
-    }
 
     Ok(())
 }

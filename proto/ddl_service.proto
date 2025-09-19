@@ -227,6 +227,30 @@ message CreateTableResponse {
   WaitVersion version = 2;
 }
 
+message CreateIcebergTableRequest {
+  message TableJobInfo {
+    catalog.Source source = 1;
+    catalog.Table table = 2;
+    stream_plan.StreamFragmentGraph fragment_graph = 3;
+  }
+
+  message SinkJobInfo {
+    catalog.Sink sink = 1;
+    stream_plan.StreamFragmentGraph fragment_graph = 2;
+  }
+
+  TableJobInfo table_info = 1;
+  SinkJobInfo sink_info = 2;
+  catalog.Source iceberg_source = 3;
+
+  bool if_not_exists = 5;
+}
+
+message CreateIcebergTableResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
 message AlterNameRequest {
   oneof object {
     uint32 table_id = 1;
@@ -611,6 +635,7 @@ service DdlService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc CreateIcebergTable(CreateIcebergTableRequest) returns (CreateIcebergTableResponse);
   rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
   rpc DropSecret(DropSecretRequest) returns (DropSecretResponse);
   rpc AlterSecret(AlterSecretRequest) returns (AlterSecretResponse);

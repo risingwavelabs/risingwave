@@ -1276,6 +1276,15 @@ impl DdlService for DdlServiceImpl {
             status: None,
         }))
     }
+
+    async fn create_iceberg_table(
+        &self,
+        request: Request<CreateIcebergTableRequest>,
+    ) -> Result<Response<CreateIcebergTableResponse>, Status> {
+        let req = request.into_inner();
+        // TODO: reset rate limit if source is present.
+        todo!()
+    }
 }
 
 fn add_auto_schema_change_fail_event_log(
