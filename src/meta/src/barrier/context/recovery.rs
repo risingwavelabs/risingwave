@@ -370,12 +370,10 @@ impl GlobalBarrierWorkerContextImpl {
                     tracing::info!("recovered background job progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let dropped_table_ids = self.scheduled_barriers.pre_apply_drop_cancel(None);
+                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
                     self.metadata_manager
                         .catalog_controller
-                        .complete_dropped_tables(
-                            dropped_table_ids.into_iter().map(|id| id.table_id as _),
-                        )
+                        .cleanup_dropped_tables()
                         .await;
 
                     let mut active_streaming_nodes =
