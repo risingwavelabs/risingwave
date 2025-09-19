@@ -293,8 +293,20 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 row_count as i64,
             )));
 
-            let row = OwnedRow::new(row_data);
-            progress_table.insert(row);
+            let new_row = OwnedRow::new(row_data);
+
+            // Check if there's an existing row for this vnode to determine insert vs update
+            // This ensures state operation consistency - update existing rows, insert new ones
+            let key_data = vec![Some(vnode.to_scalar().into())];
+            let key = OwnedRow::new(key_data);
+
+            if let Some(existing_row) = progress_table.get_row(&key).await? {
+                // Update existing state - ensures proper state transition for recovery
+                progress_table.update(existing_row, new_row);
+            } else {
+                // Insert new state - first time persisting for this vnode
+                progress_table.insert(new_row);
+            }
         }
         Ok(())
     }
