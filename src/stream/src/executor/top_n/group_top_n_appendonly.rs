@@ -169,7 +169,12 @@ where
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
                 self.metrics.group_top_n_cache_miss_count.inc();
-                let mut topn_cache = TopNCache::with_min_capacity(self.offset, self.limit, data_types.clone(), self.topn_cache_min_capacity);
+                let mut topn_cache = TopNCache::with_min_capacity(
+                    self.offset,
+                    self.limit,
+                    data_types.clone(),
+                    self.topn_cache_min_capacity,
+                );
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;

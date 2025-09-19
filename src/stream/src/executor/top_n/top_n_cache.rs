@@ -179,7 +179,12 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
 
     /// `data_types` -- Data types for the full row.
     /// `min_capacity` -- Minimum capacity for the high cache.
-    pub fn with_min_capacity(offset: usize, limit: usize, data_types: Vec<DataType>, min_capacity: usize) -> Self {
+    pub fn with_min_capacity(
+        offset: usize,
+        limit: usize,
+        data_types: Vec<DataType>,
+        min_capacity: usize,
+    ) -> Self {
         assert!(limit > 0);
         if WITH_TIES {
             // It's trickier to support.
@@ -919,7 +924,8 @@ mod tests {
     #[test]
     fn test_topn_cache_with_custom_min_capacity() {
         let custom_min_capacity = 25;
-        let cache = TopNCache::<false>::with_min_capacity(0, 5, vec![DataType::Int32], custom_min_capacity);
+        let cache =
+            TopNCache::<false>::with_min_capacity(0, 5, vec![DataType::Int32], custom_min_capacity);
         assert_eq!(cache.high_cache_capacity, custom_min_capacity);
     }
 
@@ -929,8 +935,13 @@ mod tests {
         let offset = 2;
         let limit = 5;
         let expected_capacity = (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR;
-        
-        let cache = TopNCache::<false>::with_min_capacity(offset, limit, vec![DataType::Int32], custom_min_capacity);
+
+        let cache = TopNCache::<false>::with_min_capacity(
+            offset,
+            limit,
+            vec![DataType::Int32],
+            custom_min_capacity,
+        );
         assert_eq!(cache.high_cache_capacity, expected_capacity);
     }
 
@@ -940,8 +951,13 @@ mod tests {
         let offset = 0;
         let limit = 5;
         let expected_from_formula = (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR; // Should be 10
-        
-        let cache = TopNCache::<false>::with_min_capacity(offset, limit, vec![DataType::Int32], large_min_capacity);
+
+        let cache = TopNCache::<false>::with_min_capacity(
+            offset,
+            limit,
+            vec![DataType::Int32],
+            large_min_capacity,
+        );
         assert_eq!(cache.high_cache_capacity, large_min_capacity);
         assert!(cache.high_cache_capacity > expected_from_formula);
     }
