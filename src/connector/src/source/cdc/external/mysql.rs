@@ -518,6 +518,7 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
+                            DataType::Decimal => Value::from(value.into_decimal().to_string()),
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
                         ConnectorResult::Ok((pk.to_lowercase(), val))

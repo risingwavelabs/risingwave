@@ -392,8 +392,25 @@ impl JsonParseOptions {
                     .map_err(|_| create_error())?
                     .into()
             }
-            (DataType::Decimal, ValueType::I64 | ValueType::U64) => {
-                Decimal::from(value.try_as_i64().map_err(|_| create_error())?).into()
+            (DataType::Decimal, ValueType::I64) => {
+                let i64_val = value.try_as_i64().map_err(|_| create_error())?;
+                println!("debezium decimal i64: {}", i64_val);
+                Decimal::from(i64_val).into()
+            }
+            (DataType::Decimal, ValueType::U64) => {
+                let u64_val = value.try_as_u64().map_err(|_| create_error())?;
+                // 如果 u64 值大于 i64::MAX，说明是溢出值，需要转换为对应的正数
+                let decimal_val = if u64_val > i64::MAX as u64 {
+                    // 这是溢出值，按位转换为 i64 再转回 u64 得到原始值
+                    let wrapped_i64 = u64_val as i64;
+                    let original_u64 = wrapped_i64 as u64;
+                    println!("debezium decimal u64 overflow: u64_val={}, wrapped_i64={}, original_u64={}", u64_val, wrapped_i64, original_u64);
+                    Decimal::from(original_u64)
+                } else {
+                    println!("debezium decimal u64 normal: {}", u64_val);
+                    Decimal::from(u64_val)
+                };
+                decimal_val.into()
             }
 
             (DataType::Decimal, ValueType::F64) => {
