@@ -318,26 +318,11 @@ where
 }
 
 impl ListArray {
-    /// Creates a new `ListArray` from an iterator of `ListValue`, with the `elem_data_type`
-    /// as the type of the inner element.
-    pub fn from_list_value_iter<I: IntoIterator<Item = ListValue>>(
-        elem_data_type: DataType,
-        iter: I,
-    ) -> Self {
-        let iter = iter.into_iter();
-        let mut builder =
-            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(elem_data_type));
-        for v in iter {
-            builder.append(Some(v.as_scalar_ref()));
-        }
+    /// Creates a new `ListArray` from a `ListValue`.
+    pub fn from_single_value(elem_type: DataType, list_value: ListValue) -> Self {
+        let mut builder = ListArrayBuilder::with_type(1, DataType::list(elem_type));
+        builder.append_owned(Some(list_value));
         builder.finish()
-    }
-
-    /// Creates a new `ListArray` from a `ListValue`, with the `elem_data_type` as the type of the inner element.
-    /// Same as `from_list_value_iter` but with only one element.
-    #[inline]
-    pub fn from_list_value(elem_data_type: DataType, list_value: ListValue) -> Self {
-        Self::from_list_value_iter(elem_data_type, [list_value])
     }
 }
 

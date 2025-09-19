@@ -114,7 +114,7 @@ mod test {
             Some(Decimal::Normalized("1".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ])));
-        let array = Arc::new(ArrayImpl::List(ListArray::from_list_value(
+        let array = Arc::new(ArrayImpl::List(ListArray::from_single_value(
             DataType::Decimal,
             value,
         )));
