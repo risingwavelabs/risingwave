@@ -38,7 +38,7 @@ use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::hummock::HummockManagerRef;
-use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::metrics::{GLOBAL_META_METRICS, MetaMetrics};
 use crate::{MetaError, MetaResult};
 
 pub(super) struct NewBarrier {
@@ -385,6 +385,12 @@ impl PeriodicBarriers {
             } else {
                 sys_barrier_interval
             };
+
+            GLOBAL_META_METRICS
+                .barrier_interval_by_database
+                .with_label_values(&[&database_id.to_string()])
+                .observe(duration.as_millis_f64());
+
             // Create an `IntervalStream` for the database with the specified interval.
             let interval_stream = Self::new_interval_stream(duration);
             timer_streams.insert(database_id, interval_stream);
@@ -464,6 +470,12 @@ impl PeriodicBarriers {
         } else {
             self.sys_barrier_interval
         };
+
+        GLOBAL_META_METRICS
+            .barrier_interval_by_database
+            .with_label_values(&[&database_id.to_string()])
+            .observe(duration.as_millis_f64());
+
         let interval_stream = Self::new_interval_stream(duration);
         self.timer_streams.insert(database_id, interval_stream);
     }

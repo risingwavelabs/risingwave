@@ -316,6 +316,16 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_latency(
+                    "Barrier Interval",
+                    "Barrier interval of each database",
+                    [
+                        panels.target(
+                            f"rate({metric('meta_barrier_interval_by_database_sum')}[$__rate_interval]) / rate({metric('meta_barrier_interval_by_database_count')}[$__rate_interval]) > 0",
+                            "barrier_interval {{database_id}}"
+                        ),
+                    ],
+                ),
             ],
         )
     ]

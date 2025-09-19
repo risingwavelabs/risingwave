@@ -76,6 +76,8 @@ pub struct MetaMetrics {
     pub in_flight_barrier_nums: LabelGuardedIntGaugeVec,
     /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
     pub last_committed_barrier_time: IntGaugeVec,
+    /// The barrier interval of each database
+    pub barrier_interval_by_database: HistogramVec,
 
     // ********************************** Snapshot Backfill ***************************
     /// The barrier latency in second of `table_id` and snapshto backfill `barrier_type`
@@ -253,6 +255,13 @@ impl MetaMetrics {
         let barrier_send_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)
                 .unwrap();
+        let barrier_interval_by_database = register_histogram_vec_with_registry!(
+            "meta_barrier_interval_by_database",
+            "barrier interval of each database",
+            &["database_id"],
+            registry
+        )
+        .unwrap();
 
         let all_barrier_nums = register_guarded_int_gauge_vec_with_registry!(
             "all_barrier_nums",
@@ -825,6 +834,7 @@ impl MetaMetrics {
             all_barrier_nums,
             in_flight_barrier_nums,
             last_committed_barrier_time,
+            barrier_interval_by_database,
             snapshot_backfill_barrier_latency,
             snapshot_backfill_wait_commit_latency,
             snapshot_backfill_lag,
