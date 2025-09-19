@@ -318,11 +318,24 @@ where
 }
 
 impl ListArray {
-    /// Creates a new `ListArray` from a `ListValue`.
-    pub fn from_single_value(elem_type: DataType, list_value: ListValue) -> Self {
-        let mut builder = ListArrayBuilder::with_type(1, DataType::list(elem_type));
-        builder.append_owned(Some(list_value));
+    /// Creates a new `ListArray` from an iterator of `ListValue`.
+    pub fn from_value_iter<I: IntoIterator<Item = ListValue>>(
+        elem_type: DataType,
+        iter: I,
+    ) -> Self {
+        let iter = iter.into_iter();
+        let mut builder =
+            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(elem_type));
+        for v in iter {
+            builder.append_owned(Some(v));
+        }
         builder.finish()
+    }
+
+    /// Creates a new `ListArray` from a `ListValue`.
+    #[inline]
+    pub fn from_single_value(elem_type: DataType, list_value: ListValue) -> Self {
+        Self::from_value_iter(elem_type, [list_value])
     }
 }
 
@@ -1039,6 +1052,24 @@ mod tests {
             assert_eq!(arr.len(), 1);
             assert_eq!(arr.value_at(0).unwrap(), list1.as_scalar_ref());
         }
+    }
+
+    #[test]
+    fn test_list_nested_layout() {
+        use crate::array::*;
+
+        let listarray1 = ListArray::from_iter([Some([1i32, 2]), Some([3, 4])]);
+        let listarray2 = ListArray::from_iter([Some(vec![5, 6, 7]), None, Some(vec![8])]);
+        let listarray3 = ListArray::from_iter([Some([9, 10])]);
+
+        let nestarray = ListArray::from_value_iter(
+            DataType::Int32.list(),
+            [listarray1, listarray2, listarray3]
+                .into_iter()
+                .map(|l| ListValue::new(l.into())),
+        );
+        let actual = ListArray::from_protobuf(&nestarray.to_protobuf()).unwrap();
+        assert_eq!(ArrayImpl::List(nestarray), actual);
     }
 
     #[test]
