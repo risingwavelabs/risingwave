@@ -392,7 +392,7 @@ fn build_header_catalog(
         ColumnDesc::named_with_additional_column(
             col_name,
             column_id,
-            DataType::List(get_kafka_header_item_datatype().into()),
+            DataType::list(get_kafka_header_item_datatype()),
             AdditionalColumn {
                 column_type: Some(AdditionalColumnType::Headers(AdditionalColumnHeaders {})),
             },

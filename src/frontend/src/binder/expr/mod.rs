@@ -1013,8 +1013,8 @@ impl Binder {
 
     pub fn bind_cast_inner(&mut self, expr: &Expr, data_type: &DataType) -> Result<ExprImpl> {
         match (expr, data_type) {
-            (Expr::Array(Array { elem: expr, .. }), DataType::List(element_type)) => {
-                self.bind_array_cast(expr, element_type)
+            (Expr::Array(Array { elem: expr, .. }), DataType::List(list_type)) => {
+                self.bind_array_cast(expr, list_type.elem())
             }
             (Expr::Map { entries }, DataType::Map(m)) => self.bind_map_cast(entries, m),
             (expr, data_type) => {
@@ -1065,7 +1065,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
+        AstDataType::Array(datatype) => DataType::list(bind_data_type(datatype)?),
         AstDataType::Char(..) => {
             bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }

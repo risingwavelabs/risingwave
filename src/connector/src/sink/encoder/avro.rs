@@ -219,6 +219,7 @@ trait MaybeData: std::fmt::Debug {
     /// Switch to `RecordSchema` after #12562
     fn on_struct(self, st: &StructType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
+    // TODO(list): pass `ListType`
     fn on_list(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
     fn on_map(
@@ -477,8 +478,8 @@ fn on_field<D: MaybeData>(
             AvroSchema::Record { .. } => maybe.on_struct(st, inner, refs)?,
             _ => return no_match_err(),
         },
-        DataType::List(elem) => match inner {
-            AvroSchema::Array(avro_elem) => maybe.on_list(elem, avro_elem, refs)?,
+        DataType::List(lt) => match inner {
+            AvroSchema::Array(avro_elem) => maybe.on_list(lt.elem(), avro_elem, refs)?,
             _ => return no_match_err(),
         },
         DataType::Map(m) => {
@@ -1149,21 +1150,21 @@ mod tests {
         }"#;
 
         test_ok(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::Int32.list(),
             Some(ScalarImpl::List(ListValue::from_iter([4, 5]))),
             avro_schema,
             Value::Array(vec![Value::Int(4), Value::Int(5)]),
         );
 
         test_err(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::Int32.list(),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))).to_datum_ref(),
             avro_schema,
             "encode '' error: found null but required",
         );
 
         test_ok(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::Int32.list(),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))),
             r#"{
                 "type": "array",
@@ -1176,7 +1177,7 @@ mod tests {
         );
 
         test_ok(
-            &DataType::List(DataType::List(DataType::Int32.into()).into()),
+            &DataType::Int32.list().list(),
             Some(ScalarImpl::List(ListValue::from_iter([
                 ListValue::from_iter([26, 29]),
                 ListValue::from_iter([46, 49]),
@@ -1195,7 +1196,7 @@ mod tests {
         );
 
         test_err(
-            &DataType::List(DataType::Boolean.into()),
+            &DataType::Boolean.list(),
             (),
             r#"{"type": "array", "items": "int"}"#,
             "encode '' error: cannot encode boolean column as \"int\" field",

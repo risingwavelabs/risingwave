@@ -125,12 +125,9 @@ impl Binder {
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let element_type = align_types(exprs.iter_mut())?;
-        let expr: ExprImpl = FunctionCall::new_unchecked(
-            ExprType::Array,
-            exprs,
-            DataType::List(Box::new(element_type)),
-        )
-        .into();
+        let expr: ExprImpl =
+            FunctionCall::new_unchecked(ExprType::Array, exprs, DataType::list(element_type))
+                .into();
         Ok(expr)
     }
 
@@ -147,16 +144,13 @@ impl Binder {
         let key_type = align_types(keys.iter_mut())?;
         let value_type = align_types(values.iter_mut())?;
 
-        let keys: ExprImpl = FunctionCall::new_unchecked(
-            ExprType::Array,
-            keys,
-            DataType::List(Box::new(key_type.clone())),
-        )
-        .into();
+        let keys: ExprImpl =
+            FunctionCall::new_unchecked(ExprType::Array, keys, DataType::list(key_type.clone()))
+                .into();
         let values: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             values,
-            DataType::List(Box::new(value_type.clone())),
+            DataType::list(value_type.clone()),
         )
         .into();
 
@@ -182,7 +176,7 @@ impl Binder {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             exprs,
-            DataType::List(Box::new(element_type.clone())),
+            DataType::list(element_type.clone()),
         )
         .into();
         Ok(expr)
@@ -203,13 +197,13 @@ impl Binder {
         let keys: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             keys,
-            DataType::List(Box::new(map_type.key().clone())),
+            DataType::list(map_type.key().clone()),
         )
         .into();
         let values: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             values,
-            DataType::List(Box::new(map_type.value().clone())),
+            DataType::list(map_type.value().clone()),
         )
         .into();
 
@@ -225,10 +219,10 @@ impl Binder {
     pub(super) fn bind_index(&mut self, obj: &Expr, index: &Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
-            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
+            DataType::List(l) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
                 vec![obj, self.bind_expr_inner(index)?],
-                *return_type,
+                l.into_elem(),
             )
             .into()),
             DataType::Map(m) => Ok(FunctionCall::new_unchecked(
@@ -267,10 +261,10 @@ impl Binder {
                 .cast_implicit(&DataType::Int32)?,
         };
         match obj.return_type() {
-            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
+            t @ DataType::List(_) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayRangeAccess,
                 vec![obj, start, end],
-                DataType::List(return_type),
+                t,
             )
             .into()),
             data_type => Err(ErrorCode::BindError(format!(
@@ -413,14 +407,14 @@ mod tests {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11)],
-            DataType::List(Box::new(DataType::Int32)),
+            DataType::Int32.list(),
         )
         .into();
         let expr_pb = expr.to_expr_proto();
         let expr = build_from_prost(&expr_pb).unwrap();
         match expr.return_type() {
-            DataType::List(datatype) => {
-                assert_eq!(datatype, Box::new(DataType::Int32));
+            DataType::List(list) => {
+                assert_eq!(list.into_elem(), DataType::Int32);
             }
             _ => panic!("unexpected type"),
         };
@@ -431,7 +425,7 @@ mod tests {
         let array_expr = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11), ExprImpl::literal_int(22)],
-            DataType::List(Box::new(DataType::Int32)),
+            DataType::Int32.list(),
         )
         .into();
 
