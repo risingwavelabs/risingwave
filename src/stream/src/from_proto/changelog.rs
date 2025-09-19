@@ -35,13 +35,19 @@ impl ExecutorBuilder for ChangeLogExecutorBuilder {
         let vnodes = params
             .vnode_bitmap
             .expect("vnodes not set for changelog executor");
-        let vnode_count = node.vnode_count as usize;
+        let vnode_count = params.actor_context.vnode_count;
+        let distribution_keys = node
+            .distribution_keys
+            .iter()
+            .map(|k| *k as usize)
+            .collect::<Vec<_>>();
         let exec = ChangeLogExecutor::new(
             params.actor_context,
             input,
             node.need_op,
             vnode_count,
             vnodes,
+            distribution_keys,
         );
         Ok((params.info, exec).into())
     }

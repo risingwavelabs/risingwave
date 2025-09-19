@@ -31,7 +31,7 @@ pub struct ChangeLogExecutor {
     input: Executor,
     need_op: bool,
     all_vnode_count: usize,
-    pk_indices: Vec<usize>,
+    distribution_keys: Vec<usize>,
     changelog_row_id_generator: ChangelogRowIdGenerator,
 }
 
@@ -53,15 +53,15 @@ impl ChangeLogExecutor {
         need_op: bool,
         all_vnode_count: usize,
         vnodes: Bitmap,
+        distribution_keys: Vec<usize>,
     ) -> Self {
         let changelog_row_id_generator = ChangelogRowIdGenerator::new(vnodes);
-        let pk_indices = input.pk_indices().to_vec();
         Self {
             ctx,
             input,
             need_op,
             all_vnode_count,
-            pk_indices,
+            distribution_keys,
             changelog_row_id_generator,
         }
     }
@@ -77,7 +77,7 @@ impl ChangeLogExecutor {
                     let data_chunk = chunk.data_chunk();
                     let vnodes = VirtualNode::compute_chunk(
                         data_chunk,
-                        &self.pk_indices,
+                        &self.distribution_keys,
                         self.all_vnode_count,
                     );
                     let (ops, mut columns, bitmap) = chunk.into_inner();
@@ -85,7 +85,6 @@ impl ChangeLogExecutor {
                     let changelog_row_ids = vnodes
                         .iter()
                         .map(|vnode| self.changelog_row_id_generator.next(vnode));
-                    // They are all 0, will be add in row id gen executor.
                     let changelog_row_id_array = Arc::new(ArrayImpl::Serial(
                         SerialArray::from_iter(changelog_row_ids.map(Serial::from)),
                     ));

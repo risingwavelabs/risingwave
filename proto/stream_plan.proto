@@ -372,7 +372,7 @@ message FilterNode {
 message ChangeLogNode {
   // Whether or not there is an op in the final output.
   bool need_op = 1;
-  uint32 vnode_count = 2;
+  repeated uint32 distribution_keys = 2;
 }
 
 message CdcFilterNode {

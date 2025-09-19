@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use risingwave_common::bail_not_implemented;
 
 use crate::Planner;
 use crate::binder::Relation;
@@ -20,13 +19,8 @@ use crate::optimizer::plan_node::{LogicalChangeLog, LogicalPlanRef as PlanRef};
 
 impl Planner {
     pub(super) fn plan_changelog(&mut self, relation: Relation) -> Result<PlanRef> {
-        let vnode_count = if let Relation::BaseTable(base_table) = &relation {
-            base_table.table_catalog.vnode_count()
-        } else {
-            bail_not_implemented!("changelog only support base table");
-        };
         let root = self.plan_relation(relation)?;
-        let plan = LogicalChangeLog::create(root, vnode_count);
+        let plan = LogicalChangeLog::create(root);
         Ok(plan)
     }
 }
