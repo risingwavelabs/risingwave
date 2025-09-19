@@ -294,8 +294,6 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
     }
 }
 
-
-
 impl ScalarImpl {
     pub fn get_ident(&self) -> &'static str {
         dispatch_scalar_variants!(self, [I = VARIANT_NAME], { I })
