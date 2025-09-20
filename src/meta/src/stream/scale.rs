@@ -519,7 +519,7 @@ impl ScaleController {
             .values()
             .flat_map(|jobs| jobs.values())
             .flatten()
-            .map(|(fragment_id, _)| *fragment_id )
+            .map(|(fragment_id, _)| *fragment_id)
             .collect_vec();
         println!("!!!!!!!!");
 
@@ -577,7 +577,7 @@ impl ScaleController {
 
         let all_related_fragment_ids: HashSet<_> = fragment_ids
             .iter()
-            .map(|id| *id as i32)
+            .copied()
             .chain(
                 all_upstream_fragments
                     .values()
@@ -651,8 +651,8 @@ impl ScaleController {
 
                 let fragment_actors: HashMap<_, _> = upstream_fragments
                     .keys()
-                    .map(|id| *id as u32)
-                    .chain(downstream_fragments.keys().map(|id| *id as u32))
+                    .copied()
+                    .chain(downstream_fragments.keys().copied())
                     .map(|fragment_id| {
                         let fragment = all_prev_fragments.get(&(fragment_id as i32)).unwrap();
                         (
