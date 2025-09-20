@@ -562,6 +562,8 @@ pub async fn start_service_as_election_leader(
     )
     .await;
 
+    sub_tasks.push(ddl_srv.start_migrate_table_fragments());
+
     let user_srv = UserServiceImpl::new(metadata_manager.clone());
 
     let scale_srv = ScaleServiceImpl::new(
@@ -758,6 +760,10 @@ pub async fn start_service_as_election_leader(
     );
     started::set();
     let _server_handle = tokio::spawn(server);
+
+    // sub_tasks.push(metadata_manager.spawn_migrate_table_fragments(
+    //     env.frontend_client_pool_ref(),
+    // ).0);
 
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
