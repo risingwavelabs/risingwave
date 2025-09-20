@@ -21,10 +21,10 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeMask};
 use risingwave_common::hash::ActorMapping;
-use risingwave_common::{bail, hash};
 use risingwave_meta_model::{
     ObjectId, StreamingParallelism, WorkerId, fragment, fragment_relation,
 };
@@ -252,9 +252,7 @@ impl ScaleController {
                                 vnode_bitmap,
                                 ..
                             },
-                        )| {
-                            (*actor_id as hash::ActorId, vnode_bitmap.clone().unwrap())
-                        },
+                        )| { (*actor_id, vnode_bitmap.clone().unwrap()) },
                     )
                     .collect();
                 Some(ActorMapping::from_bitmaps(&actor_mapping))
@@ -267,7 +265,7 @@ impl ScaleController {
             .filter(|&(_, dispatcher_type)| *dispatcher_type != DispatcherType::NoShuffle)
             .map(|(upstream_fragment, _)| {
                 (
-                    *upstream_fragment as FragmentId,
+                    *upstream_fragment,
                     prev_fragment_info.fragment_id as DispatcherId,
                 )
             })
@@ -285,7 +283,7 @@ impl ScaleController {
                 .map(|actor_id| {
                     let actor = StreamActor {
                         actor_id: *actor_id,
-                        fragment_id: prev_fragment_info.fragment_id as _,
+                        fragment_id: prev_fragment_info.fragment_id,
                         vnode_bitmap: curr_actors[actor_id].vnode_bitmap.clone(),
                         mview_definition: "wtf".to_owned(), // TODO: handle mview definition
                         expr_context: Some(PbExprContext::default()),
@@ -519,7 +517,7 @@ impl ScaleController {
             .values()
             .flat_map(|jobs| jobs.values())
             .flatten()
-            .map(|(fragment_id, _)| *fragment_id )
+            .map(|(fragment_id, _)| *fragment_id)
             .collect_vec();
         println!("!!!!!!!!");
 
@@ -550,10 +548,12 @@ impl ScaleController {
         let mut all_upstream_fragments = HashMap::new();
 
         for (fragment, upstream, dispatcher) in upstreams {
+            let fragment_id = fragment as FragmentId;
+            let upstream_id = upstream as FragmentId;
             all_upstream_fragments
-                .entry(fragment as u32)
+                .entry(fragment_id)
                 .or_insert(HashMap::new())
-                .insert(upstream as u32, dispatcher);
+                .insert(upstream_id, dispatcher);
         }
 
         let mut all_downstream_fragments = HashMap::new();
@@ -561,23 +561,19 @@ impl ScaleController {
         println!("pppppppppp");
         let mut downstream_relations = HashMap::new();
         for relation in downstreams {
+            let source_fragment_id = relation.source_fragment_id as FragmentId;
+            let target_fragment_id = relation.target_fragment_id as FragmentId;
             all_downstream_fragments
-                .entry(relation.source_fragment_id as u32)
+                .entry(source_fragment_id)
                 .or_insert(HashMap::new())
-                .insert(relation.target_fragment_id as u32, relation.dispatcher_type);
+                .insert(target_fragment_id, relation.dispatcher_type);
 
-            downstream_relations.insert(
-                (
-                    relation.source_fragment_id as u32,
-                    relation.target_fragment_id as u32,
-                ),
-                relation,
-            );
+            downstream_relations.insert((source_fragment_id, target_fragment_id), relation);
         }
 
         let all_related_fragment_ids: HashSet<_> = fragment_ids
             .iter()
-            .map(|id| *id as i32)
+            .copied()
             .chain(
                 all_upstream_fragments
                     .values()
@@ -640,10 +636,10 @@ impl ScaleController {
                 } = fragment_info;
 
                 let upstream_fragments = all_upstream_fragments
-                    .remove(&(*fragment_id as _))
+                    .remove(&(*fragment_id as FragmentId))
                     .unwrap_or_default();
                 let downstream_fragments = all_downstream_fragments
-                    .remove(&(*fragment_id as _))
+                    .remove(&(*fragment_id as FragmentId))
                     .unwrap_or_default();
 
                 println!("fragment {} down {:?}", fragment_id, downstream_fragments);
@@ -651,8 +647,8 @@ impl ScaleController {
 
                 let fragment_actors: HashMap<_, _> = upstream_fragments
                     .keys()
-                    .map(|id| *id as u32)
-                    .chain(downstream_fragments.keys().map(|id| *id as u32))
+                    .copied()
+                    .chain(downstream_fragments.keys().copied())
                     .map(|fragment_id| {
                         let fragment = all_prev_fragments.get(&(fragment_id as i32)).unwrap();
                         (
@@ -674,7 +670,7 @@ impl ScaleController {
                 for downstream_fragment_id in downstream_fragments.keys() {
                     println!("for down {}", downstream_fragment_id);
                     let target_fragment_actors =
-                        match all_rendered_fragments.get(&(*downstream_fragment_id as _)) {
+                        match all_rendered_fragments.get(&(*downstream_fragment_id as i32)) {
                             None => {
                                 println!(
                                     "no more downstream_fragments for {}",
@@ -712,7 +708,10 @@ impl ScaleController {
                         output_indices,
                         output_type_mapping,
                     } = downstream_relations
-                        .remove(&(*fragment_id as _, *downstream_fragment_id as _))
+                        .remove(&(
+                            *fragment_id as FragmentId,
+                            *downstream_fragment_id as FragmentId,
+                        ))
                         .expect("downstream relation should exist");
 
                     let pb_mapping = PbDispatchOutputMapping {
@@ -753,7 +752,7 @@ impl ScaleController {
 
                 //
 
-                reschedules.insert(*fragment_id as _, reschedule);
+                reschedules.insert(*fragment_id as FragmentId, reschedule);
             }
 
             println!("ssssss");
@@ -877,7 +876,7 @@ impl GlobalStreamManager {
             })
             .map(|worker| {
                 (
-                    worker.id as _,
+                    worker.id as i32,
                     WorkerInfo {
                         weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                         resource_group: worker.resource_group(),
