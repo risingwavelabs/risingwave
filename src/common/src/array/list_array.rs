@@ -32,8 +32,8 @@ use super::{
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
-    DataType, Datum, DatumRef, DefaultOrd, ListType, Scalar, ScalarImpl, ScalarRefImpl, ToDatumRef,
-    ToText, hash_datum,
+    DataType, Datum, DatumRef, DefaultOrd, ListType, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl,
+    ToDatumRef, ToText, hash_datum,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -355,10 +355,12 @@ impl ListValue {
         }
     }
 
+    /// Convert this list into an [`Array`] of the element type.
     pub fn into_array(self) -> ArrayImpl {
         *self.values
     }
 
+    /// Creates a new empty `ListValue` with the given element type.
     pub fn empty(elem_type: &DataType) -> Self {
         Self::new(elem_type.create_array_builder(0).finish())
     }
@@ -460,45 +462,42 @@ impl Ord for ListValue {
     }
 }
 
+// Construction helpers:
+
+// [Some(1), None].collect()
 impl<T: PrimitiveArrayItemType> FromIterator<Option<T>> for ListValue {
     fn from_iter<I: IntoIterator<Item = Option<T>>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<PrimitiveArray<T>>().into())
     }
 }
-
+// [1, 2].collect()
 impl<T: PrimitiveArrayItemType> FromIterator<T> for ListValue {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<PrimitiveArray<T>>().into())
     }
 }
-
+// [true, false].collect()
 impl FromIterator<bool> for ListValue {
     fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<BoolArray>().into())
     }
 }
-
+// [Some("hello"), None].collect()
 impl<'a> FromIterator<Option<&'a str>> for ListValue {
     fn from_iter<I: IntoIterator<Item = Option<&'a str>>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<Utf8Array>().into())
     }
 }
-
+// ["hello", "world"].collect()
 impl<'a> FromIterator<&'a str> for ListValue {
     fn from_iter<I: IntoIterator<Item = &'a str>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<Utf8Array>().into())
     }
 }
-
+// nested: [ListValue::from_iter([1,2,3]), ListValue::from_iter([4,5])].collect()
 impl FromIterator<ListValue> for ListValue {
     fn from_iter<I: IntoIterator<Item = ListValue>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<ListArray>().into())
-    }
-}
-
-impl From<ListValue> for ArrayImpl {
-    fn from(value: ListValue) -> Self {
-        *value.values
     }
 }
 
@@ -573,14 +572,6 @@ impl<'a> ListRef<'a> {
     /// estimate the serialized size with value encoding
     pub fn estimate_serialize_size_inner(self) -> usize {
         self.iter().map(estimate_serialize_datum_size).sum()
-    }
-
-    pub fn to_owned(self) -> ListValue {
-        let mut builder = self.array.create_builder(self.len());
-        for datum_ref in self.iter() {
-            builder.append(datum_ref);
-        }
-        ListValue::new(builder.finish())
     }
 
     pub fn as_primitive_slice<T: PrimitiveArrayItemType>(self) -> Option<&'a [T]> {
@@ -702,19 +693,33 @@ impl ToText for ListRef<'_> {
     }
 }
 
-impl<'a> From<&'a ListValue> for ListRef<'a> {
-    fn from(value: &'a ListValue) -> Self {
+/// Implement `Scalar` for `ListValue`.
+impl Scalar for ListValue {
+    type ScalarRefType<'a> = ListRef<'a>;
+
+    fn as_scalar_ref(&self) -> ListRef<'_> {
         ListRef {
-            array: &value.values,
+            array: &self.values,
             start: 0,
-            end: value.len() as u32,
+            end: self.len() as u32,
         }
     }
 }
 
-impl From<ListRef<'_>> for ListValue {
-    fn from(value: ListRef<'_>) -> Self {
-        value.to_owned()
+/// Implement `Scalar` for `ListValue`.
+impl<'a> ScalarRef<'a> for ListRef<'a> {
+    type ScalarType = ListValue;
+
+    fn to_owned_scalar(&self) -> ListValue {
+        let mut builder = self.array.create_builder(self.len());
+        for datum_ref in self.iter() {
+            builder.append(datum_ref);
+        }
+        ListValue::new(builder.finish())
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash_scalar_inner(state)
     }
 }
 

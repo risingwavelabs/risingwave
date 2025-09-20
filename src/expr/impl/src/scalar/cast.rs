@@ -18,12 +18,12 @@ use std::sync::Arc;
 
 use futures_util::FutureExt;
 use itertools::Itertools;
-use risingwave_common::array::{
-    ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue, VectorVal,
-};
+use risingwave_common::array::{DataChunk, ListRef, ListValue, StructRef, StructValue, VectorVal};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, F64, Int256, JsonbRef, MapRef, MapValue, ToText};
+use risingwave_common::types::{
+    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, ToText,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
 use risingwave_expr::{ExprError, Result, function};
@@ -215,7 +215,7 @@ fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
         vec![InputRefExpression::new(ctx.arg_types[0].as_list_elem().clone(), 0).boxed()],
     )
     .unwrap();
-    let items = Arc::new(ArrayImpl::from(input.to_owned()));
+    let items = Arc::new(input.to_owned_scalar().into_array());
     let len = items.len();
     let list = cast
         .eval(&DataChunk::new(vec![items], len))
