@@ -486,6 +486,7 @@ define_keywords!(
     STDDEV_POP,
     STDDEV_SAMP,
     STDIN,
+    STDOUT,
     STORED,
     STRING,
     STRUCT,
