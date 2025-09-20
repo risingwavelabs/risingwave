@@ -218,10 +218,23 @@ pub enum AlterSinkOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSubscriptionOperation {
-    RenameSubscription { subscription_name: ObjectName },
-    ChangeOwner { new_owner_name: Ident },
-    SetSchema { new_schema_name: ObjectName },
-    SwapRenameSubscription { target_subscription: ObjectName },
+    RenameSubscription {
+        subscription_name: ObjectName,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    SwapRenameSubscription {
+        target_subscription: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -544,6 +557,17 @@ impl fmt::Display for AlterSubscriptionOperation {
                 target_subscription,
             } => {
                 write!(f, "SWAP WITH {}", target_subscription)
+            }
+            AlterSubscriptionOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
         }
     }

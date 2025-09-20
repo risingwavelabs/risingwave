@@ -1123,6 +1123,19 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSubscriptionOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                alter_parallelism::handle_alter_parallelism(
+                    handler_args,
+                    name,
+                    parallelism,
+                    StatementType::ALTER_SUBSCRIPTION,
+                    deferred,
+                )
+                .await
+            }
         },
         Statement::AlterSource { name, operation } => match operation {
             AlterSourceOperation::AlterConnectorProps { alter_props } => {

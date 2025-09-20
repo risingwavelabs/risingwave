@@ -3650,6 +3650,20 @@ impl Parser<'_> {
                 AlterSubscriptionOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_keyword(Keyword::PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SUBSCRIPTION SET PARALLELISM");
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSubscriptionOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
             } else {
                 return self.expected("SCHEMA after SET");
             }
