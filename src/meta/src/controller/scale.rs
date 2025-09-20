@@ -366,7 +366,7 @@ where
 
             let empty_actor_splits = actors
                 .iter()
-                .map(|actor_id| (*actor_id as _, vec![]))
+                .map(|actor_id| (*actor_id as u32, vec![]))
                 .collect();
 
             let splits = source_splits
@@ -377,7 +377,7 @@ where
             let splits = splits.into_iter().map(|s| (s.id(), s)).collect();
 
             crate::stream::source_manager::reassign_splits(
-                entry_fragment_id as _,
+                entry_fragment_id as u32,
                 empty_actor_splits,
                 &splits,
                 // pre-allocate splits is the first time getting splits, and it does not have scale-in scene
@@ -421,7 +421,7 @@ where
 
                     let splits = if fragment_source_ids.contains_key(&fragment_id) {
                         fragment_splits
-                            .get(&(actor_idx as _))
+                            .get(&(actor_idx as u32))
                             .cloned()
                             .unwrap_or_default()
                     } else {
@@ -452,7 +452,7 @@ where
                 state_table_ids: state_table_ids
                     .into_inner()
                     .into_iter()
-                    .map(|id| catalog::TableId::new(id as _))
+                    .map(|id| catalog::TableId::new(id as u32))
                     .collect(),
             };
 
@@ -494,7 +494,7 @@ where
             && let Some(source_id) = fragment.stream_node.to_protobuf().find_stream_source()
         {
             source_fragment_ids
-                .entry(source_id as SourceId)
+                .entry(source_id)
                 .or_insert_with(BTreeSet::new)
                 .insert(fragment_id);
         }
@@ -505,7 +505,7 @@ where
         .flat_map(|(source_id, fragment_ids)| {
             fragment_ids
                 .iter()
-                .map(|fragment_id| (**fragment_id, *source_id))
+                .map(|fragment_id| (**fragment_id, *source_id as SourceId))
         })
         .collect();
 
@@ -650,7 +650,7 @@ mod tests {
     use super::*;
 
     // Helper type aliases for cleaner test code
-    type FragmentId = i32; // Assuming i32 based on previous context
+    // Using the actual FragmentId type from the module
     type Edges = (
         HashMap<FragmentId, Vec<FragmentId>>,
         HashMap<FragmentId, Vec<FragmentId>>,
