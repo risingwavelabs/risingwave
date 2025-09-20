@@ -17,6 +17,8 @@ use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use anyhow::{Context, anyhow};
+use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
 use futures::future::pending;
 use futures::prelude::Future;
 use futures::{Stream, StreamExt};
@@ -197,8 +199,14 @@ impl BigQueryCommon {
     async fn build_client(&self, aws_auth_props: &AwsAuthProps) -> Result<Client> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
-        let service_account = serde_json::from_str::<ServiceAccountKey>(&auth_json)
-            .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+        let service_account =
+            if let Ok(auth_json_from_base64) = BASE64_STANDARD.decode(auth_json.clone()) {
+                serde_json::from_slice::<ServiceAccountKey>(&auth_json_from_base64)
+            } else {
+                serde_json::from_str::<ServiceAccountKey>(&auth_json)
+            }
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
+
         let client: Client = Client::from_service_account_key(service_account, false)
             .await
             .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
@@ -211,9 +219,14 @@ impl BigQueryCommon {
     ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>> + use<>)> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
-        let credentials_file = CredentialsFile::new_from_str(&auth_json)
-            .await
+        let credentials_file =
+            if let Ok(auth_json_from_base64) = BASE64_STANDARD.decode(auth_json.clone()) {
+                serde_json::from_slice::<CredentialsFile>(&auth_json_from_base64)
+            } else {
+                serde_json::from_str::<CredentialsFile>(&auth_json)
+            }
             .map_err(|e| SinkError::BigQuery(e.into()))?;
+
         StorageWriterClient::new(credentials_file).await
     }
 
