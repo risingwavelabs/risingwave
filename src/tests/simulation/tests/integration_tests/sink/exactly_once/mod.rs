@@ -62,20 +62,15 @@ async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>) -> Result<()> {
 
     test_sink.wait_initial_parallelism(6).await?;
 
-    let internal_tables = session.run("show internal tables").await?;
+    let internal_tables = session.show_internal_tables().await?;
 
     let table_name_prefix = "__internal_test_sink_";
 
     let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
         internal_tables
-            .split("\n")
-            .filter(|line| {
-                line.contains(table_name_prefix)
-                    && line
-                        .strip_prefix(table_name_prefix)
-                        .unwrap()
-                        .contains("sink")
-            })
+            .iter()
+            .filter_map(|(_, table_name)| table_name.strip_prefix(table_name_prefix))
+            .filter(|name| name.contains("sink"))
             .collect_vec(),
     )
     .unwrap()[0]
