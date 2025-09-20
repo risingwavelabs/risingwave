@@ -258,7 +258,14 @@ impl IcebergCompactionManager {
         let IcebergSinkCompactionUpdate {
             sink_id,
             compaction_interval,
+            force_compaction,
         } = msg;
+
+        let compaction_interval = if force_compaction {
+            0
+        } else {
+            compaction_interval
+        };
 
         // if the compaction interval is changed, we need to reset the commit info when the compaction task is sent of initialized
         let commit_info = guard.iceberg_commits.entry(sink_id).or_insert(CommitInfo {
