@@ -251,12 +251,23 @@ impl KinesisSplitReader {
                     tokio::time::sleep(self.error_retry_interval).await;
                     continue;
                 }
+                Err(SdkError::TimeoutError(_)) => {
+                    // according to sdk doc:
+                    // The request failed due to a timeout. The request MAY have been sent and received.
+                    tracing::warn!(
+                        "shard {:?} request timeout, rolling back to previous offset",
+                        self.shard_id
+                    );
+                    self.new_shard_iter().await?;
+                    tokio::time::sleep(self.error_retry_interval).await;
+                    continue;
+                }
                 Err(e) => {
                     let error = anyhow!(e).context(format!(
                         "Kinesis got an unhandled error on stream {:?}, shard {:?}",
                         self.stream_name, self.shard_id
                     ));
-                    tracing::error!(error = %error.as_report());
+                    tracing::warn!(error = %error.as_report()); // change to warn as user has no action to take
                     return Err(error.into());
                 }
             }
