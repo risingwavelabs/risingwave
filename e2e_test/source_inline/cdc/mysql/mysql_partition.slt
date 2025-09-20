@@ -1,0 +1,243 @@
+# Test MySQL CDC support for partitioned tables (both single-level and sub-partitioned tables)
+
+control substitution on
+
+statement ok
+ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;
+
+system ok
+mysql -e "
+    SET GLOBAL time_zone = '+01:00';
+"
+
+system ok
+mysql -e "
+    DROP DATABASE IF EXISTS testdb_partition; CREATE DATABASE testdb_partition;
+    USE testdb_partition;
+    CREATE TABLE single_partition_table (
+        id INT NOT NULL,
+        purchased INT DEFAULT NULL,
+        created_at BIGINT UNSIGNED NOT NULL DEFAULT '0' COMMENT 'Creation timestamp',
+        PRIMARY KEY (id, created_at),
+        KEY idx (id, purchased)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Single-level partitioned test table'
+    PARTITION BY RANGE (created_at) (
+        PARTITION p20250101 VALUES LESS THAN (1735689600000) ENGINE = InnoDB,
+        PARTITION p20250102 VALUES LESS THAN (1735776000000) ENGINE = InnoDB,
+        PARTITION p20250103 VALUES LESS THAN (1735948800000) ENGINE = InnoDB
+    );
+    CREATE TABLE sub_partition_table (
+        id INT NOT NULL,
+        region_code VARCHAR(10) NOT NULL,
+        amount DECIMAL(10, 2) NOT NULL,
+        created_at BIGINT UNSIGNED NOT NULL DEFAULT '0' COMMENT 'Creation timestamp',
+        PRIMARY KEY (id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Sub-partitioned test table'
+    PARTITION BY RANGE (created_at)
+    SUBPARTITION BY HASH (id)
+    SUBPARTITIONS 4 (
+        PARTITION p20250101 VALUES LESS THAN (1735689600000),
+        PARTITION p20250102 VALUES LESS THAN (1735776000000),
+        PARTITION p20250103 VALUES LESS THAN (1735948800000)
+    );
+    INSERT INTO single_partition_table (id, purchased, created_at) VALUES
+    (1, 1, 1735689599000), (2, 2, 1735775999000), (3, 3, 1735862399000);
+    INSERT INTO sub_partition_table (id, region_code, amount, created_at) VALUES
+    (1, 'US', 101.00, 1735689599000), (2, 'EU', 102.00, 1735775999000), (3, 'ASIA', 103.00, 1735862399000);
+"
+
+system ok
+mysql -e "
+    DROP USER IF EXISTS 'partition-cdc'@'%';
+    CREATE USER 'partition-cdc'@'%' IDENTIFIED BY 'partition123';
+    GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'partition-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+create source s with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = 'partition-cdc',
+  password = 'partition123',
+  database.name = 'testdb_partition',
+);
+
+sleep 2s
+
+# Generate 1500 backfill records using MySQL recursive CTE
+system ok
+mysql -e "
+    USE testdb_partition;
+    WITH RECURSIVE numbers AS (SELECT 4 as n UNION ALL SELECT n + 1 FROM numbers WHERE n < 1500)
+    INSERT INTO single_partition_table (id, purchased, created_at)
+    SELECT n, (n % 100) + 1, CASE WHEN n % 3 = 0 THEN 1735689599000 WHEN n % 3 = 1 THEN 1735775999000 ELSE 1735862399000 END FROM numbers;
+"
+
+system ok
+mysql -e "
+    USE testdb_partition;
+    WITH RECURSIVE numbers AS (SELECT 4 as n UNION ALL SELECT n + 1 FROM numbers WHERE n < 1500)
+    INSERT INTO sub_partition_table (id, region_code, amount, created_at)
+    SELECT n, CASE WHEN n % 3 = 0 THEN 'US' WHEN n % 3 = 1 THEN 'EU' ELSE 'ASIA' END, (n % 1000) + 100.00, CASE WHEN n % 3 = 0 THEN 1735689599000 WHEN n % 3 = 1 THEN 1735775999000 ELSE 1735862399000 END FROM numbers;
+"
+
+# Create RisingWave table from single-level partitioned table
+statement ok
+create table single_partition_rw (
+  id INT,
+  purchased INT,
+  created_at BIGINT,
+  PRIMARY KEY (id, created_at)
+) with(
+  snapshot = 'true',
+  snapshot.interval = 10,
+  snapshot.batch_size = 10000
+) from s table 'testdb_partition.single_partition_table';
+
+# Create RisingWave table from sub-partitioned table
+statement ok
+create table sub_partition_rw (
+  id INT,
+  region_code VARCHAR,
+  amount DECIMAL,
+  created_at BIGINT,
+  PRIMARY KEY (id, created_at)
+) with(
+  snapshot = 'true',
+  snapshot.interval = 10,
+  snapshot.batch_size = 10000
+) from s table 'testdb_partition.sub_partition_table';
+
+sleep 5s
+
+# Verify data synchronization for single-level partitioned table
+query IT
+select count(*) from single_partition_rw;
+----
+1500
+
+# Verify data synchronization for sub-partitioned table
+query IT
+select count(*) from sub_partition_rw;
+----
+1500
+
+# Test CDC operations on single-level partitioned table
+system ok
+mysql -e "
+    USE testdb_partition;
+    INSERT INTO single_partition_table (id, purchased, created_at) VALUES
+    (1501, 888, 1735689599000);
+    UPDATE single_partition_table SET purchased = 999 WHERE id = 1;
+    DELETE FROM single_partition_table WHERE id = 2;
+"
+
+# Test CDC operations on sub-partitioned table
+system ok
+mysql -e "
+    USE testdb_partition;
+    INSERT INTO sub_partition_table (id, region_code, amount, created_at) VALUES
+    (1501, 'US', 888.88, 1735689599000);
+    UPDATE sub_partition_table SET amount = 999.99 WHERE id = 1;
+    DELETE FROM sub_partition_table WHERE id = 2;
+"
+
+sleep 5s
+
+# Verify CDC operations on single-level partitioned table
+query IT
+select count(*) from single_partition_rw;
+----
+1500
+
+# Verify CDC operations on sub-partitioned table
+query IT
+select count(*) from sub_partition_rw;
+----
+1500
+
+# Verify CDC operations - check if id=1 was updated
+query IT
+select id, purchased from single_partition_rw where id = 1;
+----
+1 999
+
+# Verify CDC operations - check if id=1501 was inserted
+query IT
+select id, purchased from single_partition_rw where id = 1501;
+----
+1501 888
+
+# Verify CDC operations - check if id=2 was deleted
+query IT
+select id, purchased from single_partition_rw where id = 2;
+----
+
+# Verify CDC operations on sub-partitioned table - check if id=1 was updated
+query IT
+select id, amount from sub_partition_rw where id = 1;
+----
+1 999.99
+
+# Verify CDC operations on sub-partitioned table - check if id=1501 was inserted
+query IT
+select id, amount from sub_partition_rw where id = 1501;
+----
+1501 888.88
+
+# Verify CDC operations on sub-partitioned table - check if id=2 was deleted
+query IT
+select id, amount from sub_partition_rw where id = 2;
+----
+
+# Verify partition data distribution for single-level partitioned table
+query IT
+select
+    created_at,
+    count(*) as count,
+    sum(purchased) as total_purchased
+from single_partition_rw
+group by created_at
+order by created_at;
+----
+1735689599000 501 250501
+1735775999000 500 250000
+1735862399000 499 249499
+
+# Verify partition data distribution for sub-partitioned table
+query IT
+select
+    created_at,
+    count(*) as count,
+    sum(amount) as total_amount
+from sub_partition_rw
+group by created_at
+order by created_at;
+----
+1735689599000 501 250501.00
+1735775999000 500 250000.00
+1735862399000 499 249499.00
+
+# Verify both single-level and sub-partitioned tables work correctly
+# Check that data is properly distributed across partitions
+query IT
+select 'single_partition' as table_type, created_at, count(*) as record_count from single_partition_rw group by created_at
+union all
+select 'sub_partition' as table_type, created_at, count(*) as record_count from sub_partition_rw group by created_at
+order by table_type, created_at;
+----
+single_partition 1735689599000 501
+single_partition 1735775999000 500
+single_partition 1735862399000 499
+sub_partition 1735689599000 501
+sub_partition 1735775999000 500
+sub_partition 1735862399000 499
+
+# Clean up
+statement ok
+drop source s cascade;
+
+system ok
+mysql -e "
+    SET GLOBAL time_zone = '+00:00';
+"
