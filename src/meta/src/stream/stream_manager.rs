@@ -488,6 +488,8 @@ impl GlobalStreamManager {
             .source_manager
             .allocate_splits(&stream_job_fragments)
             .await?;
+        println!("step a {:#?}", init_split_assignment);
+
         init_split_assignment.extend(
             self.source_manager
                 .allocate_splits_for_backfill(
@@ -497,6 +499,8 @@ impl GlobalStreamManager {
                 )
                 .await?,
         );
+
+        println!("init split {:#?}", init_split_assignment);
 
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
             stream_job_fragments.stream_job_id.table_id,
