@@ -270,6 +270,8 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
+    println!("ensembles {:#?}", ensembles);
+
     let mut result: HashMap<
         DatabaseId,
         HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
@@ -280,6 +282,8 @@ where
         components,
     } in &ensembles
     {
+        println!("ensemble entries {:#?}", entries);
+
         let entry_fragments = entries
             .iter()
             .map(|fragment_id| fragment_map.get(fragment_id).unwrap())
@@ -331,7 +335,7 @@ where
             }
             StreamingParallelism::Fixed(n) => n,
         }
-        .min(total_parallelism) // limit fixed
+        //.min(total_parallelism) // limit fixed
         .min(job.max_parallelism as usize) // limit max parallelism
         .min(vnode_count); // limit vnode count
 
@@ -548,6 +552,7 @@ pub struct ActorGraph<'a> {
     pub locations: &'a HashMap<ActorId, WorkerId>,
 }
 
+#[derive(Debug)]
 pub struct NoShuffleEnsemble {
     entries: HashSet<FragmentId>,
     components: HashSet<FragmentId>,
