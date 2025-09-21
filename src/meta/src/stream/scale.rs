@@ -303,6 +303,12 @@ impl ScaleController {
                     )
                 })
                 .collect();
+
+        let actor_splits = curr_actors
+            .iter()
+            .map(|(&actor_id, info)| (actor_id, info.splits.clone()))
+            .collect();
+
         let reschedule = Reschedule {
             added_actors,
             removed_actors,
@@ -311,7 +317,7 @@ impl ScaleController {
             upstream_dispatcher_mapping,
             downstream_fragment_ids,
             newly_created_actors,
-            actor_splits: Default::default(),
+            actor_splits,
             cdc_table_snapshot_split_assignment: Default::default(),
             cdc_table_id: None,
         };
