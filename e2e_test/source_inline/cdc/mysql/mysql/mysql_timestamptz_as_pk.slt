@@ -76,11 +76,6 @@ mysql -e "
 "
 
 sleep 2s
-# Verify we have 50 rows in MySQL
-query I
-SELECT COUNT(*) FROM risedev.ts_pk_test;
-----
-50
 
 statement ok
 create source s_ts_pk with (
