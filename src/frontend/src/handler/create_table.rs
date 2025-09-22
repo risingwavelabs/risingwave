@@ -777,13 +777,13 @@ fn gen_table_plan_inner(
         .into());
     }
 
-    if !append_only && retention_seconds.is_some() {
-        return Err(ErrorCode::NotSupported(
-            "Defining retention seconds on table requires the table to be append only.".to_owned(),
-            "Use the key words `APPEND ONLY`".to_owned(),
-        )
-        .into());
-    }
+    // if !append_only && retention_seconds.is_some() {
+    //     return Err(ErrorCode::NotSupported(
+    //         "Defining retention seconds on table requires the table to be append only.".to_owned(),
+    //         "Use the key words `APPEND ONLY`".to_owned(),
+    //     )
+    //     .into());
+    // }
 
     let materialize =
         plan_root.gen_table_plan(context, table_name, database_id, schema_id, info, props)?;
