@@ -507,7 +507,6 @@ impl MySqlExternalTableReader {
                 .map(|(pk, datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
-                        println!("ty: {:?}", ty);
                         let val = match ty {
                             DataType::Boolean => Value::from(value.into_bool()),
                             DataType::Int16 => Value::from(value.into_int16()),
