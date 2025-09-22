@@ -414,9 +414,12 @@ impl GlobalBarrierWorkerContextImpl {
                                 dropped_table_ids.into_iter().map(|id| id.table_id as _),
                             )
                             .await;
-                        info = self.resolve_graph_info(None, &active_streaming_nodes).await.inspect_err(|err| {
-                            warn!(error = %err.as_report(), "resolve actor info failed");
-                        })?
+                        info = self
+                            .resolve_graph_info(None, &active_streaming_nodes)
+                            .await
+                            .inspect_err(|err| {
+                                warn!(error = %err.as_report(), "resolve actor info failed");
+                            })?
                     }
 
                     self.recovery_table_with_upstream_sinks(&mut info).await?;
