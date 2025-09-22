@@ -17,9 +17,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use parking_lot::RawRwLock;
+use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
@@ -28,6 +31,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbSubscriptionUpstreamInfo, PbUpstreamSinkInfo};
 use tracing::warn;
 
+use crate::MetaResult;
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
@@ -45,22 +49,105 @@ pub struct SharedFragmentInfo {
 
 impl From<&InflightFragmentInfo> for SharedFragmentInfo {
     fn from(info: &InflightFragmentInfo) -> Self {
+        let InflightFragmentInfo {
+            fragment_id,
+            distribution_type,
+            actors,
+            ..
+        } = info;
+
         Self {
-            fragment_id: info.fragment_id,
-            distribution_type: info.distribution_type,
-            actors: info.actors.clone(),
+            fragment_id: *fragment_id,
+            distribution_type: *distribution_type,
+            actors: actors.clone(),
         }
     }
 }
 
-type SharedActorInfosInner = HashMap<DatabaseId, HashMap<FragmentId, SharedFragmentInfo>>;
+#[derive(Default, Debug)]
+pub struct SharedActorInfosInner {
+    info: HashMap<DatabaseId, HashMap<FragmentId, SharedFragmentInfo>>,
+}
+
+impl SharedActorInfosInner {
+    pub fn get_fragment(&self, fragment_id: FragmentId) -> Option<&SharedFragmentInfo> {
+        self.info
+            .values()
+            .find_map(|database| database.get(&fragment_id))
+    }
+
+    pub fn iter_over_fragments(&self) -> impl Iterator<Item = (&FragmentId, &SharedFragmentInfo)> {
+        self.info.values().flatten()
+    }
+}
 
 #[derive(Clone, educe::Educe)]
 #[educe(Debug)]
-pub(crate) struct SharedActorInfos {
+pub struct SharedActorInfos {
     inner: Arc<parking_lot::RwLock<SharedActorInfosInner>>,
     #[educe(Debug(ignore))]
     notification_manager: NotificationManagerRef,
+}
+
+impl SharedActorInfos {
+    pub fn read_guard(&self) -> RwLockReadGuard<'_, RawRwLock, SharedActorInfosInner> {
+        self.inner.read()
+    }
+
+    pub fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
+        let core = self.inner.read();
+        core.iter_over_fragments()
+            .flat_map(|(_, fragment)| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|(actor_id, info)| (*actor_id, info.splits.clone()))
+            })
+            .collect()
+    }
+
+    /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
+    ///
+    /// Very occasionally split removal may happen during scaling, in which case we need to
+    /// use the old splits for reallocation instead of the latest splits (which may be missing),
+    /// so that we can resolve the split removal in the next command.
+    pub fn migrate_splits_for_source_actors(
+        &self,
+        fragment_id: FragmentId,
+        prev_actor_ids: &[ActorId],
+        curr_actor_ids: &[ActorId],
+    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
+        let guard = self.read_guard();
+
+        let prev_splits = prev_actor_ids
+            .iter()
+            .flat_map(|actor_id| {
+                // Note: File Source / Iceberg Source doesn't have splits assigned by meta.
+                guard
+                    .get_fragment(fragment_id)
+                    .and_then(|info| info.actors.get(actor_id))
+                    .map(|actor| actor.splits.clone())
+                    .unwrap_or_default()
+            })
+            .map(|split| (split.id(), split))
+            .collect();
+
+        let empty_actor_splits = curr_actor_ids
+            .iter()
+            .map(|actor_id| (*actor_id, vec![]))
+            .collect();
+
+        let diff = crate::stream::source_manager::reassign_splits(
+            fragment_id,
+            empty_actor_splits,
+            &prev_splits,
+            // pre-allocate splits is the first time getting splits, and it does not have scale-in scene
+            std::default::Default::default(),
+        )
+        .unwrap_or_default();
+
+        Ok(diff)
+    }
 }
 
 impl SharedActorInfos {
@@ -72,7 +159,7 @@ impl SharedActorInfos {
     }
 
     pub(super) fn remove_database(&self, database_id: DatabaseId) {
-        if let Some(database) = self.inner.write().remove(&database_id) {
+        if let Some(database) = self.inner.write().info.remove(&database_id) {
             let mapping = database
                 .into_values()
                 .map(|fragment| rebuild_fragment_mapping(&fragment))
@@ -91,6 +178,7 @@ impl SharedActorInfos {
         for fragment in self
             .inner
             .write()
+            .info
             .extract_if(|database_id, _| !database_ids.contains(database_id))
             .flat_map(|(_, fragments)| fragments.into_values())
         {
@@ -112,7 +200,7 @@ impl SharedActorInfos {
             .collect();
         // delete the fragments that exist previously, but not included in the recovered fragments
         let mut writer = self.start_writer(database_id);
-        let database = writer.write_guard.entry(database_id).or_default();
+        let database = writer.write_guard.info.entry(database_id).or_default();
         for (_, fragment) in database.extract_if(|fragment_id, fragment_info| {
             if let Some(info) = remaining_fragments.remove(fragment_id) {
                 let info = info.into();
@@ -175,7 +263,7 @@ pub(super) struct SharedActorInfoWriter<'a> {
 
 impl SharedActorInfoWriter<'_> {
     pub(super) fn upsert(&mut self, infos: impl IntoIterator<Item = &InflightFragmentInfo>) {
-        let database = self.write_guard.entry(self.database_id).or_default();
+        let database = self.write_guard.info.entry(self.database_id).or_default();
         for info in infos {
             match database.entry(info.fragment_id) {
                 Entry::Occupied(mut entry) => {
@@ -197,7 +285,7 @@ impl SharedActorInfoWriter<'_> {
     }
 
     pub(super) fn remove(&mut self, info: &InflightFragmentInfo) {
-        if let Some(database) = self.write_guard.get_mut(&self.database_id)
+        if let Some(database) = self.write_guard.info.get_mut(&self.database_id)
             && let Some(fragment) = database.remove(&info.fragment_id)
         {
             self.deleted_fragment_mapping
@@ -255,8 +343,12 @@ pub(crate) enum CommandFragmentChanges {
         new_actors: HashMap<ActorId, InflightActorInfo>,
         actor_update_vnode_bitmap: HashMap<ActorId, Bitmap>,
         to_remove: HashSet<ActorId>,
+        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
     RemoveFragment,
+    SplitAssignment {
+        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    },
 }
 
 #[derive(Default, Clone, Debug)]
@@ -420,6 +512,7 @@ impl InflightDatabaseInfo {
                     CommandFragmentChanges::Reschedule {
                         new_actors,
                         actor_update_vnode_bitmap,
+                        actor_splits,
                         ..
                     } => {
                         let info = self.fragment_mut(fragment_id);
@@ -435,6 +528,11 @@ impl InflightDatabaseInfo {
                                 .try_insert(actor_id as _, actor)
                                 .expect("non-duplicate");
                         }
+                        for (actor_id, splits) in actor_splits {
+                            actors.get_mut(&actor_id).expect("should exist").splits = splits;
+                        }
+
+                        // info will be upserted into shared_actor_infos in post_apply stage
                     }
                     CommandFragmentChanges::RemoveFragment => {}
                     CommandFragmentChanges::ReplaceNodeUpstream(replace_map) => {
@@ -527,6 +625,15 @@ impl InflightDatabaseInfo {
                         });
                         assert!(removed, "should remove upstream from UpstreamSinkUnion");
                     }
+                    CommandFragmentChanges::SplitAssignment { actor_splits } => {
+                        let info = self.fragment_mut(fragment_id);
+                        let actors = &mut info.actors;
+                        for (actor_id, splits) in actor_splits {
+                            actors.get_mut(&actor_id).expect("should exist").splits = splits;
+                        }
+
+                        shared_actor_writer.upsert([&*info]);
+                    }
                 }
             }
             shared_actor_writer.finish();
@@ -606,19 +713,25 @@ impl InflightDatabaseInfo {
             .cloned();
         let new_fragment_infos = info
             .into_iter()
-            .flat_map(|info| info.stream_job_fragments.new_fragment_info())
+            .flat_map(|info| {
+                info.stream_job_fragments
+                    .new_fragment_info(&info.init_split_assignment)
+            })
             .chain(replace_job.into_iter().flat_map(|replace_job| {
-                replace_job.new_fragments.new_fragment_info().chain(
-                    replace_job
-                        .auto_refresh_schema_sinks
-                        .as_ref()
-                        .into_iter()
-                        .flat_map(|sinks| {
-                            sinks.iter().map(|sink| {
-                                (sink.new_fragment.fragment_id, sink.new_fragment_info())
-                            })
-                        }),
-                )
+                replace_job
+                    .new_fragments
+                    .new_fragment_info(&replace_job.init_split_assignment)
+                    .chain(
+                        replace_job
+                            .auto_refresh_schema_sinks
+                            .as_ref()
+                            .into_iter()
+                            .flat_map(|sinks| {
+                                sinks.iter().map(|sink| {
+                                    (sink.new_fragment.fragment_id, sink.new_fragment_info())
+                                })
+                            }),
+                    )
             }))
             .collect_vec();
         let mut builder = FragmentEdgeBuilder::new(
@@ -738,7 +851,8 @@ impl InflightDatabaseInfo {
                     }
                     CommandFragmentChanges::ReplaceNodeUpstream(_)
                     | CommandFragmentChanges::AddNodeUpstream(_)
-                    | CommandFragmentChanges::DropNodeUpstream(_) => {}
+                    | CommandFragmentChanges::DropNodeUpstream(_)
+                    | CommandFragmentChanges::SplitAssignment { .. } => {}
                 }
             }
         }

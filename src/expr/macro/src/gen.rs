@@ -103,7 +103,7 @@ impl FunctionAttr {
             }
             if let Some(i) = self.args.iter().position(|t| t == "any") {
                 // infer as the array type of "any" argument
-                return Ok(quote! { |args| Ok(DataType::List(Box::new(args[#i].clone()))) });
+                return Ok(quote! { |args| Ok(DataType::list(args[#i].clone())) });
             }
         } else if self.ret == "struct" {
             if let Some(i) = self.args.iter().position(|t| t == "struct") {
@@ -1321,7 +1321,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
 fn data_type(ty: &str) -> TokenStream2 {
     if let Some(ty) = ty.strip_suffix("[]") {
         let inner_type = data_type(ty);
-        return quote! { DataType::List(Box::new(#inner_type)) };
+        return quote! { DataType::list(#inner_type) };
     }
     if ty.starts_with("struct<") {
         return quote! { DataType::Struct(#ty.parse().expect("invalid struct type")) };

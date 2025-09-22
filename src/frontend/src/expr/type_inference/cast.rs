@@ -93,7 +93,7 @@ pub fn align_array_and_element(
         true => ExprImpl::from(Literal::new_untyped(None)),
         false => {
             let array_element_type = match inputs[array_idx].return_type() {
-                DataType::List(t) => *t,
+                DataType::List(t) => t.into_elem(),
                 t => return Err(ErrorCode::BindError(format!("expects array but got {t}"))),
             };
             // use InputRef rather than literal_null so it is always typed, even for varchar
@@ -109,7 +109,7 @@ pub fn align_array_and_element(
             .filter_map(|(i, e)| element_indices.contains(&i).then_some(e))
             .chain(std::iter::once(&mut dummy_element)),
     )?;
-    let array_type = DataType::List(Box::new(common_element_type));
+    let array_type = DataType::list(common_element_type);
 
     // elements are already casted by `align_types`, we cast the array argument here
     inputs[array_idx].cast_implicit_mut(&array_type)?;
@@ -229,8 +229,8 @@ fn cast_struct(source: &DataType, target: &DataType, allows: CastContext) -> Cas
 
 fn cast_array(source: &DataType, target: &DataType, allows: CastContext) -> CastResult {
     match (source, target) {
-        (DataType::List(source_elem), DataType::List(target_elem)) => {
-            cast(source_elem, target_elem, allows)
+        (DataType::List(source), DataType::List(target)) => {
+            cast(source.elem(), target.elem(), allows)
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.
@@ -238,12 +238,12 @@ fn cast_array(source: &DataType, target: &DataType, allows: CastContext) -> Cast
         (DataType::Varchar, DataType::List(_)) => canbo(CastContext::Explicit <= allows),
         (DataType::List(_), DataType::Varchar) => canbo(CastContext::Assign <= allows),
         // https://github.com/pgvector/pgvector/blob/v0.8.0/sql/vector.sql#L157-L170
-        (DataType::Vector(_), DataType::List(elem)) => {
-            canbo(**elem == DataType::Float32 && CastContext::Implicit <= allows)
+        (DataType::Vector(_), DataType::List(list)) => {
+            canbo(list.elem() == &DataType::Float32 && CastContext::Implicit <= allows)
         }
-        (DataType::List(elem), DataType::Vector(_)) => canbo(
+        (DataType::List(list), DataType::Vector(_)) => canbo(
             matches!(
-                **elem,
+                list.elem(),
                 DataType::Int32 | DataType::Decimal | DataType::Float32 | DataType::Float64
             ) && CastContext::Assign <= allows,
         ),

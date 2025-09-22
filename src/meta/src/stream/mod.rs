@@ -16,7 +16,7 @@ pub(crate) mod cdc;
 mod refresh_manager;
 mod scale;
 mod sink;
-mod source_manager;
+pub mod source_manager;
 mod stream_graph;
 mod stream_manager;
 #[cfg(test)]

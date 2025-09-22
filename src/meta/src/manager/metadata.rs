@@ -773,6 +773,16 @@ impl MetadataManager {
             .await
     }
 
+    #[await_tree::instrument]
+    pub async fn update_source_splits(
+        &self,
+        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        self.catalog_controller
+            .update_source_splits(source_splits)
+            .await
+    }
+
     pub async fn get_mv_depended_subscriptions(
         &self,
         database_id: Option<DatabaseId>,
@@ -847,16 +857,6 @@ impl MetadataManager {
             .get_job_fragment_backfill_scan_type(job_id.table_id as _)
             .await?;
         Ok(backfill_types)
-    }
-
-    #[await_tree::instrument]
-    pub async fn update_source_splits(
-        &self,
-        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
-    ) -> MetaResult<()> {
-        self.catalog_controller
-            .update_source_splits(source_splits)
-            .await
     }
 }
 

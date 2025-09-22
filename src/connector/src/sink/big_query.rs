@@ -471,7 +471,7 @@ impl BigQuerySink {
                 Ok(format!("STRUCT<{}>", elements_vec.join(", ")))
             }
             DataType::List(l) => {
-                let element_string = Self::get_string_and_check_support_from_datatype(l.as_ref())?;
+                let element_string = Self::get_string_and_check_support_from_datatype(l.elem())?;
                 Ok(format!("ARRAY<{}>", element_string))
             }
             DataType::Bytea => Ok("BYTES".to_owned()),
@@ -521,8 +521,9 @@ impl BigQuerySink {
                 }
                 TableFieldSchema::record(&rw_field.name, sub_fields)
             }
-            DataType::List(dt) => {
-                let inner_field = Self::map_field(&Field::with_name(*dt.clone(), &rw_field.name))?;
+            DataType::List(lt) => {
+                let inner_field =
+                    Self::map_field(&Field::with_name(lt.elem().clone(), &rw_field.name))?;
                 TableFieldSchema {
                     mode: Some("REPEATED".to_owned()),
                     ..inner_field
@@ -1018,7 +1019,7 @@ fn build_protobuf_field(
             return Ok((field, Some(sub_proto)));
         }
         DataType::List(l) => {
-            let (mut field, proto) = build_protobuf_field(l.as_ref(), index, name.clone())?;
+            let (mut field, proto) = build_protobuf_field(l.elem(), index, name.clone())?;
             field.label = Some(field_descriptor_proto::Label::Repeated.into());
             return Ok((field, proto));
         }
@@ -1053,8 +1054,8 @@ mod test {
     #[tokio::test]
     async fn test_type_check() {
         let big_query_type_string = "ARRAY<STRUCT<v1 ARRAY<INT64>, v2 STRUCT<v1 INT64, v2 INT64>>>";
-        let rw_datatype = DataType::List(Box::new(DataType::Struct(StructType::new(vec![
-            ("v1".to_owned(), DataType::List(Box::new(DataType::Int64))),
+        let rw_datatype = DataType::list(DataType::Struct(StructType::new(vec![
+            ("v1".to_owned(), DataType::Int64.list()),
             (
                 "v2".to_owned(),
                 DataType::Struct(StructType::new(vec![
@@ -1062,7 +1063,7 @@ mod test {
                     ("v2".to_owned(), DataType::Int64),
                 ])),
             ),
-        ]))));
+        ])));
         assert_eq!(
             BigQuerySink::get_string_and_check_support_from_datatype(&rw_datatype).unwrap(),
             big_query_type_string
@@ -1076,8 +1077,8 @@ mod test {
                 Field::with_name(DataType::Int64, "v1"),
                 Field::with_name(DataType::Float64, "v2"),
                 Field::with_name(
-                    DataType::List(Box::new(DataType::Struct(StructType::new(vec![
-                        ("v1".to_owned(), DataType::List(Box::new(DataType::Int64))),
+                    DataType::list(DataType::Struct(StructType::new(vec![
+                        ("v1".to_owned(), DataType::Int64.list()),
                         (
                             "v3".to_owned(),
                             DataType::Struct(StructType::new(vec![
@@ -1085,7 +1086,7 @@ mod test {
                                 ("v2".to_owned(), DataType::Int64),
                             ])),
                         ),
-                    ])))),
+                    ]))),
                     "v3",
                 ),
             ],

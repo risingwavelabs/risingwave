@@ -354,8 +354,8 @@ pub trait ToArrow {
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
-            DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
+            DataType::List(list) => self.list_type_to_arrow(list.elem())?,
+            DataType::Map(map) => self.map_type_to_arrow(map)?,
             DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
@@ -451,6 +451,7 @@ pub trait ToArrow {
         arrow_schema::DataType::Int64
     }
 
+    // TODO(list): pass `ListType`
     #[inline]
     fn list_type_to_arrow(
         &self,
@@ -558,7 +559,7 @@ pub trait FromArrow {
             Binary => DataType::Bytea,
             LargeUtf8 => self.from_large_utf8()?,
             LargeBinary => self.from_large_binary()?,
-            List(field) => DataType::List(Box::new(self.from_field(field)?)),
+            List(field) => DataType::list(self.from_field(field)?),
             Struct(fields) => DataType::Struct(self.from_fields(fields)?),
             Map(field, _is_sorted) => {
                 let entries = self.from_field(field)?;
@@ -1527,8 +1528,8 @@ pub fn is_parquet_schema_match_source_schema(
         }
         // List type recursive matching
         // Arrow's List matches RisingWave's List if the element type matches recursively
-        (ArrowType::List(arrow_field), RwType::List(rw_elem_ty)) => {
-            is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_elem_ty)
+        (ArrowType::List(arrow_field), RwType::List(rw_list_ty)) => {
+            is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_list_ty.elem())
         }
         // Map type recursive matching
         // Arrow's Map matches RisingWave's Map if the key and value types match recursively,
@@ -1603,10 +1604,10 @@ mod tests {
         let arrow_list =
             ArrowType::List(Box::new(ArrowField::new("item", ArrowType::Float64, true)).into());
         // RW: list<double>
-        let rw_list = RwType::List(Box::new(RwType::Float64));
+        let rw_list = RwType::Float64.list();
         assert!(is_parquet_schema_match_source_schema(&arrow_list, &rw_list));
 
-        let rw_list2 = RwType::List(Box::new(RwType::Int32));
+        let rw_list2 = RwType::Int32.list();
         assert!(!is_parquet_schema_match_source_schema(
             &arrow_list,
             &rw_list2

@@ -134,10 +134,31 @@ fn map_access<'a>(
 /// select
 ///     map_contains(MAP{1:1}, 1),
 ///     map_contains(MAP{1:1}, 2),
-///     map_contains(MAP{1:1}, NULL::varchar),
-///     map_contains(MAP{1:1}, 1.0)
+///     map_contains(MAP{1:1}, NULL),
+///     map_contains(MAP{1:1}, '1'),
+///     map_contains(MAP{'a':'1','b':'2'}, 'ab');
 /// ----
-/// t f NULL f
+/// t f NULL t f
+///
+///
+/// query error
+/// select map_contains(MAP{1:1}, 1.0);
+/// ----
+/// db error: ERROR: Failed to run the query
+///
+/// Caused by these errors (recent errors listed first):
+///   1: Failed to bind expression: map_contains(MAP {1: 1}, 1.0)
+///   2: Bind error: Cannot check if numeric exists in map(integer,integer)
+///
+///
+/// query error
+/// select map_contains(MAP{1:1}, NULL::varchar);
+/// ----
+/// db error: ERROR: Failed to run the query
+///
+/// Caused by these errors (recent errors listed first):
+///   1: Failed to bind expression: map_contains(MAP {1: 1}, CAST(NULL AS CHARACTER VARYING))
+///   2: Bind error: Cannot check if character varying exists in map(integer,integer)
 /// ```
 #[function("map_contains(anymap, any) -> boolean")]
 fn map_contains(map: MapRef<'_>, key: ScalarRefImpl<'_>) -> Result<bool, ExprError> {
@@ -253,7 +274,7 @@ fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>) -> MapValue {
 #[function(
     "map_keys(anymap) -> anyarray",
     type_infer = "|args|{
-        Ok(DataType::List(Box::new(args[0].as_map().key().clone())))
+        Ok(DataType::list(args[0].as_map().key().clone()))
     }"
 )]
 fn map_keys(map: MapRef<'_>) -> ListValue {
@@ -271,7 +292,7 @@ fn map_keys(map: MapRef<'_>) -> ListValue {
 #[function(
     "map_values(anymap) -> anyarray",
     type_infer = "|args|{
-        Ok(DataType::List(Box::new(args[0].as_map().value().clone())))
+        Ok(DataType::list(args[0].as_map().value().clone()))
     }"
 )]
 fn map_values(map: MapRef<'_>) -> ListValue {
