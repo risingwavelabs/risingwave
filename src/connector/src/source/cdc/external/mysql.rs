@@ -344,7 +344,6 @@ pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
     pool: mysql_async::Pool,
-    upstream_mysql_pk_infos: Vec<(String, String)>, // (column_name, column_type)
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
@@ -399,10 +398,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
-        let database = config.database.clone();
-        let table = config.table.clone();
-
+    pub fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -429,15 +425,10 @@ impl MySqlExternalTableReader {
             .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 
-        // Query MySQL primary key infos for type casting.
-        let upstream_mysql_pk_infos =
-            Self::query_upstream_pk_infos(&pool, &database, &table).await?;
-
         Ok(Self {
             rw_schema,
             field_names,
             pool,
-            upstream_mysql_pk_infos,
         })
     }
 
@@ -452,64 +443,6 @@ impl MySqlExternalTableReader {
                 offset,
             )?))
         })
-    }
-
-    /// Query upstream primary key data types, used for generating filter conditions with proper type casting.
-    async fn query_upstream_pk_infos(
-        pool: &mysql_async::Pool,
-        database: &str,
-        table: &str,
-    ) -> ConnectorResult<Vec<(String, String)>> {
-        let mut conn = pool.get_conn().await?;
-
-        // Query primary key columns and their data types
-        let sql = format!(
-            "SELECT COLUMN_NAME, COLUMN_TYPE
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = '{}'
-            AND TABLE_NAME = '{}'
-            AND COLUMN_KEY = 'PRI'
-            ORDER BY ORDINAL_POSITION",
-            database, table
-        );
-
-        let rs = conn.query::<mysql_async::Row, _>(sql).await?;
-
-        let mut column_infos = Vec::new();
-        for row in &rs {
-            let column_name: String = row.get(0).unwrap();
-            let column_type: String = row.get(1).unwrap();
-            column_infos.push((column_name, column_type));
-        }
-
-        drop(conn);
-
-        Ok(column_infos)
-    }
-
-    /// Check if a column is unsigned type
-    fn is_unsigned_type(&self, column_name: &str) -> bool {
-        for (col_name, col_type) in &self.upstream_mysql_pk_infos {
-            if col_name == column_name {
-                return col_type.to_lowercase().contains("unsigned");
-            }
-        }
-        false
-    }
-
-    /// Convert negative i64 to unsigned u64 based on column type
-    fn convert_negative_to_unsigned(&self, negative_val: i64) -> u64 {
-        negative_val as u64
-    }
-
-    /// Convert negative i32 to unsigned u32 based on column type
-    fn convert_negative_to_unsigned_i32(&self, negative_val: i32) -> u32 {
-        negative_val as u32
-    }
-
-    /// Convert negative i16 to unsigned u16 based on column type
-    fn convert_negative_to_unsigned_i16(&self, negative_val: i16) -> u16 {
-        negative_val as u16
     }
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
@@ -575,30 +508,9 @@ impl MySqlExternalTableReader {
                         let ty = field_map.get(pk.as_str()).unwrap();
                         let val = match ty {
                             DataType::Boolean => Value::from(value.into_bool()),
-                            DataType::Int16 => {
-                                let int16_val = value.into_int16();
-                                if int16_val < 0 && self.is_unsigned_type(pk.as_str()) {
-                                    Value::from(self.convert_negative_to_unsigned_i16(int16_val))
-                                } else {
-                                    Value::from(int16_val)
-                                }
-                            }
-                            DataType::Int32 => {
-                                let int32_val = value.into_int32();
-                                if int32_val < 0 && self.is_unsigned_type(pk.as_str()) {
-                                    Value::from(self.convert_negative_to_unsigned_i32(int32_val))
-                                } else {
-                                    Value::from(int32_val)
-                                }
-                            }
-                            DataType::Int64 => {
-                                let int64_val = value.into_int64();
-                                if int64_val < 0 && self.is_unsigned_type(pk.as_str()) {
-                                    Value::from(self.convert_negative_to_unsigned(int64_val))
-                                } else {
-                                    Value::from(int64_val)
-                                }
-                            }
+                            DataType::Int16 => Value::from(value.into_int16()),
+                            DataType::Int32 => Value::from(value.into_int32()),
+                            DataType::Int64 => Value::from(value.into_int64()),
                             DataType::Float32 => Value::from(value.into_float32().into_inner()),
                             DataType::Float64 => Value::from(value.into_float64().into_inner()),
                             DataType::Varchar => Value::from(String::from(value.into_utf8())),
@@ -725,8 +637,6 @@ mod tests {
 
     #[test]
     fn test_mysql_filter_expr() {
-        // This test is commented out because filter_expression now requires &self
-        // and we need a proper MySqlExternalTableReader instance to test it
         let cols = vec!["id".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(`id` > :id)");
@@ -783,9 +693,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema)
-            .await
-            .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema).unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 

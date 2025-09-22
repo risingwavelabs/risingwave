@@ -400,9 +400,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema.clone())
-            .await
-            .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema.clone()).unwrap();
 
         let mut cnt: usize = 0;
         let mut start_pk = Some(OwnedRow::new(vec![Some(ScalarImpl::Int64(0))]));

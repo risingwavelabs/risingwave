@@ -150,7 +150,8 @@ pub fn mysql_datum_to_rw_datum(
             handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i32, u32)
         }
         DataType::Int64 => {
-            handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i64, u64)
+            // for bigint unsigned, should up cast to decimal.
+            handle_data_type!(mysql_row, mysql_datum_index, column_name, i64)
         }
         DataType::Float32 => {
             handle_data_type!(mysql_row, mysql_datum_index, column_name, f32)
