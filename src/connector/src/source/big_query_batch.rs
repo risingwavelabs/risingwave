@@ -285,8 +285,14 @@ impl BatchBigQueryReader {
             .build_client(&self.properties.aws_auth_props)
             .await
             .map_err(|e| match e {
-                crate::sink::SinkError::BigQuery(err) => anyhow!(err),
-                _ => anyhow!("Failed to build BigQuery client: {}", e),
+                crate::sink::SinkError::BigQuery(err) => {
+                    tracing::error!("Failed to build BigQuery client for batch source: {}", err);
+                    anyhow!("Failed to build BigQuery client: {}. Please check your credentials (supports both JSON and base64-encoded JSON).", err)
+                },
+                _ => {
+                    tracing::error!("Failed to build BigQuery client for batch source: {}", e);
+                    anyhow!("Failed to build BigQuery client: {}", e)
+                },
             })?;
         Ok(client)
     }

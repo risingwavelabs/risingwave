@@ -200,13 +200,18 @@ impl BigQueryCommon {
     pub async fn build_client(&self, aws_auth_props: &AwsAuthProps) -> Result<Client> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
-        let service_account =
-            if let Ok(auth_json_from_base64) = BASE64_STANDARD.decode(auth_json.clone()) {
-                serde_json::from_slice::<ServiceAccountKey>(&auth_json_from_base64)
-            } else {
-                serde_json::from_str::<ServiceAccountKey>(&auth_json)
-            }
-            .map_err(|e| SinkError::BigQuery(e.into()))?;
+        // Try to decode base64 first, if it fails assume it's plain JSON
+        let service_account = if let Ok(auth_json_from_base64) =
+            BASE64_STANDARD.decode(auth_json.clone())
+        {
+            // Successfully decoded base64, try to parse as JSON
+            serde_json::from_slice::<ServiceAccountKey>(&auth_json_from_base64)
+                    .map_err(|e| SinkError::BigQuery(anyhow!("Failed to parse base64-decoded service account key: {}. Make sure the base64 string contains valid JSON.", e)))?
+        } else {
+            // Not base64, try to parse as plain JSON
+            serde_json::from_str::<ServiceAccountKey>(&auth_json)
+                    .map_err(|e| SinkError::BigQuery(anyhow!("Failed to parse service account key JSON: {}. Make sure the credentials are valid JSON or base64-encoded JSON.", e)))?
+        };
 
         let client: Client = Client::from_service_account_key(service_account, false)
             .await
@@ -220,13 +225,18 @@ impl BigQueryCommon {
     ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>> + use<>)> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
-        let credentials_file =
-            if let Ok(auth_json_from_base64) = BASE64_STANDARD.decode(auth_json.clone()) {
-                serde_json::from_slice::<CredentialsFile>(&auth_json_from_base64)
-            } else {
-                serde_json::from_str::<CredentialsFile>(&auth_json)
-            }
-            .map_err(|e| SinkError::BigQuery(e.into()))?;
+        // Try to decode base64 first, if it fails assume it's plain JSON
+        let credentials_file = if let Ok(auth_json_from_base64) =
+            BASE64_STANDARD.decode(auth_json.clone())
+        {
+            // Successfully decoded base64, try to parse as JSON
+            serde_json::from_slice::<CredentialsFile>(&auth_json_from_base64)
+                    .map_err(|e| SinkError::BigQuery(anyhow!("Failed to parse base64-decoded credentials file: {}. Make sure the base64 string contains valid JSON.", e)))?
+        } else {
+            // Not base64, try to parse as plain JSON
+            serde_json::from_str::<CredentialsFile>(&auth_json)
+                    .map_err(|e| SinkError::BigQuery(anyhow!("Failed to parse credentials file JSON: {}. Make sure the credentials are valid JSON or base64-encoded JSON.", e)))?
+        };
 
         StorageWriterClient::new(credentials_file).await
     }
