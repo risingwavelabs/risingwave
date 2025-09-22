@@ -75,7 +75,7 @@ mysql -e "
         (FROM_UNIXTIME(1700000050), 50, 'backfill');
 "
 
-sleep 2
+sleep 2s
 # Verify we have 50 rows in MySQL
 query I
 SELECT COUNT(*) FROM risedev.ts_pk_test;
