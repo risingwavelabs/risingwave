@@ -97,6 +97,11 @@ impl MapType {
         DataType::list(self.into_struct())
     }
 
+    /// Sames as [`Self::into_list`] but returns [`ListType`].
+    pub fn into_list_type(self) -> ListType {
+        ListType::new(self.into_struct())
+    }
+
     /// String and integral types are allowed.
     ///
     /// This is similar to [Protobuf](https://protobuf.dev/programming-guides/proto3/#maps)'s

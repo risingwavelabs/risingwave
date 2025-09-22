@@ -87,7 +87,7 @@ fn list_to_binary_with_type(
     {
         // Reference: Postgres code `src/backend/utils/adt/arrayfuncs.c`
         // https://github.com/postgres/postgres/blob/c1c09007e219ae68d1f8428a54baf68ccc1f8683/src/backend/utils/adt/arrayfuncs.c#L1548
-        let element_ty = ty.as_list_element_type();
+        let element_ty = ty.as_list_elem();
         if matches!(element_ty, DataType::List(_)) {
             bail_not_implemented!(
                 issue = 7949,

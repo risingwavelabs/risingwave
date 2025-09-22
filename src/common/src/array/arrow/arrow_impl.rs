@@ -354,9 +354,9 @@ pub trait ToArrow {
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::List(list) => self.list_type_to_arrow(list.elem())?,
+            DataType::List(list) => self.list_type_to_arrow(list)?,
             DataType::Map(map) => self.map_type_to_arrow(map)?,
-            DataType::Vector(_) => self.list_type_to_arrow(&VECTOR_ITEM_TYPE)?,
+            DataType::Vector(_) => self.vector_type_to_arrow()?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
     }
@@ -451,14 +451,13 @@ pub trait ToArrow {
         arrow_schema::DataType::Int64
     }
 
-    // TODO(list): pass `ListType`
     #[inline]
     fn list_type_to_arrow(
         &self,
-        elem_type: &DataType,
+        list_type: &ListType,
     ) -> Result<arrow_schema::DataType, ArrayError> {
         Ok(arrow_schema::DataType::List(Arc::new(
-            self.to_arrow_field("item", elem_type)?,
+            self.to_arrow_field("item", list_type.elem())?,
         )))
     }
 
@@ -492,6 +491,13 @@ pub trait ToArrow {
             )),
             sorted,
         ))
+    }
+
+    #[inline]
+    fn vector_type_to_arrow(&self) -> Result<arrow_schema::DataType, ArrayError> {
+        Ok(arrow_schema::DataType::List(Arc::new(
+            self.to_arrow_field("item", &VECTOR_ITEM_TYPE)?,
+        )))
     }
 }
 

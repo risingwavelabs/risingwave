@@ -99,10 +99,10 @@ fn array_cat(
             return left.or(right).map(|list| list.to_owned_scalar());
         };
         ListValue::from_datum_iter(
-            ctx.arg_types[0].as_list_element_type(),
+            ctx.arg_types[0].as_list_elem(),
             left.iter().chain(right.iter()),
         )
-    } else if ctx.arg_types[0].as_list_element_type() == &ctx.arg_types[1] {
+    } else if ctx.arg_types[0].as_list_elem() == &ctx.arg_types[1] {
         // array[] || array
         let Some(right) = right else {
             return left.map(|left| left.to_owned_scalar());
@@ -113,7 +113,7 @@ fn array_cat(
                 .flat_map(|list| list.iter())
                 .chain([Some(right.into())]),
         )
-    } else if &ctx.arg_types[0] == ctx.arg_types[1].as_list_element_type() {
+    } else if &ctx.arg_types[0] == ctx.arg_types[1].as_list_elem() {
         // array || array[]
         let Some(left) = left else {
             return right.map(|right| right.to_owned_scalar());
