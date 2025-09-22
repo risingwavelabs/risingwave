@@ -50,6 +50,14 @@ pub enum TimeHandling {
 }
 
 #[derive(Clone, Debug)]
+pub enum BigintUnsignedHandlingMode {
+    /// Convert unsigned bigint to signed bigint (default)
+    Long,
+    /// Use base64-encoded decimal for unsigned bigint (Debezium precise mode)
+    Precise,
+}
+
+#[derive(Clone, Debug)]
 pub enum TimestamptzHandling {
     /// `"2024-04-11T02:00:00.123456Z"`
     UtcString,
@@ -148,6 +156,7 @@ pub struct JsonParseOptions {
     pub boolean_handling: BooleanHandling,
     pub varchar_handling: VarcharHandling,
     pub struct_handling: StructHandling,
+    pub bigint_unsigned_handling: BigintUnsignedHandlingMode,
     pub ignoring_keycase: bool,
     pub handle_toast_columns: bool,
 }
@@ -174,6 +183,7 @@ impl JsonParseOptions {
         },
         varchar_handling: VarcharHandling::Strict,
         struct_handling: StructHandling::Strict,
+        bigint_unsigned_handling: BigintUnsignedHandlingMode::Long, // default to long mode
         ignoring_keycase: true,
         handle_toast_columns: false,
     };
@@ -189,6 +199,7 @@ impl JsonParseOptions {
         boolean_handling: BooleanHandling::Strict,
         varchar_handling: VarcharHandling::OnlyPrimaryTypes,
         struct_handling: StructHandling::AllowJsonString,
+        bigint_unsigned_handling: BigintUnsignedHandlingMode::Long, // default to long mode
         ignoring_keycase: true,
         handle_toast_columns: false,
     };
@@ -197,6 +208,7 @@ impl JsonParseOptions {
         timestamptz_handling: TimestamptzHandling,
         timestamp_handling: TimestampHandling,
         time_handling: TimeHandling,
+        bigint_unsigned_handling: Option<BigintUnsignedHandlingMode>,
         handle_toast_columns: bool,
     ) -> Self {
         Self {
@@ -214,6 +226,8 @@ impl JsonParseOptions {
             },
             varchar_handling: VarcharHandling::Strict,
             struct_handling: StructHandling::Strict,
+            bigint_unsigned_handling: bigint_unsigned_handling
+                .unwrap_or(BigintUnsignedHandlingMode::Long),
             ignoring_keycase: true,
             handle_toast_columns,
         }
@@ -418,25 +432,34 @@ impl JsonParseOptions {
                 match Decimal::from_str(str_val) {
                     Ok(decimal) => decimal.into(),
                     Err(_) => {
-                        // When processing CDC data, if the upstream system has unsigned bigint (e.g., MySQL CDC),
-                        // the best practice is to upcast, i.e., convert unsigned bigint to decimal.
-                        // Only when users configure `debezium.bigint.unsigned.handling.mode='precise'`,
-                        // Debezium will convert unsigned bigint to base64-encoded decimal.
-                        // Reference: https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-property-bigint-unsigned-handling-mode
-                        //
-                        // Therefore, here we check if the string falls into the above case after Decimal::from_str returns an error.
+                        // Only attempt base64 decoding in Precise mode
+                        match self.bigint_unsigned_handling {
+                            BigintUnsignedHandlingMode::Precise => {
+                                // When processing CDC data, if the upstream system has unsigned bigint (e.g., MySQL CDC),
+                                // the best practice is to upcast, i.e., convert unsigned bigint to decimal.
+                                // Only when users configure `debezium.bigint.unsigned.handling.mode='precise'`,
+                                // Debezium will convert unsigned bigint to base64-encoded decimal.
+                                // Reference: https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-property-bigint-unsigned-handling-mode
+                                //
+                                // Therefore, here we check if the string falls into the above case after Decimal::from_str returns an error.
 
-                        // A better approach would be to get bytes + org.apache.kafka.connect.data.Decimal from schema
-                        // instead of string, as described in https://github.com/risingwavelabs/risingwave/issues/16852.
-                        // However, Rust doesn't have a library to parse Kafka Connect metadata, so we'll refactor this
-                        // after implementing that functionality.
-                        let value = base64::engine::general_purpose::STANDARD
-                            .decode(str_val)
-                            .map_err(|_| create_error())?;
-                        let unscaled = num_bigint::BigInt::from_signed_bytes_be(&value);
-                        Decimal::from_str(&unscaled.to_string())
-                            .map_err(|_| create_error())?
-                            .into()
+                                // A better approach would be to get bytes + org.apache.kafka.connect.data.Decimal from schema
+                                // instead of string, as described in https://github.com/risingwavelabs/risingwave/issues/16852.
+                                // However, Rust doesn't have a library to parse Kafka Connect metadata, so we'll refactor this
+                                // after implementing that functionality.
+                                let value = base64::engine::general_purpose::STANDARD
+                                    .decode(str_val)
+                                    .map_err(|_| create_error())?;
+                                let unscaled = num_bigint::BigInt::from_signed_bytes_be(&value);
+                                Decimal::from_str(&unscaled.to_string())
+                                    .map_err(|_| create_error())?
+                                    .into()
+                            }
+                            BigintUnsignedHandlingMode::Long => {
+                                // In Long mode, return the original error directly
+                                return Err(create_error());
+                            }
+                        }
                     }
                 }
             }

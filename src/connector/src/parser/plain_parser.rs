@@ -74,6 +74,7 @@ impl PlainParser {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                None, // bigint_unsigned_handling
                 false,
             )?,
         ));
