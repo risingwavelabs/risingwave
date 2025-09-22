@@ -392,7 +392,7 @@ impl JsonParseOptions {
                     .map_err(|_| create_error())?
                     .into()
             }
-            (DataType::Decimal, ValueType::I64) => {
+            (DataType::Decimal, ValueType::I64 | ValueType::U64) => {
                 let i64_val = value.try_as_i64().map_err(|_| create_error())?;
                 Decimal::from(i64_val).into()
             }
@@ -415,68 +415,30 @@ impl JsonParseOptions {
                     _ => {}
                 }
 
-                // 检查是否是base64编码的decimal数据（debezium precise模式）
-                if str_val.len() > 0
-                    && str_val
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
-                {
-                    // 尝试base64解码
-                    match base64::engine::general_purpose::STANDARD.decode(str_val) {
-                        Ok(decoded_bytes) => {
-                            // 将字节数组转换为BigInt，然后转换为Decimal
-                            if decoded_bytes.len() <= 8 {
-                                // 对于8字节以内的数据，转换为u64
-                                let mut bytes_array = [0u8; 8];
-                                let start_idx = 8 - decoded_bytes.len();
-                                bytes_array[start_idx..].copy_from_slice(&decoded_bytes);
-                                let u64_val = u64::from_be_bytes(bytes_array);
-                                println!("converted to u64: {}", u64_val);
-                                Decimal::from(u64_val).into()
-                            } else {
-                                // 对于更大的数据，使用BigInt
-                                use num_bigint::BigInt;
-                                let big_int =
-                                    BigInt::from_bytes_be(num_bigint::Sign::Plus, &decoded_bytes);
-                                println!("converted to BigInt: {}", big_int);
-                                // 将BigInt转换为Decimal
-                                Decimal::from_str(&big_int.to_string())
-                                    .map_err(|_| create_error())?
-                                    .into()
-                            }
-                        }
-                        Err(_) => {
-                            // 如果不是有效的base64，尝试直接解析为decimal
-                            println!("not valid base64, trying direct decimal parse");
-                            Decimal::from_str(str_val)
-                                .map_err(|_| create_error())?
-                                .into()
-                        }
+                match Decimal::from_str(str_val) {
+                    Ok(decimal) => decimal.into(),
+                    Err(_) => {
+                        // When processing CDC data, if the upstream system has unsigned bigint (e.g., MySQL CDC),
+                        // the best practice is to upcast, i.e., convert unsigned bigint to decimal.
+                        // Only when users configure `debezium.bigint.unsigned.handling.mode='precise'`,
+                        // Debezium will convert unsigned bigint to base64-encoded decimal.
+                        // Reference: https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-property-bigint-unsigned-handling-mode
+                        //
+                        // Therefore, here we check if the string falls into the above case after Decimal::from_str returns an error.
+
+                        // A better approach would be to get bytes + org.apache.kafka.connect.data.Decimal from schema
+                        // instead of string, as described in https://github.com/risingwavelabs/risingwave/issues/16852.
+                        // However, Rust doesn't have a library to parse Kafka Connect metadata, so we'll refactor this
+                        // after implementing that functionality.
+                        let value = base64::engine::general_purpose::STANDARD
+                            .decode(str_val)
+                            .map_err(|_| create_error())?;
+                        let unscaled = num_bigint::BigInt::from_signed_bytes_be(&value);
+                        Decimal::from_str(&unscaled.to_string())
+                            .map_err(|_| create_error())?
+                            .into()
                     }
-                } else {
-                    // 不是base64格式，直接解析为decimal
-                    Decimal::from_str(str_val)
-                        .map_err(|_| create_error())?
-                        .into()
                 }
-            }
-            (DataType::Decimal, ValueType::U64) => {
-                let u64_val = value.try_as_u64().map_err(|_| create_error())?;
-                // 如果 u64 值大于 i64::MAX，说明是溢出值，需要转换为对应的正数
-                let decimal_val = if u64_val > i64::MAX as u64 {
-                    // 这是溢出值，按位转换为 i64 再转回 u64 得到原始值
-                    let wrapped_i64 = u64_val as i64;
-                    let original_u64 = wrapped_i64 as u64;
-                    println!(
-                        "debezium decimal u64 overflow: u64_val={}, wrapped_i64={}, original_u64={}",
-                        u64_val, wrapped_i64, original_u64
-                    );
-                    Decimal::from(original_u64)
-                } else {
-                    println!("debezium decimal u64 normal: {}", u64_val);
-                    Decimal::from(u64_val)
-                };
-                decimal_val.into()
             }
 
             (DataType::Decimal, ValueType::F64) => {
