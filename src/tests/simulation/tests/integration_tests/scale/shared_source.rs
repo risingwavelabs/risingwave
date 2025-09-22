@@ -79,7 +79,7 @@ async fn validate_splits_aligned(cluster: &mut Cluster) -> Result<()> {
     // So we just print the result here, instead of asserting with a fixed value.
     let actor_upstream =
         source_backfill_upstream(&source_backfill_fragment.inner, &source_fragment.inner);
-    tracing::info!(
+    println!(
         "{}",
         actor_upstream
             .iter()
@@ -88,8 +88,10 @@ async fn validate_splits_aligned(cluster: &mut Cluster) -> Result<()> {
                 actor_id, upstream
             )))
     );
+
+    println!("actor ups {:#?}", actor_upstream);
     let actor_splits = cluster.list_source_splits().await?;
-    println!("{:#?}", actor_splits);
+    println!("actor splits {:#?}", actor_splits);
     for (actor, upstream) in actor_upstream {
         assert_eq!(
             actor_splits.get(&actor).unwrap(),
@@ -172,8 +174,8 @@ async fn test_shared_source() -> Result<()> {
         3 8 HASH {SOURCE_SCAN} 3 256"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED CUSTOM 256
-        8 CREATED CUSTOM 256"#]]
+        6 CREATED FIXED(3) 256
+        8 CREATED FIXED(5) 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
     // resolve_no_shuffle for backfill fragment is OK, which will scale the upstream together.
@@ -199,8 +201,8 @@ async fn test_shared_source() -> Result<()> {
         3 8 HASH {SOURCE_SCAN} 7 256"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED CUSTOM 256
-        8 CREATED CUSTOM 256"#]]
+        6 CREATED FIXED(7) 256
+        8 CREATED FIXED(5) 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
     Ok(())
 }
