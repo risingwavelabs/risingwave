@@ -246,6 +246,8 @@ where
     let (fragment_source_ids, source_splits) =
         resolve_source_fragments(txn, source_properties, &fragment_map).await?;
 
+    println!("fragment source id {:#?}", fragment_source_ids);
+
     println!("source splits {:#?}", source_splits);
 
     let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
@@ -356,7 +358,8 @@ where
 
         let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
 
-        let fragment_splits = if let Some(entry_fragment) = entry_fragments.first()
+        let (fragment_splits, shared_source_id) = if let Some(entry_fragment) =
+            entry_fragments.first()
             && let Some(source_id) = fragment_source_ids.get(&entry_fragment.fragment_id)
         {
             println!(
@@ -380,16 +383,17 @@ where
 
             let splits = splits.into_iter().map(|s| (s.id(), s)).collect();
 
-            crate::stream::source_manager::reassign_splits(
+            let fragment_splits = crate::stream::source_manager::reassign_splits(
                 entry_fragment_id as u32,
                 empty_actor_splits,
                 &splits,
                 // pre-allocate splits is the first time getting splits, and it does not have scale-in scene
                 std::default::Default::default(),
             )
-            .unwrap_or_default()
+            .unwrap_or_default();
+            (fragment_splits, Some(*source_id))
         } else {
-            HashMap::new()
+            (HashMap::new(), None)
         };
 
         println!("fragment splits {:#?}", fragment_splits);
@@ -404,6 +408,11 @@ where
                 state_table_ids,
                 ..
             } = fragment_map.remove(fragment_id).unwrap();
+
+            println!(
+                "{fragment_id} type mask {:?}",
+                FragmentTypeMask::from(fragment_type_mask)
+            );
 
             let actor_id_base =
                 id_gen.generate_interval::<{ IdCategory::Actor }>(actors.len() as u64) as u32;
@@ -423,7 +432,9 @@ where
 
                     let actor_id = actor_id_base + actor_idx as u32;
 
-                    let splits = if fragment_source_ids.contains_key(&fragment_id) {
+                    let splits = if let Some(source_id) = fragment_source_ids.get(&fragment_id) {
+                        assert_eq!(shared_source_id, Some(*source_id));
+
                         fragment_splits
                             .get(&(actor_idx as u32))
                             .cloned()
@@ -494,8 +505,18 @@ where
 {
     let mut source_fragment_ids = HashMap::new();
     for (fragment_id, fragment) in fragment_map {
-        if FragmentTypeMask::from(fragment.fragment_type_mask).contains(FragmentTypeFlag::Source)
+        let mask = FragmentTypeMask::from(fragment.fragment_type_mask);
+        if mask.contains(FragmentTypeFlag::Source)
             && let Some(source_id) = fragment.stream_node.to_protobuf().find_stream_source()
+        {
+            source_fragment_ids
+                .entry(source_id)
+                .or_insert_with(BTreeSet::new)
+                .insert(fragment_id);
+        }
+
+        if mask.contains(FragmentTypeFlag::SourceScan)
+            && let Some((source_id, _)) = fragment.stream_node.to_protobuf().find_source_backfill()
         {
             source_fragment_ids
                 .entry(source_id)
