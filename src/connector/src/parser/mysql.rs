@@ -159,10 +159,6 @@ pub fn mysql_datum_to_rw_datum(
             handle_data_type!(mysql_row, mysql_datum_index, column_name, f64)
         }
         DataType::Decimal => {
-            println!(
-                "这里decimal, column_name: {}, mysql_datum_index: {}",
-                column_name, mysql_datum_index
-            );
             handle_data_type!(
                 mysql_row,
                 mysql_datum_index,

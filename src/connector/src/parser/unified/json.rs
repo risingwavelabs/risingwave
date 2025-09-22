@@ -394,12 +394,10 @@ impl JsonParseOptions {
             }
             (DataType::Decimal, ValueType::I64) => {
                 let i64_val = value.try_as_i64().map_err(|_| create_error())?;
-                println!("debezium decimal i64: {}", i64_val);
                 Decimal::from(i64_val).into()
             }
             (DataType::Decimal, ValueType::String) => {
                 let str_val = value.as_str().unwrap();
-                println!("debezium decimal string: {}", str_val);
 
                 // 首先检查特殊字符串
                 match str_val {
@@ -426,7 +424,6 @@ impl JsonParseOptions {
                     // 尝试base64解码
                     match base64::engine::general_purpose::STANDARD.decode(str_val) {
                         Ok(decoded_bytes) => {
-                            println!("base64 decoded bytes: {:?}", decoded_bytes);
                             // 将字节数组转换为BigInt，然后转换为Decimal
                             if decoded_bytes.len() <= 8 {
                                 // 对于8字节以内的数据，转换为u64
