@@ -166,9 +166,7 @@ impl Binder {
             let mut array_args = args
                 .iter()
                 .enumerate()
-                .map(|(i, expr)| {
-                    InputRef::new(i, DataType::List(Box::new(expr.return_type()))).into()
-                })
+                .map(|(i, expr)| InputRef::new(i, DataType::list(expr.return_type())).into())
                 .collect_vec();
             let schema_path = self.bind_schema_path(schema_name.as_deref());
             let scalar_func_expr = if let Ok((func, _)) = self.catalog.get_function_by_name_inputs(
@@ -497,7 +495,7 @@ impl Binder {
         })?;
 
         let inner_ty = match bound_array.return_type() {
-            DataType::List(ty) => *ty,
+            DataType::List(ty) => ty.into_elem(),
             real_type => return Err(ErrorCode::BindError(format!(
                 "The `array` argument for `array_transform` should be an array, but {} were got",
                 real_type
@@ -528,7 +526,7 @@ impl Binder {
         let bound_lambda = self.bind_unary_lambda_function(inner_ty, lambda_arg, *lambda_body)?;
 
         let lambda_ret_type = bound_lambda.return_type();
-        let transform_ret_type = DataType::List(Box::new(lambda_ret_type));
+        let transform_ret_type = DataType::list(lambda_ret_type);
 
         Ok(ExprImpl::FunctionCallWithLambda(Box::new(
             FunctionCallWithLambda::new_unchecked(

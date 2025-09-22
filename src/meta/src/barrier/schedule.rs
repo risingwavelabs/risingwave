@@ -582,8 +582,8 @@ pub(super) enum MarkReadyOptions {
 }
 
 impl ScheduledBarriers {
-    /// Pre buffered drop and cancel command, return true if any.
-    pub(super) fn pre_apply_drop_cancel(&self, database_id: Option<DatabaseId>) -> bool {
+    /// Pre buffered drop and cancel command, return all dropped state tables if any.
+    pub(super) fn pre_apply_drop_cancel(&self, database_id: Option<DatabaseId>) -> Vec<TableId> {
         self.pre_apply_drop_cancel_scheduled(database_id)
     }
 
@@ -719,11 +719,14 @@ impl ScheduledBarriers {
         }
     }
 
-    /// Try to pre apply drop and cancel scheduled command and return them if any.
+    /// Try to pre apply drop and cancel scheduled command and return all dropped state tables if any.
     /// It should only be called in recovery.
-    pub(super) fn pre_apply_drop_cancel_scheduled(&self, database_id: Option<DatabaseId>) -> bool {
+    pub(super) fn pre_apply_drop_cancel_scheduled(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> Vec<TableId> {
         let mut queue = self.inner.queue.lock();
-        let mut applied = false;
+        let mut dropped_tables = vec![];
 
         let mut pre_apply_drop_cancel = |queue: &mut DatabaseScheduledQueue| {
             while let Some(ScheduledQueueItem {
@@ -731,8 +734,11 @@ impl ScheduledBarriers {
             }) = queue.queue.inner.pop_front()
             {
                 match command {
-                    Command::DropStreamingJobs { .. } => {
-                        applied = true;
+                    Command::DropStreamingJobs {
+                        unregistered_state_table_ids,
+                        ..
+                    } => {
+                        dropped_tables.extend(unregistered_state_table_ids);
                     }
                     Command::DropSubscription { .. } => {}
                     _ => {
@@ -758,7 +764,7 @@ impl ScheduledBarriers {
             }
         }
 
-        applied
+        dropped_tables
     }
 }
 
@@ -868,6 +874,13 @@ mod tests {
         }
 
         async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn handle_refresh_finished_table_ids(
+            &self,
+            _refresh_finished_table_ids: Vec<u32>,
+        ) -> MetaResult<()> {
             unimplemented!()
         }
     }

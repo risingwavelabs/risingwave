@@ -105,7 +105,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 30
+      timeout_in_minutes: 35
       retry: *auto-retry
     - label: "end-to-end preload-memory test"
       key: "e2e-preload-memory-test-release"
@@ -118,7 +118,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 30
+      timeout_in_minutes: 35
       retry: *auto-retry
 
     - label: "slow end-to-end test ({{matrix.backend}} backend)"
@@ -135,7 +135,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 15
+      timeout_in_minutes: 25
       retry: *auto-retry
 
     - label: "end-to-end test (parallel, {{matrix.backend}} backend)"

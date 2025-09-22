@@ -208,7 +208,7 @@ impl JsonParseOptions {
         timestamptz_handling: TimestamptzHandling,
         timestamp_handling: TimestampHandling,
         time_handling: TimeHandling,
-        bigint_unsigned_handling: Option<BigintUnsignedHandlingMode>,
+        bigint_unsigned_handling: BigintUnsignedHandlingMode,
         handle_toast_columns: bool,
     ) -> Self {
         Self {
@@ -226,8 +226,7 @@ impl JsonParseOptions {
             },
             varchar_handling: VarcharHandling::Strict,
             struct_handling: StructHandling::Strict,
-            bigint_unsigned_handling: bigint_unsigned_handling
-                .unwrap_or(BigintUnsignedHandlingMode::Long),
+            bigint_unsigned_handling,
             ignoring_keycase: true,
             handle_toast_columns,
         }
@@ -650,7 +649,8 @@ impl JsonParseOptions {
             }
 
             // ---- List -----
-            (DataType::List(item_type), ValueType::Array) => ListValue::new({
+            (DataType::List(list_type), ValueType::Array) => ListValue::new({
+                let item_type = list_type.elem();
                 let array = value.as_array().unwrap();
                 let mut builder = item_type.create_array_builder(array.len());
                 for v in array {

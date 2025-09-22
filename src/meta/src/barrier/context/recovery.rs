@@ -60,6 +60,10 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
+        self.metadata_manager
+            .catalog_controller
+            .reset_refreshing_tables(database_id)
+            .await?;
 
         // unregister cleaned sources.
         self.source_manager
@@ -367,6 +371,10 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
+                    self.metadata_manager
+                        .catalog_controller
+                        .cleanup_dropped_tables()
+                        .await;
 
                     let mut active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
@@ -433,7 +441,14 @@ impl GlobalBarrierWorkerContextImpl {
                             })?
                     };
 
-                    if self.scheduled_barriers.pre_apply_drop_cancel(None) {
+                    let dropped_table_ids = self.scheduled_barriers.pre_apply_drop_cancel(None);
+                    if !dropped_table_ids.is_empty() {
+                        self.metadata_manager
+                            .catalog_controller
+                            .complete_dropped_tables(
+                                dropped_table_ids.into_iter().map(|id| id.table_id as _),
+                            )
+                            .await;
                         info = self.resolve_graph_info(None).await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
@@ -516,7 +531,15 @@ impl GlobalBarrierWorkerContextImpl {
                         .await?;
 
                     // get split assignments for all actors
-                    let source_splits = self.source_manager.list_assignments().await;
+                    let mut source_splits = HashMap::new();
+                    for (_, job) in info.values().flatten() {
+                        for fragment in job.fragment_infos.values() {
+                            for (actor_id, info) in &fragment.actors {
+                                source_splits.insert(*actor_id, info.splits.clone());
+                            }
+                        }
+                    }
+
                     let cdc_table_backfill_actors = self
                         .metadata_manager
                         .catalog_controller
@@ -585,9 +608,13 @@ impl GlobalBarrierWorkerContextImpl {
         tracing::info!(?database_id, "recovered background job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-        let _ = self
+        let dropped_table_ids = self
             .scheduled_barriers
             .pre_apply_drop_cancel(Some(database_id));
+        self.metadata_manager
+            .catalog_controller
+            .complete_dropped_tables(dropped_table_ids.into_iter().map(|id| id.table_id as _))
+            .await;
 
         let mut info = self
             .resolve_graph_info(Some(database_id))
@@ -675,7 +702,12 @@ impl GlobalBarrierWorkerContextImpl {
         })?;
 
         // get split assignments for all actors
-        let source_splits = self.source_manager.list_assignments().await;
+        let mut source_splits = HashMap::new();
+        for fragment in info.values().flatten() {
+            for (actor_id, info) in &fragment.actors {
+                source_splits.insert(*actor_id, info.splits.clone());
+            }
+        }
 
         let cdc_table_backfill_actors = self
             .metadata_manager

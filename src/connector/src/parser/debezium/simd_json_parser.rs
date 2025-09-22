@@ -38,7 +38,7 @@ impl DebeziumJsonAccessBuilder {
         timestamptz_handling: TimestamptzHandling,
         timestamp_handling: TimestampHandling,
         time_handling: TimeHandling,
-        bigint_unsigned_handling: Option<BigintUnsignedHandlingMode>,
+        bigint_unsigned_handling: BigintUnsignedHandlingMode,
         handle_toast_columns: bool,
     ) -> ConnectorResult<Self> {
         Ok(Self {
@@ -101,7 +101,7 @@ impl DebeziumMongoJsonAccessBuilder {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
-                None, // bigint_unsigned_handling
+                BigintUnsignedHandlingMode::Long,
                 false,
             ),
             strong_schema: props.strong_schema,

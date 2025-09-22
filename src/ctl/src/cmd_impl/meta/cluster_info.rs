@@ -44,10 +44,6 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
 
     // build actor_splits_map
     for table_fragment in &table_fragments {
-        if table_fragment.actor_splits.is_empty() {
-            continue;
-        }
-
         for fragment in table_fragment.fragments.values() {
             let fragment_type_mask = fragment.fragment_type_mask;
             if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
@@ -76,11 +72,8 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
         }
     }
 
-    // print in the second iteration. Otherwise we don't have upstream splits info
+    // print in the second iteration. Otherwise, we don't have upstream splits info
     for table_fragment in &table_fragments {
-        if table_fragment.actor_splits.is_empty() {
-            continue;
-        }
         if ignore_id {
             println!("Table");
         } else {

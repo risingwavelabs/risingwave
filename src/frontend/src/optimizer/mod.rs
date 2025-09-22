@@ -265,7 +265,7 @@ impl LogicalPlanRoot {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
-        let return_type = DataType::List(input_column_type.clone().into());
+        let return_type = DataType::list(input_column_type.clone());
         let agg = Agg::new(
             vec![PlanAggCall {
                 agg_type: PbAggKind::ArrayAgg.into(),
