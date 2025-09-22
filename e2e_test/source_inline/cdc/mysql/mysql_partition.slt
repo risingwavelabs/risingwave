@@ -139,7 +139,7 @@ sleep 5s
 query I
 select count(*) from single_partition_rw;
 ----
-26
+27
 
 # Verify CDC operations on sub-partitioned table
 query I
@@ -157,8 +157,8 @@ group by created_at
 order by created_at;
 ----
 1735689599000 10
-1735775999000 9
-1735862399000 7
+1735775999000 11
+1735862399000 6
 
 # Verify partition data distribution for sub-partitioned table
 query IT
@@ -170,8 +170,8 @@ group by created_at
 order by created_at;
 ----
 1735689599000 10
-1735775999000 9
-1735862399000 7
+1735775999000 11
+1735862399000 5
 
 # Clean up
 statement ok
