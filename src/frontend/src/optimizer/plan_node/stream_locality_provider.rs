@@ -193,7 +193,7 @@ impl StreamLocalityProvider {
         catalog_builder.set_dist_key_in_pk(vec![0]);
 
         let num_of_columns = catalog_builder.columns().len();
-        catalog_builder.set_value_indices((1..num_of_columns).collect_vec());
+        catalog_builder.set_value_indices((0..num_of_columns).collect_vec());
 
         catalog_builder
             .build(vec![0], 1)
