@@ -172,7 +172,7 @@ pub trait TopNCacheTrait {
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     /// `data_types` -- Data types for the full row.
-    /// `min_capacity` -- Minimum capacity for the high cache. When not provided, defaults to TOPN_CACHE_MIN_CAPACITY.
+    /// `min_capacity` -- Minimum capacity for the high cache. When not provided, defaults to `TOPN_CACHE_MIN_CAPACITY`.
     pub fn new(offset: usize, limit: usize, data_types: Vec<DataType>) -> Self {
         Self::with_min_capacity(offset, limit, data_types, TOPN_CACHE_MIN_CAPACITY)
     }
