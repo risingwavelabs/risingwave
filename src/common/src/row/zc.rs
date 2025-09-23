@@ -138,7 +138,7 @@ impl Row for ZcRow {
     }
 }
 
-fn row_encode_to<R: Row>(row: R, buf: &mut OwnedBuf, todo: &mut Vec<Datum>) -> Ref<[ZcDatum]> {
+fn zc_encode_to<R: Row>(row: R, buf: &mut OwnedBuf, todo: &mut Vec<Datum>) -> Ref<[ZcDatum]> {
     let len = row.len();
     let mut zcs = Vec::with_capacity(len);
 
@@ -155,10 +155,10 @@ fn row_encode_to<R: Row>(row: R, buf: &mut OwnedBuf, todo: &mut Vec<Datum>) -> R
 
 #[easy_ext::ext(RowZcEncodeExt)]
 impl<R: Row> R {
-    pub fn encode(&self) -> ZcRow {
+    pub fn zc_encode(&self) -> ZcRow {
         let mut buf = OwnedBuf::new();
         let mut todo = Vec::new(); // TODO: reserve first
-        let zc = row_encode_to(self, &mut buf, &mut todo);
+        let zc = zc_encode_to(self, &mut buf, &mut todo);
 
         ZcRow {
             data: Box::new(ZcRowData {
