@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use educe::Educe;
+//! A row type that is more compact and has better locality, while still being able to borrow
+//! `DatumRef` from it with no allocation (zero-copy).
+
 use musli_zerocopy::buf::Load;
 use musli_zerocopy::{Buf, OwnedBuf, Ref, ZeroCopy};
+use static_assertions::const_assert_eq;
 
 use crate::row::{OwnedRow, Row};
 use crate::types::{Datum, DatumRef, ScalarRefImpl, ToOwnedDatum as _};
 
+/// The zero-copy representation of `Datum`.
+// TODO(zc): variants that are commented out are not supported yet.
 #[derive(Debug, Copy, Clone, ZeroCopy)]
 #[repr(u8)]
 enum ZcDatum {
@@ -44,11 +49,21 @@ enum ZcDatum {
     // Map(crate::types::MapRef<'scalar>),
     // Vector(crate::types::VectorRef<'scalar>),
     Bytea(Ref<[u8]>),
+
+    /// For unsupported variants, we place the original [`Datum`] separately in an [`OwnedRow`]
+    /// aside, and store its index here.
     Todo(usize),
 }
 
+// Demonstrate that each datum is 16 bytes.
+const_assert_eq!(std::mem::size_of::<ZcDatum>(), 16);
+
 impl ScalarRefImpl<'_> {
-    fn encode_to(self, buf: &mut OwnedBuf, todo: &mut Vec<Datum>) -> ZcDatum {
+    /// Convert this `ScalarRefImpl` into `ZcDatum` by storing necessary data.
+    ///
+    /// - If it cannot be inlined, some data will be stored to `buf`.
+    /// - If it's not supported yet, the owned datum will be stored to `todo`.
+    fn store_to(self, buf: &mut OwnedBuf, todo: &mut Vec<Datum>) -> ZcDatum {
         match self {
             ScalarRefImpl::Int16(v) => ZcDatum::Int16(v),
             ScalarRefImpl::Int32(v) => ZcDatum::Int32(v),
@@ -68,6 +83,10 @@ impl ScalarRefImpl<'_> {
 }
 
 impl ZcDatum {
+    /// Convert this `ZcDatum` into `DatumRef` by loading necessary data.
+    ///
+    /// - If it's inlined, we load the data from `buf`.
+    /// - If it's not supported yet, we directly load the datum from `todo`.
     fn load<'a>(self, buf: &'a Buf, todo: &'a impl Row) -> DatumRef<'a> {
         let scalar = match self {
             ZcDatum::Null => return None,
@@ -86,35 +105,49 @@ impl ZcDatum {
     }
 }
 
-#[derive(Educe, Clone)]
-#[educe(Debug)]
+/// The stored data for [`ZcRow`].
+#[derive(Clone)]
 struct ZcRowData {
-    #[educe(Debug(ignore))]
+    /// The data for supported datums.
     buf: OwnedBuf,
-    remaining: OwnedRow,
+    /// The datums that are not supported to be zero-copy.
+    todo: OwnedRow,
 }
 
 impl PartialEq for ZcRowData {
     fn eq(&self, other: &Self) -> bool {
-        self.buf.as_slice() == other.buf.as_slice() && self.remaining == other.remaining
+        self.buf.as_slice() == other.buf.as_slice() && self.todo == other.todo
     }
 }
 impl Eq for ZcRowData {}
 
+impl std::fmt::Debug for ZcRowData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ZcRowData")
+            .field("buf", &self.buf.as_slice())
+            .field("todo", &self.todo)
+            .finish()
+    }
+}
+
+/// A row type that is more compact and has better locality, while still being able to borrow
+/// `DatumRef` from it with no allocation (zero-copy).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ZcRow {
     data: Box<ZcRowData>,
+    /// The root metadata.
     zc: Ref<[ZcDatum]>,
 }
 
 impl ZcRow {
+    /// Load all `ZcDatum`s.
     fn zc_datums(&self) -> &[ZcDatum] {
         self.zc.load(&self.data.buf).unwrap()
     }
 
-    /// Load `ZcDatum` into `DatumRef`.
+    /// Convert the given `ZcDatum` into `DatumRef` by loading necessary data from `data`.
     fn load_datum(&self, datum: ZcDatum) -> DatumRef<'_> {
-        datum.load(&self.data.buf, &self.data.remaining)
+        datum.load(&self.data.buf, &self.data.todo)
     }
 }
 
@@ -138,13 +171,15 @@ impl Row for ZcRow {
     }
 }
 
-fn zc_encode_to<R: Row>(row: R, buf: &mut OwnedBuf, todo: &mut Vec<Datum>) -> Ref<[ZcDatum]> {
+/// Store the given row into `buf` and `todo` by storing each datum, and return the root metadata
+/// for all datums.
+fn row_store_to<R: Row>(row: R, buf: &mut OwnedBuf, todo: &mut Vec<Datum>) -> Ref<[ZcDatum]> {
     let len = row.len();
     let mut zcs = Vec::with_capacity(len);
 
     for datum in row.iter() {
         let zc = match datum {
-            Some(scalar) => scalar.encode_to(buf, todo),
+            Some(scalar) => scalar.store_to(buf, todo),
             None => ZcDatum::Null,
         };
         zcs.push(zc);
@@ -155,15 +190,16 @@ fn zc_encode_to<R: Row>(row: R, buf: &mut OwnedBuf, todo: &mut Vec<Datum>) -> Re
 
 #[easy_ext::ext(RowZcEncodeExt)]
 impl<R: Row> R {
+    /// Convert the given row into a [`ZcRow`].
     pub fn zc_encode(&self) -> ZcRow {
         let mut buf = OwnedBuf::new();
         let mut todo = Vec::new(); // TODO: reserve first
-        let zc = zc_encode_to(self, &mut buf, &mut todo);
+        let zc = row_store_to(self, &mut buf, &mut todo);
 
         ZcRow {
             data: Box::new(ZcRowData {
                 buf,
-                remaining: OwnedRow::new(todo),
+                todo: OwnedRow::new(todo),
             }),
             zc,
         }
