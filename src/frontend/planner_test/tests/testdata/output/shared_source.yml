@@ -23,9 +23,10 @@
       └─StreamUnion { all: true }
         ├─StreamExchange [no_shuffle] { dist: SomeShard }
         │ └─StreamSource { source: s, columns: [x, y, _row_id] }
-        └─StreamExchange { dist: HashShard(_row_id) }
-          └─StreamDml { columns: [x, y, _row_id] }
-            └─StreamSource
+        ├─StreamExchange { dist: HashShard(_row_id) }
+        │ └─StreamDml { columns: [x, y, _row_id] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
   with_config_map:
     streaming_use_shared_source: 'true'
 - before:

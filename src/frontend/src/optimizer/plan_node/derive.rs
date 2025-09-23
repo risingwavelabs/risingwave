@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema, USER_COLUMN_ID_OFFSET};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-use super::PlanRef;
+use super::StreamPlanRef;
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::property::Order;
@@ -78,7 +78,7 @@ pub(crate) fn derive_columns(
 
 /// Derive the pk and the stream key for tables and sinks.
 pub(crate) fn derive_pk(
-    input: PlanRef,
+    input: StreamPlanRef,
     user_order_by: Order,
     columns: &[ColumnCatalog],
 ) -> (Vec<ColumnOrder>, Vec<usize>) {
@@ -108,12 +108,19 @@ pub(crate) fn derive_pk(
     let mut pk = vec![];
 
     let func_dep = input.functional_dependency();
-    let user_order_by =
-        func_dep.minimize_order_key(user_order_by, input.distribution().dist_column_indices());
+    let user_order_by = func_dep.minimize_order_key(
+        user_order_by,
+        // The plan could be `SomeShard` in some cases. Ignore the requirement on distribution key
+        // when minimizing the order key.
+        input
+            .distribution()
+            .dist_column_indices_opt()
+            .unwrap_or(&[]),
+    );
 
     for order in &user_order_by.column_orders {
         let idx = order.column_index;
-        pk.push(order.clone());
+        pk.push(*order);
         in_order.insert(idx);
     }
 

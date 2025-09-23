@@ -16,10 +16,9 @@ use std::rc::Rc;
 
 use risingwave_connector::source::ConnectorProperties;
 
-use super::{DefaultBehavior, Merge};
-use crate::PlanRef;
+use super::{BatchPlanVisitor, DefaultBehavior, Merge};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::{BatchSource, LogicalSource, StreamSource};
+use crate::optimizer::plan_node::{BatchPlanRef as PlanRef, BatchSource};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
@@ -49,7 +48,7 @@ impl DistributedDmlVisitor {
     }
 }
 
-impl PlanVisitor for DistributedDmlVisitor {
+impl BatchPlanVisitor for DistributedDmlVisitor {
     type Result = bool;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
@@ -60,22 +59,6 @@ impl PlanVisitor for DistributedDmlVisitor {
 
     fn visit_batch_source(&mut self, batch_source: &BatchSource) -> bool {
         if let Some(source_catalog) = &batch_source.core.catalog {
-            Self::is_iceberg_source(source_catalog)
-        } else {
-            false
-        }
-    }
-
-    fn visit_logical_source(&mut self, logical_source: &LogicalSource) -> bool {
-        if let Some(source_catalog) = &logical_source.core.catalog {
-            Self::is_iceberg_source(source_catalog)
-        } else {
-            false
-        }
-    }
-
-    fn visit_stream_source(&mut self, stream_source: &StreamSource) -> bool {
-        if let Some(source_catalog) = &stream_source.core.catalog {
             Self::is_iceberg_source(source_catalog)
         } else {
             false

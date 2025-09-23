@@ -33,6 +33,7 @@ use risingwave_frontend::handler::{
     drop_table, explain, variable,
 };
 use risingwave_frontend::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
+use risingwave_frontend::optimizer::plan_node::ConventionMarker;
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{LocalFrontend, create_proto_file, get_explain_output};
 use risingwave_frontend::{
@@ -437,7 +438,7 @@ impl TestCase {
                     source_watermarks,
                     append_only,
                     on_conflict,
-                    with_version_column,
+                    with_version_columns,
                     cdc_table_info,
                     include_column_options,
                     wildcard_idx,
@@ -458,7 +459,10 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         on_conflict,
-                        with_version_column.map(|x| x.real_value()),
+                        with_version_columns
+                            .iter()
+                            .map(|x| x.real_value())
+                            .collect(),
                         cdc_table_info,
                         include_column_options,
                         webhook_info,
@@ -482,6 +486,7 @@ impl TestCase {
                 Statement::CreateIndex {
                     name,
                     table_name,
+                    method,
                     columns,
                     include,
                     distributed_by,
@@ -494,6 +499,7 @@ impl TestCase {
                         if_not_exists,
                         name,
                         table_name,
+                        method,
                         columns,
                         include,
                         distributed_by,
@@ -895,7 +901,7 @@ impl TestCase {
     }
 }
 
-fn explain_plan(plan: &PlanRef) -> String {
+fn explain_plan(plan: &PlanRef<impl ConventionMarker>) -> String {
     plan.explain_to_string()
 }
 

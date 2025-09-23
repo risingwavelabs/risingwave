@@ -19,9 +19,9 @@ use risingwave_common::types::Interval;
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchHopWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
-    gen_filter_and_pushdown, generic,
+    BatchHopWindow, BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow,
+    StreamPlanRef, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::expr::{ExprType, FunctionCall, InputRef};
@@ -39,7 +39,7 @@ pub struct LogicalHopWindow {
 }
 
 impl LogicalHopWindow {
-    /// Hop windows will add `windows_start` and `windows_end` columns at the end.
+    /// Hop windows will add `window_start` and `window_end` columns at the end.
     /// Take care to modify the code referring it if above rule changes.
     pub const ADDITION_COLUMN_LEN: usize = 2;
 
@@ -144,7 +144,7 @@ impl LogicalHopWindow {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalHopWindow {
+impl PlanTreeNodeUnary<Logical> for LogicalHopWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -209,7 +209,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalHopWindow}
+impl_plan_tree_node_for_unary! { Logical, LogicalHopWindow}
 impl_distill_by_unit!(LogicalHopWindow, core, "LogicalHopWindow");
 
 impl ColPrunable for LogicalHopWindow {
@@ -273,7 +273,7 @@ impl ColPrunable for LogicalHopWindow {
     }
 }
 
-impl ExprRewritable for LogicalHopWindow {}
+impl ExprRewritable<Logical> for LogicalHopWindow {}
 
 impl ExprVisitable for LogicalHopWindow {}
 
@@ -302,24 +302,35 @@ impl PredicatePushdown for LogicalHopWindow {
 }
 
 impl ToBatch for LogicalHopWindow {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        let (window_start_exprs, window_end_exprs) =
-            new_logical.derive_window_start_and_end_exprs()?;
-        Ok(BatchHopWindow::new(new_logical, window_start_exprs, window_end_exprs).into())
+        let window = self.core.clone_with_input(new_input);
+        let (window_start_exprs, window_end_exprs) = window.derive_window_start_and_end_exprs()?;
+        Ok(BatchHopWindow::new(window, window_start_exprs, window_end_exprs).into())
     }
 }
 
 impl ToStream for LogicalHopWindow {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         let new_input = self.input().to_stream(ctx)?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        let (window_start_exprs, window_end_exprs) =
-            new_logical.derive_window_start_and_end_exprs()?;
-        Ok(StreamHopWindow::new(new_logical, window_start_exprs, window_end_exprs).into())
+        let window = self.core.clone_with_input(new_input);
+        let (window_start_exprs, window_end_exprs) = window.derive_window_start_and_end_exprs()?;
+        Ok(StreamHopWindow::new(window, window_start_exprs, window_end_exprs).into())
+    }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+
+        // Map output columns to input columns using the o2i mapping
+        let input_columns = columns
+            .iter()
+            .map(|&col| self.o2i_col_mapping().try_map(col))
+            .collect::<Option<Vec<usize>>>()?;
+
+        let new_input = self.input().try_better_locality(&input_columns)?;
+        Some(self.clone_with_input(new_input).into())
     }
 
     fn logical_rewrite_for_stream(

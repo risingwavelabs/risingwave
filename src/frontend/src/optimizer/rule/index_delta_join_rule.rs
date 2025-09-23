@@ -16,13 +16,13 @@ use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use crate::optimizer::plan_node::{Stream, StreamPlanRef as PlanRef, *};
+use crate::optimizer::rule::{BoxedRule, Rule};
 
 /// Use index scan and delta joins for supported queries.
 pub struct IndexDeltaJoinRule {}
 
-impl Rule for IndexDeltaJoinRule {
+impl Rule<Stream> for IndexDeltaJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_stream_hash_join()?;
         if join.eq_join_predicate().has_non_eq() || join.join_type() != JoinType::Inner {
@@ -54,7 +54,14 @@ impl Rule for IndexDeltaJoinRule {
             table_scan: &StreamTableScan,
             stream_scan_type: StreamScanType,
         ) -> Option<PlanRef> {
-            for index in &table_scan.core().indexes {
+            if table_scan.core().cross_database()
+                && stream_scan_type == StreamScanType::UpstreamOnly
+            {
+                // We currently do not support cross database index scan in upstream only mode.
+                return None;
+            }
+
+            for index in &table_scan.core().table_indexes {
                 // Only full covering index can be used in delta join
                 if !index.full_covering() {
                     continue;
@@ -92,7 +99,6 @@ impl Rule for IndexDeltaJoinRule {
                 return Some(
                     table_scan
                         .to_index_scan(
-                            index.index_table.name.as_str(),
                             index.index_table.clone(),
                             p2s_mapping,
                             index.function_mapping(),
@@ -109,7 +115,7 @@ impl Rule for IndexDeltaJoinRule {
             {
                 // Check join key is prefix of primary table order key
                 let primary_table_order_key_prefix = primary_table
-                    .table_desc
+                    .table_catalog
                     .pk
                     .iter()
                     .map(|x| x.column_index)
@@ -161,7 +167,7 @@ impl Rule for IndexDeltaJoinRule {
 }
 
 impl IndexDeltaJoinRule {
-    pub fn create() -> BoxedRule {
+    pub fn create() -> BoxedRule<Stream> {
         Box::new(Self {})
     }
 }

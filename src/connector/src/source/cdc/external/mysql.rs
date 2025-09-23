@@ -17,14 +17,14 @@ use std::collections::HashMap;
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
 use futures::stream::BoxStream;
-use futures::{StreamExt, pin_mut};
+use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, F32, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -32,15 +32,16 @@ use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;
 
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName, SslMode, mysql_row_to_owned_row,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName, SslMode, mysql_row_to_owned_row,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -88,7 +89,8 @@ impl MySqlExternalTable {
             .port(config.port.parse::<u16>().unwrap())
             .database(&config.database)
             .ssl_mode(match config.ssl_mode {
-                SslMode::Disabled | SslMode::Preferred => sqlx::mysql::MySqlSslMode::Disabled,
+                SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
+                SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
                 SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
                 _ => {
                     return Err(anyhow!("unsupported SSL mode").into());
@@ -101,13 +103,11 @@ impl MySqlExternalTable {
         // discover system version first
         let system_info = schema_discovery.discover_system().await?;
         schema_discovery.query = SchemaQueryBuilder::new(system_info.clone());
-
         let schema = Alias::new(config.database.as_str()).into_iden();
         let table = Alias::new(config.table.as_str()).into_iden();
         let columns = schema_discovery
             .discover_columns(schema, table, &system_info)
             .await?;
-
         let mut column_descs = vec![];
         let mut pk_names = vec![];
         for col in columns {
@@ -146,7 +146,6 @@ impl MySqlExternalTable {
         if pk_names.is_empty() {
             return Err(anyhow!("MySQL table doesn't define the primary key").into());
         }
-
         Ok(Self {
             column_descs,
             pk_names,
@@ -378,6 +377,24 @@ impl ExternalTableReader for MySqlExternalTableReader {
     async fn disconnect(self) -> ConnectorResult<()> {
         self.pool.disconnect().await.map_err(|e| e.into())
     }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        // TODO(zw): feat: impl
+        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+    }
+
+    fn split_snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _left: OwnedRow,
+        _right: OwnedRow,
+        _split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        todo!("implement MySQL CDC parallelized backfill")
+    }
 }
 
 impl MySqlExternalTableReader {
@@ -501,6 +518,14 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
+                            DataType::Timestamptz => {
+                                // Convert timestamptz to NaiveDateTime for MySQL TIMESTAMP comparison
+                                // MySQL expects NaiveDateTime for TIMESTAMP parameters
+                                let ts = value.into_timestamptz();
+                                let datetime_utc = ts.to_datetime_utc();
+                                let naive_datetime = datetime_utc.naive_utc();
+                                Value::from(naive_datetime)
+                            }
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
                         ConnectorResult::Ok((pk.to_lowercase(), val))

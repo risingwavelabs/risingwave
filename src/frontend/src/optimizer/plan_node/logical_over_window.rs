@@ -23,9 +23,10 @@ use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamEowcSort,
-    StreamOverWindow, ToBatch, ToStream, gen_filter_and_pushdown,
+    BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    StreamEowcOverWindow, StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -37,7 +38,7 @@ use crate::optimizer::plan_node::logical_agg::LogicalAggBuilder;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition, IndexSet};
 
 struct LogicalOverWindowBuilder<'a> {
@@ -494,7 +495,7 @@ impl LogicalOverWindow {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalOverWindow {
+impl PlanTreeNodeUnary<Logical> for LogicalOverWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -525,7 +526,7 @@ impl PlanTreeNodeUnary for LogicalOverWindow {
     }
 }
 
-impl_plan_tree_node_for_unary! { LogicalOverWindow }
+impl_plan_tree_node_for_unary! { Logical, LogicalOverWindow }
 impl_distill_by_unit!(LogicalOverWindow, core, "LogicalOverWindow");
 
 impl ColPrunable for LogicalOverWindow {
@@ -587,7 +588,7 @@ impl ColPrunable for LogicalOverWindow {
     }
 }
 
-impl ExprRewritable for LogicalOverWindow {}
+impl ExprRewritable<Logical> for LogicalOverWindow {}
 
 impl ExprVisitable for LogicalOverWindow {}
 
@@ -624,7 +625,7 @@ macro_rules! empty_partition_by_not_implemented {
 }
 
 impl ToBatch for LogicalOverWindow {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         assert!(
             self.core.funcs_have_same_partition_and_order(),
             "must apply OverWindowSplitRule before generating physical plan"
@@ -642,16 +643,16 @@ impl ToBatch for LogicalOverWindow {
         }
 
         let input = self.input().to_batch()?;
-        let new_logical = OverWindow {
-            input,
-            ..self.core.clone()
-        };
-        Ok(BatchOverWindow::new(new_logical).into())
+        let core = self.core.clone_with_input(input);
+        Ok(BatchOverWindow::new(core).into())
     }
 }
 
 impl ToStream for LogicalOverWindow {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         use super::stream::prelude::*;
 
         assert!(
@@ -659,7 +660,22 @@ impl ToStream for LogicalOverWindow {
             "must apply OverWindowSplitRule before generating physical plan"
         );
 
-        let stream_input = self.core.input.to_stream(ctx)?;
+        let partition_key_indices = self.window_functions()[0]
+            .partition_by
+            .iter()
+            .map(|e| e.index())
+            .collect_vec();
+        // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
+        // empty PARTITION BY by simply removing the following check.
+        if partition_key_indices.is_empty() {
+            empty_partition_by_not_implemented!();
+        }
+        let input = self
+            .core
+            .input
+            .try_better_locality(&partition_key_indices)
+            .unwrap_or_else(|| self.core.input.clone());
+        let stream_input = input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
             // Emit-On-Window-Close case
@@ -683,22 +699,12 @@ impl ToStream for LogicalOverWindow {
             }
             let order_key_index = order_by[0].column_index;
 
-            let partition_key_indices = self.window_functions()[0]
-                .partition_by
-                .iter()
-                .map(|e| e.index())
-                .collect_vec();
-            if partition_key_indices.is_empty() {
-                empty_partition_by_not_implemented!();
-            }
-
             let sort_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
-                    .enforce_if_not_satisfies(stream_input, &Order::any())?;
+                    .streaming_enforce_if_not_satisfies(stream_input)?;
             let sort = StreamEowcSort::new(sort_input, order_key_index);
 
-            let mut core = self.core.clone();
-            core.input = sort.into();
+            let core = self.core.clone_with_input(sort.into());
             Ok(StreamEowcOverWindow::new(core).into())
         } else {
             // General (Emit-On-Update) case
@@ -714,23 +720,12 @@ impl ToStream for LogicalOverWindow {
                 );
             }
 
-            // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
-            // empty PARTITION BY by simply removing the following check.
-            let partition_key_indices = self.window_functions()[0]
-                .partition_by
-                .iter()
-                .map(|e| e.index())
-                .collect_vec();
-            if partition_key_indices.is_empty() {
-                empty_partition_by_not_implemented!();
-            }
-
             let new_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
-                    .enforce_if_not_satisfies(stream_input, &Order::any())?;
-            let mut core = self.core.clone();
-            core.input = new_input;
-            Ok(StreamOverWindow::new(core).into())
+                    .streaming_enforce_if_not_satisfies(stream_input)?;
+            let core = self.core.clone_with_input(new_input);
+
+            Ok(StreamOverWindow::new(core)?.into())
         }
     }
 

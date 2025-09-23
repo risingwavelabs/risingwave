@@ -25,7 +25,8 @@ use super::stream::prelude::*;
 use super::stream_join_common::StreamJoinCommon;
 use super::utils::{Distill, childless_record, plan_node_name, watermark_pretty};
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode, generic,
+    ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
+    StreamPlanRef as PlanRef, generic,
 };
 use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprVisitor, InequalityInputPair};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -68,14 +69,10 @@ pub struct StreamHashJoin {
 }
 
 impl StreamHashJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Result<Self> {
         let ctx = core.ctx();
 
-        // Inner join won't change the append-only behavior of the stream. The rest might.
-        let append_only = match core.join_type {
-            JoinType::Inner => core.left.append_only() && core.right.append_only(),
-            _ => false,
-        };
+        let stream_kind = core.stream_kind()?;
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),
@@ -210,22 +207,22 @@ impl StreamHashJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            stream_kind,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
             eq_join_predicate,
             inequality_pairs,
-            is_append_only: append_only,
+            is_append_only: stream_kind.is_append_only(),
             clean_left_state_conjunction_idx,
             clean_right_state_conjunction_idx,
             join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
-        }
+        })
     }
 
     /// Get join type
@@ -240,7 +237,7 @@ impl StreamHashJoin {
 
     /// Convert this hash join to a delta join plan
     pub fn into_delta_join(self) -> StreamDeltaJoin {
-        StreamDeltaJoin::new(self.core, self.eq_join_predicate)
+        StreamDeltaJoin::new(self.core, self.eq_join_predicate).unwrap()
     }
 
     pub fn derive_dist_key_in_join_key(&self) -> Vec<usize> {
@@ -311,7 +308,7 @@ impl Distill for StreamHashJoin {
     }
 }
 
-impl PlanTreeNodeBinary for StreamHashJoin {
+impl PlanTreeNodeBinary<Stream> for StreamHashJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -324,11 +321,11 @@ impl PlanTreeNodeBinary for StreamHashJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone())
+        Self::new(core, self.eq_join_predicate.clone()).unwrap()
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamHashJoin }
+impl_plan_tree_node_for_binary! { Stream, StreamHashJoin }
 
 impl StreamNode for StreamHashJoin {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -341,13 +338,13 @@ impl StreamNode for StreamHashJoin {
 
         let (left_table, left_degree_table, left_deduped_input_pk_indices) =
             Join::infer_internal_and_degree_table_catalog(
-                self.left().plan_base(),
+                self.left(),
                 left_jk_indices,
                 dk_indices_in_jk.clone(),
             );
         let (right_table, right_degree_table, right_deduped_input_pk_indices) =
             Join::infer_internal_and_degree_table_catalog(
-                self.right().plan_base(),
+                self.right(),
                 right_jk_indices,
                 dk_indices_in_jk,
             );
@@ -422,7 +419,7 @@ impl StreamNode for StreamHashJoin {
     }
 }
 
-impl ExprRewritable for StreamHashJoin {
+impl ExprRewritable<Stream> for StreamHashJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -430,7 +427,9 @@ impl ExprRewritable for StreamHashJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+        Self::new(core, self.eq_join_predicate.rewrite_exprs(r))
+            .unwrap()
+            .into()
     }
 }
 

@@ -426,7 +426,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     }
                     GroupDeltaCommon::GroupConstruct(_)
                     | GroupDeltaCommon::GroupDestroy(_)
-                    | GroupDeltaCommon::GroupMerge(_) => {}
+                    | GroupDeltaCommon::GroupMerge(_)
+                    | GroupDeltaCommon::TruncateTables(_) => {}
                 }
             }
 
@@ -628,8 +629,35 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     GroupDeltaCommon::GroupDestroy(_) => {
                         self.levels.remove(compaction_group_id);
                     }
+
+                    GroupDeltaCommon::TruncateTables(table_ids) => {
+                        // iterate all levels and truncate the specified tables with the given table ids
+                        let levels =
+                            self.levels.get_mut(compaction_group_id).unwrap_or_else(|| {
+                                panic!("compaction group {} does not exist", compaction_group_id)
+                            });
+
+                        for sub_level in &mut levels.l0.sub_levels {
+                            sub_level.table_infos.iter_mut().for_each(|sstable_info| {
+                                let mut inner = sstable_info.get_inner();
+                                inner.table_ids.retain(|id| !table_ids.contains(id));
+                                sstable_info.set_inner(inner);
+                            });
+                        }
+
+                        for level in &mut levels.levels {
+                            level.table_infos.iter_mut().for_each(|sstable_info| {
+                                let mut inner = sstable_info.get_inner();
+                                inner.table_ids.retain(|id| !table_ids.contains(id));
+                                sstable_info.set_inner(inner);
+                            });
+                        }
+
+                        levels.compaction_group_version_id += 1;
+                    }
                 }
             }
+
             if is_applied_l0_compact && let Some(levels) = self.levels.get_mut(compaction_group_id)
             {
                 levels.post_apply_l0_compact();
@@ -982,6 +1010,7 @@ where
         match HummockObjectId::Sstable(0.into()) {
             HummockObjectId::Sstable(_) => {}
             HummockObjectId::VectorFile(_) => {}
+            HummockObjectId::HnswGraphFile(_) => {}
         };
         self.get_sst_infos(exclude_change_log)
             .map(|s| HummockObjectId::Sstable(s.object_id()))
@@ -1465,6 +1494,7 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64
     match HummockObjectId::Sstable(0.into()) {
         HummockObjectId::Sstable(_) => {}
         HummockObjectId::VectorFile(_) => {}
+        HummockObjectId::HnswGraphFile(_) => {}
     };
     version
         .levels

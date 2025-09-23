@@ -41,20 +41,22 @@ use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
 use super::{
-    ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject, StreamSyncLogStore, generic,
+    ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanRef as PlanRef, StreamProject,
+    StreamSyncLogStore, generic,
 };
 use crate::TableCatalog;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::WithOptionsSecResolved;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
+const CREATE_TABLE_IF_NOT_EXISTS: &str = "create_table_if_not_exists";
 
 /// ## Why we need `PartitionComputeInfo`?
 ///
@@ -172,11 +174,16 @@ pub struct StreamSink {
 impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc, log_store_type: SinkLogStoreType) -> Self {
-        let base = input
-            .plan_base()
-            .into_stream()
-            .expect("input should be stream plan")
-            .clone_with_new_plan_id();
+        let base = input.plan_base().clone_with_new_plan_id();
+
+        if let SinkType::AppendOnly = sink_desc.sink_type {
+            let kind = input.stream_kind();
+            assert_matches!(
+                kind,
+                StreamKind::AppendOnly,
+                "{kind} stream cannot be used as input of append-only sink",
+            );
+        }
 
         Self {
             base,
@@ -249,8 +256,10 @@ impl StreamSink {
 
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
+        let derived_pk = pk.iter().map(|k| k.column_index).collect_vec();
+
         let mut downstream_pk = {
-            let from_properties =
+            let downstream_pk =
                 Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
             if let Some(t) = &target_table {
                 let user_defined_primary_key_table = t.row_id_index.is_none();
@@ -282,10 +291,27 @@ impl StreamSink {
                         })
                         .try_collect::<_, _, RwError>()?
                 }
+            } else if properties.get(CREATE_TABLE_IF_NOT_EXISTS) == Some(&"true".to_owned())
+                && sink_type == SinkType::Upsert
+                && downstream_pk.is_empty()
+            {
+                derived_pk.clone()
             } else {
-                from_properties
+                downstream_pk
             }
         };
+
+        // The "upsert" property is defined based on a specific stream key: columns other than the stream key
+        // might not be valid. We should reject the cases referencing such columns in primary key.
+        if let StreamKind::Upsert = input.stream_kind()
+            && !downstream_pk.iter().all(|i| derived_pk.contains(i))
+        {
+            bail_bind_error!(
+                "When sinking from an upsert stream, \
+                 the downstream primary key must be the same as or a subset of the one derived from the stream."
+            )
+        }
+
         if let Some(upstream_table) = &auto_refresh_schema_from_table
             && !downstream_pk.is_empty()
         {
@@ -326,7 +352,7 @@ impl StreamSink {
                     Some(s) if s == ICEBERG_SINK => {
                         // If user doesn't specify the downstream primary key, we use the stream key as the pk.
                         if sink_type.is_upsert() && downstream_pk.is_empty() {
-                            downstream_pk = pk.iter().map(|k| k.column_index).collect_vec();
+                            downstream_pk = derived_pk;
                         }
                         let (required_dist, new_input, partition_col_idx) =
                             Self::derive_iceberg_sink_distribution(
@@ -357,7 +383,15 @@ impl StreamSink {
                 }
             }
         };
-        let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
+        let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
+        let input = if input.ctx().session_ctx().config().streaming_separate_sink()
+            && input.as_stream_exchange().is_none()
+        {
+            StreamExchange::new_no_shuffle(input).into()
+        } else {
+            input
+        };
+
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let create_type = if input.ctx().session_ctx().config().background_ddl()
             && plan_can_use_background_ddl(&input)
@@ -627,7 +661,7 @@ impl StreamSink {
     }
 }
 
-impl PlanTreeNodeUnary for StreamSink {
+impl PlanTreeNodeUnary<Stream> for StreamSink {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -638,7 +672,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamSink }
+impl_plan_tree_node_for_unary! { Stream, StreamSink }
 
 impl Distill for StreamSink {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -687,7 +721,7 @@ impl StreamNode for StreamSink {
     }
 }
 
-impl ExprRewritable for StreamSink {}
+impl ExprRewritable<Stream> for StreamSink {}
 
 impl ExprVisitable for StreamSink {}
 

@@ -94,7 +94,7 @@ impl FunctionAttr {
             }
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
                 // infer as the element type of "anyarray" argument
-                return Ok(quote! { |args| Ok(args[#i].as_list_element_type().clone()) });
+                return Ok(quote! { |args| Ok(args[#i].as_list_elem().clone()) });
             }
         } else if self.ret == "anyarray" {
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
@@ -103,7 +103,7 @@ impl FunctionAttr {
             }
             if let Some(i) = self.args.iter().position(|t| t == "any") {
                 // infer as the array type of "any" argument
-                return Ok(quote! { |args| Ok(DataType::List(Box::new(args[#i].clone()))) });
+                return Ok(quote! { |args| Ok(DataType::list(args[#i].clone())) });
             }
         } else if self.ret == "struct" {
             if let Some(i) = self.args.iter().position(|t| t == "struct") {
@@ -113,12 +113,6 @@ impl FunctionAttr {
         } else if self.ret == "anymap" {
             if let Some(i) = self.args.iter().position(|t| t == "anymap") {
                 // infer as the type of "anymap" argument
-                return Ok(quote! { |args| Ok(args[#i].clone()) });
-            }
-        } else if self.ret == "vector" {
-            if let Some(i) = self.args.iter().position(|t| t == "vector") {
-                // infer as the type of "vector" argument
-                // Example usage: `last_value(*) -> auto`
                 return Ok(quote! { |args| Ok(args[#i].clone()) });
             }
         } else {
@@ -509,7 +503,7 @@ impl FunctionAttr {
             match self.args.len() {
                 0 => quote! {
                     let c = #ret_array_type::from_iter_bitmap(
-                        std::iter::repeat_with(|| #fn_name()).take(input.capacity())
+                        std::iter::repeat_with(|| #fn_name()).take(input.capacity()),
                         Bitmap::ones(input.capacity()),
                     );
                     Arc::new(c.into())
@@ -1327,7 +1321,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
 fn data_type(ty: &str) -> TokenStream2 {
     if let Some(ty) = ty.strip_suffix("[]") {
         let inner_type = data_type(ty);
-        return quote! { DataType::List(Box::new(#inner_type)) };
+        return quote! { DataType::list(#inner_type) };
     }
     if ty.starts_with("struct<") {
         return quote! { DataType::Struct(#ty.parse().expect("invalid struct type")) };

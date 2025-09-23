@@ -665,6 +665,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         self.flush_data(barrier.epoch).await?;
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+
+                    // We don't include the time post yielding barrier because the vnode update
+                    // is a one-off and rare operation.
+                    barrier_join_match_duration_ns
+                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of both sides if asked.
@@ -689,9 +694,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     ] {
                         join_cached_entry_count.set(ht.entry_count() as i64);
                     }
-
-                    barrier_join_match_duration_ns
-                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                 }
             }
             start_time = Instant::now();
@@ -1423,7 +1425,7 @@ mod tests {
                 .collect(),
         };
         let schema_len = schema.len();
-        let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
+        let info = ExecutorInfo::for_test(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T, MemoryEncoding>::new(
             ActorContext::for_test(123),
@@ -1512,7 +1514,7 @@ mod tests {
                 .collect(),
         };
         let schema_len = schema.len();
-        let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
+        let info = ExecutorInfo::for_test(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T, MemoryEncoding>::new(
             ActorContext::for_test(123),

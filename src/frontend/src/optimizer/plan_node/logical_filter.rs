@@ -20,8 +20,8 @@ use risingwave_common::types::DataType;
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject, PlanBase,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::error::Result;
 use crate::expr::{
@@ -89,7 +89,7 @@ impl LogicalFilter {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalFilter {
+impl PlanTreeNodeUnary<Logical> for LogicalFilter {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -108,7 +108,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalFilter}
+impl_plan_tree_node_for_unary! { Logical, LogicalFilter}
 impl_distill_by_unit!(LogicalFilter, core, "LogicalFilter");
 
 impl ColPrunable for LogicalFilter {
@@ -149,7 +149,7 @@ impl ColPrunable for LogicalFilter {
     }
 }
 
-impl ExprRewritable for LogicalFilter {
+impl ExprRewritable<Logical> for LogicalFilter {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -183,16 +183,18 @@ impl PredicatePushdown for LogicalFilter {
 }
 
 impl ToBatch for LogicalFilter {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        Ok(BatchFilter::new(new_logical).into())
+        let core = self.core.clone_with_input(new_input);
+        Ok(BatchFilter::new(core).into())
     }
 }
 
 impl ToStream for LogicalFilter {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         let new_input = self.input().to_stream(ctx)?;
 
         let predicate = self.predicate();
@@ -203,9 +205,8 @@ impl ToStream for LogicalFilter {
                 no `now()`, and `now_expr` is a non-decreasing expression contains `now()`."
             );
         }
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        Ok(StreamFilter::new(new_logical).into())
+        let core = self.core.clone_with_input(new_input);
+        Ok(StreamFilter::new(core).into())
     }
 
     fn logical_rewrite_for_stream(
@@ -215,6 +216,12 @@ impl ToStream for LogicalFilter {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((filter.into(), out_col_change))
+    }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        self.input()
+            .try_better_locality(columns)
+            .map(|better_input| self.clone_with_input(better_input).into())
     }
 }
 

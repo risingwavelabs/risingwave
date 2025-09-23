@@ -19,7 +19,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use risingwave_common::catalog::DatabaseId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
@@ -30,8 +30,8 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot,
-    RecoveryReason, Scheduled,
+    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot,
+    DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::{MetaSrvEnv, MetadataManager};
@@ -63,6 +63,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         job: TrackingJob,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
+    fn finish_cdc_table_backfill(
+        &self,
+        job_id: TableId,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
     async fn new_control_stream(
         &self,
         node: &WorkerNode,
@@ -75,6 +80,16 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         &self,
         database_id: DatabaseId,
     ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>>;
+
+    fn handle_load_finished_source_ids(
+        &self,
+        load_finished_source_ids: Vec<u32>,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
+    fn handle_refresh_finished_table_ids(
+        &self,
+        refresh_finished_table_ids: Vec<u32>,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {
@@ -91,6 +106,9 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
     scale_controller: ScaleControllerRef,
 
     pub(super) env: MetaSrvEnv,
+
+    /// Barrier scheduler for scheduling load finish commands
+    barrier_scheduler: BarrierScheduler,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -102,6 +120,7 @@ impl GlobalBarrierWorkerContextImpl {
         source_manager: SourceManagerRef,
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
+        barrier_scheduler: BarrierScheduler,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -111,6 +130,7 @@ impl GlobalBarrierWorkerContextImpl {
             source_manager,
             scale_controller,
             env,
+            barrier_scheduler,
         }
     }
 

@@ -536,16 +536,15 @@
         └─StreamExchange { dist: HashShard(seller) }
           └─StreamProject { exprs: [seller, price, date_time, id] }
             └─StreamGroupTopN [append_only] { order: [price ASC], limit: 1, offset: 0, group_key: [id, seller] }
-              └─StreamExchange { dist: HashShard(id, seller) }
-                └─StreamProject { exprs: [id, seller, price, date_time, _row_id, _row_id] }
-                  └─StreamFilter { predicate: (date_time >= date_time) AND (date_time <= expires) }
-                    └─StreamHashJoin [append_only] { type: Inner, predicate: id = auction, output: all }
-                      ├─StreamExchange { dist: HashShard(id) }
-                      │ └─StreamRowIdGen { row_id_index: 13 }
-                      │   └─StreamSourceScan { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
-                      └─StreamExchange { dist: HashShard(auction) }
-                        └─StreamRowIdGen { row_id_index: 10 }
-                          └─StreamSourceScan { columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
+              └─StreamProject { exprs: [id, seller, price, date_time, _row_id, _row_id] }
+                └─StreamFilter { predicate: (date_time >= date_time) AND (date_time <= expires) }
+                  └─StreamHashJoin [append_only] { type: Inner, predicate: id = auction, output: all }
+                    ├─StreamExchange { dist: HashShard(id) }
+                    │ └─StreamRowIdGen { row_id_index: 13 }
+                    │   └─StreamSourceScan { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
+                    └─StreamExchange { dist: HashShard(auction) }
+                      └─StreamRowIdGen { row_id_index: 10 }
+                        └─StreamSourceScan { columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [seller, avg, id(hidden)], stream_key: [id, seller], pk_columns: [id, seller], pk_conflict: NoCheck }
@@ -557,28 +556,25 @@
     Fragment 1
     StreamProject { exprs: [seller, price, date_time, id] }
     └── StreamGroupTopN [append_only] { order: [price ASC], limit: 1, offset: 0, group_key: [id, seller] } { tables: [ AppendOnlyGroupTopN: 1 ] }
-        └── StreamExchange Hash([0, 1]) from 2
+        └── StreamProject { exprs: [id, seller, price, date_time, _row_id, _row_id] }
+            └── StreamFilter { predicate: (date_time >= date_time) AND (date_time <= expires) }
+                └── StreamHashJoin [append_only] { type: Inner, predicate: id = auction, output: all } { tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ] }
+                    ├── StreamExchange Hash([0]) from 2
+                    └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    StreamProject { exprs: [id, seller, price, date_time, _row_id, _row_id] }
-    └── StreamFilter { predicate: (date_time >= date_time) AND (date_time <= expires) }
-        └── StreamHashJoin [append_only] { type: Inner, predicate: id = auction, output: all } { tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ] }
-            ├── StreamExchange Hash([0]) from 3
-            └── StreamExchange Hash([0]) from 4
-
-    Fragment 3
     StreamRowIdGen { row_id_index: 13 }
     └── StreamSourceScan { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] } { tables: [ SourceBackfill: 6 ] }
         └── Upstream
 
-    Fragment 4
+    Fragment 3
     StreamRowIdGen { row_id_index: 10 }
     └── StreamSourceScan { columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] } { tables: [ SourceBackfill: 7 ] }
         └── Upstream
 
     Table 0 { columns: [ seller, price, date_time, id, sum, count, _rw_timestamp ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ id, seller, price, date_time, _row_id, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 1 { columns: [ id, seller, price, date_time, _row_id, _row_id_0, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
     Table 2
     ├── columns: [ id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, _rw_timestamp ]
@@ -1496,7 +1492,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: NoCheck }
     └─StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, group_key: [bidder, auction] }
-      └─StreamExchange { dist: HashShard(bidder, auction) }
+      └─StreamExchange { dist: HashShard(auction, bidder) }
         └─StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
           └─StreamRowIdGen { row_id_index: 10 }
             └─StreamSourceScan { columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
@@ -1504,7 +1500,7 @@
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: NoCheck }
     └── StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, group_key: [bidder, auction] } { tables: [ AppendOnlyGroupTopN: 0 ] }
-        └── StreamExchange Hash([1, 0]) from 1
+        └── StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
     StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
@@ -1517,7 +1513,7 @@
     ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $0 ASC, $5 DESC, $7 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
-    ├── distribution key: [ 1, 0 ]
+    ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
     Table 1 { columns: [ partition_id, backfill_progress, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
@@ -1526,7 +1522,7 @@
     ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
-    ├── distribution key: [ 1, 0 ]
+    ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
 - id: nexmark_q18_rank
@@ -1553,7 +1549,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction, _row_id], pk_columns: [bidder, auction, _row_id], pk_conflict: NoCheck }
     └─StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] }
-      └─StreamExchange { dist: HashShard(bidder, auction) }
+      └─StreamExchange { dist: HashShard(auction, bidder) }
         └─StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
           └─StreamRowIdGen { row_id_index: 10 }
             └─StreamSourceScan { columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
@@ -1561,7 +1557,7 @@
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction, _row_id], pk_columns: [bidder, auction, _row_id], pk_conflict: NoCheck }
     └── StreamGroupTopN [append_only] { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] } { tables: [ AppendOnlyGroupTopN: 0 ] }
-        └── StreamExchange Hash([1, 0]) from 1
+        └── StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
     StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
@@ -1573,7 +1569,7 @@
     ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $0 ASC, $5 DESC, $7 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
-    ├── distribution key: [ 1, 0 ]
+    ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
     Table 1 { columns: [ partition_id, backfill_progress, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
@@ -1582,7 +1578,7 @@
     ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id, _rw_timestamp ]
     ├── primary key: [ $1 ASC, $0 ASC, $7 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
-    ├── distribution key: [ 1, 0 ]
+    ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 3
 
 - id: nexmark_q19
@@ -1943,7 +1939,7 @@
       │             └─StreamSourceScan { columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(auction))) as $expr1] }
-          └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(auction)), count] }
+          └─StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count(auction)), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [sum0(count), count(auction)] }
                 └─StreamHashAgg [append_only] { group_key: [auction], aggs: [count] }
@@ -1982,7 +1978,7 @@
 
     Fragment 4
     StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(auction))) as $expr1] }
-    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(auction)), count] } { tables: [ SimpleAggState: 9 ] }
+    └── StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count)), sum0(count(auction)), count] } { tables: [ SimpleAggState: 9 ] }
         └── StreamExchange Single from 5
 
     Fragment 5

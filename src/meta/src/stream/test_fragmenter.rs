@@ -275,7 +275,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let simple_agg_node = StreamNode {
         node_body: Some(NodeBody::SimpleAgg(Box::new(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             intermediate_state_table: Some(make_empty_table(1)),
@@ -318,7 +317,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let simple_agg_node_1 = StreamNode {
         node_body: Some(NodeBody::SimpleAgg(Box::new(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             intermediate_state_table: Some(make_empty_table(2)),
@@ -369,6 +367,8 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table_id: TableId::placeholder().table_id(),
             table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
+            staging_table: None,
+            refresh_progress_table: None,
         }))),
         fields: vec![], // TODO: fill this later
         operator_id: 7,

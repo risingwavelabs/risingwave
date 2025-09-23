@@ -307,7 +307,7 @@ impl FrontendEnv {
                 internal_rpc_host_addr: internal_rpc_host_addr.to_string(),
                 ..Default::default()
             },
-            &config.meta,
+            Arc::new(config.meta.clone()),
         )
         .await;
 
@@ -1203,7 +1203,7 @@ impl SessionImpl {
 
         self.check_privileges(&[ObjectCheckItem::new(
             secret.owner(),
-            AclMode::Create,
+            AclMode::Usage,
             secret.name.clone(),
             Object::SecretId(secret.id.secret_id()),
         )])?;

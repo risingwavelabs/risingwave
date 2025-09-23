@@ -2,11 +2,13 @@ extend = [
     { path = "src/risedevtool/grafana.toml" },
     { path = "src/risedevtool/prometheus.toml" },
     { path = "src/risedevtool/minio.toml" },
+    { path = "src/risedevtool/lakekeeper.toml" },
     { path = "src/risedevtool/tempo.toml" },
     { path = "src/risedevtool/gcloud-pubsub.toml" },
     { path = "src/risedevtool/redis.toml" },
     { path = "src/risedevtool/connector.toml" },
     { path = "src/risedevtool/risedev-components.toml" },
+    { path = "src/risedevtool/moat.toml" },
     { path = "src/sqlparser/sqlparser_test.toml" },
     { path = "src/frontend/planner_test/planner_test.toml" },
     { path = "src/tests/compaction_test/Makefile.toml" },
@@ -519,9 +521,11 @@ dependencies = [
     "download-tempo",
     "download-mcli",
     "download-minio",
+    "download-lakekeeper",
     "download-prometheus",
     "download-pubsub",
     "download-redis",
+    "download-moat"
 ]
 
 [tasks.create-user-profiles-file]
@@ -1333,7 +1337,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.28.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.28.4", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]

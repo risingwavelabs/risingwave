@@ -206,9 +206,31 @@ pub struct StorageConfig {
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_max_file_count_per_partition")]
     pub iceberg_compaction_max_file_count_per_partition: u32,
-
     #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
+
+    /// The ratio of iceberg compaction max parallelism to the number of CPU cores
+    #[serde(default = "default::storage::iceberg_compaction_task_parallelism_ratio")]
+    pub iceberg_compaction_task_parallelism_ratio: f32,
+    /// Whether to enable heuristic output parallelism in iceberg compaction.
+    #[serde(default = "default::storage::iceberg_compaction_enable_heuristic_output_parallelism")]
+    pub iceberg_compaction_enable_heuristic_output_parallelism: bool,
+    /// Maximum number of concurrent file close operations
+    #[serde(default = "default::storage::iceberg_compaction_max_concurrent_closes")]
+    pub iceberg_compaction_max_concurrent_closes: usize,
+    /// Whether to enable dynamic size estimation for iceberg compaction.
+    #[serde(default = "default::storage::iceberg_compaction_enable_dynamic_size_estimation")]
+    pub iceberg_compaction_enable_dynamic_size_estimation: bool,
+    /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
+    #[serde(default = "default::storage::iceberg_compaction_size_estimation_smoothing_factor")]
+    pub iceberg_compaction_size_estimation_smoothing_factor: f64,
+    // For Small File Compaction
+    /// The threshold for small file compaction in MB.
+    #[serde(default = "default::storage::iceberg_compaction_small_file_threshold_mb")]
+    pub iceberg_compaction_small_file_threshold_mb: u32,
+    /// The maximum total size of tasks in small file compaction in MB.
+    #[serde(default = "default::storage::iceberg_compaction_max_task_total_size_mb")]
+    pub iceberg_compaction_max_task_total_size_mb: u32,
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
@@ -314,6 +336,10 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::threshold")]
     pub threshold: f64,
 
+    /// Recent filter layer shards.
+    #[serde(default = "default::cache_refill::recent_filter_shards")]
+    pub recent_filter_shards: usize,
+
     /// Recent filter layer count.
     #[serde(default = "default::cache_refill::recent_filter_layers")]
     pub recent_filter_layers: usize,
@@ -321,6 +347,12 @@ pub struct CacheRefillConfig {
     /// Recent filter layer rotate interval.
     #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
     pub recent_filter_rotate_interval_ms: usize,
+
+    /// Skip check recent filter on data refill.
+    ///
+    /// This option is suitable for a single compute node or debugging.
+    #[serde(default = "default::cache_refill::skip_recent_filter")]
+    pub skip_recent_filter: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -368,6 +400,20 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::fifo_probation_ratio")]
     pub fifo_probation_ratio: f64,
+
+    /// Set the blob index size for each blob.
+    ///
+    /// A larger blob index size can hold more blob entries, but it will also increase the io size of each blob part
+    /// write.
+    ///
+    /// NOTE:
+    ///
+    /// - The size will be aligned up to a multiplier of 4K.
+    /// - Modifying this configuration will invalidate all existing file cache data.
+    ///
+    /// Default: 16 `KiB`
+    #[serde(default = "default::file_cache::blob_index_size_kb")]
+    pub blob_index_size_kb: usize,
 
     /// Recover mode.
     ///
@@ -845,7 +891,13 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            3.0000
+            match std::env::var("RW_COMPACTOR_MODE")
+                .unwrap_or_default()
+                .as_str()
+            {
+                mode if mode.contains("iceberg") => 12.0000,
+                _ => 3.0000,
+            }
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -993,6 +1045,34 @@ pub mod default {
         pub fn iceberg_compaction_max_file_count_per_partition() -> u32 {
             32
         }
+
+        pub fn iceberg_compaction_task_parallelism_ratio() -> f32 {
+            4.0
+        }
+
+        pub fn iceberg_compaction_enable_heuristic_output_parallelism() -> bool {
+            false
+        }
+
+        pub fn iceberg_compaction_max_concurrent_closes() -> usize {
+            8
+        }
+
+        pub fn iceberg_compaction_enable_dynamic_size_estimation() -> bool {
+            true
+        }
+
+        pub fn iceberg_compaction_size_estimation_smoothing_factor() -> f64 {
+            0.3
+        }
+
+        pub fn iceberg_compaction_small_file_threshold_mb() -> u32 {
+            32
+        }
+
+        pub fn iceberg_compaction_max_task_total_size_mb() -> u32 {
+            50 * 1024 // 50GB
+        }
     }
 
     pub mod file_cache {
@@ -1044,6 +1124,10 @@ pub mod default {
             0.1
         }
 
+        pub fn blob_index_size_kb() -> usize {
+            16
+        }
+
         pub fn recover_mode() -> RecoverMode {
             RecoverMode::Quiet
         }
@@ -1085,12 +1169,20 @@ pub mod default {
             0.5
         }
 
+        pub fn recent_filter_shards() -> usize {
+            16
+        }
+
         pub fn recent_filter_layers() -> usize {
             6
         }
 
         pub fn recent_filter_rotate_interval_ms() -> usize {
             10000
+        }
+
+        pub fn skip_recent_filter() -> bool {
+            false
         }
     }
 

@@ -98,8 +98,8 @@ pub fn infer_some_all(
 ) -> Result<DataType> {
     let element_type = if inputs[1].is_untyped() {
         None
-    } else if let DataType::List(datatype) = inputs[1].return_type() {
-        Some(*datatype)
+    } else if let DataType::List(list) = inputs[1].return_type() {
+        Some(list.into_elem())
     } else {
         return Err(ErrorCode::BindError(
             "op SOME/ANY/ALL (array) requires array on right side".to_owned(),
@@ -135,7 +135,7 @@ pub fn infer_some_all(
                 ErrorCode::BindError("array/struct on left are not supported yet".into()).into(),
             );
         };
-        inputs[1].cast_implicit_mut(&DataType::List(Box::new(t.clone())))?;
+        inputs[1].cast_implicit_mut(&DataType::list(t.clone()))?;
     }
 
     let inputs_owned = std::mem::take(inputs);
@@ -150,7 +150,7 @@ pub fn infer_some_all(
 }
 
 macro_rules! ensure_arity {
-    ($func:literal, $lower:literal <= | $inputs:ident | <= $upper:literal) => {
+    ($func:expr, $lower:literal <= | $inputs:ident | <= $upper:literal) => {
         if !($lower <= $inputs.len() && $inputs.len() <= $upper) {
             return Err(ErrorCode::BindError(format!(
                 "Function `{}` takes {} to {} arguments ({} given)",
@@ -162,7 +162,7 @@ macro_rules! ensure_arity {
             .into());
         }
     };
-    ($func:literal, $lower:literal <= | $inputs:ident |) => {
+    ($func:expr, $lower:literal <= | $inputs:ident |) => {
         if !($lower <= $inputs.len()) {
             return Err(ErrorCode::BindError(format!(
                 "Function `{}` takes at least {} arguments ({} given)",
@@ -173,7 +173,7 @@ macro_rules! ensure_arity {
             .into());
         }
     };
-    ($func:literal, | $inputs:ident | == $num:literal) => {
+    ($func:expr, | $inputs:ident | == $num:literal) => {
         if !($inputs.len() == $num) {
             return Err(ErrorCode::BindError(format!(
                 "Function `{}` takes {} arguments ({} given)",
@@ -184,7 +184,7 @@ macro_rules! ensure_arity {
             .into());
         }
     };
-    ($func:literal, | $inputs:ident | <= $upper:literal) => {
+    ($func:expr, | $inputs:ident | <= $upper:literal) => {
         if !($inputs.len() <= $upper) {
             return Err(ErrorCode::BindError(format!(
                 "Function `{}` takes at most {} arguments ({} given)",
@@ -466,7 +466,7 @@ fn infer_type_for_special(
                 | (t @ Some(DataType::List(_)), None) => {
                     // when neither type is available, default to `varchar[]`
                     // when one side is unknown and other side is list, use that list type
-                    let t = t.unwrap_or_else(|| DataType::List(DataType::Varchar.into()));
+                    let t = t.unwrap_or_else(|| DataType::Varchar.list());
                     for input in &mut *inputs {
                         input.cast_implicit_mut(&t)?;
                     }
@@ -562,7 +562,7 @@ fn infer_type_for_special(
             ensure_arity!("array_positions", | inputs | == 2);
             let common_type = align_array_and_element(0, &[1], inputs);
             match common_type {
-                Ok(_) => Ok(Some(DataType::List(Box::new(DataType::Int32)))),
+                Ok(_) => Ok(Some(DataType::Int32.list())),
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot get position of {} in {}",
                     inputs[1].return_type(),
@@ -575,7 +575,9 @@ fn infer_type_for_special(
             ensure_arity!("array_dims", | inputs | == 1);
             inputs[0].ensure_array_type()?;
 
-            if let DataType::List(box DataType::List(_)) = inputs[0].return_type() {
+            if let DataType::List(list) = inputs[0].return_type()
+                && let DataType::List(_) = list.elem()
+            {
                 return Err(ErrorCode::BindError(
                     "array_dims for dimensions greater than 1 not supported".into(),
                 )
@@ -594,8 +596,8 @@ fn infer_type_for_special(
                 }
                 (Some(DataType::List(left)), Some(DataType::List(right))) => {
                     // cannot directly cast, find unnest type and judge if they are same type
-                    let left = left.unnest_list();
-                    let right = right.unnest_list();
+                    let left = left.elem().unnest_list();
+                    let right = right.elem().unnest_list();
                     if left.equals_datatype(right) {
                         Ok(Some(DataType::Boolean))
                     } else {
@@ -625,8 +627,21 @@ fn infer_type_for_special(
                 .into()),
             }
         }
-        ExprType::MapCat => {
+        ExprType::MapContains => {
             ensure_arity!("map_contains", | inputs | == 2);
+            let map_type = inputs[0].try_into_map_type()?;
+            match inputs[1].cast_implicit_mut(map_type.key()) {
+                Ok(()) => Ok(Some(DataType::Boolean)),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot check if {} exists in {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        ExprType::MapCat => {
+            ensure_arity!("map_cat", | inputs | == 2);
             Ok(Some(align_types(inputs.iter_mut())?))
         }
         ExprType::MapInsert => {
@@ -659,39 +674,82 @@ fn infer_type_for_special(
                 .into()),
             }
         }
-        ExprType::L2Distance => {
-            ensure_arity!("l2_distance", | inputs | == 2);
-            let (known_idx, unknown_idx) = match (inputs[0].is_untyped(), inputs[1].is_untyped()) {
-                (true, true) => return Err(ErrorCode::BindError(
-                    "function l2_distance(unknown, unknown) is not unique; you might need to add explicit type casts".to_owned()
-                ).into()),
-                (false, false) => match (inputs[0].return_type(), inputs[1].return_type()) {
-                    (DataType::Vector(l), DataType::Vector(r)) => return match l == r {
-                        true => Ok(Some(DataType::Float64)),
-                        false => Err(ErrorCode::BindError(format!("different vector dimensions {l} and {r}")).into()),
-                    },
-                    _ => return Err(ErrorCode::BindError(format!(
-                        "function l2_distance({}, {}) does not exist",
-                        inputs[0].return_type(),
-                        inputs[1].return_type()
+        ExprType::L2Distance
+        | ExprType::CosineDistance
+        | ExprType::L1Distance
+        | ExprType::InnerProduct
+        | ExprType::Add
+        | ExprType::Subtract
+        | ExprType::Multiply => {
+            let Some(vec_arg_first) = inputs
+                .iter()
+                .find(|e| !e.is_untyped() && matches!(e.return_type(), DataType::Vector(_)))
+            else {
+                // no vector type, use general rules later
+                return Ok(None);
+            };
+            ensure_arity!(func_type.as_str_name().to_ascii_lowercase(), | inputs | == 2);
+            let vec_type = vec_arg_first.return_type();
+            if inputs[0].is_untyped() {
+                inputs[0].cast_implicit_mut(&vec_type)?;
+            }
+            if inputs[1].is_untyped() {
+                inputs[1].cast_implicit_mut(&vec_type)?;
+            }
+            let ret = match func_type {
+                ExprType::L2Distance
+                | ExprType::CosineDistance
+                | ExprType::L1Distance
+                | ExprType::InnerProduct => DataType::Float64,
+                ExprType::Add | ExprType::Subtract | ExprType::Multiply => vec_type,
+                _ => unreachable!(),
+            };
+            match (inputs[0].return_type(), inputs[1].return_type()) {
+                (DataType::Vector(l), DataType::Vector(r)) => match l == r {
+                    true => Ok(Some(ret)),
+                    false => Err(ErrorCode::BindError(format!(
+                        "different vector dimensions {l} and {r}"
                     ))
                     .into()),
                 },
-                (true, false) => (1, 0),
-                (false, true) => (0, 1),
-            };
-            // infer the unknown side as same size of the known side
-            let t = inputs[known_idx].return_type();
-            if !matches!(t, DataType::Vector(_)) {
-                return Err(ErrorCode::BindError(format!(
-                    "function l2_distance({}, {}) does not exist",
-                    inputs[0].return_type(),
-                    inputs[1].return_type()
-                ))
-                .into());
+                _ => Ok(None), // would be rejected by general rules later
             }
-            inputs[unknown_idx].cast_implicit_mut(&t)?;
-            Ok(Some(DataType::Float64))
+        }
+        ExprType::VecConcat => {
+            use risingwave_common::types::ScalarImpl;
+            ensure_arity!("vec_concat", | inputs | == 2);
+            for input in inputs.iter_mut() {
+                if !input.is_untyped() {
+                    continue;
+                }
+                let ExprImpl::Literal(lit) = input else {
+                    // use general rules, which would reject with proper error message
+                    return Ok(None);
+                };
+                let Some(ScalarImpl::Utf8(lit)) = lit.get_data() else {
+                    // use general rules, which would reject with proper error message
+                    return Ok(None);
+                };
+                let guessed = lit.matches(',').count() + 1;
+                input.cast_explicit_mut(&DataType::Vector(guessed))?;
+            }
+            if let (DataType::Vector(l), DataType::Vector(r)) =
+                (inputs[0].return_type(), inputs[1].return_type())
+            {
+                let s = l
+                    .checked_add(r)
+                    .and_then(|s| (s <= DataType::VEC_MAX_SIZE).then_some(s))
+                    .ok_or_else(|| {
+                        ErrorCode::BindError(format!(
+                            "vector cannot have more than {} dimensions: {l} + {r}",
+                            DataType::VEC_MAX_SIZE
+                        ))
+                    })?;
+                Ok(Some(DataType::Vector(s)))
+            } else {
+                // use general rules, which would reject with proper error message
+                Ok(None)
+            }
         }
         // internal use only
         ExprType::Vnode => Ok(Some(VirtualNode::RW_TYPE)),

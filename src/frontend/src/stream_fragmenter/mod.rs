@@ -28,6 +28,7 @@ use educe::Educe;
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     BackfillOrder, DispatchStrategy, DispatcherType, ExchangeNode, NoOpNode,
@@ -38,9 +39,8 @@ use risingwave_pb::stream_plan::{
 use self::rewrite::build_delta_join_without_arrange;
 use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::reorganize_elements_id;
+use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, reorganize_elements_id};
 use crate::stream_fragmenter::parallelism::derive_parallelism;
 
 /// The mutable state when building fragment graph.
@@ -118,7 +118,7 @@ impl BuildFragmentGraphState {
 
             // Take input's properties.
             stream_key: input.stream_key.clone(),
-            append_only: input.append_only,
+            stream_kind: input.stream_kind,
             fields: input.fields.clone(),
 
             input: vec![input],
@@ -352,8 +352,7 @@ fn build_fragment(
                 if let Some(source) = node.source_inner.as_ref()
                     && let Some(source_info) = source.info.as_ref()
                     && ((source_info.is_shared() && !source_info.is_distributed)
-                        || source.with_properties.is_new_fs_connector()
-                        || source.with_properties.is_iceberg_connector())
+                        || source.with_properties.requires_singleton())
                 {
                     current_fragment.requires_singleton = true;
                 }
@@ -409,12 +408,21 @@ fn build_fragment(
                 current_fragment.upstream_table_ids.push(node.table_id);
             }
 
-            NodeBody::StreamCdcScan(_) => {
-                current_fragment
-                    .fragment_type_mask
-                    .add(FragmentTypeFlag::StreamScan);
-                // the backfill algorithm is not parallel safe
-                current_fragment.requires_singleton = true;
+            NodeBody::StreamCdcScan(node) => {
+                if let Some(o) = node.options
+                    && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
+                {
+                    // Use parallel CDC backfill.
+                    current_fragment
+                        .fragment_type_mask
+                        .add(FragmentTypeFlag::StreamCdcScan);
+                } else {
+                    current_fragment
+                        .fragment_type_mask
+                        .add(FragmentTypeFlag::StreamScan);
+                    // the backfill algorithm is not parallel safe
+                    current_fragment.requires_singleton = true;
+                }
                 state.has_source_backfill = true;
             }
 
@@ -460,6 +468,18 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::FsFetch);
+            }
+
+            NodeBody::VectorIndexWrite(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::VectorIndexWrite);
+            }
+
+            NodeBody::UpstreamSinkUnion(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::UpstreamSinkUnion);
             }
 
             _ => {}
@@ -545,7 +565,7 @@ fn build_fragment(
 
                                     // Take reference's properties.
                                     stream_key: ref_fragment_node.stream_key.clone(),
-                                    append_only: ref_fragment_node.append_only,
+                                    stream_kind: ref_fragment_node.stream_kind,
                                     fields: ref_fragment_node.fields.clone(),
                                 });
 

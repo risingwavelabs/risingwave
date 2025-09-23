@@ -93,10 +93,12 @@ where
         }
     };
 
+    // Note: although we support empty(zero-field) struct and we allow `0` occurrences here, users
+    // still need to leave a whitespace between `<` and `>` to prevent it from being tokenized as `Neq`.
     delimited(
         Token::Lt,
         cut_err(separated(
-            1..,
+            0..,
             trace(
                 "struct_field",
                 seq! {
@@ -244,7 +246,7 @@ fn non_keyword_datatype<S: TokenStream>(input: &mut StatefulStream<S>) -> ModalR
         "regclass" => Ok(DataType::Regclass),
         "regproc" => Ok(DataType::Regproc),
         "map" => cut_err(map_type_arguments).parse_next(input),
-        "vector" => precision_in_range(1..=16000)
+        "vector" => precision_in_range(..)
             .map(DataType::Vector)
             .parse_next(input),
         _ => Ok(DataType::Custom(type_name)),

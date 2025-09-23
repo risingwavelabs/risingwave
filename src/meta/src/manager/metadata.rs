@@ -20,6 +20,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{Either, select};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
@@ -484,15 +485,15 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
+    pub async fn get_table_catalog_by_ids(&self, ids: &[u32]) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
-            .get_table_by_ids(ids.into_iter().map(|id| id as _).collect(), false)
+            .get_table_by_ids(ids.iter().map(|id| *id as _).collect(), false)
             .await
     }
 
-    pub async fn get_sink_catalog_by_ids(&self, ids: &[u32]) -> MetaResult<Vec<PbSink>> {
+    pub async fn get_table_incoming_sinks(&self, table_id: u32) -> MetaResult<Vec<PbSink>> {
         self.catalog_controller
-            .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
+            .get_table_incoming_sinks(table_id as _)
             .await
     }
 
@@ -728,6 +729,25 @@ impl MetadataManager {
         Ok(new_props)
     }
 
+    pub async fn update_iceberg_table_props_by_table_id(
+        &self,
+        table_id: TableId,
+        props: BTreeMap<String, String>,
+        alter_iceberg_table_props: Option<
+            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
+        >,
+    ) -> MetaResult<(HashMap<String, String>, u32)> {
+        let (new_props, sink_id) = self
+            .catalog_controller
+            .update_iceberg_table_props_by_table_id(
+                table_id.table_id as _,
+                props,
+                alter_iceberg_table_props,
+            )
+            .await?;
+        Ok((new_props, sink_id))
+    }
+
     pub async fn update_fragment_rate_limit_by_fragment_id(
         &self,
         fragment_id: FragmentId,
@@ -750,6 +770,16 @@ impl MetadataManager {
     ) -> MetaResult<()> {
         self.catalog_controller
             .update_actor_splits(split_assignment)
+            .await
+    }
+
+    #[await_tree::instrument]
+    pub async fn update_source_splits(
+        &self,
+        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        self.catalog_controller
+            .update_source_splits(source_splits)
             .await
     }
 
@@ -857,5 +887,10 @@ impl MetadataManager {
     pub(crate) async fn notify_finish_failed(&self, database_id: Option<DatabaseId>, err: String) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
         mgr.notify_finish_failed(database_id.map(|id| id.database_id as _), err);
+    }
+
+    pub(crate) async fn notify_cancelled(&self, database_id: DatabaseId, id: ObjectId) {
+        let mut mgr = self.catalog_controller.get_inner_write_guard().await;
+        mgr.notify_cancelled(database_id.database_id as _, id);
     }
 }

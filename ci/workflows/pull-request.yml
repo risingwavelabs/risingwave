@@ -89,7 +89,7 @@ steps:
           <<: *docker-compose
           environment:
           - GITHUB_TOKEN
-    timeout_in_minutes: 14
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "build (deterministic simulation)"
@@ -123,6 +123,20 @@ steps:
     timeout_in_minutes: 35
     parallelism: 4
     retry: *auto-retry
+  - label: "e2e preload-memory test"
+    command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-preload-memory-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 35
+    parallelism: 4
+    retry: *auto-retry
 
   - label: "slow end-to-end test"
     key: "slow-e2e-test"
@@ -137,7 +151,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "meta backup test"
@@ -216,7 +230,7 @@ steps:
           <<: *docker-compose
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 25
     parallelism: 2
     retry: *auto-retry
 
@@ -474,6 +488,18 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
+  - label: "documentation"
+    command: "ci/scripts/doc.sh"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-check"
+      || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+    plugins:
+      - *cargo-cache
+      - docker-compose#v5.5.0: *docker-compose
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-unit-test.sh"
     if: |
@@ -536,6 +562,19 @@ steps:
       # - test-collector#v1.0.0:
       #     files: "*-junit.xml"
       #     format: "junit"
+    timeout_in_minutes: 40
+    parallelism: 4
+    retry: *auto-retry
+  - label: "preload memory recovery test (deterministic simulation)"
+    command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true TEST_NUM=4 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-preload-memory-tests"
+    depends_on: "build-simulation"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      # Only upload zipped files, otherwise the logs is too much.
+      - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 40
     parallelism: 4
     retry: *auto-retry
@@ -719,7 +758,7 @@ steps:
       - ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 45
     retry: *auto-retry
 
   - label: "enable ci/pr/run-selected only in draft PRs"

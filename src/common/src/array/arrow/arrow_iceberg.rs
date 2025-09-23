@@ -111,9 +111,9 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
-            DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::List(list) => self.list_type_to_arrow(list)?,
+            DataType::Map(map) => self.map_type_to_arrow(map)?,
+            DataType::Vector(_) => self.vector_type_to_arrow()?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
     }
@@ -278,9 +278,9 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
-            DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::List(list) => self.list_type_to_arrow(list)?,
+            DataType::Map(map) => self.map_type_to_arrow(map)?,
+            DataType::Vector(_) => self.vector_type_to_arrow()?,
         };
 
         let mut arrow_field = arrow_schema::Field::new(name, data_type, true);

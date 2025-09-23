@@ -65,6 +65,9 @@ compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10
 periodic_scheduling_compaction_group_merge_interval_sec = 600
 compaction_group_merge_dimension_threshold = 1.2
+cdc_table_split_init_sleep_interval_splits = 1000
+cdc_table_split_init_sleep_duration_millis = 500
+cdc_table_split_init_insert_batch_size = 100
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -195,6 +198,10 @@ stream_iceberg_list_interval_sec = 1
 stream_iceberg_fetch_batch_size = 1024
 stream_iceberg_sink_positional_delete_cache_size = 1024
 stream_iceberg_sink_write_parquet_max_row_group_rows = 100000
+stream_default_enable_mem_preload_state_table = false
+stream_mem_preload_state_table_ids_whitelist = []
+stream_mem_preload_state_table_ids_blacklist = []
+stream_aggressive_noop_update_elimination = false
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5
@@ -239,6 +246,13 @@ iceberg_compaction_max_record_batch_rows = 1024
 iceberg_compaction_min_size_per_partition_mb = 1024
 iceberg_compaction_max_file_count_per_partition = 32
 iceberg_compaction_write_parquet_max_row_group_rows = 102400
+iceberg_compaction_task_parallelism_ratio = 4.0
+iceberg_compaction_enable_heuristic_output_parallelism = false
+iceberg_compaction_max_concurrent_closes = 8
+iceberg_compaction_enable_dynamic_size_estimation = true
+iceberg_compaction_size_estimation_smoothing_factor = 0.3
+iceberg_compaction_small_file_threshold_mb = 32
+iceberg_compaction_max_task_total_size_mb = 51200
 
 [storage.cache]
 vector_block_cache_capacity_mb = 16
@@ -269,6 +283,7 @@ insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
 fifo_probation_ratio = 0.1
+blob_index_size_kb = 16
 recover_mode = "Quiet"
 
 [storage.data_file_cache.throttle]
@@ -295,6 +310,7 @@ insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
 fifo_probation_ratio = 0.1
+blob_index_size_kb = 16
 recover_mode = "Quiet"
 
 [storage.meta_file_cache.throttle]
@@ -316,8 +332,10 @@ timeout_ms = 6000
 concurrency = 10
 unit = 64
 threshold = 0.5
+recent_filter_shards = 16
 recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
+skip_recent_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false

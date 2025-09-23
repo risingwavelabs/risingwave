@@ -24,8 +24,7 @@ use mysql_async::prelude::Queryable;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use serde::Deserialize;
-use serde_derive::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
@@ -59,6 +58,7 @@ const fn default_use_https() -> bool {
     false
 }
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct StarrocksCommon {
     /// The `StarRocks` host address.
@@ -86,6 +86,7 @@ pub struct StarrocksCommon {
     /// Whether to use https to connect to the `StarRocks` server.
     #[serde(rename = "starrocks.use_https")]
     #[serde(default = "default_use_https")]
+    #[serde_as(as = "DisplayFromStr")]
     pub use_https: bool,
 }
 
@@ -263,7 +264,7 @@ impl StarrocksSink {
                 if starrocks_data_type.contains("unknown") {
                     return Ok(true);
                 }
-                let check_result = Self::check_and_correct_column_type(list.as_ref(), starrocks_data_type)?;
+                let check_result = Self::check_and_correct_column_type(list.elem(), starrocks_data_type)?;
                 Ok(check_result && starrocks_data_type.contains("array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
@@ -279,7 +280,9 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
                 "MAP is not supported for Starrocks sink.".to_owned(),
             )),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::Starrocks(
+                "VECTOR is not supported for Starrocks sink.".to_owned(),
+            )),
         }
     }
 }

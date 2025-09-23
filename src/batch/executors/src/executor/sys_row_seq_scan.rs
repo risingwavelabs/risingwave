@@ -15,7 +15,7 @@
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, Schema, SysCatalogReaderRef, TableId};
+use risingwave_common::catalog::{Schema, SysCatalogReaderRef, TableId};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -68,17 +68,19 @@ impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
         let sys_catalog_reader = source.context().catalog_reader();
 
         let table_id = seq_scan_node.get_table_id().into();
-        let column_descs = seq_scan_node
+
+        let column_indices = seq_scan_node
             .column_descs
             .iter()
-            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
+            .map(|d| d.column_id as usize)
             .collect_vec();
-
-        let column_indices = column_descs
-            .iter()
-            .map(|d| d.column_id.get_id() as usize)
-            .collect_vec();
-        let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
+        let schema = Schema::new(
+            seq_scan_node
+                .column_descs
+                .iter()
+                .map(Into::into)
+                .collect_vec(),
+        );
         Ok(Box::new(SysRowSeqScanExecutor::new(
             table_id,
             schema,

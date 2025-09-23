@@ -226,11 +226,13 @@ impl FunctionCall {
                 let return_type = infer_some_all(func_types, &mut inputs)?;
                 Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
             }
-            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(
-                expr_type,
-                vec![Self::new_binary_op_func(func_types, inputs)?],
-            )?
-            .into()),
+            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull | ExprType::Neg => {
+                Ok(FunctionCall::new(
+                    expr_type,
+                    vec![Self::new_binary_op_func(func_types, inputs)?],
+                )?
+                .into())
+            }
             _ => Ok(FunctionCall::new(expr_type, inputs)?.into()),
         }
     }
@@ -296,16 +298,21 @@ impl Expr for FunctionCall {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
-        ExprNode {
+
+        let children = self
+            .inputs()
+            .iter()
+            .map(|input| input.try_to_expr_proto())
+            .try_collect()?;
+
+        Ok(ExprNode {
             function_type: self.func_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: self.inputs().iter().map(Expr::to_expr_proto).collect(),
-            })),
-        }
+            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
+        })
     }
 }
 

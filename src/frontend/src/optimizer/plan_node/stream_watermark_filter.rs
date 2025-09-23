@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, TableCatalogBuilder, childless_record, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::TableCatalog;
 use crate::expr::{ExprDisplay, ExprImpl};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -50,7 +50,7 @@ impl StreamWatermarkFilter {
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.append_only(),
+            input.stream_kind(),
             false, // TODO(rc): decide EOWC property
             watermark_columns,
             // watermark filter preserves input order and hence monotonicity
@@ -104,7 +104,7 @@ impl Distill for StreamWatermarkFilter {
     }
 }
 
-impl PlanTreeNodeUnary for StreamWatermarkFilter {
+impl PlanTreeNodeUnary<Stream> for StreamWatermarkFilter {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -114,7 +114,7 @@ impl PlanTreeNodeUnary for StreamWatermarkFilter {
     }
 }
 
-impl_plan_tree_node_for_unary! {StreamWatermarkFilter}
+impl_plan_tree_node_for_unary! { Stream, StreamWatermarkFilter}
 
 pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
     let mut builder = TableCatalogBuilder::default();
@@ -160,6 +160,6 @@ impl StreamNode for StreamWatermarkFilter {
 }
 
 // TODO(yuhao): may impl a `ExprRewritable` after store `ExplImpl` in catalog.
-impl ExprRewritable for StreamWatermarkFilter {}
+impl ExprRewritable<Stream> for StreamWatermarkFilter {}
 
 impl ExprVisitable for StreamWatermarkFilter {}

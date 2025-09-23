@@ -39,6 +39,7 @@ use crate::sql_gen::SqlGenerator;
 pub mod config;
 pub mod reducer;
 mod sql_gen;
+pub mod sqlreduce;
 pub mod test_runners;
 mod utils;
 pub mod validation;
@@ -346,7 +347,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
-                            with_version_column: None,
+                            with_version_columns: [],
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
@@ -396,7 +397,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
-                            with_version_column: None,
+                            with_version_columns: [],
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
@@ -457,7 +458,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
-                            with_version_column: None,
+                            with_version_columns: [],
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
@@ -658,7 +659,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
-                            with_version_column: None,
+                            with_version_columns: [],
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
@@ -715,7 +716,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
-                            with_version_column: None,
+                            with_version_columns: [],
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
@@ -779,7 +780,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
-                            with_version_column: None,
+                            with_version_columns: [],
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
@@ -861,7 +862,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
-                            with_version_column: None,
+                            with_version_columns: [],
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],

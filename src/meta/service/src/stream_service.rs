@@ -30,6 +30,7 @@ use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingPar
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
+use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -424,8 +425,9 @@ impl StreamManagerService for StreamServiceImpl {
         let SourceManagerRunningInfo {
             source_fragments,
             backfill_fragments,
-            mut actor_splits,
         } = self.stream_manager.source_manager.get_running_info().await;
+
+        let mut actor_splits = self.env.shared_actor_infos().list_assignments();
 
         let source_actors = self
             .metadata_manager
@@ -512,66 +514,103 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListRateLimitsResponse { rate_limits }))
     }
 
+    #[cfg_attr(coverage, coverage(off))]
+    async fn refresh(
+        &self,
+        request: Request<RefreshRequest>,
+    ) -> Result<Response<RefreshResponse>, Status> {
+        let req = request.into_inner();
+
+        tracing::info!("Refreshing table with id: {}", req.table_id);
+
+        // Create refresh manager and execute refresh
+        let refresh_manager = risingwave_meta::stream::RefreshManager::new(
+            self.metadata_manager.clone(),
+            self.barrier_scheduler.clone(),
+        );
+
+        let response = refresh_manager.refresh_table(req).await?;
+
+        Ok(Response::new(response))
+    }
+
     async fn alter_connector_props(
         &self,
         request: Request<AlterConnectorPropsRequest>,
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
+        let secret_manager = LocalSecretManager::global();
+        let (new_props_plaintext, object_id) =
+            match AlterConnectorPropsObject::try_from(request.object_type) {
+                Ok(AlterConnectorPropsObject::Sink) => (
+                    self.metadata_manager
+                        .update_sink_props_by_sink_id(
+                            request.object_id as i32,
+                            request.changed_props.clone().into_iter().collect(),
+                        )
+                        .await?,
+                    request.object_id,
+                ),
+                Ok(AlterConnectorPropsObject::IcebergTable) => {
+                    self.metadata_manager
+                        .update_iceberg_table_props_by_table_id(
+                            TableId::from(request.object_id),
+                            request.changed_props.clone().into_iter().collect(),
+                            request.extra_options,
+                        )
+                        .await?
+                }
+
+                Ok(AlterConnectorPropsObject::Source) => {
+                    // alter source and table's associated source
+                    if request.connector_conn_ref.is_some() {
+                        return Err(Status::invalid_argument(
+                            "alter connector_conn_ref is not supported",
+                        ));
+                    }
+                    let options_with_secret = self
+                        .metadata_manager
+                        .catalog_controller
+                        .update_source_props_by_source_id(
+                            request.object_id as SourceId,
+                            request.changed_props.clone().into_iter().collect(),
+                            request.changed_secret_refs.clone().into_iter().collect(),
+                        )
+                        .await?;
+
+                    self.stream_manager
+                        .source_manager
+                        .validate_source_once(request.object_id, options_with_secret.clone())
+                        .await?;
+
+                    let (options, secret_refs) = options_with_secret.into_parts();
+                    (
+                        secret_manager
+                            .fill_secrets(options, secret_refs)
+                            .map_err(MetaError::from)?
+                            .into_iter()
+                            .collect(),
+                        request.object_id,
+                    )
+                }
+
+                _ => {
+                    unimplemented!(
+                        "Unsupported object type for AlterConnectorProps: {:?}",
+                        request.object_type
+                    );
+                }
+            };
 
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(request.object_id as ObjectId)
+            .get_object_database_id(object_id as ObjectId)
             .await?;
         let database_id = DatabaseId::new(database_id as _);
 
-        let secret_manager = LocalSecretManager::global();
-        let new_props_plaintext = match request.object_type() {
-            AlterConnectorPropsObject::Sink => {
-                self.metadata_manager
-                    .update_sink_props_by_sink_id(
-                        request.object_id as i32,
-                        request.changed_props.clone().into_iter().collect(),
-                    )
-                    .await?
-            }
-            AlterConnectorPropsObject::Source => {
-                // alter source and table's associated source
-                if request.connector_conn_ref.is_some() {
-                    return Err(Status::invalid_argument(
-                        "alter connector_conn_ref is not supported",
-                    ));
-                }
-                let options_with_secret = self
-                    .metadata_manager
-                    .catalog_controller
-                    .update_source_props_by_source_id(
-                        request.object_id as SourceId,
-                        request.changed_props.clone().into_iter().collect(),
-                        request.changed_secret_refs.clone().into_iter().collect(),
-                    )
-                    .await?;
-
-                self.stream_manager
-                    .source_manager
-                    .validate_source_once(request.object_id, options_with_secret.clone())
-                    .await?;
-
-                let (options, secret_refs) = options_with_secret.into_parts();
-                secret_manager
-                    .fill_secrets(options, secret_refs)
-                    .map_err(MetaError::from)?
-                    .into_iter()
-                    .collect()
-            }
-            AlterConnectorPropsObject::Connection => {
-                todo!()
-            }
-            AlterConnectorPropsObject::Unspecified => unreachable!(),
-        };
-
         let mut mutation = HashMap::default();
-        mutation.insert(request.object_id, new_props_plaintext);
+        mutation.insert(object_id, new_props_plaintext);
 
         let _i = self
             .barrier_scheduler
@@ -608,6 +647,29 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
 
         Ok(Response::new(SetSyncLogStoreAlignedResponse {}))
+    }
+
+    async fn list_cdc_progress(
+        &self,
+        _request: Request<ListCdcProgressRequest>,
+    ) -> Result<Response<ListCdcProgressResponse>, Status> {
+        let cdc_progress = self
+            .env
+            .cdc_table_backfill_tracker()
+            .list_cdc_progress()
+            .into_iter()
+            .map(|(job_id, p)| {
+                (
+                    job_id,
+                    PbCdcProgress {
+                        split_total_count: p.split_total_count,
+                        split_backfilled_count: p.split_backfilled_count,
+                        split_completed_count: p.split_completed_count,
+                    },
+                )
+            })
+            .collect();
+        Ok(Response::new(ListCdcProgressResponse { cdc_progress }))
     }
 }
 

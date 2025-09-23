@@ -35,6 +35,7 @@ pub mod prelude {
     pub type PosixFsSplitEnumerator =
         OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalPosixFs>;
     pub use crate::source::cdc::enumerator::DebeziumSplitEnumerator;
+    pub use crate::source::filesystem::opendal_source::BatchPosixFsEnumerator as BatchPosixFsSplitEnumerator;
     pub type CitusCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Citus>;
     pub type MongodbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mongodb>;
     pub type PostgresCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Postgres>;
@@ -43,6 +44,7 @@ pub mod prelude {
 }
 
 pub mod base;
+pub mod batch;
 pub mod cdc;
 pub mod data_gen_util;
 pub mod datagen;
@@ -55,11 +57,12 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
-mod util;
 
+mod util;
 use std::future::IntoFuture;
 
 pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
+pub use batch::BatchSourceSplitImpl;
 pub(crate) use common::*;
 use google_cloud_pubsub::subscription::Subscription;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
@@ -77,12 +80,14 @@ use async_nats::jetstream::consumer::AckPolicy as JetStreamAckPolicy;
 use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
+use risingwave_common::row::OwnedRow;
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
 pub use crate::source::filesystem::LEGACY_S3_CONNECTOR;
 pub use crate::source::filesystem::opendal_source::{
-    AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    POSIX_FS_CONNECTOR,
 };
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
@@ -118,6 +123,16 @@ pub enum WaitCheckpointTask {
 
 impl WaitCheckpointTask {
     pub async fn run(self) {
+        self.run_with_on_commit_success(|_source_id, _offset| {
+            // Default implementation: no action on commit success
+        })
+        .await;
+    }
+
+    pub async fn run_with_on_commit_success<F>(self, mut on_commit_success: F)
+    where
+        F: FnMut(u64, &str),
+    {
         use std::str::FromStr;
         match self {
             WaitCheckpointTask::CommitCdcOffset(updated_offset) => {
@@ -125,7 +140,10 @@ impl WaitCheckpointTask {
                     let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
                     // notify cdc connector to commit offset
                     match cdc::jni_source::commit_cdc_offset(source_id, offset.clone()) {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            // Execute callback after successful commit
+                            on_commit_success(source_id, &offset);
+                        }
                         Err(e) => {
                             tracing::error!(
                                 error = %e.as_report(),
@@ -207,3 +225,13 @@ impl WaitCheckpointTask {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CdcTableSnapshotSplitCommon<T: Clone> {
+    pub split_id: i64,
+    pub left_bound_inclusive: T,
+    pub right_bound_exclusive: T,
+}
+
+pub type CdcTableSnapshotSplit = CdcTableSnapshotSplitCommon<OwnedRow>;
+pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;

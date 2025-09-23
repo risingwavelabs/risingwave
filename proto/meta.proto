@@ -106,8 +106,9 @@ message TableFragments {
   State state = 2;
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
-  // `Source` and `SourceBackfill` are handled together here.
-  map<uint32, source.ConnectorSplits> actor_splits = 5;
+
+  reserved 5;
+  reserved "actor_splits";
 
   stream_plan.StreamContext ctx = 6;
 
@@ -177,6 +178,15 @@ message PauseResponse {}
 message ResumeRequest {}
 
 message ResumeResponse {}
+
+message RefreshRequest {
+  uint32 table_id = 1;
+  uint32 associated_source_id = 2;
+}
+
+message RefreshResponse {
+  common.Status status = 1;
+}
 
 message CancelCreatingJobsRequest {
   message CreatingJobInfo {
@@ -346,11 +356,16 @@ message RecoverRequest {}
 message RecoverResponse {}
 
 message AlterConnectorPropsRequest {
+  message AlterIcebergTableIds {
+    int32 source_id = 1;
+    int32 sink_id = 2;
+  }
   enum AlterConnectorPropsObject {
     UNSPECIFIED = 0;
     SOURCE = 1;
     SINK = 2;
     CONNECTION = 3;
+    ICEBERG_TABLE = 4;
   }
 
   uint32 object_id = 1;
@@ -358,14 +373,29 @@ message AlterConnectorPropsRequest {
   map<string, secret.SecretRef> changed_secret_refs = 3;
   optional uint32 connector_conn_ref = 4;
   AlterConnectorPropsObject object_type = 5;
+  oneof extra_options {
+    AlterIcebergTableIds alter_iceberg_table_ids = 6;
+  }
 }
 
 message AlterConnectorPropsResponse {}
+
+message ListCdcProgressRequest {}
+
+message ListCdcProgressResponse {
+  message CdcProgress {
+    uint64 split_total_count = 1;
+    uint64 split_backfilled_count = 2;
+    uint64 split_completed_count = 3;
+  }
+  map<uint32, CdcProgress> cdc_progress = 1;
+}
 
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
+  rpc Refresh(RefreshRequest) returns (RefreshResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
   rpc ListStreamingJobStates(ListStreamingJobStatesRequest) returns (ListStreamingJobStatesResponse);
@@ -380,6 +410,7 @@ service StreamManagerService {
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
   rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
+  rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
 }
 
 // Below for cluster service.
@@ -822,6 +853,7 @@ message EventLog {
     string table_name = 2;
     string cdc_table_id = 3;
     string upstream_ddl = 4;
+    string fail_info = 5;
   }
   message EventSinkFail {
     uint32 sink_id = 1;
@@ -890,6 +922,7 @@ message AddEventLogRequest {
   oneof event {
     EventLog.EventWorkerNodePanic worker_node_panic = 1;
     EventLog.EventSinkFail sink_fail = 2;
+    EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 3;
   }
 }
 
@@ -918,10 +951,8 @@ message RelationIdInfos {
 }
 
 message FragmentToRelationMap {
-  /// fragment_id -> relation_id of all in-bound fragments e.g. the ones with StreamScan
-  map<uint32, uint32> in_map = 1;
-  /// fragment_id -> relation_id of all out-bound fragments e.g. the ones with MaterializeExecutor
-  map<uint32, uint32> out_map = 2;
+  /// fragment_id -> relation_id mapping for all fragments
+  map<uint32, uint32> fragment_to_relation_map = 1;
 }
 
 message ActorCountPerParallelism {

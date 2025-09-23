@@ -30,7 +30,7 @@ struct ArrayTransformExpression {
 #[async_trait]
 impl Expression for ArrayTransformExpression {
     fn return_type(&self) -> DataType {
-        DataType::List(Box::new(self.lambda.return_type()))
+        DataType::list(self.lambda.return_type())
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {

@@ -29,6 +29,7 @@ either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = { workspace = true }
 hex = "0.4"
 http = "1"
 iceberg = { workspace = true }
@@ -64,7 +65,7 @@ risingwave_sqlparser = { workspace = true }
 rw_futures_util = { workspace = true }
 scopeguard = "1.2.0"
 sea-orm = { workspace = true }
-serde = { version = "1.0.196", features = ["derive"] }
+serde = { workspace = true }
 serde_json = "1.0.113"
 strum = { version = "0.27", features = ["derive"] }
 sync-point = { path = "../utils/sync-point" }

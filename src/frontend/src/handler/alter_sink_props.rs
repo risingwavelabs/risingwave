@@ -24,20 +24,19 @@ use crate::{Binder, WithOptions};
 
 pub async fn handle_alter_sink_props(
     handler_args: HandlerArgs,
-    table_name: ObjectName,
+    sink_name: ObjectName,
     changed_props: Vec<SqlOption>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
+    let user_name = &session.user_name();
     let sink_id = {
         let db_name = &session.database();
-        let (schema_name, real_table_name) =
-            Binder::resolve_schema_qualified_name(db_name, &table_name)?;
         let search_path = session.config().search_path();
-        let user_name = &session.user_name();
-
-        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
         let reader = session.env().catalog_reader().read_guard();
+        let (schema_name, real_table_name) =
+            Binder::resolve_schema_qualified_name(db_name, &sink_name)?;
+        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
         let (sink, schema_name) =
             reader.get_created_sink_by_name(db_name, schema_path, &real_table_name)?;
 

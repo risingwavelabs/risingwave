@@ -16,7 +16,7 @@ use educe::Educe;
 
 use super::generic::GenericPlanNode;
 use super::*;
-use crate::optimizer::property::{Distribution, WatermarkColumns};
+use crate::optimizer::property::{Distribution, StreamKind, WatermarkColumns};
 
 /// No extra fields for logical plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -51,9 +51,9 @@ pub struct StreamExtra {
     /// Common fields for physical plan nodes.
     physical: PhysicalCommonExtra,
 
-    /// The append-only property of the `PlanNode`'s output is a stream-only property. Append-only
-    /// means the stream contains only insert operation.
-    append_only: bool,
+    /// Whether the `PlanNode`'s output is append-only, retract, or upsert.
+    stream_kind: StreamKind,
+
     /// Whether the output is emitted on window close.
     emit_on_window_close: bool,
     /// The watermark column indices of the `PlanNode`'s output. There could be watermark output from
@@ -103,7 +103,7 @@ impl GetPhysicalCommon for BatchExtra {
 /// normally be the same as the given [`GenericPlanNode`] when constructing.
 ///
 /// - To access them, use traits including [`GenericPlanRef`],
-///   [`PhysicalPlanRef`], [`StreamPlanRef`] and [`BatchPlanRef`] with
+///   [`PhysicalPlanRef`], [`StreamPlanNodeMetadata`] and [`BatchPlanNodeMetadata`] with
 ///   compile-time checks.
 /// - To mutate them, use methods like `new_*` or `clone_with_*`.
 #[derive(Educe)]
@@ -158,9 +158,9 @@ where
     }
 }
 
-impl stream::StreamPlanRef for PlanBase<Stream> {
-    fn append_only(&self) -> bool {
-        self.extra.append_only
+impl stream::StreamPlanNodeMetadata for PlanBase<Stream> {
+    fn stream_kind(&self) -> StreamKind {
+        self.extra.stream_kind
     }
 
     fn emit_on_window_close(&self) -> bool {
@@ -176,7 +176,7 @@ impl stream::StreamPlanRef for PlanBase<Stream> {
     }
 }
 
-impl batch::BatchPlanRef for PlanBase<Batch> {
+impl batch::BatchPlanNodeMetadata for PlanBase<Batch> {
     fn order(&self) -> &Order {
         &self.extra.order
     }
@@ -225,7 +225,7 @@ impl PlanBase<Stream> {
         stream_key: Option<Vec<usize>>,
         functional_dependency: FunctionalDependencySet,
         dist: Distribution,
-        append_only: bool,
+        stream_kind: StreamKind,
         emit_on_window_close: bool,
         watermark_columns: WatermarkColumns,
         columns_monotonicity: MonotonicityMap,
@@ -239,7 +239,7 @@ impl PlanBase<Stream> {
             functional_dependency,
             extra: StreamExtra {
                 physical: PhysicalCommonExtra { dist },
-                append_only,
+                stream_kind,
                 emit_on_window_close,
                 watermark_columns,
                 columns_monotonicity,
@@ -250,7 +250,7 @@ impl PlanBase<Stream> {
     pub fn new_stream_with_core(
         core: &impl GenericPlanNode,
         dist: Distribution,
-        append_only: bool,
+        stream_kind: StreamKind,
         emit_on_window_close: bool,
         watermark_columns: WatermarkColumns,
         columns_monotonicity: MonotonicityMap,
@@ -261,7 +261,7 @@ impl PlanBase<Stream> {
             core.stream_key(),
             core.functional_dependency(),
             dist,
-            append_only,
+            stream_kind,
             emit_on_window_close,
             watermark_columns,
             columns_monotonicity,
@@ -319,136 +319,5 @@ where
 impl<C: ConventionMarker> PlanBase<C> {
     pub fn functional_dependency_mut(&mut self) -> &mut FunctionalDependencySet {
         &mut self.functional_dependency
-    }
-}
-
-/// Reference to [`PlanBase`] with erased conventions.
-///
-/// Used for accessing fields on a type-erased plan node. All traits of [`GenericPlanRef`],
-/// [`PhysicalPlanRef`], [`StreamPlanRef`] and [`BatchPlanRef`] are implemented for this type,
-/// so runtime checks are required when calling methods on it.
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, enum_as_inner::EnumAsInner)]
-pub enum PlanBaseRef<'a> {
-    Logical(&'a PlanBase<Logical>),
-    Stream(&'a PlanBase<Stream>),
-    Batch(&'a PlanBase<Batch>),
-}
-
-impl PlanBaseRef<'_> {
-    /// Get the convention of this plan base.
-    pub fn convention(self) -> Convention {
-        match self {
-            PlanBaseRef::Logical(_) => Convention::Logical,
-            PlanBaseRef::Stream(_) => Convention::Stream,
-            PlanBaseRef::Batch(_) => Convention::Batch,
-        }
-    }
-}
-
-/// Dispatch a method call to the corresponding plan base type.
-macro_rules! dispatch_plan_base {
-    ($self:ident, [$($convention:ident),+ $(,)?], $method:expr) => {
-        match $self {
-            $(
-                PlanBaseRef::$convention(plan) => $method(plan),
-            )+
-
-            #[allow(unreachable_patterns)]
-            _ => unreachable!("calling `{}` on a plan node of `{:?}`", stringify!($method), $self.convention()),
-        }
-    }
-}
-
-/// Workaround for getters returning references.
-///
-/// For example, callers writing `GenericPlanRef::schema(&foo.plan_base())` will lead to a
-/// borrow checker error, as it borrows [`PlanBaseRef`] again, which is already a reference.
-///
-/// As a workaround, we directly let the getters below take the ownership of [`PlanBaseRef`],
-/// which is `Copy`. When callers write `foo.plan_base().schema()`, the compiler will prefer
-/// these ones over the ones defined in traits like [`GenericPlanRef`].
-impl<'a> PlanBaseRef<'a> {
-    pub(super) fn schema(self) -> &'a Schema {
-        dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::schema)
-    }
-
-    pub(super) fn stream_key(self) -> Option<&'a [usize]> {
-        dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::stream_key)
-    }
-
-    pub(super) fn functional_dependency(self) -> &'a FunctionalDependencySet {
-        dispatch_plan_base!(
-            self,
-            [Logical, Stream, Batch],
-            GenericPlanRef::functional_dependency
-        )
-    }
-
-    pub(super) fn distribution(self) -> &'a Distribution {
-        dispatch_plan_base!(self, [Stream, Batch], PhysicalPlanRef::distribution)
-    }
-
-    pub(super) fn watermark_columns(self) -> &'a WatermarkColumns {
-        dispatch_plan_base!(self, [Stream], StreamPlanRef::watermark_columns)
-    }
-
-    pub(super) fn columns_monotonicity(self) -> &'a MonotonicityMap {
-        dispatch_plan_base!(self, [Stream], StreamPlanRef::columns_monotonicity)
-    }
-
-    pub(super) fn order(self) -> &'a Order {
-        dispatch_plan_base!(self, [Batch], BatchPlanRef::order)
-    }
-}
-
-impl GenericPlanRef for PlanBaseRef<'_> {
-    fn id(&self) -> PlanNodeId {
-        dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::id)
-    }
-
-    fn schema(&self) -> &Schema {
-        (*self).schema()
-    }
-
-    fn stream_key(&self) -> Option<&[usize]> {
-        (*self).stream_key()
-    }
-
-    fn functional_dependency(&self) -> &FunctionalDependencySet {
-        (*self).functional_dependency()
-    }
-
-    fn ctx(&self) -> OptimizerContextRef {
-        dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::ctx)
-    }
-}
-
-impl PhysicalPlanRef for PlanBaseRef<'_> {
-    fn distribution(&self) -> &Distribution {
-        (*self).distribution()
-    }
-}
-
-impl StreamPlanRef for PlanBaseRef<'_> {
-    fn append_only(&self) -> bool {
-        dispatch_plan_base!(self, [Stream], StreamPlanRef::append_only)
-    }
-
-    fn emit_on_window_close(&self) -> bool {
-        dispatch_plan_base!(self, [Stream], StreamPlanRef::emit_on_window_close)
-    }
-
-    fn watermark_columns(&self) -> &WatermarkColumns {
-        (*self).watermark_columns()
-    }
-
-    fn columns_monotonicity(&self) -> &MonotonicityMap {
-        (*self).columns_monotonicity()
-    }
-}
-
-impl BatchPlanRef for PlanBaseRef<'_> {
-    fn order(&self) -> &Order {
-        (*self).order()
     }
 }

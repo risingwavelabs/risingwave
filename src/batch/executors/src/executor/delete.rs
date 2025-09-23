@@ -38,7 +38,6 @@ pub struct DeleteExecutor {
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
-    #[expect(dead_code)]
     chunk_size: usize,
     schema: Schema,
     identity: String,
@@ -99,7 +98,7 @@ impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let data_types = self.child.schema().data_types();
-        let mut builder = DataChunkBuilder::new(data_types, 1024);
+        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         let table_dml_handle = self
             .dml_manager

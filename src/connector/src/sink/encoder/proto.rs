@@ -17,6 +17,7 @@ use prost::Message;
 use prost_reflect::{
     DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value,
 };
+use risingwave_common::array::VECTOR_ITEM_TYPE;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, MapType, ScalarRefImpl, StructType};
@@ -388,8 +389,8 @@ fn on_field<D: MaybeData>(
             Kind::Message(pb) => maybe.on_struct(st, &pb)?,
             _ => return no_match_err(),
         },
-        DataType::List(elem) => match expect_list {
-            true => maybe.on_list(elem, proto_field)?,
+        DataType::List(lt) => match expect_list {
+            true => maybe.on_list(lt.elem(), proto_field)?,
             false => return no_match_err(),
         },
         // Group B: match between RisingWave types and ProtoBuf Well-Known types
@@ -458,7 +459,10 @@ fn on_field<D: MaybeData>(
                 return no_match_err();
             }
         }
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Vector(_) => match expect_list {
+            true => maybe.on_list(&VECTOR_ITEM_TYPE, proto_field)?,
+            false => return no_match_err(),
+        },
     };
 
     Ok(value)
@@ -502,7 +506,7 @@ mod tests {
                 ])),
                 "nested_message_field",
             ),
-            Field::with_name(DataType::List(DataType::Int32.into()), "repeated_int_field"),
+            Field::with_name(DataType::Int32.list(), "repeated_int_field"),
             Field::with_name(DataType::Timestamptz, "timestamp_field"),
             Field::with_name(
                 DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
@@ -902,7 +906,7 @@ mod tests {
         let message_descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
 
         let schema = Schema::new(vec![Field::with_name(
-            DataType::List(DataType::List(DataType::Int32.into()).into()),
+            DataType::Int32.list().list(),
             "repeated_int_field",
         )]);
 
@@ -920,7 +924,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![Field::with_name(
-            DataType::List(DataType::Int32.into()),
+            DataType::Int32.list(),
             "repeated_int_field",
         )]);
         let row = OwnedRow::new(vec![Some(ScalarImpl::List(ListValue::from_iter([

@@ -17,6 +17,8 @@ use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use anyhow::{Context, anyhow};
+use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
 use futures::future::pending;
 use futures::prelude::Future;
 use futures::{Stream, StreamExt};
@@ -47,7 +49,7 @@ use prost_types::{
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use tokio::sync::mpsc;
@@ -197,8 +199,14 @@ impl BigQueryCommon {
     async fn build_client(&self, aws_auth_props: &AwsAuthProps) -> Result<Client> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
-        let service_account = serde_json::from_str::<ServiceAccountKey>(&auth_json)
-            .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+        let service_account =
+            if let Ok(auth_json_from_base64) = BASE64_STANDARD.decode(auth_json.clone()) {
+                serde_json::from_slice::<ServiceAccountKey>(&auth_json_from_base64)
+            } else {
+                serde_json::from_str::<ServiceAccountKey>(&auth_json)
+            }
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
+
         let client: Client = Client::from_service_account_key(service_account, false)
             .await
             .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
@@ -211,9 +219,14 @@ impl BigQueryCommon {
     ) -> Result<(StorageWriterClient, impl Stream<Item = Result<()>> + use<>)> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
-        let credentials_file = CredentialsFile::new_from_str(&auth_json)
-            .await
+        let credentials_file =
+            if let Ok(auth_json_from_base64) = BASE64_STANDARD.decode(auth_json.clone()) {
+                serde_json::from_slice::<CredentialsFile>(&auth_json_from_base64)
+            } else {
+                serde_json::from_str::<CredentialsFile>(&auth_json)
+            }
             .map_err(|e| SinkError::BigQuery(e.into()))?;
+
         StorageWriterClient::new(credentials_file).await
     }
 
@@ -354,7 +367,7 @@ impl BigQuerySink {
             DataType::Int32 => Ok("INT64".to_owned()),
             DataType::Int64 => Ok("INT64".to_owned()),
             DataType::Float32 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support real"
+                "REAL is not supported for BigQuery sink. Please convert to FLOAT64 or other supported types."
             ))),
             DataType::Float64 => Ok("FLOAT64".to_owned()),
             DataType::Decimal => Ok("NUMERIC".to_owned()),
@@ -374,19 +387,21 @@ impl BigQuerySink {
                 Ok(format!("STRUCT<{}>", elements_vec.join(", ")))
             }
             DataType::List(l) => {
-                let element_string = Self::get_string_and_check_support_from_datatype(l.as_ref())?;
+                let element_string = Self::get_string_and_check_support_from_datatype(l.elem())?;
                 Ok(format!("ARRAY<{}>", element_string))
             }
             DataType::Bytea => Ok("BYTES".to_owned()),
             DataType::Jsonb => Ok("JSON".to_owned()),
             DataType::Serial => Ok("INT64".to_owned()),
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support Int256"
+                "INT256 is not supported for BigQuery sink."
             ))),
             DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support Map"
+                "MAP is not supported for BigQuery sink."
             ))),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "VECTOR is not supported for BigQuery sink."
+            ))),
         }
     }
 
@@ -398,7 +413,7 @@ impl BigQuerySink {
             }
             DataType::Float32 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support real"
+                    "REAL is not supported for BigQuery sink. Please convert to FLOAT64 or other supported types."
                 )));
             }
             DataType::Float64 => TableFieldSchema::float(&rw_field.name),
@@ -410,7 +425,7 @@ impl BigQuerySink {
             DataType::Timestamptz => TableFieldSchema::timestamp(&rw_field.name),
             DataType::Interval => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Interval"
+                    "INTERVAL is not supported for BigQuery sink. Please convert to VARCHAR or other supported types."
                 )));
             }
             DataType::Struct(st) => {
@@ -422,8 +437,9 @@ impl BigQuerySink {
                 }
                 TableFieldSchema::record(&rw_field.name, sub_fields)
             }
-            DataType::List(dt) => {
-                let inner_field = Self::map_field(&Field::with_name(*dt.clone(), &rw_field.name))?;
+            DataType::List(lt) => {
+                let inner_field =
+                    Self::map_field(&Field::with_name(lt.elem().clone(), &rw_field.name))?;
                 TableFieldSchema {
                     mode: Some("REPEATED".to_owned()),
                     ..inner_field
@@ -434,15 +450,19 @@ impl BigQuerySink {
             DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
             DataType::Int256 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Int256"
+                    "INT256 is not supported for BigQuery sink."
                 )));
             }
             DataType::Map(_) => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Map"
+                    "MAP is not supported for BigQuery sink."
                 )));
             }
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "VECTOR is not supported for BigQuery sink."
+                )));
+            }
         };
         Ok(tfs)
     }
@@ -939,7 +959,7 @@ fn build_protobuf_field(
             return Ok((field, Some(sub_proto)));
         }
         DataType::List(l) => {
-            let (mut field, proto) = build_protobuf_field(l.as_ref(), index, name.clone())?;
+            let (mut field, proto) = build_protobuf_field(l.elem(), index, name.clone())?;
             field.label = Some(field_descriptor_proto::Label::Repeated.into());
             return Ok((field, proto));
         }
@@ -951,8 +971,10 @@ fn build_protobuf_field(
                 "Don't support Float32 and Int256"
             )));
         }
-        DataType::Map(_) => todo!(),
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Map(_) => return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Map"))),
+        DataType::Vector(_) => {
+            return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Vector")));
+        }
     }
     Ok((field, None))
 }
@@ -972,8 +994,8 @@ mod test {
     #[tokio::test]
     async fn test_type_check() {
         let big_query_type_string = "ARRAY<STRUCT<v1 ARRAY<INT64>, v2 STRUCT<v1 INT64, v2 INT64>>>";
-        let rw_datatype = DataType::List(Box::new(DataType::Struct(StructType::new(vec![
-            ("v1".to_owned(), DataType::List(Box::new(DataType::Int64))),
+        let rw_datatype = DataType::list(DataType::Struct(StructType::new(vec![
+            ("v1".to_owned(), DataType::Int64.list()),
             (
                 "v2".to_owned(),
                 DataType::Struct(StructType::new(vec![
@@ -981,7 +1003,7 @@ mod test {
                     ("v2".to_owned(), DataType::Int64),
                 ])),
             ),
-        ]))));
+        ])));
         assert_eq!(
             BigQuerySink::get_string_and_check_support_from_datatype(&rw_datatype).unwrap(),
             big_query_type_string
@@ -995,8 +1017,8 @@ mod test {
                 Field::with_name(DataType::Int64, "v1"),
                 Field::with_name(DataType::Float64, "v2"),
                 Field::with_name(
-                    DataType::List(Box::new(DataType::Struct(StructType::new(vec![
-                        ("v1".to_owned(), DataType::List(Box::new(DataType::Int64))),
+                    DataType::list(DataType::Struct(StructType::new(vec![
+                        ("v1".to_owned(), DataType::Int64.list()),
                         (
                             "v3".to_owned(),
                             DataType::Struct(StructType::new(vec![
@@ -1004,7 +1026,7 @@ mod test {
                                 ("v2".to_owned(), DataType::Int64),
                             ])),
                         ),
-                    ])))),
+                    ]))),
                     "v3",
                 ),
             ],

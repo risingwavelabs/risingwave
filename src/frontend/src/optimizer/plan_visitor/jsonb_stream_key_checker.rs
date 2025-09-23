@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{Field, FieldDisplay};
 use risingwave_common::types::DataType;
 
-use super::{DefaultBehavior, Merge};
+use super::{DefaultBehavior, LogicalPlanVisitor, Merge};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::PlanVisitor;
@@ -24,7 +24,7 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 pub struct StreamKeyChecker;
 
 impl StreamKeyChecker {
-    fn visit_inputs(&mut self, plan: &impl PlanNode) -> Option<String> {
+    fn visit_inputs(&mut self, plan: &impl LogicalPlanNode) -> Option<String> {
         let results = plan.inputs().into_iter().map(|input| self.visit(input));
         Self::default_behavior().apply(results)
     }
@@ -38,7 +38,7 @@ impl StreamKeyChecker {
     }
 }
 
-impl PlanVisitor for StreamKeyChecker {
+impl LogicalPlanVisitor for StreamKeyChecker {
     type Result = Option<String>;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

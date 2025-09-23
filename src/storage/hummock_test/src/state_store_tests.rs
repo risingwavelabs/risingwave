@@ -1274,6 +1274,7 @@ async fn test_replicated_local_hummock_storage() {
             change_log_delta: Default::default(),
             vector_index_delta: Default::default(),
             tables_to_commit: HashMap::from_iter([(TEST_TABLE_ID, epoch0)]),
+            truncate_tables: Default::default(),
         })
         .await
         .unwrap();

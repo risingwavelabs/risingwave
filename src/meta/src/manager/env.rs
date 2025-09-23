@@ -33,6 +33,7 @@ use sea_orm::EntityTrait;
 
 use crate::MetaResult;
 use crate::barrier::SharedActorInfos;
+use crate::barrier::cdc_progress::{CdcTableBackfillTracker, CdcTableBackfillTrackerRef};
 use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
@@ -86,6 +87,8 @@ pub struct MetaSrvEnv {
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
+
+    pub cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
 }
 
 /// Options shared by all meta service instances
@@ -276,6 +279,10 @@ pub struct MetaOpts {
     pub stream_client_config: RpcClientConfig,
     pub frontend_client_config: RpcClientConfig,
     pub redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
+
+    pub cdc_table_split_init_sleep_interval_splits: u64,
+    pub cdc_table_split_init_sleep_duration_millis: u64,
+    pub cdc_table_split_init_insert_batch_size: u64,
 }
 
 impl MetaOpts {
@@ -364,6 +371,9 @@ impl MetaOpts {
             stream_client_config: RpcClientConfig::default(),
             frontend_client_config: RpcClientConfig::default(),
             redact_sql_option_keywords: Arc::new(Default::default()),
+            cdc_table_split_init_sleep_interval_splits: 1000,
+            cdc_table_split_init_sleep_duration_millis: 10,
+            cdc_table_split_init_insert_batch_size: 1000,
         }
     }
 }
@@ -439,6 +449,9 @@ impl MetaSrvEnv {
             )
             .await?,
         );
+        let cdc_table_backfill_tracker = CdcTableBackfillTracker::new(meta_store_impl.clone())
+            .await?
+            .into();
         Ok(Self {
             id_gen_manager_impl: Arc::new(SqlIdGeneratorManager::new(&meta_store_impl.conn).await?),
             system_param_manager_impl: system_param_controller,
@@ -455,6 +468,7 @@ impl MetaSrvEnv {
             opts: opts.into(),
             // Await trees on the meta node is lightweight, thus always enabled.
             await_tree_reg: await_tree::Registry::new(Default::default()),
+            cdc_table_backfill_tracker,
         })
     }
 
@@ -522,8 +536,12 @@ impl MetaSrvEnv {
         &self.await_tree_reg
     }
 
-    pub(crate) fn shared_actor_infos(&self) -> &SharedActorInfos {
+    pub fn shared_actor_infos(&self) -> &SharedActorInfos {
         &self.shared_actor_info
+    }
+
+    pub fn cdc_table_backfill_tracker(&self) -> CdcTableBackfillTrackerRef {
+        self.cdc_table_backfill_tracker.clone()
     }
 }
 

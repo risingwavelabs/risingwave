@@ -27,9 +27,8 @@ use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::plan_common::StorageTableDesc;
-use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamNode, StreamScanNode, StreamScanType};
+use risingwave_pb::stream_plan::{self, StreamNode, StreamScanNode, StreamScanType};
 use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
@@ -38,7 +37,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
@@ -85,10 +84,14 @@ impl StreamActorManager {
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
 
+        let stream_kind = node.stream_kind();
+
         let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
+
         ExecutorInfo {
             schema,
             pk_indices,
+            stream_kind,
             identity,
             id: executor_id,
         }
@@ -166,8 +169,10 @@ impl StreamActorManager {
             BatchTable::new_partial(state_store.clone(), column_ids, vnodes.clone(), table_desc);
 
         let state_table = node.get_state_table()?;
-        let state_table =
-            StateTable::from_table_catalog(state_table, state_store.clone(), vnodes).await;
+        let state_table = StateTableBuilder::new(state_table, state_store.clone(), vnodes)
+            .enable_preload_all_rows_by_config(&actor_context.streaming_config)
+            .build()
+            .await;
 
         let executor = SnapshotBackfillExecutor::new(
             upstream_table,
@@ -271,6 +276,35 @@ impl StreamActorManager {
             );
         }
 
+        self.generate_executor_from_inputs(
+            fragment_id,
+            node,
+            env,
+            store,
+            actor_context,
+            vnode_bitmap,
+            has_stateful || is_stateful,
+            subtasks,
+            local_barrier_manager,
+            input,
+        )
+        .await
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    async fn generate_executor_from_inputs(
+        &self,
+        fragment_id: FragmentId,
+        node: &stream_plan::StreamNode,
+        env: StreamEnvironment,
+        store: impl StateStore,
+        actor_context: &ActorContextRef,
+        vnode_bitmap: Option<Bitmap>,
+        has_stateful: bool,
+        subtasks: &mut Vec<SubtaskHandle>,
+        local_barrier_manager: &LocalBarrierManager,
+        input: Vec<Executor>,
+    ) -> StreamResult<Executor> {
         let op_info = node.get_identity().clone();
 
         // We assume that the operator_id of different instances from the same RelNode will be the
@@ -315,7 +349,7 @@ impl StreamActorManager {
         let executor = (info, wrapped).into();
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
-        let executor = if has_stateful && is_stateful {
+        let executor = if has_stateful {
             // TODO(bugen): subtask does not work with tracing spans.
             // let (subtask, executor) = subtask::wrap(executor, actor_context.id);
             // subtasks.push(subtask);
@@ -380,6 +414,7 @@ impl StreamActorManager {
                 related_subscriptions,
                 self.env.meta_client().clone(),
                 streaming_config,
+                self.env.clone(),
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();

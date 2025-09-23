@@ -26,7 +26,7 @@ use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_pb::catalog::PbConnection;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::serde_as;
 use tonic::async_trait;
 use url::Url;

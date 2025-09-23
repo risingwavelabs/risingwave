@@ -73,9 +73,6 @@ pub(super) struct GlobalBarrierWorker<C> {
     /// The queue of scheduled barriers.
     periodic_barriers: PeriodicBarriers,
 
-    /// The max barrier nums in flight
-    in_flight_barrier_nums: usize,
-
     /// Whether per database failure isolation is enabled in system parameters.
     system_enable_per_database_isolation: bool,
 
@@ -108,7 +105,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         context: Arc<C>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
-        let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
         let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
 
@@ -123,7 +119,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         Self {
             enable_recovery,
             periodic_barriers,
-            in_flight_barrier_nums,
             system_enable_per_database_isolation,
             context,
             env,
@@ -149,6 +144,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         sink_manager: SinkCoordinatorManager,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
+        barrier_scheduler: schedule::BarrierScheduler,
     ) -> Self {
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
 
@@ -160,6 +156,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             source_manager,
             scale_controller,
             env.clone(),
+            barrier_scheduler,
         ));
 
         Self::new_inner(env, sink_manager, request_rx, context).await
@@ -202,7 +199,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         tracing::info!(
             "Starting barrier manager with: enable_recovery={}, in_flight_barrier_nums={}",
             self.enable_recovery,
-            self.in_flight_barrier_nums,
+            self.checkpoint_control.in_flight_barrier_nums,
         );
 
         if !self.enable_recovery {
@@ -464,10 +461,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         self.failure_recovery(e).await;
                     }
                 }
-                new_barrier = self.periodic_barriers.next_barrier(&*self.context),
-                    if self
-                        .checkpoint_control
-                        .can_inject_barrier(self.in_flight_barrier_nums) => {
+                new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
                     if let Some((Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
                         let worker_ids: HashSet<_> =
                             info.stream_job_fragments.inner
@@ -786,6 +780,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut background_jobs,
                 hummock_version_stats,
                 database_infos,
+                mut cdc_table_snapshot_split_assignment,
             } = runtime_info_snapshot;
 
             self.sink_manager.reset().await;
@@ -823,6 +818,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         subscription_infos.remove(&database_id).unwrap_or_default(),
                         is_paused,
                         &hummock_version_stats,
+                        &mut cdc_table_snapshot_split_assignment,
                     );
                     let node_to_collect = match result {
                         Ok(info) => {

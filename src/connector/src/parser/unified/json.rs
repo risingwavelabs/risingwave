@@ -87,6 +87,12 @@ impl TimestamptzHandling {
 }
 
 #[derive(Clone, Debug)]
+pub enum TimestampHandling {
+    Milli,
+    GuessNumberUnit,
+}
+
+#[derive(Clone, Debug)]
 pub enum JsonValueHandling {
     AsValue,
     AsString,
@@ -135,6 +141,7 @@ pub enum StructHandling {
 pub struct JsonParseOptions {
     pub bytea_handling: ByteaHandling,
     pub time_handling: TimeHandling,
+    pub timestamp_handling: TimestampHandling,
     pub timestamptz_handling: TimestamptzHandling,
     pub json_value_handling: JsonValueHandling,
     pub numeric_handling: NumericHandling,
@@ -142,6 +149,7 @@ pub struct JsonParseOptions {
     pub varchar_handling: VarcharHandling,
     pub struct_handling: StructHandling,
     pub ignoring_keycase: bool,
+    pub handle_toast_columns: bool,
 }
 
 impl Default for JsonParseOptions {
@@ -154,6 +162,7 @@ impl JsonParseOptions {
     pub const CANAL: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
         time_handling: TimeHandling::Micro,
+        timestamp_handling: TimestampHandling::GuessNumberUnit, // backward-compatible
         timestamptz_handling: TimestamptzHandling::GuessNumberUnit, // backward-compatible
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
@@ -166,10 +175,12 @@ impl JsonParseOptions {
         varchar_handling: VarcharHandling::Strict,
         struct_handling: StructHandling::Strict,
         ignoring_keycase: true,
+        handle_toast_columns: false,
     };
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
         time_handling: TimeHandling::Micro,
+        timestamp_handling: TimestampHandling::GuessNumberUnit, // backward-compatible
         timestamptz_handling: TimestamptzHandling::GuessNumberUnit, // backward-compatible
         json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
@@ -179,12 +190,19 @@ impl JsonParseOptions {
         varchar_handling: VarcharHandling::OnlyPrimaryTypes,
         struct_handling: StructHandling::AllowJsonString,
         ignoring_keycase: true,
+        handle_toast_columns: false,
     };
 
-    pub fn new_for_debezium(timestamptz_handling: TimestamptzHandling) -> Self {
+    pub fn new_for_debezium(
+        timestamptz_handling: TimestamptzHandling,
+        timestamp_handling: TimestampHandling,
+        time_handling: TimeHandling,
+        handle_toast_columns: bool,
+    ) -> Self {
         Self {
             bytea_handling: ByteaHandling::Base64,
-            time_handling: TimeHandling::Micro,
+            time_handling,
+            timestamp_handling,
             timestamptz_handling,
             json_value_handling: JsonValueHandling::AsString,
             numeric_handling: NumericHandling::Relax {
@@ -197,6 +215,7 @@ impl JsonParseOptions {
             varchar_handling: VarcharHandling::Strict,
             struct_handling: StructHandling::Strict,
             ignoring_keycase: true,
+            handle_toast_columns,
         }
     }
 
@@ -210,7 +229,6 @@ impl JsonParseOptions {
             got: value.value_type().to_string(),
             value: value.to_string(),
         };
-
         let v: ScalarImpl = match (type_expected, value.value_type()) {
             (_, ValueType::Null) => return Ok(DatumCow::NULL),
             // ---- Boolean -----
@@ -483,9 +501,18 @@ impl JsonParseOptions {
             (
                 DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => i64_to_timestamp(value.as_i64().unwrap())
-                .map_err(|_| create_error())?
-                .into(),
+            ) => {
+                match self.timestamp_handling {
+                    // Only when user configures debezium.time.precision.mode = 'connect',
+                    // the Milli branch will be executed
+                    TimestampHandling::Milli => Timestamp::with_millis(value.as_i64().unwrap())
+                        .map_err(|_| create_error())?
+                        .into(),
+                    TimestampHandling::GuessNumberUnit => i64_to_timestamp(value.as_i64().unwrap())
+                        .map_err(|_| create_error())?
+                        .into(),
+                }
+            }
             // ---- Timestamptz -----
             (DataType::Timestamptz, ValueType::String) => match self.timestamptz_handling {
                 TimestamptzHandling::UtcWithoutSuffix => value
@@ -568,7 +595,8 @@ impl JsonParseOptions {
             }
 
             // ---- List -----
-            (DataType::List(item_type), ValueType::Array) => ListValue::new({
+            (DataType::List(list_type), ValueType::Array) => ListValue::new({
+                let item_type = list_type.elem();
                 let array = value.as_array().unwrap();
                 let mut builder = item_type.create_array_builder(array.len());
                 for v in array {
@@ -580,23 +608,35 @@ impl JsonParseOptions {
             .into(),
 
             // ---- Bytea -----
-            (DataType::Bytea, ValueType::String) => match self.bytea_handling {
-                ByteaHandling::Standard => str_to_bytea(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into(),
-                ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
-                    .decode(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into_boxed_slice()
-                    .into(),
-            },
+            (DataType::Bytea, ValueType::String) => {
+                let value_str = value.as_str().unwrap();
+
+                match self.bytea_handling {
+                    ByteaHandling::Standard => {
+                        str_to_bytea(value_str).map_err(|_| create_error())?.into()
+                    }
+                    ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
+                        .decode(value_str)
+                        .map_err(|_| create_error())?
+                        .into_boxed_slice()
+                        .into(),
+                }
+            }
             // ---- Jsonb -----
             (DataType::Jsonb, ValueType::String)
                 if matches!(self.json_value_handling, JsonValueHandling::AsString) =>
             {
-                JsonbVal::from_str(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into()
+                // Check if this value is the Debezium unavailable value (TOAST handling for postgres-cdc).
+                // Debezium will base64 encode the bytea type placeholder.
+                // When a placeholder is encountered, it is converted into a jsonb format placeholder to match the original type.
+                match self.handle_toast_columns {
+                    true => JsonbVal::from_debezium_unavailable_value(value.as_str().unwrap())
+                        .map_err(|_| create_error())?
+                        .into(),
+                    false => JsonbVal::from_str(value.as_str().unwrap())
+                        .map_err(|_| create_error())?
+                        .into(),
+                }
             }
             (DataType::Jsonb, _)
                 if matches!(self.json_value_handling, JsonValueHandling::AsValue) =>

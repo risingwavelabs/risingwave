@@ -55,14 +55,21 @@ impl<REQ: From<SinkWriterStreamRequest>> SinkWriterRequestSender<REQ> {
 
 impl SinkWriterResponseReceiver {
     pub async fn next_commit_response(&mut self) -> Result<CommitResponse> {
-        match self.next_response().await? {
-            SinkWriterStreamResponse {
-                response: Some(sink_writer_stream_response::Response::Commit(rsp)),
-            } => Ok(rsp),
-            msg => Err(RpcError::Internal(anyhow!(
-                "should get Sync response but get {:?}",
-                msg
-            ))),
+        loop {
+            match self.next_response().await? {
+                SinkWriterStreamResponse {
+                    response: Some(sink_writer_stream_response::Response::Commit(rsp)),
+                } => return Ok(rsp),
+                SinkWriterStreamResponse {
+                    response: Some(sink_writer_stream_response::Response::Batch(_)),
+                } => continue,
+                msg => {
+                    return Err(RpcError::Internal(anyhow!(
+                        "should get Sync response but get {:?}",
+                        msg
+                    )));
+                }
+            }
         }
     }
 }

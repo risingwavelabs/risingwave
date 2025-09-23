@@ -69,6 +69,9 @@ impl CatalogController {
                         indexes.iter().all(|obj| obj.obj_type == ObjectType::Index),
                         "only index could be dropped in restrict mode"
                     );
+                    for idx in &indexes {
+                        check_object_refer_for_drop(idx.obj_type, idx.oid, &txn).await?;
+                    }
                     indexes
                 }
                 object_type @ (ObjectType::Source | ObjectType::Sink) => {
@@ -94,19 +97,14 @@ impl CatalogController {
 
         // TODO: record dependency info in object_dependency table for sink into table.
         // Special handling for 'sink into table'.
-        let removed_incoming_sinks: Vec<I32Array> = Table::find()
+        let incoming_sink_ids: Vec<SinkId> = Sink::find()
             .select_only()
-            .column(table::Column::IncomingSinks)
-            .filter(table::Column::TableId.is_in(removed_object_ids.clone()))
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::TargetTable.is_in(removed_object_ids.clone()))
             .into_tuple()
             .all(&txn)
             .await?;
-        if !removed_incoming_sinks.is_empty() {
-            let incoming_sink_ids = removed_incoming_sinks
-                .into_iter()
-                .flat_map(|arr| arr.into_inner().into_iter())
-                .collect_vec();
-
+        if !incoming_sink_ids.is_empty() {
             if self.env.opts.protect_drop_table_with_incoming_sink {
                 let sink_names: Vec<String> = Sink::find()
                     .select_only()
@@ -132,24 +130,21 @@ impl CatalogController {
             removed_objects.extend(removed_sink_objs);
         }
 
-        // When there is a table sink in the dependency chain of drop cascade, an error message needs to be returned currently to manually drop the sink.
-        if object_type != ObjectType::Sink {
-            for obj in &removed_objects {
-                if obj.obj_type == ObjectType::Sink {
-                    let sink = Sink::find_by_id(obj.oid)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
+        for obj in &removed_objects {
+            if obj.obj_type == ObjectType::Sink {
+                let sink = Sink::find_by_id(obj.oid)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
 
-                    // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
-                    if let Some(target_table) = sink.target_table
-                        && !removed_object_ids.contains(&target_table)
-                    {
-                        return Err(MetaError::permission_denied(format!(
-                            "Found sink into table in dependency: {}, please drop it manually",
-                            sink.name,
-                        )));
-                    }
+                if let Some(target_table) = sink.target_table
+                    && !removed_object_ids.contains(&target_table)
+                    && !has_table_been_migrated(&txn, target_table).await?
+                {
+                    return Err(anyhow::anyhow!(
+                        "Dropping sink into table is not allowed for unmigrated table {}. Please migrate it first.",
+                        target_table
+                    ).into());
                 }
             }
         }
@@ -198,9 +193,13 @@ impl CatalogController {
                 .count(&txn)
                 .await?;
             if creating != 0 {
-                return Err(MetaError::permission_denied(format!(
-                    "can not drop {creating} creating streaming job, please cancel them firstly"
-                )));
+                if creating == 1 && object_type == ObjectType::Sink {
+                    info!("dropping creating sink job, it will be cancelled");
+                } else {
+                    return Err(MetaError::permission_denied(format!(
+                        "can not drop {creating} creating streaming job, please cancel them firstly"
+                    )));
+                }
             }
         }
 
@@ -269,8 +268,25 @@ impl CatalogController {
             }
         }
 
-        let (removed_source_fragments, removed_actors, removed_fragments) =
+        let (removed_source_fragments, removed_sink_fragments, removed_actors, removed_fragments) =
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
+
+        let sink_target_fragments = fetch_target_fragments(&txn, removed_sink_fragments).await?;
+        let mut removed_sink_fragment_by_targets = HashMap::new();
+        for (sink_fragment, target_fragments) in sink_target_fragments {
+            assert!(
+                target_fragments.len() <= 1,
+                "sink should have at most one downstream fragment"
+            );
+            if let Some(target_fragment) = target_fragments.first()
+                && !removed_fragments.contains(target_fragment)
+            {
+                removed_sink_fragment_by_targets
+                    .entry(*target_fragment)
+                    .or_insert_with(Vec::new)
+                    .push(sink_fragment);
+            }
+        }
 
         // Find affect users with privileges on all this objects.
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -315,6 +331,7 @@ impl CatalogController {
         inner
             .dropped_tables
             .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
+
         let version = match object_type {
             ObjectType::Database => {
                 // TODO: Notify objects in other databases when the cross-database query is supported.
@@ -361,6 +378,7 @@ impl CatalogController {
                 removed_source_fragments,
                 removed_actors,
                 removed_fragments,
+                removed_sink_fragment_by_targets,
             },
             version,
         ))

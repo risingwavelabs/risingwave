@@ -17,7 +17,7 @@ use rumqttc::tokio_rustls::rustls;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::ConnectProperties;
 use rumqttc::v5::{AsyncClient, EventLoop, MqttOptions};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use strum_macros::{Display, EnumString};
 use with_options::WithOptions;

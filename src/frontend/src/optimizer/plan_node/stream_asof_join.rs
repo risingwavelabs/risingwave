@@ -25,8 +25,8 @@ use super::utils::{
     Distill, TableCatalogBuilder, childless_record, plan_node_name, watermark_pretty,
 };
 use super::{
-    ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamJoinCommon,
-    StreamNode, generic,
+    ExprRewritable, LogicalJoin, PlanBase, PlanTreeNodeBinary, StreamJoinCommon, StreamNode,
+    StreamPlanRef as PlanRef, generic,
 };
 use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
@@ -63,16 +63,12 @@ impl StreamAsOfJoin {
         core: generic::Join<PlanRef>,
         eq_join_predicate: EqJoinPredicate,
         inequality_desc: AsOfJoinDesc,
-    ) -> Self {
+    ) -> Result<Self> {
         let ctx = core.ctx();
 
         assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
 
-        // Inner join won't change the append-only behavior of the stream. The rest might.
-        let append_only = match core.join_type {
-            JoinType::Inner => core.left.append_only() && core.right.append_only(),
-            _ => false,
-        };
+        let stream_kind = core.stream_kind()?;
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),
@@ -87,20 +83,20 @@ impl StreamAsOfJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            stream_kind,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
             eq_join_predicate,
-            is_append_only: append_only,
+            is_append_only: stream_kind.is_append_only(),
             inequality_desc,
             join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
-        }
+        })
     }
 
     /// Get join type
@@ -125,7 +121,7 @@ impl StreamAsOfJoin {
     }
 
     /// Return stream asof join internal table catalog.
-    pub fn infer_internal_table_catalog<I: StreamPlanRef>(
+    pub fn infer_internal_table_catalog<I: StreamPlanNodeMetadata>(
         input: I,
         join_key_indices: Vec<usize>,
         dk_indices_in_jk: Vec<usize>,
@@ -214,7 +210,7 @@ impl Distill for StreamAsOfJoin {
     }
 }
 
-impl PlanTreeNodeBinary for StreamAsOfJoin {
+impl PlanTreeNodeBinary<Stream> for StreamAsOfJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -227,11 +223,12 @@ impl PlanTreeNodeBinary for StreamAsOfJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone(), self.inequality_desc)
+
+        Self::new(core, self.eq_join_predicate.clone(), self.inequality_desc).unwrap()
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamAsOfJoin }
+impl_plan_tree_node_for_binary! { Stream, StreamAsOfJoin }
 
 impl StreamNode for StreamAsOfJoin {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -292,7 +289,7 @@ impl StreamNode for StreamAsOfJoin {
     }
 }
 
-impl ExprRewritable for StreamAsOfJoin {
+impl ExprRewritable<Stream> for StreamAsOfJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -306,7 +303,8 @@ impl ExprRewritable for StreamAsOfJoin {
             core.left.schema().len(),
         )
         .unwrap();
-        Self::new(core, eq_join_predicate, desc).into()
+
+        Self::new(core, eq_join_predicate, desc).unwrap().into()
     }
 }
 

@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
@@ -27,7 +26,7 @@ use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCreateMviewProgress, PbLocalSstableInfo,
+    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -43,10 +42,10 @@ use self::managed_state::ManagedBarrierState;
 use crate::error::{ScoredStreamError, StreamError, StreamResult};
 #[cfg(test)]
 use crate::task::LocalBarrierManager;
+use crate::task::managed_state::BarrierToComplete;
 use crate::task::{
     ActorId, AtomicU64Ref, PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
 };
-
 pub mod managed_state;
 #[cfg(test)]
 mod tests;
@@ -76,7 +75,7 @@ use crate::task::barrier_worker::managed_state::{
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
-/// Collect result of some barrier on current compute node. Will be reported to the meta service in [`LocalBarrierWorker::next_completed_epoch`].
+/// Collect result of some barrier on current compute node. Will be reported to the meta service in [`LocalBarrierWorker::on_epoch_completed`].
 #[derive(Debug)]
 pub struct BarrierCompleteResult {
     /// The result returned from `sync` of `StateStore`.
@@ -84,6 +83,16 @@ pub struct BarrierCompleteResult {
 
     /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
+
+    /// The source IDs that have finished loading data for refreshable batch sources.
+    pub load_finished_source_ids: Vec<u32>,
+
+    pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+
+    /// The table IDs that should be truncated.
+    pub truncate_tables: Vec<u32>,
+    /// The table IDs that have finished refresh.
+    pub refresh_finished_tables: Vec<u32>,
 }
 
 /// Lives in [`crate::task::barrier_worker::LocalBarrierWorker`],
@@ -367,6 +376,8 @@ impl LocalBarrierWorker {
                             partial_graph_id,
                             barrier,
                         } => {
+                            // update await_epoch_completed_futures
+                            // handled below in next_completed_epoch
                             self.complete_barrier(database_id, partial_graph_id, barrier.epoch.prev);
                         }
                         ManagedBarrierStateEvent::ActorError{
@@ -613,7 +624,9 @@ mod await_epoch_completed_future {
     use futures::FutureExt;
     use futures::future::BoxFuture;
     use risingwave_hummock_sdk::SyncResult;
-    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
+    use risingwave_pb::stream_service::barrier_complete_response::{
+        PbCdcTableBackfillProgress, PbCreateMviewProgress,
+    };
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
@@ -623,12 +636,17 @@ mod await_epoch_completed_future {
         + 'static;
 
     #[define_opaque(AwaitEpochCompletedFuture)]
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn instrument_complete_barrier_future(
         partial_graph_id: PartialGraphId,
         complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
         create_mview_progress: Vec<PbCreateMviewProgress>,
+        load_finished_source_ids: Vec<u32>,
+        cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+        truncate_tables: Vec<u32>,
+        refresh_finished_tables: Vec<u32>,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -646,6 +664,10 @@ mod await_epoch_completed_future {
                 result.map(|sync_result| BarrierCompleteResult {
                     sync_result,
                     create_mview_progress,
+                    load_finished_source_ids,
+                    cdc_table_backfill_progress,
+                    truncate_tables,
+                    refresh_finished_tables,
                 }),
             )
         });
@@ -664,6 +686,7 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdds;
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
 use crate::executor::exchange::permit;
@@ -716,8 +739,15 @@ impl LocalBarrierWorker {
             else {
                 return;
             };
-            let (barrier, table_ids, create_mview_progress) =
-                database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
+            let BarrierToComplete {
+                barrier,
+                table_ids,
+                create_mview_progress,
+                load_finished_source_ids,
+                cdc_table_backfill_progress,
+                truncate_tables,
+                refresh_finished_tables,
+            } = database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
                 BarrierKind::Unspecified => unreachable!(),
@@ -748,6 +778,10 @@ impl LocalBarrierWorker {
                         barrier,
                         self.actor_manager.await_tree_reg.as_ref(),
                         create_mview_progress,
+                        load_finished_source_ids,
+                        cdc_table_backfill_progress,
+                        truncate_tables,
+                        refresh_finished_tables,
                     )
                 });
         }
@@ -763,14 +797,19 @@ impl LocalBarrierWorker {
         let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
+            load_finished_source_ids,
+            cdc_table_backfill_progress,
+            truncate_tables,
+            refresh_finished_tables,
         } = result;
 
-        let (synced_sstables, table_watermarks, old_value_ssts) = sync_result
+        let (synced_sstables, table_watermarks, old_value_ssts, vector_index_adds) = sync_result
             .map(|sync_result| {
                 (
                     sync_result.uncommitted_ssts,
                     sync_result.table_watermarks,
                     sync_result.old_value_ssts,
+                    sync_result.vector_index_adds,
                 )
             })
             .unwrap_or_default();
@@ -808,6 +847,21 @@ impl LocalBarrierWorker {
                             .map(|sst| sst.sst_info.into())
                             .collect(),
                         database_id: database_id.database_id,
+                        load_finished_source_ids,
+                        vector_index_adds: vector_index_adds
+                            .into_iter()
+                            .map(|(table_id, adds)| {
+                                (
+                                    table_id.table_id,
+                                    PbVectorIndexAdds {
+                                        adds: adds.into_iter().map(|add| add.into()).collect(),
+                                    },
+                                )
+                            })
+                            .collect(),
+                        cdc_table_backfill_progress,
+                        truncate_tables,
+                        refresh_finished_tables,
                     },
                 )
             }

@@ -32,6 +32,7 @@ use self::column_aware_row_encoding::ColumnAwareSerde;
 pub mod column_aware_row_encoding;
 
 pub use crate::row::RowDeserializer as BasicDeserializer;
+use crate::vector::{decode_vector_payload, encode_vector_payload};
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
@@ -230,7 +231,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
         ScalarRefImpl::Map(m) => serialize_list(m.into_inner(), buf),
-        ScalarRefImpl::Vector(v) => serialize_list(v.into_inner(), buf),
+        ScalarRefImpl::Vector(v) => serialize_vector(v, buf),
     }
 }
 
@@ -257,7 +258,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
         ScalarRefImpl::Map(v) => estimate_serialize_list_size(v.into_inner()),
-        ScalarRefImpl::Vector(v) => estimate_serialize_list_size(v.into_inner()),
+        ScalarRefImpl::Vector(v) => estimate_serialize_vector_size(v),
     }
 }
 
@@ -280,6 +281,14 @@ fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
 }
 fn estimate_serialize_list_size(list: ListRef<'_>) -> usize {
     4 + list.estimate_serialize_size_inner()
+}
+
+fn serialize_vector(value: VectorRef<'_>, buf: &mut impl BufMut) {
+    let elems = value.as_slice();
+    encode_vector_payload(elems, buf);
+}
+fn estimate_serialize_vector_size(v: VectorRef<'_>) -> usize {
+    size_of_val(v.as_slice())
 }
 
 fn serialize_str(bytes: &[u8], buf: &mut impl BufMut) {
@@ -360,17 +369,9 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
-        DataType::Vector(size) => {
-            let inner = deserialize_list(&DataType::Float32, data)?.into_list();
-            assert_eq!(inner.len(), *size);
-            VectorVal::from_inner(inner).into()
-        }
-        DataType::List(item_type) => deserialize_list(item_type, data)?,
-        DataType::Map(map_type) => {
-            // FIXME: clone type everytime here is inefficient
-            let list = deserialize_list(&map_type.clone().into_struct(), data)?.into_list();
-            ScalarImpl::Map(MapValue::from_entries(list))
-        }
+        DataType::Vector(dimension) => deserialize_vector(*dimension, data),
+        DataType::List(list_type) => deserialize_list(list_type, data)?,
+        DataType::Map(map_type) => deserialize_map(map_type, data)?,
     })
 }
 
@@ -383,13 +384,27 @@ fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<Sc
     Ok(ScalarImpl::Struct(StructValue::new(field_values)))
 }
 
-fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
+fn deserialize_list(list_type: &ListType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    let elem_type = list_type.elem();
     let len = data.get_u32_le();
-    let mut builder = item_type.create_array_builder(len as usize);
+    let mut builder = elem_type.create_array_builder(len as usize);
     for _ in 0..len {
-        builder.append(inner_deserialize_datum(data, item_type)?);
+        builder.append(inner_deserialize_datum(data, elem_type)?);
     }
     Ok(ScalarImpl::List(ListValue::new(builder.finish())))
+}
+
+fn deserialize_map(map_type: &MapType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    // FIXME: clone type everytime here is inefficient
+    let list = deserialize_list(&map_type.clone().into_list_type(), data)?.into_list();
+    Ok(ScalarImpl::Map(MapValue::from_entries(list)))
+}
+
+fn deserialize_vector(dimension: usize, data: &mut impl Buf) -> ScalarImpl {
+    VectorVal {
+        inner: decode_vector_payload(dimension, data).into_boxed_slice(),
+    }
+    .to_scalar_value()
 }
 
 fn deserialize_str(data: &mut impl Buf) -> Result<Box<str>> {

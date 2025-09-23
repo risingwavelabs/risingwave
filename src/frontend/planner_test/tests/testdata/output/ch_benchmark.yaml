@@ -866,7 +866,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(order_line.ol_amount))] }
-      └─StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(order_line.ol_amount)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(order_line.ol_amount)] }
             └─StreamProject { exprs: [order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
@@ -876,7 +876,7 @@
     Fragment 0
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └── StreamProject { exprs: [sum(sum(order_line.ol_amount))] }
-        └── StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum(sum(order_line.ol_amount)), count] }
             ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
@@ -1932,7 +1932,7 @@
         │             └─StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_order_cnt], stream_scan_type: ArrangementBackfill, stream_key: [stock.s_w_id, stock.s_i_id], pk: [s_w_id, s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [(sum(sum(stock.s_order_cnt))::Decimal * 0.005:Decimal) as $expr3] }
-            └─StreamSimpleAgg { aggs: [sum(sum(stock.s_order_cnt)), count] }
+            └─StreamSimpleAgg [append_only] { aggs: [sum(sum(stock.s_order_cnt)), count] }
               └─StreamExchange { dist: Single }
                 └─StreamStatelessSimpleAgg { aggs: [sum(stock.s_order_cnt)] }
                   └─StreamShare { id: 10 }
@@ -1999,7 +1999,7 @@
 
     Fragment 7
     StreamProject { exprs: [(sum(sum(stock.s_order_cnt))::Decimal * 0.005:Decimal) as $expr3] }
-    └── StreamSimpleAgg { aggs: [sum(sum(stock.s_order_cnt)), count] } { tables: [ SimpleAggState: 14 ] }
+    └── StreamSimpleAgg [append_only] { aggs: [sum(sum(stock.s_order_cnt)), count] } { tables: [ SimpleAggState: 14 ] }
         └── StreamExchange Single from 8
 
     Fragment 8
@@ -2254,7 +2254,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [promo_revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [((100.00:Decimal * sum(sum($expr1))) / (1:Decimal + sum(sum(order_line.ol_amount)))) as $expr2] }
-      └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(order_line.ol_amount)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum(sum(order_line.ol_amount)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(order_line.ol_amount)] }
             └─StreamProject { exprs: [Case(Like(item.i_data, 'PR%':Varchar), order_line.ol_amount, 0:Decimal) as $expr1, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id] }
@@ -2269,7 +2269,7 @@
     Fragment 0
     StreamMaterialize { columns: [promo_revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └── StreamProject { exprs: [((100.00:Decimal * sum(sum($expr1))) / (1:Decimal + sum(sum(order_line.ol_amount)))) as $expr2] }
-        └── StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(order_line.ol_amount)), count] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum(sum(order_line.ol_amount)), count] }
             ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
@@ -2619,7 +2619,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [(sum(sum(order_line.ol_amount)) / 2.0:Decimal) as $expr3] }
-      └─StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(order_line.ol_amount)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(order_line.ol_amount)] }
             └─StreamProject { exprs: [order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id, item.i_id] }
@@ -2641,7 +2641,7 @@
     Fragment 0
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └── StreamProject { exprs: [(sum(sum(order_line.ol_amount)) / 2.0:Decimal) as $expr3] }
-        └── StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum(sum(order_line.ol_amount)), count] }
             ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
@@ -2850,7 +2850,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(order_line.ol_amount))] }
-      └─StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(order_line.ol_amount)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(order_line.ol_amount)] }
             └─StreamProject { exprs: [order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, order_line.ol_i_id, item.i_id] }
@@ -2868,7 +2868,7 @@
     Fragment 0
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └── StreamProject { exprs: [sum(sum(order_line.ol_amount))] }
-        └── StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum(sum(order_line.ol_amount)), count] }
             ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
@@ -3396,7 +3396,7 @@
               │     └─StreamTableScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_id], stream_scan_type: ArrangementBackfill, stream_key: [orders.o_w_id, orders.o_d_id, orders.o_id], pk: [o_w_id, o_d_id, o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
               └─StreamExchange { dist: Broadcast }
                 └─StreamProject { exprs: [(sum(sum(customer.c_balance)) / sum0(count(customer.c_balance))::Decimal) as $expr1] }
-                  └─StreamSimpleAgg { aggs: [sum(sum(customer.c_balance)), sum0(count(customer.c_balance)), count] }
+                  └─StreamSimpleAgg [append_only] { aggs: [sum(sum(customer.c_balance)), sum0(count(customer.c_balance)), count] }
                     └─StreamExchange { dist: Single }
                       └─StreamStatelessSimpleAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
                         └─StreamProject { exprs: [customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }

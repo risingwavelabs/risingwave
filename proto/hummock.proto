@@ -108,6 +108,11 @@ message GroupMerge {
   uint64 right_group_id = 2;
 }
 
+// TruncateTables is used to truncate multiple tables from sstables.
+message TruncateTables {
+  repeated uint32 table_ids = 1;
+}
+
 message GroupDelta {
   reserved 4;
   reserved "group_meta_change";
@@ -119,6 +124,7 @@ message GroupDelta {
     GroupDestroy group_destroy = 3;
     GroupMerge group_merge = 6;
     NewL0SubLevel new_l0_sub_level = 7;
+    TruncateTables truncate_tables = 8;
   }
 }
 
@@ -177,17 +183,10 @@ message StateTableInfoDelta {
   uint64 compaction_group_id = 3;
 }
 
-enum DistanceType {
-  DISTANCE_TYPE_UNSPECIFIED = 0;
-  DISTANCE_TYPE_L1 = 1;
-  DISTANCE_TYPE_L2 = 2;
-  DISTANCE_TYPE_COSINE = 3;
-  DISTANCE_TYPE_INNER_PRODUCT = 4;
-}
-
 enum VectorIndexObjectType {
   VECTOR_INDEX_OBJECT_UNSPECIFIED = 0;
   VECTOR_INDEX_OBJECT_VECTOR = 1;
+  VECTOR_INDEX_OBJECT_HNSW_GRAPH = 2;
 }
 message VectorIndexObject {
   uint64 id = 1;
@@ -202,10 +201,8 @@ message VectorFileInfo {
   uint64 meta_offset = 5;
 }
 
-message FlatIndexConfig {}
-
 message FlatIndex {
-  FlatIndexConfig config = 1;
+  catalog.FlatIndexConfig config = 1;
   repeated VectorFileInfo vector_files = 2;
   uint64 next_vector_id = 3;
 }
@@ -215,29 +212,62 @@ message FlatIndexAdd {
   uint64 next_vector_id = 2;
 }
 
+message HnswGraph {
+  message HnswNeighbor {
+    uint64 vector_id = 1;
+    double distance = 2;
+  }
+
+  message HnswLevel {
+    repeated HnswNeighbor neighbors = 1;
+  }
+
+  message HnswNode {
+    repeated HnswLevel levels = 1;
+  }
+
+  repeated HnswNode nodes = 1;
+  uint64 entrypoint_id = 2;
+}
+
+message HnswGraphFileInfo {
+  uint64 object_id = 1;
+  uint64 file_size = 2;
+}
+
+message HnswFlatIndex {
+  catalog.HnswFlatIndexConfig config = 1;
+  repeated VectorFileInfo vector_files = 2;
+  uint64 next_vector_id = 3;
+  optional HnswGraphFileInfo graph_file = 4;
+}
+
+message HnswFlatIndexAdd {
+  repeated VectorFileInfo added_vector_files = 1;
+  uint64 next_vector_id = 2;
+  HnswGraphFileInfo graph_file = 3;
+}
+
 message VectorIndex {
   uint32 dimension = 1;
-  DistanceType distance_type = 2;
+  common.DistanceType distance_type = 2;
   oneof variant {
     // reserve 64 general configs
     FlatIndex flat = 65;
+    HnswFlatIndex hnsw_flat = 66;
   }
 }
 
 message VectorIndexDelta {
   message VectorIndexInit {
-    uint32 dimension = 1;
-    DistanceType distance_type = 2;
-    oneof config {
-      // reserve 64 general configs
-      FlatIndexConfig flat = 65;
-    }
+    catalog.VectorIndexInfo info = 1;
   }
 
   message VectorIndexAdd {
     oneof add {
       // reserve 64 general configs
       FlatIndexAdd flat = 65;
+      HnswFlatIndexAdd hnsw_flat = 66;
     }
   }
 

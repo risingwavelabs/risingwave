@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::source::BATCH_POSIX_FS_CONNECTOR;
+
 use super::*;
 
 pub static SOURCE_ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> =
@@ -81,6 +83,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
                 ),
                 POSIX_FS_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
+                ),
+                BATCH_POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv],
                 ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
@@ -121,9 +126,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
 
 fn validate_license(connector: &str) -> Result<()> {
     if connector == SQL_SERVER_CDC_CONNECTOR {
-        Feature::SqlServerCdcSource
-            .check_available()
-            .map_err(|e| anyhow::anyhow!(e))?;
+        Feature::SqlServerCdcSource.check_available()?;
     }
     Ok(())
 }

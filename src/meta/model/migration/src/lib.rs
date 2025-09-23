@@ -43,7 +43,17 @@ mod m20250522_074525_iceberg_tables;
 mod m20250522_074947_iceberg_namespace_properties;
 mod m20250528_064717_barrier_interval_per_database;
 mod m20250603_084830_default_privilege;
+mod m20250702_062029_cdc_table_snapshot_splits;
 mod m20250710_065220_sink_auto_refresh_schema;
+mod m20250722_155040_table_refreshable;
+mod m20250729_174630_add_vector_index_info;
+mod m20250810_000000_add_user_admin_field;
+mod m20250819_014448_add_version_column_indices_to_table;
+mod m20250820_120000_add_cdc_table_type;
+mod m20250821_081110_cdc_table_snapshot_splits_add_column;
+mod m20250905_144810_deprecate_table_incoming_sinks;
+mod m20250907_000000_source_splits;
+mod m20250916_120000_add_refresh_fields;
 mod utils;
 
 pub struct Migrator;
@@ -125,7 +135,17 @@ impl MigratorTrait for Migrator {
             Box::new(m20250522_074947_iceberg_namespace_properties::Migration),
             Box::new(m20250528_064717_barrier_interval_per_database::Migration),
             Box::new(m20250603_084830_default_privilege::Migration),
+            Box::new(m20250702_062029_cdc_table_snapshot_splits::Migration),
             Box::new(m20250710_065220_sink_auto_refresh_schema::Migration),
+            Box::new(m20250722_155040_table_refreshable::Migration),
+            Box::new(m20250729_174630_add_vector_index_info::Migration),
+            Box::new(m20250810_000000_add_user_admin_field::Migration),
+            Box::new(m20250819_014448_add_version_column_indices_to_table::Migration),
+            Box::new(m20250820_120000_add_cdc_table_type::Migration),
+            Box::new(m20250821_081110_cdc_table_snapshot_splits_add_column::Migration),
+            Box::new(m20250905_144810_deprecate_table_incoming_sinks::Migration),
+            Box::new(m20250907_000000_source_splits::Migration),
+            Box::new(m20250916_120000_add_refresh_fields::Migration),
         ]
     }
 }

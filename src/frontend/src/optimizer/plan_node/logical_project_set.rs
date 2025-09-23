@@ -18,9 +18,9 @@ use risingwave_common::types::DataType;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchProjectSet, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
-    gen_filter_and_pushdown, generic,
+    BatchProjectSet, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamPlanRef,
+    StreamProjectSet, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{
@@ -195,7 +195,7 @@ impl LogicalProjectSet {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalProjectSet {
+impl PlanTreeNodeUnary<Logical> for LogicalProjectSet {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -222,7 +222,7 @@ impl PlanTreeNodeUnary for LogicalProjectSet {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalProjectSet}
+impl_plan_tree_node_for_unary! { Logical, LogicalProjectSet}
 impl_distill_by_unit!(LogicalProjectSet, core, "LogicalProjectSet");
 // TODO: add verbose display like Project
 
@@ -294,7 +294,7 @@ impl ColPrunable for LogicalProjectSet {
     }
 }
 
-impl ExprRewritable for LogicalProjectSet {
+impl ExprRewritable<Logical> for LogicalProjectSet {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -354,10 +354,10 @@ impl PredicatePushdown for LogicalProjectSet {
 }
 
 impl ToBatch for LogicalProjectSet {
-    fn to_batch(&self) -> Result<PlanRef> {
-        let mut new_logical = self.core.clone();
-        new_logical.input = self.input().to_batch()?;
-        Ok(BatchProjectSet::new(new_logical).into())
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
+        let new_input = self.input().to_batch()?;
+        let core = self.core.clone_with_input(new_input);
+        Ok(BatchProjectSet::new(core).into())
     }
 }
 
@@ -398,7 +398,7 @@ impl ToStream for LogicalProjectSet {
 
     // TODO: implement to_stream_with_dist_required like LogicalProject
 
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         if self.select_list().iter().any(|item| item.has_now()) {
             // User may use `now()` in table function in a wrong way, because we allow `now()` in `FROM` clause.
             return Err(ErrorCode::NotSupported(
@@ -409,9 +409,51 @@ impl ToStream for LogicalProjectSet {
         }
 
         let new_input = self.input().to_stream(ctx)?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        Ok(StreamProjectSet::new(new_logical).into())
+        let core = self.core.clone_with_input(new_input);
+        Ok(StreamProjectSet::new(core).into())
+    }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+
+        let input_columns = columns
+            .iter()
+            .map(|&col| {
+                // First try the original o2i mapping for direct InputRef
+                if let Some(input_col) = self.core.o2i_col_mapping().try_map(col) {
+                    return Some(input_col);
+                }
+
+                // For ProjectSet, column 0 is the projected_row_id (synthetic column)
+                // so we can't map it to input. Only handle columns from the select_list.
+                if col == 0 {
+                    return None;
+                }
+
+                let expr = &self.select_list()[col - 1];
+
+                // Skip table functions as they generate new data and don't have direct locality
+                if expr.has_table_function() {
+                    return None;
+                }
+
+                // Check if it's a pure function with single InputRef
+                if expr.is_pure() {
+                    let input_refs = expr.collect_input_refs(self.input().schema().len());
+                    // Check if expression references exactly one input column
+                    if input_refs.count_ones(..) == 1 {
+                        return input_refs.ones().next();
+                    }
+                }
+
+                None
+            })
+            .collect::<Option<Vec<usize>>>()?;
+
+        let new_input = self.input().try_better_locality(&input_columns)?;
+        Some(self.clone_with_input(new_input).into())
     }
 }
 

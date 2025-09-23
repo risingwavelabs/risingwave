@@ -14,13 +14,11 @@
 
 use std::collections::HashMap;
 
-use paste::paste;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::StreamScanType;
 
 use super::*;
 use crate::optimizer::property::RequiredDist;
-use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
 /// `ToStream` converts a logical plan node to streaming physical node
 /// with an optional required distribution.
@@ -43,27 +41,31 @@ pub trait ToStream {
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
-    ) -> Result<(PlanRef, ColIndexMapping)>;
+    ) -> Result<(LogicalPlanRef, ColIndexMapping)>;
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef>;
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef>;
 
     /// convert the plan to streaming physical plan and satisfy the required distribution
     fn to_stream_with_dist_required(
         &self,
         required_dist: &RequiredDist,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<StreamPlanRef> {
         let ret = self.to_stream(ctx)?;
-        required_dist.enforce_if_not_satisfies(ret, &Order::any())
+        required_dist.streaming_enforce_if_not_satisfies(ret)
+    }
+
+    fn try_better_locality(&self, _columns: &[usize]) -> Option<LogicalPlanRef> {
+        None
     }
 }
 
 pub fn stream_enforce_eowc_requirement(
     ctx: OptimizerContextRef,
-    plan: PlanRef,
+    plan: StreamPlanRef,
     emit_on_window_close: bool,
-) -> Result<PlanRef> {
+) -> Result<StreamPlanRef> {
     if emit_on_window_close && !plan.emit_on_window_close() {
         let watermark_groups = plan.watermark_columns().grouped();
         let n_watermark_groups = watermark_groups.len();
@@ -91,14 +93,14 @@ pub fn stream_enforce_eowc_requirement(
 
 #[derive(Debug, Clone, Default)]
 pub struct RewriteStreamContext {
-    share_rewrite_map: HashMap<PlanNodeId, (PlanRef, ColIndexMapping)>,
+    share_rewrite_map: HashMap<PlanNodeId, (LogicalPlanRef, ColIndexMapping)>,
 }
 
 impl RewriteStreamContext {
     pub fn add_rewrite_result(
         &mut self,
         plan_node_id: PlanNodeId,
-        plan_ref: PlanRef,
+        plan_ref: LogicalPlanRef,
         col_change: ColIndexMapping,
     ) {
         let prev = self
@@ -110,14 +112,14 @@ impl RewriteStreamContext {
     pub fn get_rewrite_result(
         &self,
         plan_node_id: PlanNodeId,
-    ) -> Option<&(PlanRef, ColIndexMapping)> {
+    ) -> Option<&(LogicalPlanRef, ColIndexMapping)> {
         self.share_rewrite_map.get(&plan_node_id)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ToStreamContext {
-    share_to_stream_map: HashMap<PlanNodeId, PlanRef>,
+    share_to_stream_map: HashMap<PlanNodeId, StreamPlanRef>,
     emit_on_window_close: bool,
     stream_scan_type: StreamScanType,
 }
@@ -142,13 +144,13 @@ impl ToStreamContext {
         self.stream_scan_type
     }
 
-    pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: PlanRef) {
+    pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: StreamPlanRef) {
         self.share_to_stream_map
             .try_insert(plan_node_id, plan_ref)
             .unwrap();
     }
 
-    pub fn get_to_stream_result(&self, plan_node_id: PlanNodeId) -> Option<&PlanRef> {
+    pub fn get_to_stream_result(&self, plan_node_id: PlanNodeId) -> Option<&StreamPlanRef> {
         self.share_to_stream_map.get(&plan_node_id)
     }
 
@@ -170,9 +172,9 @@ impl ToStreamContext {
 ///   `to_batch_with_order_required(&Order::any())`.
 pub trait ToBatch {
     /// `to_batch` is equivalent to `to_batch_with_order_required(&Order::any())`
-    fn to_batch(&self) -> Result<PlanRef>;
+    fn to_batch(&self) -> Result<BatchPlanRef>;
     /// convert the plan to batch physical plan and satisfy the required Order
-    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<BatchPlanRef> {
         let ret = self.to_batch()?;
         required_order.enforce_if_not_satisfies(ret)
     }
@@ -183,10 +185,10 @@ pub trait ToBatch {
 /// This is quite similar to `ToBatch`, but different in several ways. For example it converts
 /// scan to exchange + scan.
 pub trait ToLocalBatch {
-    fn to_local(&self) -> Result<PlanRef>;
+    fn to_local(&self) -> Result<BatchPlanRef>;
 
     /// Convert the plan to batch local physical plan and satisfy the required Order
-    fn to_local_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+    fn to_local_with_order_required(&self, required_order: &Order) -> Result<BatchPlanRef> {
         let ret = self.to_local()?;
         required_order.enforce_if_not_satisfies(ret)
     }
@@ -204,78 +206,15 @@ pub trait ToLocalBatch {
 pub trait ToDistributedBatch {
     /// `to_distributed` is equivalent to `to_distributed_with_required(&Order::any(),
     /// &RequiredDist::Any)`
-    fn to_distributed(&self) -> Result<PlanRef>;
+    fn to_distributed(&self) -> Result<BatchPlanRef>;
     /// insert the exchange in batch physical plan to satisfy the required Distribution and Order.
     fn to_distributed_with_required(
         &self,
         required_order: &Order,
         required_dist: &RequiredDist,
-    ) -> Result<PlanRef> {
+    ) -> Result<BatchPlanRef> {
         let ret = self.to_distributed()?;
         let ret = required_order.enforce_if_not_satisfies(ret)?;
-        required_dist.enforce_if_not_satisfies(ret, required_order)
+        required_dist.batch_enforce_if_not_satisfies(ret, required_order)
     }
 }
-
-/// Implement [`ToBatch`] for batch and streaming node.
-macro_rules! ban_to_batch {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl ToBatch for [<$convention $name>] {
-                fn to_batch(&self) -> Result<PlanRef> {
-                    panic!("converting into batch is only allowed on logical plan")
-                }
-            })*
-        }
-    }
-}
-for_batch_plan_nodes! { ban_to_batch }
-for_stream_plan_nodes! { ban_to_batch }
-
-/// Implement [`ToStream`] for batch and streaming node.
-macro_rules! ban_to_stream {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl ToStream for [<$convention $name>] {
-                fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef>{
-                    panic!("converting to stream is only allowed on logical plan")
-                }
-                fn logical_rewrite_for_stream(&self, _ctx: &mut RewriteStreamContext) -> Result<(PlanRef, ColIndexMapping)>{
-                    panic!("logical rewrite is only allowed on logical plan")
-                }
-            })*
-        }
-    }
-}
-for_batch_plan_nodes! { ban_to_stream }
-for_stream_plan_nodes! { ban_to_stream }
-
-/// impl `ToDistributedBatch`  for logical and streaming node.
-macro_rules! ban_to_distributed {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl ToDistributedBatch for [<$convention $name>] {
-                fn to_distributed(&self) -> Result<PlanRef> {
-                    panic!("converting to distributed is only allowed on batch plan")
-                }
-            })*
-        }
-    }
-}
-for_logical_plan_nodes! { ban_to_distributed }
-for_stream_plan_nodes! { ban_to_distributed }
-
-/// impl `ToLocalBatch`  for logical and streaming node.
-macro_rules! ban_to_local {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl ToLocalBatch for [<$convention $name>] {
-                fn to_local(&self) -> Result<PlanRef> {
-                    panic!("converting to distributed is only allowed on batch plan")
-                }
-            })*
-        }
-    }
-}
-for_logical_plan_nodes! { ban_to_local }
-for_stream_plan_nodes! { ban_to_local }

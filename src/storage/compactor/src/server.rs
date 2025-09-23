@@ -30,7 +30,6 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
-use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_pb::common::WorkerType;
@@ -196,14 +195,13 @@ pub async fn compactor_serve(
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
-
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
         opts.meta_address.clone(),
         WorkerType::Compactor,
         &advertise_addr,
         Default::default(),
-        &config.meta,
+        Arc::new(config.meta.clone()),
     )
     .await;
 
@@ -279,8 +277,6 @@ pub async fn compactor_serve(
             ),
             CompactorMode::Shared => unreachable!(),
             CompactorMode::DedicatedIceberg => {
-                register_jvm_builder();
-
                 risingwave_storage::hummock::compactor::start_iceberg_compactor(
                     compactor_context.clone(),
                     hummock_meta_client.clone(),

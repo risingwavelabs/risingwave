@@ -20,18 +20,19 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType};
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, OrderByExpr, Window,
+    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
+    OrderByExpr, Statement, Window,
 };
-use risingwave_sqlparser::parser::ParserError;
+use risingwave_sqlparser::parser::Parser;
 
+use crate::binder::Binder;
 use crate::binder::bind_context::Clause;
-use crate::binder::{Binder, UdfContext};
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -60,12 +61,6 @@ pub(super) fn is_sys_function_without_args(ident: &Ident) -> bool {
         .iter()
         .any(|e| ident.real_value().as_str() == *e && ident.quote_style().is_none())
 }
-
-/// The global max calling depth for the global counter in `udf_context`
-/// To reduce the chance that the current running rw thread
-/// be killed by os, the current allowance depth of calling
-/// stack is set to `16`.
-const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
 
 macro_rules! reject_syntax {
     ($pred:expr, $msg:expr) => {
@@ -99,11 +94,7 @@ impl Binder {
             [name] => (None, name.real_value()),
             [schema, name] => {
                 let schema_name = schema.real_value();
-                let func_name = if schema_name == PG_CATALOG_SCHEMA_NAME {
-                    // pg_catalog is always effectively part of the search path, so we can always bind the function.
-                    // Ref: https://www.postgresql.org/docs/current/ddl-schemas.html#DDL-SCHEMAS-CATALOG
-                    name.real_value()
-                } else if schema_name == INFORMATION_SCHEMA_SCHEMA_NAME {
+                let func_name = if schema_name == INFORMATION_SCHEMA_SCHEMA_NAME {
                     // definition of information_schema: https://github.com/postgres/postgres/blob/e0b2eed047df9045664da6f724cb42c10f8b12f0/src/backend/catalog/information_schema.sql
                     //
                     // FIXME: handle schema correctly, so that the functions are hidden if the schema is not in the search path.
@@ -117,12 +108,22 @@ impl Binder {
                     }
                     function_name
                 } else {
-                    bail_not_implemented!(
-                        issue = 12422,
-                        "Unsupported function name under schema: {}",
-                        schema_name
-                    );
+                    name.real_value()
                 };
+                (Some(schema_name), func_name)
+            }
+            [database, schema, name] => {
+                // Support database.schema.function qualified names when database matches current database
+                let database_name = database.real_value();
+                if database_name != self.db_name {
+                    return Err(ErrorCode::BindError(format!(
+                        "Cross-database function call is not supported: {}",
+                        name
+                    ))
+                    .into());
+                }
+                let schema_name = schema.real_value();
+                let func_name = name.real_value();
                 (Some(schema_name), func_name)
             }
             _ => bail_not_implemented!(issue = 112, "qualified function {}", name),
@@ -165,9 +166,7 @@ impl Binder {
             let mut array_args = args
                 .iter()
                 .enumerate()
-                .map(|(i, expr)| {
-                    InputRef::new(i, DataType::List(Box::new(expr.return_type()))).into()
-                })
+                .map(|(i, expr)| InputRef::new(i, DataType::list(expr.return_type())).into())
                 .collect_vec();
             let schema_path = self.bind_schema_path(schema_name.as_deref());
             let scalar_func_expr = if let Ok((func, _)) = self.catalog.get_function_by_name_inputs(
@@ -204,8 +203,20 @@ impl Binder {
                 self.bind_builtin_scalar_function(&func_name, array_args, arg_list.variadic)?
             };
 
+            // `AggType::WrapScalar` requires the inner expression to be convertible to `ExprNode`
+            // and directly executable. If there's any subquery in the expression, this will fail.
+            let expr_node = match scalar_func_expr.try_to_expr_proto() {
+                Ok(expr_node) => expr_node,
+                Err(e) => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "function {func_name} cannot be used after `AGGREGATE:`: {e}",
+                    ))
+                    .into());
+                }
+            };
+
             // now this is either an aggregate/window function call
-            Some(AggType::WrapScalar(scalar_func_expr.to_expr_proto()))
+            Some(AggType::WrapScalar(expr_node))
         } else {
             None
         };
@@ -484,7 +495,7 @@ impl Binder {
         })?;
 
         let inner_ty = match bound_array.return_type() {
-            DataType::List(ty) => *ty,
+            DataType::List(ty) => ty.into_elem(),
             real_type => return Err(ErrorCode::BindError(format!(
                 "The `array` argument for `array_transform` should be an array, but {} were got",
                 real_type
@@ -515,7 +526,7 @@ impl Binder {
         let bound_lambda = self.bind_unary_lambda_function(inner_ty, lambda_arg, *lambda_body)?;
 
         let lambda_ret_type = bound_lambda.return_type();
-        let transform_ret_type = DataType::List(Box::new(lambda_ret_type));
+        let transform_ret_type = DataType::list(lambda_ret_type);
 
         Ok(ExprImpl::FunctionCallWithLambda(Box::new(
             FunctionCallWithLambda::new_unchecked(
@@ -657,85 +668,87 @@ impl Binder {
         Ok(())
     }
 
+    /// A common utility function to extract sql udf expression out from the input `ast`.
+    pub(crate) fn extract_udf_expr(ast: Vec<Statement>) -> Result<AstExpr> {
+        if ast.len() != 1 {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "the query for sql udf should contain only one statement".to_owned(),
+            )
+            .into());
+        }
+
+        // Extract the expression out
+        let Statement::Query(query) = ast.into_iter().next().unwrap() else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "invalid function definition, please recheck the syntax".to_owned(),
+            )
+            .into());
+        };
+
+        if let Some(expr) = query.as_single_select_item() {
+            // Inline SQL UDF.
+            Ok(expr.clone())
+        } else {
+            // Subquery SQL UDF.
+            Ok(AstExpr::Subquery(query))
+        }
+    }
+
+    pub fn bind_sql_udf_inner(
+        &mut self,
+        body: &str,
+        arg_names: &[String],
+        args: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        // This represents the current user defined function is `language sql`
+        let ast = Parser::parse_sql(body)?;
+
+        // Stash the current arguments.
+        // For subquery SQL UDF, as we always push a new context, there should be no arguments to stash.
+        // For inline SQL UDF, we need to stash the arguments in case of nesting.
+        let stashed_arguments = self.context.sql_udf_arguments.take();
+
+        // The actual inline logic for sql udf.
+        let mut arguments = HashMap::new();
+        for (i, arg) in args.into_iter().enumerate() {
+            if arg_names[i].is_empty() {
+                // unnamed argument, use `$1`, `$2` as the name
+                arguments.insert(format!("${}", i + 1), arg);
+            } else {
+                // named argument
+                arguments.insert(arg_names[i].clone(), arg);
+            }
+        }
+        self.context.sql_udf_arguments = Some(arguments);
+
+        let Ok(expr) = Self::extract_udf_expr(ast) else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "failed to parse the input query and extract the udf expression, \
+                please recheck the syntax"
+                    .to_owned(),
+            )
+            .into());
+        };
+
+        let bind_result = self.bind_expr(&expr);
+        // Restore arguments information for subsequent binding.
+        self.context.sql_udf_arguments = stashed_arguments;
+
+        bind_result
+    }
+
     fn bind_sql_udf(
         &mut self,
         func: Arc<FunctionCatalog>,
         args: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
-        if func.body.is_none() {
+        let Some(body) = &func.body else {
             return Err(
                 ErrorCode::InvalidInputSyntax("`body` must exist for sql udf".to_owned()).into(),
             );
-        }
+        };
 
-        // This represents the current user defined function is `language sql`
-        let parse_result =
-            risingwave_sqlparser::parser::Parser::parse_sql(func.body.as_ref().unwrap().as_str());
-        if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
-            parse_result
-        {
-            // Here we just return the original parse error message
-            return Err(ErrorCode::InvalidInputSyntax(err).into());
-        }
-
-        debug_assert!(parse_result.is_ok());
-
-        // We can safely unwrap here
-        let ast = parse_result.unwrap();
-
-        // Stash the current `udf_context`
-        // Note that the `udf_context` may be empty,
-        // if the current binding is the root (top-most) sql udf.
-        // In this case the empty context will be stashed
-        // and restored later, no need to maintain other flags.
-        let stashed_udf_context = self.udf_context.get_context();
-
-        // The actual inline logic for sql udf
-        // Note that we will always create new udf context for each sql udf
-        let mut udf_context = HashMap::new();
-        for (i, arg) in args.into_iter().enumerate() {
-            if func.arg_names[i].is_empty() {
-                // unnamed argument, use `$1`, `$2` as the name
-                udf_context.insert(format!("${}", i + 1), arg);
-            } else {
-                // named argument
-                udf_context.insert(func.arg_names[i].clone(), arg);
-            }
-        }
-        self.udf_context.update_context(udf_context);
-
-        // Check for potential recursive calling
-        if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
-            return Err(ErrorCode::BindError(format!(
-                "function {} calling stack depth limit exceeded",
-                func.name
-            ))
-            .into());
-        } else {
-            // Update the status for the global counter
-            self.udf_context.incr_global_count();
-        }
-
-        if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
-            let bind_result = self.bind_expr(&expr);
-
-            // We should properly decrement global count after a successful binding
-            // Since the subsequent probe operation in `bind_column` or
-            // `bind_parameter` relies on global counting
-            self.udf_context.decr_global_count();
-
-            // Restore context information for subsequent binding
-            self.udf_context.update_context(stashed_udf_context);
-
-            return bind_result;
-        }
-
-        Err(ErrorCode::InvalidInputSyntax(
-            "failed to parse the input query and extract the udf expression,
-                please recheck the syntax"
-                .to_owned(),
-        )
-        .into())
+        self.bind_sql_udf_inner(body, &func.arg_names, args)
     }
 
     pub(in crate::binder) fn bind_function_expr_arg(

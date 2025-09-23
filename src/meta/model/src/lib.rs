@@ -26,6 +26,7 @@ pub mod prelude;
 
 pub mod actor;
 pub mod catalog_version;
+pub mod cdc_table_snapshot_split;
 pub mod cluster;
 pub mod compaction_config;
 pub mod compaction_status;
@@ -57,6 +58,7 @@ pub mod serde_seaql_migration;
 pub mod session_parameter;
 pub mod sink;
 pub mod source;
+pub mod source_splits;
 pub mod streaming_job;
 pub mod subscription;
 pub mod system_parameter;

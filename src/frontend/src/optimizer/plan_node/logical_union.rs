@@ -20,7 +20,8 @@ use risingwave_common::types::{DataType, Scalar};
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase, PredicatePushdown,
+    ToBatch, ToStream,
 };
 use crate::Explain;
 use crate::error::Result;
@@ -74,12 +75,12 @@ impl LogicalUnion {
     }
 }
 
-impl PlanTreeNode for LogicalUnion {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Logical> for LogicalUnion {
+    fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         self.core.inputs.clone().into_iter().collect()
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         Self::new_with_source_col(self.all(), inputs.to_vec(), self.core.source_col).into()
     }
 }
@@ -97,7 +98,7 @@ impl ColPrunable for LogicalUnion {
     }
 }
 
-impl ExprRewritable for LogicalUnion {}
+impl ExprRewritable<Logical> for LogicalUnion {}
 
 impl ExprVisitable for LogicalUnion {}
 
@@ -117,7 +118,7 @@ impl PredicatePushdown for LogicalUnion {
 }
 
 impl ToBatch for LogicalUnion {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new_inputs = self
             .inputs()
             .iter()
@@ -145,7 +146,10 @@ impl ToBatch for LogicalUnion {
 }
 
 impl ToStream for LogicalUnion {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         // TODO: use round robin distribution instead of using hash distribution of all inputs.
         let dist = RequiredDist::hash_shard(self.base.stream_key().unwrap_or_else(|| {
             panic!(
@@ -158,16 +162,12 @@ impl ToStream for LogicalUnion {
             .iter()
             .map(|input| input.to_stream_with_dist_required(&dist, ctx))
             .collect();
-        let new_logical = generic::Union {
-            all: true,
-            inputs: new_inputs?,
-            ..self.core
-        };
+        let core = self.core.clone_with_inputs(new_inputs?);
         assert!(
             self.all(),
             "After UnionToDistinctRule, union should become union all"
         );
-        Ok(StreamUnion::new(new_logical).into())
+        Ok(StreamUnion::new(core).into())
     }
 
     fn logical_rewrite_for_stream(
@@ -323,6 +323,15 @@ impl ToStream for LogicalUnion {
                 ColIndexMapping::identity_or_none(original_schema_len, new_union.schema().len());
             Ok((new_union.into(), out_col_change))
         }
+    }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        let new_inputs = self
+            .inputs()
+            .iter()
+            .map(|input| input.try_better_locality(columns))
+            .collect::<Option<Vec<PlanRef>>>()?;
+        Some(self.clone_with_inputs(&new_inputs))
     }
 }
 

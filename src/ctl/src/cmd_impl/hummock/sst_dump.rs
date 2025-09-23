@@ -144,7 +144,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
                 let obj_id = SstableStore::get_object_id_from_path(&obj.key);
                 let obj_id = match obj_id {
                     HummockObjectId::Sstable(obj_id) => obj_id,
-                    HummockObjectId::VectorFile(_) => {
+                    HummockObjectId::VectorFile(_) | HummockObjectId::HnswGraphFile(_) => {
                         println!(
                             "object id {:?} not a sstable object id: {}. skip",
                             obj_id, obj.key

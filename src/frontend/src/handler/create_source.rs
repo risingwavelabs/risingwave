@@ -746,9 +746,7 @@ pub fn bind_connector_props(
                 ))
             })?
         {
-            Feature::CdcAutoSchemaChange
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
+            Feature::CdcAutoSchemaChange.check_available()?;
         }
 
         // set connector to backfill mode
@@ -759,14 +757,17 @@ pub fn bind_connector_props(
         if with_properties.enable_transaction_metadata() {
             with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
         }
-        with_properties.insert(
-            CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
-            handler_args
-                .session
-                .config()
-                .cdc_source_wait_streaming_start_timeout()
-                .to_string(),
-        );
+        // Only set CDC_WAIT_FOR_STREAMING_START_TIMEOUT if not already specified by user.
+        if !with_properties.contains_key(CDC_WAIT_FOR_STREAMING_START_TIMEOUT) {
+            with_properties.insert(
+                CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
+                handler_args
+                    .session
+                    .config()
+                    .cdc_source_wait_streaming_start_timeout()
+                    .to_string(),
+            );
+        }
     }
     if with_properties.is_mysql_cdc_connector() {
         // Generate a random server id for mysql cdc source if needed
@@ -839,12 +840,18 @@ pub async fn bind_create_source_or_table_with_connector(
     }
 
     if is_create_source {
+        // reject refreshable batch source
+        if with_properties.is_batch_connector() {
+            return Err(ErrorCode::BindError(
+            "can't CREATE SOURCE with refreshable batch connector\n\nHint: use CREATE TABLE instead"
+                .to_owned(),
+        )
+        .into());
+        }
+
         match format_encode.format {
-            Format::Upsert
-            | Format::Debezium
-            | Format::DebeziumMongo
-            | Format::Maxwell
-            | Format::Canal => {
+            // reject unsupported formats for CREATE SOURCE
+            Format::Debezium | Format::DebeziumMongo | Format::Maxwell | Format::Canal => {
                 return Err(ErrorCode::BindError(format!(
                     "can't CREATE SOURCE with FORMAT {}.\n\nHint: use CREATE TABLE instead\n\n{}",
                     format_encode.format,
@@ -852,9 +859,14 @@ pub async fn bind_create_source_or_table_with_connector(
                 ))
                 .into());
             }
-            _ => {
-                // TODO: enhance error message for other formats
+            // hint limitations for some other formats
+            Format::Upsert => {
+                notice_to_user(format!(
+                    "Streaming queries on sources with `FORMAT {}` may have limitations. If your query isn't supported, consider using `CREATE TABLE` instead.",
+                    format_encode.format
+                ));
             }
+            _ => {}
         }
     }
 
@@ -961,14 +973,6 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
         &with_properties,
     )
     .await?;
-
-    if is_create_source && !pk_names.is_empty() {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
-                .to_owned(),
-        )
-        .into());
-    }
 
     // User may specify a generated or additional column with the same name as one from the external schema.
     // Ensure duplicated column names are handled here.
