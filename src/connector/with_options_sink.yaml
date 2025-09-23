@@ -627,6 +627,14 @@ IcebergConfig:
     required: false
     default: 'true'
     allow_alter_on_fly: true
+  - name: max_snapshots_num_before_compaction
+    field_type: usize
+    comments: |-
+      The maximum number of snapshots allowed since the last rewrite operation
+      If set, sink will check snapshot count and wait if exceeded
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
 KafkaConfig:
   fields:
   - name: topic
