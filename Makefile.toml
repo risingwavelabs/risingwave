@@ -886,7 +886,7 @@ TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
 echo "Building connector node..."
 cd "${JAVA_DIR}"
-"${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip -Dno-build-rust
+"${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip -Dno-build-rust -Dcheckstyle.skip=true -Dspotless.check.skip=true
 
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"

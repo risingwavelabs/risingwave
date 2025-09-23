@@ -37,10 +37,13 @@
             <groupId>io.debezium</groupId>
             <artifactId>debezium-connector-postgres</artifactId>
         </dependency>
+        <!-- Exclude original debezium-connector-mysql to use our patched version -->
+        <!--
         <dependency>
             <groupId>io.debezium</groupId>
             <artifactId>debezium-connector-mysql</artifactId>
         </dependency>
+        -->
         <dependency>
             <groupId>io.debezium</groupId>
             <artifactId>debezium-connector-mongodb</artifactId>

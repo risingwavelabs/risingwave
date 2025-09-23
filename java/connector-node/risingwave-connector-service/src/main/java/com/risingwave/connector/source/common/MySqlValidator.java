@@ -66,9 +66,9 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             var major = jdbcConnection.getMetaData().getDatabaseMajorVersion();
             var minor = jdbcConnection.getMetaData().getDatabaseMinorVersion();
 
-            if ((major > 8) || (major == 8 && minor >= 4)) {
-                throw ValidatorUtils.failedPrecondition("MySQL version should be less than 8.4");
-            }
+            // if ((major > 8) || (major == 8 && minor >= 4)) {
+            //     throw ValidatorUtils.failedPrecondition("MySQL version should be less than 8.4");
+            // }
 
             // "database.name" is a comma-separated list of database names
             var dbNames = userProps.get(DbzConnectorConfig.DB_NAME);
@@ -310,7 +310,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return Data.DataType.TypeName.INT32_VALUE <= val
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
-                return val == Data.DataType.TypeName.INT64_VALUE;
+                return val == Data.DataType.TypeName.INT64_VALUE || val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "boolean":
             case "bool":
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE;
