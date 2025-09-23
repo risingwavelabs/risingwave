@@ -852,7 +852,7 @@ mod tests {
                 Field::unnamed(
                     StructType::unnamed(vec![DataType::Varchar, DataType::Float32]).into(),
                 ),
-                Field::unnamed(DataType::List(Box::new(DataType::Int64))),
+                Field::unnamed(DataType::Int64.list()),
             ],
         };
         let mut struct_builder = StructArrayBuilder::with_type(
@@ -862,8 +862,7 @@ mod tests {
                 DataType::Float32,
             ])),
         );
-        let mut list_builder =
-            ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Int64)));
+        let mut list_builder = ListArrayBuilder::with_type(0, DataType::Int64.list());
         // {abcd, -1.2}   .
         // {c, 0}         [1, ., 3]
         // {c, .}         .
@@ -918,8 +917,7 @@ mod tests {
                 DataType::Float32,
             ])),
         );
-        let mut list_builder =
-            ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Int64)));
+        let mut list_builder = ListArrayBuilder::with_type(0, DataType::Int64.list());
         // {abcd, -1.2}   .
         // {c, 0}         [2]
         // {c, 0}         [1, ., 3]

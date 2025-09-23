@@ -56,6 +56,7 @@ mod fields;
 mod from_sql;
 mod interval;
 mod jsonb;
+mod list_type;
 mod macros;
 mod map_type;
 mod native_type;
@@ -83,6 +84,7 @@ pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{DateTimeField, Interval, IntervalDisplay, test_utils};
 pub use self::jsonb::{JsonbRef, JsonbVal};
+pub use self::list_type::ListType;
 pub use self::map_type::MapType;
 pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
@@ -170,9 +172,9 @@ pub enum DataType {
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Struct(StructType),
-    #[display("{0}[]")]
-    #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
-    List(Box<DataType>),
+    #[display("{0}")]
+    #[from_str(regex = "(?i)^(?P<0>.+)$")]
+    List(ListType),
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
     Bytea,
@@ -194,15 +196,6 @@ pub enum DataType {
 }
 
 impl !PartialOrd for DataType {}
-
-// For DataType::List
-impl std::str::FromStr for Box<DataType> {
-    type Err = BoxedError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Box::new(DataType::from_str(s)?))
-    }
-}
 
 impl ZeroHeapSize for DataType {}
 
@@ -282,9 +275,9 @@ impl From<&PbDataType> for DataType {
                 }
                 struct_type.into()
             }
-            PbTypeName::List => DataType::List(
+            PbTypeName::List => DataType::list(
                 // The first (and only) item is the list element type.
-                Box::new((&proto.field_type[0]).into()),
+                proto.field_type[0].clone().into(),
             ),
             PbTypeName::Map => {
                 // Map is physically the same as a list.
@@ -446,12 +439,12 @@ impl DataType {
                     pb.field_ids = ids.map(|id| id.get_id()).collect();
                 }
             }
-            DataType::List(datatype) => {
-                pb.field_type = vec![datatype.to_protobuf()];
+            DataType::List(list) => {
+                pb.field_type = vec![list.elem().to_protobuf()];
             }
-            DataType::Map(datatype) => {
+            DataType::Map(map) => {
                 // Same as List<Struct<K,V>>
-                pb.field_type = vec![datatype.clone().into_struct().to_protobuf()];
+                pb.field_type = vec![map.clone().into_struct().to_protobuf()];
             }
             DataType::Vector(size) => {
                 pb.precision = *size as _;
@@ -553,37 +546,44 @@ impl DataType {
         }
     }
 
-    /// Returns the inner element's type of a list type.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the type is not a list type.
-    pub fn as_list_element_type(&self) -> &DataType {
+    pub fn as_list(&self) -> &ListType {
         match self {
             DataType::List(t) => t,
             t => panic!("expect list type, got {t}"),
         }
     }
 
-    pub fn into_list_element_type(self) -> DataType {
+    pub fn into_list(self) -> ListType {
         match self {
-            DataType::List(t) => *t,
+            DataType::List(t) => t,
             t => panic!("expect list type, got {t}"),
         }
     }
 
+    /// Returns the inner element's type if `self` is a list type.
+    /// Equivalent to `self.as_list().elem()`.
+    pub fn as_list_elem(&self) -> &DataType {
+        self.as_list().elem()
+    }
+
+    /// Returns the inner element's type if `self` is a list type.
+    /// Equivalent to `self.into_list().into_elem()`.
+    pub fn into_list_elem(self) -> DataType {
+        self.into_list().into_elem()
+    }
+
     /// Return a new type that removes the outer list, and get the innermost element type.
     ///
-    /// Use [`DataType::as_list_element_type`] if you only want the element type of a list.
+    /// Use [`DataType::as_list_elem`] if you only want the element type of a list.
     ///
     /// ```
     /// use risingwave_common::types::DataType::*;
-    /// assert_eq!(List(Box::new(Int32)).unnest_list(), &Int32);
-    /// assert_eq!(List(Box::new(List(Box::new(Int32)))).unnest_list(), &Int32);
+    /// assert_eq!(Int32.list().unnest_list(), &Int32);
+    /// assert_eq!(Int32.list().list().unnest_list(), &Int32);
     /// ```
     pub fn unnest_list(&self) -> &Self {
         match self {
-            DataType::List(inner) => inner.unnest_list(),
+            DataType::List(list) => list.elem().unnest_list(),
             _ => self,
         }
     }
@@ -593,9 +593,9 @@ impl DataType {
     pub fn array_ndims(&self) -> usize {
         let mut d = 0;
         let mut t = self;
-        while let Self::List(inner) = t {
+        while let Self::List(list) = t {
             d += 1;
-            t = inner;
+            t = list.elem();
         }
         d
     }
@@ -604,7 +604,7 @@ impl DataType {
     pub fn equals_datatype(&self, other: &DataType) -> bool {
         match (self, other) {
             (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
-            (Self::List(d1), Self::List(d2)) => d1.equals_datatype(d2),
+            (Self::List(d1), Self::List(d2)) => d1.elem().equals_datatype(d2.elem()),
             (Self::Map(m1), Self::Map(m2)) => {
                 m1.key().equals_datatype(m2.key()) && m1.value().equals_datatype(m2.value())
             }
@@ -638,7 +638,7 @@ impl DataType {
                 Some(struct_can_alter)
             }
 
-            DataType::List(inner_type) => inner_type.can_alter(),
+            DataType::List(list_type) => list_type.elem().can_alter(),
             DataType::Map(map_type) => {
                 debug_assert!(
                     map_type.key().is_simple(),
@@ -1433,7 +1433,7 @@ mod tests {
                 ),
                 DataTypeName::List => (
                     ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
-                    DataType::List(Box::new(DataType::Int64)),
+                    DataType::Int64.list(),
                 ),
                 DataTypeName::Vector => (
                     ScalarImpl::Vector(VectorVal::from_iter(
@@ -1557,51 +1557,42 @@ mod tests {
 
         assert_eq!(
             DataType::from_str("int2[]").unwrap(),
-            DataType::List(Box::new(DataType::Int16))
+            DataType::Int16.list()
         );
-        assert_eq!(
-            DataType::from_str("int[]").unwrap(),
-            DataType::List(Box::new(DataType::Int32))
-        );
+        assert_eq!(DataType::from_str("int[]").unwrap(), DataType::Int32.list());
         assert_eq!(
             DataType::from_str("int8[]").unwrap(),
-            DataType::List(Box::new(DataType::Int64))
+            DataType::Int64.list()
         );
         assert_eq!(
             DataType::from_str("float4[]").unwrap(),
-            DataType::List(Box::new(DataType::Float32))
+            DataType::Float32.list()
         );
         assert_eq!(
             DataType::from_str("float8[]").unwrap(),
-            DataType::List(Box::new(DataType::Float64))
+            DataType::Float64.list()
         );
         assert_eq!(
             DataType::from_str("decimal[]").unwrap(),
-            DataType::List(Box::new(DataType::Decimal))
+            DataType::Decimal.list()
         );
         assert_eq!(
             DataType::from_str("varchar[]").unwrap(),
-            DataType::List(Box::new(DataType::Varchar))
+            DataType::Varchar.list()
         );
-        assert_eq!(
-            DataType::from_str("date[]").unwrap(),
-            DataType::List(Box::new(DataType::Date))
-        );
-        assert_eq!(
-            DataType::from_str("time[]").unwrap(),
-            DataType::List(Box::new(DataType::Time))
-        );
+        assert_eq!(DataType::from_str("date[]").unwrap(), DataType::Date.list());
+        assert_eq!(DataType::from_str("time[]").unwrap(), DataType::Time.list());
         assert_eq!(
             DataType::from_str("timestamp[]").unwrap(),
-            DataType::List(Box::new(DataType::Timestamp))
+            DataType::Timestamp.list()
         );
         assert_eq!(
             DataType::from_str("timestamptz[]").unwrap(),
-            DataType::List(Box::new(DataType::Timestamptz))
+            DataType::Timestamptz.list()
         );
         assert_eq!(
             DataType::from_str("interval[]").unwrap(),
-            DataType::List(Box::new(DataType::Interval))
+            DataType::Interval.list()
         );
 
         assert_eq!(
@@ -1621,9 +1612,9 @@ mod tests {
     fn test_can_alter() {
         let cannots = [
             (DataType::Int32, None),
-            (DataType::List(DataType::Int32.into()), None),
+            (DataType::Int32.list(), None),
             (
-                MapType::from_kv(DataType::Varchar, DataType::List(DataType::Int32.into())).into(),
+                MapType::from_kv(DataType::Varchar, DataType::Int32.list()).into(),
                 None,
             ),
             (
@@ -1644,15 +1635,12 @@ mod tests {
         }
 
         let cans = [
-            StructType::new([
-                ("a", DataType::Int32),
-                ("b", DataType::List(DataType::Int32.into())),
-            ])
-            .with_ids([ColumnId::new(1), ColumnId::new(2)])
-            .into(),
-            DataType::List(Box::new(DataType::Struct(
+            StructType::new([("a", DataType::Int32), ("b", DataType::Int32.list())])
+                .with_ids([ColumnId::new(1), ColumnId::new(2)])
+                .into(),
+            DataType::list(DataType::Struct(
                 StructType::new([("a", DataType::Int32)]).with_ids([ColumnId::new(1)]),
-            ))),
+            )),
             MapType::from_kv(
                 DataType::Varchar,
                 StructType::new([("a", DataType::Int32)])

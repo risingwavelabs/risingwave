@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::table::batch_table::BatchTable;
 
-use super::filter::FilterExecutor;
+use crate::executor::FilterExecutor;
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 

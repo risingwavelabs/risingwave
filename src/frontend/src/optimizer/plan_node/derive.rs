@@ -108,8 +108,15 @@ pub(crate) fn derive_pk(
     let mut pk = vec![];
 
     let func_dep = input.functional_dependency();
-    let user_order_by =
-        func_dep.minimize_order_key(user_order_by, input.distribution().dist_column_indices());
+    let user_order_by = func_dep.minimize_order_key(
+        user_order_by,
+        // The plan could be `SomeShard` in some cases. Ignore the requirement on distribution key
+        // when minimizing the order key.
+        input
+            .distribution()
+            .dist_column_indices_opt()
+            .unwrap_or(&[]),
+    );
 
     for order in &user_order_by.column_orders {
         let idx = order.column_index;

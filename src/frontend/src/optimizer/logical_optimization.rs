@@ -109,8 +109,6 @@ impl<C: ConventionMarker> OptimizationStage<C> {
 
 use std::sync::LazyLock;
 
-use risingwave_sqlparser::ast::ExplainFormat;
-
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 
 pub struct LogicalOptimizer {}
@@ -340,7 +338,11 @@ static CONVERT_DISTINCT_AGG_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::n
 static SIMPLIFY_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simplify Aggregation",
-        vec![AggGroupBySimplifyRule::create(), AggCallMergeRule::create()],
+        vec![
+            AggGroupBySimplifyRule::create(),
+            AggCallMergeRule::create(),
+            UnifyFirstLastValueRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
@@ -733,25 +735,7 @@ impl LogicalOptimizer {
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        if ctx.is_explain_logical() {
-            match ctx.explain_format() {
-                ExplainFormat::Text => {
-                    ctx.store_logical(plan.explain_to_string());
-                }
-                ExplainFormat::Json => {
-                    ctx.store_logical(plan.explain_to_json());
-                }
-                ExplainFormat::Xml => {
-                    ctx.store_logical(plan.explain_to_xml());
-                }
-                ExplainFormat::Yaml => {
-                    ctx.store_logical(plan.explain_to_yaml());
-                }
-                ExplainFormat::Dot => {
-                    ctx.store_logical(plan.explain_to_dot());
-                }
-            }
-        }
+        ctx.may_store_explain_logical(&plan);
 
         Ok(plan)
     }
@@ -862,25 +846,7 @@ impl LogicalOptimizer {
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        if ctx.is_explain_logical() {
-            match ctx.explain_format() {
-                ExplainFormat::Text => {
-                    ctx.store_logical(plan.explain_to_string());
-                }
-                ExplainFormat::Json => {
-                    ctx.store_logical(plan.explain_to_json());
-                }
-                ExplainFormat::Xml => {
-                    ctx.store_logical(plan.explain_to_xml());
-                }
-                ExplainFormat::Yaml => {
-                    ctx.store_logical(plan.explain_to_yaml());
-                }
-                ExplainFormat::Dot => {
-                    ctx.store_logical(plan.explain_to_dot());
-                }
-            }
-        }
+        ctx.may_store_explain_logical(&plan);
 
         Ok(plan)
     }

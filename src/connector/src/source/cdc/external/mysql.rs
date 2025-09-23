@@ -32,7 +32,7 @@ use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;
@@ -518,6 +518,14 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
+                            DataType::Timestamptz => {
+                                // Convert timestamptz to NaiveDateTime for MySQL TIMESTAMP comparison
+                                // MySQL expects NaiveDateTime for TIMESTAMP parameters
+                                let ts = value.into_timestamptz();
+                                let datetime_utc = ts.to_datetime_utc();
+                                let naive_datetime = datetime_utc.naive_utc();
+                                Value::from(naive_datetime)
+                            }
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
                         ConnectorResult::Ok((pk.to_lowercase(), val))

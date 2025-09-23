@@ -76,7 +76,9 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
+use risingwave_pb::meta::alter_connector_props_request::{
+    AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
+};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -138,7 +140,7 @@ pub struct MetaClient {
     worker_type: WorkerType,
     host_addr: HostAddr,
     inner: GrpcMetaClient,
-    meta_config: MetaConfig,
+    meta_config: Arc<MetaConfig>,
     cluster_id: String,
     shutting_down: Arc<AtomicBool>,
 }
@@ -264,7 +266,7 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         property: Property,
-        meta_config: &MetaConfig,
+        meta_config: Arc<MetaConfig>,
     ) -> (Self, SystemParamsReader) {
         let ret =
             Self::register_new_inner(addr_strategy, worker_type, addr, property, meta_config).await;
@@ -283,7 +285,7 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         property: Property,
-        meta_config: &MetaConfig,
+        meta_config: Arc<MetaConfig>,
     ) -> Result<(Self, SystemParamsReader)> {
         tracing::info!("register meta client using strategy: {}", addr_strategy);
 
@@ -339,7 +341,7 @@ impl MetaClient {
             worker_type,
             host_addr: addr.clone(),
             inner: grpc_meta_client,
-            meta_config: meta_config.to_owned(),
+            meta_config: meta_config.clone(),
             cluster_id: add_worker_resp.cluster_id,
             shutting_down: Arc::new(false.into()),
         };
@@ -1415,6 +1417,31 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Sink as i32,
+            extra_options: None,
+        };
+        let _resp = self.inner.alter_connector_props(req).await?;
+        Ok(())
+    }
+
+    pub async fn alter_iceberg_table_props(
+        &self,
+        table_id: u32,
+        sink_id: u32,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        let req = AlterConnectorPropsRequest {
+            object_id: table_id,
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            connector_conn_ref,
+            object_type: AlterConnectorPropsObject::IcebergTable as i32,
+            extra_options: Some(ExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds {
+                sink_id: sink_id as i32,
+                source_id: source_id as i32,
+            })),
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1433,6 +1460,7 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Source as i32,
+            extra_options: None,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -2039,7 +2067,7 @@ struct MetaMemberManagement {
     core_ref: Arc<RwLock<GrpcMetaClientCore>>,
     members: Either<MetaMemberClient, MetaMemberGroup>,
     current_leader: http::Uri,
-    meta_config: MetaConfig,
+    meta_config: Arc<MetaConfig>,
 }
 
 impl MetaMemberManagement {
@@ -2166,7 +2194,7 @@ impl GrpcMetaClient {
         init_leader_addr: http::Uri,
         members: Either<MetaMemberClient, MetaMemberGroup>,
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
-        meta_config: MetaConfig,
+        meta_config: Arc<MetaConfig>,
     ) -> Result<()> {
         let core_ref: Arc<RwLock<GrpcMetaClientCore>> = self.core.clone();
         let current_leader = init_leader_addr;
@@ -2235,7 +2263,7 @@ impl GrpcMetaClient {
     }
 
     /// Connect to the meta server from `addrs`.
-    pub async fn new(strategy: &MetaAddressStrategy, config: MetaConfig) -> Result<Self> {
+    pub async fn new(strategy: &MetaAddressStrategy, config: Arc<MetaConfig>) -> Result<Self> {
         let (channel, addr) = match strategy {
             MetaAddressStrategy::LoadBalance(addr) => {
                 Self::try_build_rpc_channel(vec![addr.clone()]).await
@@ -2262,7 +2290,7 @@ impl GrpcMetaClient {
             }
         };
 
-        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config)?;
+        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config.clone())?;
 
         client.force_refresh_leader().await?;
 

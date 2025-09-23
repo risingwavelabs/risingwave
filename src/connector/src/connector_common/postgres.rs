@@ -24,7 +24,7 @@ use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use sea_schema::postgres::def::{ColumnType as SeaType, TableDef, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use sea_schema::sea_query::{Alias, IntoIden};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{PgPool, Row};
 use thiserror_ext::AsReport;
@@ -448,7 +448,7 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
                 }
             };
 
-            DataType::List(Box::new(item_type))
+            DataType::list(item_type)
         }
         SeaType::PgLsn => DataType::Int64,
         SeaType::Cidr

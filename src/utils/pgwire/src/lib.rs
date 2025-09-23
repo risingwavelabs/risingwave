@@ -20,6 +20,7 @@
 #![feature(never_type)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
+#![feature(str_as_str)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;

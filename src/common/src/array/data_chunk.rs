@@ -723,7 +723,7 @@ impl DataChunkTestExt for DataChunk {
         use crate::types::ScalarImpl;
         fn parse_type(s: &str) -> DataType {
             if let Some(s) = s.strip_suffix("[]") {
-                return DataType::List(Box::new(parse_type(s)));
+                return DataType::list(parse_type(s));
             }
 
             // Special logic to support Map type in `DataChunk::from_pretty`.

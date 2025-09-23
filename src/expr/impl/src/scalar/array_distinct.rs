@@ -51,7 +51,7 @@ use risingwave_expr::function;
 
 #[function("array_distinct(anyarray) -> anyarray")]
 pub fn array_distinct(list: ListRef<'_>) -> ListValue {
-    ListValue::from_datum_iter(&list.data_type(), list.iter().unique())
+    ListValue::from_datum_iter(&list.elem_type(), list.iter().unique())
 }
 
 #[cfg(test)]

@@ -799,6 +799,11 @@ impl HummockStorage {
         wait_epoch: HummockReadEpoch,
         table_id: TableId,
     ) -> StorageResult<()> {
+        tracing::debug!(
+            "try_wait_epoch: epoch: {:?}, table_id: {}",
+            wait_epoch,
+            table_id
+        );
         match wait_epoch {
             HummockReadEpoch::Committed(wait_epoch) => {
                 assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
