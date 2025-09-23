@@ -1158,7 +1158,7 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
-pub use logical_vector_search::{LogicalVectorSearch, VectorSearchCore};
+pub use logical_vector_search::LogicalVectorSearch;
 pub use logical_vector_search_lookup_join::LogicalVectorSearchLookupJoin;
 pub use stream_asof_join::StreamAsOfJoin;
 pub use stream_cdc_table_scan::StreamCdcTableScan;

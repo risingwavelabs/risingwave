@@ -325,10 +325,7 @@ impl ToBatch for LogicalVectorSearchLookupJoin {
                 distance_type: self.core.distance_type,
                 index_name: index.index_table.name.clone(),
                 index_table_id: index.index_table.id,
-                info_column_desc: index.index_table.columns[1..=index.included_info_columns.len()]
-                    .iter()
-                    .map(|col| col.column_desc.clone())
-                    .collect(),
+                info_column_desc: index.info_column_desc(),
                 info_output_indices,
                 include_distance: self.core.include_distance,
                 vector_column_idx: self.core.input_vector_col_idx,
