@@ -38,7 +38,7 @@ use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::hummock::HummockManagerRef;
-use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::metrics::{GLOBAL_META_METRICS, MetaMetrics};
 use crate::{MetaError, MetaResult};
 
 pub(super) struct NewBarrier {
@@ -385,8 +385,9 @@ impl PeriodicBarriers {
             } else {
                 sys_barrier_interval
             };
+
             // Create an `IntervalStream` for the database with the specified interval.
-            let interval_stream = Self::new_interval_stream(duration);
+            let interval_stream = Self::new_interval_stream(duration, &database_id);
             timer_streams.insert(database_id, interval_stream);
         });
         Self {
@@ -398,7 +399,11 @@ impl PeriodicBarriers {
     }
 
     // Create a new interval stream with the specified duration.
-    fn new_interval_stream(duration: Duration) -> IntervalStream {
+    fn new_interval_stream(duration: Duration, database_id: &DatabaseId) -> IntervalStream {
+        GLOBAL_META_METRICS
+            .barrier_interval_by_database
+            .with_label_values(&[&database_id.to_string()])
+            .set(duration.as_millis_f64());
         let mut interval = tokio::time::interval(duration);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         IntervalStream::new(interval)
@@ -413,7 +418,7 @@ impl PeriodicBarriers {
         // Reset the `IntervalStream` for all databases that use default param.
         for (db_id, db_state) in &mut self.databases {
             if db_state.barrier_interval.is_none() {
-                let interval_stream = Self::new_interval_stream(duration);
+                let interval_stream = Self::new_interval_stream(duration, db_id);
                 self.timer_streams.insert(*db_id, interval_stream);
             }
         }
@@ -464,7 +469,8 @@ impl PeriodicBarriers {
         } else {
             self.sys_barrier_interval
         };
-        let interval_stream = Self::new_interval_stream(duration);
+
+        let interval_stream = Self::new_interval_stream(duration, &database_id);
         self.timer_streams.insert(database_id, interval_stream);
     }
 
