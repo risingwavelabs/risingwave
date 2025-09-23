@@ -260,7 +260,7 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
         4 8 SINGLE {NOW} 1 1"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED CUSTOM 256
+        6 CREATED FIXED(3) 256
         8 CREATED ADAPTIVE 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
@@ -275,7 +275,7 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
         4 8 SINGLE {NOW} 1 1"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED CUSTOM 256
+        6 CREATED FIXED(7) 256
         8 CREATED ADAPTIVE 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
     Ok(())
