@@ -383,7 +383,7 @@
     LogicalProject { exprs: [events.event_id, array, events.time] }
     └─LogicalVectorSearchLookupJoin { distance_type: Cosine, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.id:Int32, items.name:Varchar], include_distance: false }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-      └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
 - id: correlated_read_with_embedding
   before:
   - create_correlated_tables
@@ -401,7 +401,7 @@
     LogicalProject { exprs: [events.event_id, events.time, events.embedding, array] }
     └─LogicalVectorSearchLookupJoin { distance_type: Cosine, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.id:Int32, items.name:Varchar], include_distance: false }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-      └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
 - id: correlated_read_with_distance
   before:
   - create_correlated_tables
@@ -439,6 +439,31 @@
 - id: correlated_read_without_embedding
   before:
   - create_correlated_tables_with_column_value_index
+  sql: "select \n  event_id, array(\n    select row(name)\n    from (select name from items order by events.embedding <-> items.embedding limit 3)\n  ) as related_info, \n  time\nfrom events;\n"
+  logical_plan: |-
+    LogicalProject { exprs: [events.event_id, $expr3, events.time] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(StructType { fields: [("f1", Varchar)] }))) as $expr3] }
+        └─LogicalAgg { aggs: [array_agg($expr2)] }
+          └─LogicalProject { exprs: [Row(items.name) as $expr2] }
+            └─LogicalProject { exprs: [items.name] }
+              └─LogicalTopN { order: [$expr1 ASC], limit: 3, offset: 0 }
+                └─LogicalProject { exprs: [items.name, L2Distance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
+                  └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [events.event_id, array, events.time] }
+    └─LogicalVectorSearchLookupJoin { distance_type: L2Sqr, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.name:Varchar], include_distance: false }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
+      └─LogicalScan { table: items, columns: [items.name, items.embedding] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [events.event_id, vector_info, events.time] }
+      └─BatchVectorSearch { schema: [events.event_id:Int32, events.time:Timestamp, events.embedding:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar)] }))], top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding }
+        └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: Single }
+- id: correlated_read_without_embedding
+  before:
+  - create_correlated_tables_with_column_value_index
   sql: "select \n  event_id, array(\n    select row(id, name, distance)\n    from (select id, name, events.embedding <-> items.embedding as distance from items order by distance limit 3)\n  ) as related_info, \n  time\nfrom events;\n"
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
@@ -454,7 +479,7 @@
     LogicalProject { exprs: [events.event_id, array, events.time] }
     └─LogicalVectorSearchLookupJoin { distance_type: L2Sqr, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.id:Int32, items.name:Varchar], include_distance: true }
       ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
-      └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [events.event_id, vector_info, events.time] }

@@ -14,18 +14,22 @@
 
 use std::assert_matches::assert_matches;
 
+use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::column_index_mapping;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::aggregate::AggType;
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
 
-use crate::expr::{Expr, ExprImpl, ExprType, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::LogicalPlanRef;
-use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
+use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef, TopNLimit};
 use crate::optimizer::plan_node::{
-    LogicalPlanNodeType, LogicalPlanRef as PlanRef, LogicalProject, LogicalTopN,
-    LogicalVectorSearch, LogicalVectorSearchLookupJoin, PlanTreeNodeBinary, PlanTreeNodeUnary,
+    ColPrunable, ColumnPruningContext, LogicalPlanNodeType, LogicalPlanRef as PlanRef,
+    LogicalProject, LogicalTopN, LogicalVectorSearch, LogicalVectorSearchLookupJoin,
+    PlanTreeNodeBinary, PlanTreeNodeUnary, VectorSearchCore,
 };
 use crate::optimizer::rule::prelude::*;
 use crate::optimizer::rule::{BoxedRule, PbAggKind, ProjectMergeRule, Rule};
@@ -51,13 +55,7 @@ fn merge_consecutive_projections(input: LogicalPlanRef) -> Option<(Vec<ExprImpl>
 }
 
 impl TopNToVectorSearchRule {
-    #[expect(clippy::type_complexity)]
-    fn resolve_vector_search(
-        top_n: &LogicalTopN,
-    ) -> Option<(
-        (u64, PbDistanceType, ExprImpl, ExprImpl, PlanRef),
-        Vec<ExprImpl>,
-    )> {
+    fn resolve_vector_search(top_n: &LogicalTopN) -> Option<(VectorSearchCore, Vec<ExprImpl>)> {
         if !top_n.group_key().is_empty() {
             // vector search applies for only singleton top n
             return None;
@@ -119,6 +117,14 @@ impl TopNToVectorSearchRule {
         assert_matches!(left.return_type(), DataType::Vector(_));
         assert_matches!(right.return_type(), DataType::Vector(_));
 
+        let vector_search = VectorSearchCore {
+            top_n: limit,
+            distance_type,
+            left: left.clone(),
+            right: right.clone(),
+            output_indices: (0..projection_input.schema().len()).collect(),
+            input: projection_input.clone(),
+        };
         let mut output_exprs = Vec::with_capacity(exprs.len());
         for expr in &exprs[0..order.column_index] {
             output_exprs.push(expr.clone());
@@ -133,16 +139,7 @@ impl TopNToVectorSearchRule {
         for expr in &exprs[order.column_index + 1..exprs.len()] {
             output_exprs.push(expr.clone());
         }
-        Some((
-            (
-                limit,
-                distance_type,
-                left.clone(),
-                right.clone(),
-                projection_input,
-            ),
-            output_exprs,
-        ))
+        Some((vector_search, output_exprs))
     }
 }
 
@@ -159,16 +156,8 @@ impl TopNToVectorSearchRule {
 impl Rule<Logical> for TopNToVectorSearchRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_n = plan.as_logical_top_n()?;
-        let ((top_n, distance_type, left, right, input), project_exprs) =
-            TopNToVectorSearchRule::resolve_vector_search(top_n)?;
-        let vector_search = LogicalVectorSearch::new(
-            top_n,
-            distance_type,
-            left,
-            right,
-            (0..input.schema().len()).collect(),
-            input,
-        );
+        let (vector_search, project_exprs) = Self::resolve_vector_search(top_n)?;
+        let vector_search: LogicalVectorSearch = vector_search.into();
         Some(LogicalProject::create(vector_search.into(), project_exprs))
     }
 }
@@ -236,7 +225,7 @@ impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
         };
         let [array_agg_input]: &[_; 1] = array_agg_input;
 
-        let ((top_n, distance_type, left, right, lookup_input), project_exprs) = {
+        let (vector_search, project_exprs) = {
             let mut prev_proj_exprs: Option<Vec<_>> = None;
             let mut input = agg.input();
             loop {
@@ -275,51 +264,61 @@ impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
             }
         };
 
-        let (input_vector_idx, lookup_expr) = match (left, right) {
-            (ExprImpl::CorrelatedInputRef(correlated), lookup_expr)
-            | (lookup_expr, ExprImpl::CorrelatedInputRef(correlated))
-                if correlated.correlated_id() == correlated_id
-                    && IndexColumnExprValidator::validate(&lookup_expr, true).is_ok() =>
-            {
-                (correlated.index(), lookup_expr)
-            }
-            _ => {
-                return None;
-            }
-        };
-
         // match pattern Row(lookup.col1, lookup.col2, ..)
         let array_agg_input_expr = &project_exprs[array_agg_input.index];
         let row_input_func = array_agg_input_expr.as_function_call()?;
         if row_input_func.func_type() != ExprType::Row {
             return None;
         }
-        let mut lookup_input_indices = vec![];
+        let mut row_input_indices = Vec::with_capacity(row_input_func.inputs().len());
+        for row_input in row_input_func.inputs().iter() {
+            row_input_indices.push(row_input.as_input_ref()?.index);
+        }
+
+        let (vector_search, proj_exprs) = vector_search.prune_col(
+            &row_input_indices,
+            &mut ColumnPruningContext::new(vector_search.input.clone()),
+            &vector_search.schema(),
+        );
+        let mut lookup_output_indices = Vec::with_capacity(proj_exprs.len());
         let mut include_distance = false;
-        for (idx, row_input) in row_input_func.inputs().iter().enumerate() {
-            let input_index = row_input.as_input_ref()?.index;
-            if input_index == lookup_input.schema().len() {
-                // distance column included in the row output
-                if idx != row_input_func.inputs().len() - 1 {
-                    // for simplicity, we require that distance column should be the last column in the row
+        for (idx, expr) in proj_exprs.iter().enumerate() {
+            let vector_search_output_idx = expr.as_input_ref()?.index;
+            // see if the output is the distance column
+            if vector_search_output_idx == vector_search.output_indices.len() {
+                if idx < proj_exprs.len() - 1 {
+                    // for simplicity, we limit that the distance column must be the last column of output
                     return None;
                 } else {
                     include_distance = true;
                 }
             } else {
-                lookup_input_indices.push(input_index);
+                lookup_output_indices.push(vector_search.output_indices[vector_search_output_idx]);
             }
         }
 
+        let (input_vector_idx, lookup_expr) = match (&vector_search.left, &vector_search.right) {
+            (ExprImpl::CorrelatedInputRef(correlated), lookup_expr)
+            | (lookup_expr, ExprImpl::CorrelatedInputRef(correlated))
+                if correlated.correlated_id() == correlated_id
+                    && IndexColumnExprValidator::validate(lookup_expr, true).is_ok() =>
+            {
+                (correlated.index(), lookup_expr.clone())
+            }
+            _ => {
+                return None;
+            }
+        };
+
         Some(
             LogicalVectorSearchLookupJoin::new(
-                top_n,
-                distance_type,
+                vector_search.top_n,
+                vector_search.distance_type,
                 input,
                 input_vector_idx,
-                lookup_input,
+                vector_search.input,
                 lookup_expr,
-                lookup_input_indices,
+                lookup_output_indices,
                 include_distance,
             )
             .into(),

@@ -40,6 +40,9 @@ pub struct BatchVectorSearchCore {
     pub index_name: String,
     pub index_table_id: TableId,
     pub info_column_desc: Vec<ColumnDesc>,
+    pub info_output_indices: Vec<usize>,
+    pub include_distance: bool,
+
     pub vector_column_idx: usize,
     pub hnsw_ef_search: Option<usize>,
     #[educe(Hash(ignore), Eq(ignore))]
@@ -59,10 +62,20 @@ impl GenericPlanNode for BatchVectorSearchCore {
             "vector_info",
             DataType::list(
                 StructType::new(
-                    self.info_column_desc
+                    self.info_output_indices
                         .iter()
-                        .map(|col| (col.name.clone(), col.data_type.clone()))
-                        .chain([("__distance".to_owned(), DataType::Float64)]),
+                        .map(|idx| {
+                            (
+                                self.info_column_desc[*idx].name.clone(),
+                                self.info_column_desc[*idx].data_type.clone(),
+                            )
+                        })
+                        .chain(
+                            self.include_distance
+                                .then(|| [("__distance".to_owned(), DataType::Float64)].into_iter())
+                                .into_iter()
+                                .flatten(),
+                        ),
                 )
                 .into(),
             ),
@@ -161,6 +174,13 @@ impl ToBatchPb for BatchVectorSearch {
             top_n: self.core.top_n as _,
             distance_type: self.core.distance_type as _,
             hnsw_ef_search: self.core.hnsw_ef_search.unwrap_or(0) as _,
+            info_output_indices: self
+                .core
+                .info_output_indices
+                .iter()
+                .map(|&idx| idx as _)
+                .collect(),
+            include_distance: self.core.include_distance,
         })
     }
 }

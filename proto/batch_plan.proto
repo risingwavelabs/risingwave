@@ -415,6 +415,8 @@ message VectorIndexNearestNode {
   common.DistanceType distance_type = 6;
   // The ef_search used to query hnsw index
   uint32 hnsw_ef_search = 7;
+  repeated uint32 info_output_indices = 8;
+  bool include_distance = 9;
 }
 
 message PlanNode {

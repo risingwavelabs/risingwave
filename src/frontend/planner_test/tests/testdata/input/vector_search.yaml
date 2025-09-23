@@ -209,6 +209,21 @@
   sql: |
     select 
       event_id, array(
+        select row(name)
+        from (select name from items order by events.embedding <-> items.embedding limit 3)
+      ) as related_info, 
+      time
+    from events;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- before:
+    - create_correlated_tables_with_column_value_index
+  id: correlated_read_without_embedding
+  sql: |
+    select 
+      event_id, array(
         select row(id, name, distance)
         from (select id, name, events.embedding <-> items.embedding as distance from items order by distance limit 3)
       ) as related_info, 

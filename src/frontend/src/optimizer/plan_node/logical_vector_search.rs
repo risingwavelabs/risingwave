@@ -46,15 +46,15 @@ use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct VectorSearchCore {
-    top_n: u64,
-    distance_type: PbDistanceType,
-    left: ExprImpl,
-    right: ExprImpl,
+pub struct VectorSearchCore {
+    pub top_n: u64,
+    pub distance_type: PbDistanceType,
+    pub left: ExprImpl,
+    pub right: ExprImpl,
     /// The indices of input that will be included in the output.
     /// The index of distance column is `output_indices.len()`
-    output_indices: Vec<usize>,
-    input: PlanRef,
+    pub output_indices: Vec<usize>,
+    pub input: PlanRef,
 }
 
 impl VectorSearchCore {
@@ -123,28 +123,15 @@ pub struct LogicalVectorSearch {
 }
 
 impl LogicalVectorSearch {
-    pub(crate) fn new(
-        top_n: u64,
-        distance_type: PbDistanceType,
-        left: ExprImpl,
-        right: ExprImpl,
-        output_indices: Vec<usize>,
-        input: PlanRef,
-    ) -> Self {
-        let core = VectorSearchCore {
-            top_n,
-            distance_type,
-            left,
-            right,
-            output_indices,
-            input,
-        };
-        Self::with_core(core)
-    }
-
     fn with_core(core: VectorSearchCore) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
+    }
+}
+
+impl From<VectorSearchCore> for LogicalVectorSearch {
+    fn from(core: VectorSearchCore) -> Self {
+        Self::with_core(core)
     }
 }
 
@@ -189,18 +176,22 @@ impl Distill for LogicalVectorSearch {
     }
 }
 
-impl ColPrunable for LogicalVectorSearch {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let (project_exprs, required_cols) =
-            ensure_sorted_required_cols(required_cols, self.base.schema());
+impl VectorSearchCore {
+    pub fn prune_col(
+        &self,
+        required_cols: &[usize],
+        ctx: &mut ColumnPruningContext,
+        schema: &Schema,
+    ) -> (VectorSearchCore, Vec<ExprImpl>) {
+        let (project_exprs, required_cols) = ensure_sorted_required_cols(required_cols, schema);
         assert!(required_cols.is_sorted());
-        let input_schema = self.core.input.schema();
+        let input_schema = self.input.schema();
         let mut required_input_idx_bitset =
-            collect_input_refs(input_schema.len(), [&self.core.left, &self.core.right]);
+            collect_input_refs(input_schema.len(), [&self.left, &self.right]);
         let mut non_distance_required_input_idx = Vec::new();
         let require_distance_col = required_cols
             .last()
-            .map(|last_col_idx| *last_col_idx == self.core.output_indices.len())
+            .map(|last_col_idx| *last_col_idx == self.output_indices.len())
             .unwrap_or(false);
         let non_distance_iter_end_idx = if require_distance_col {
             required_cols.len() - 1
@@ -208,29 +199,36 @@ impl ColPrunable for LogicalVectorSearch {
             required_cols.len()
         };
         for &required_col_idx in &required_cols[0..non_distance_iter_end_idx] {
-            let required_input_idx = self.core.output_indices[required_col_idx];
+            let required_input_idx = self.output_indices[required_col_idx];
             non_distance_required_input_idx.push(required_input_idx);
             required_input_idx_bitset.set(required_col_idx, true);
         }
         let input_required_idx = required_input_idx_bitset.ones().collect_vec();
 
-        let new_input = self.input().prune_col(&input_required_idx, ctx);
+        let new_input = self.input.prune_col(&input_required_idx, ctx);
         // mapping from idx of original input to new input
-        let mut mapping = ColIndexMapping::with_remaining_columns(
-            &input_required_idx,
-            self.input().schema().len(),
-        );
+        let mut mapping =
+            ColIndexMapping::with_remaining_columns(&input_required_idx, self.input.schema().len());
 
         let vector_search = {
-            let mut new_core = self.core.clone_with_input(new_input);
+            let mut new_core = self.clone_with_input(new_input);
             new_core.left = mapping.rewrite_expr(new_core.left);
             new_core.right = mapping.rewrite_expr(new_core.right);
             new_core.output_indices = non_distance_required_input_idx
                 .iter()
                 .map(|input_idx| mapping.map(*input_idx))
                 .collect();
-            Self::with_core(new_core)
+            new_core
         };
+        (vector_search, project_exprs)
+    }
+}
+
+impl ColPrunable for LogicalVectorSearch {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let (vector_search, project_exprs) =
+            self.core.prune_col(required_cols, ctx, self.base.schema());
+        let vector_search: LogicalVectorSearch = vector_search.into();
         LogicalProject::create(vector_search.into(), project_exprs)
     }
 }
@@ -457,17 +455,20 @@ impl ToBatch for LogicalVectorSearch {
                             .batch_hnsw_ef_search(),
                     ),
                 };
+                let info_column_desc = index.index_table.columns
+                    [1..=index.included_info_columns.len()]
+                    .iter()
+                    .map(|col| col.column_desc.clone())
+                    .collect_vec();
                 let core = BatchVectorSearchCore {
                     input: literal_vector_input,
                     top_n: self.core.top_n,
                     distance_type: self.core.distance_type,
                     index_name: index.index_table.name.clone(),
                     index_table_id: index.index_table.id,
-                    info_column_desc: index.index_table.columns
-                        [1..=index.included_info_columns.len()]
-                        .iter()
-                        .map(|col| col.column_desc.clone())
-                        .collect(),
+                    info_output_indices: (0..info_column_desc.len()).collect(),
+                    info_column_desc,
+                    include_distance: true,
                     vector_column_idx: 0,
                     hnsw_ef_search,
                     ctx: self.core.ctx(),

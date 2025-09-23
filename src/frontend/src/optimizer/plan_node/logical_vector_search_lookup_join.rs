@@ -290,24 +290,18 @@ impl ToBatch for LogicalVectorSearchLookupJoin {
     fn to_batch(&self) -> Result<BatchPlanRef> {
         if let Some(scan) = self.core.lookup.as_logical_scan()
             && let Some((
-                            index,
-                            covered_table_cols_idx,
-                            non_covered_table_cols_idx,
-                            primary_table_col_in_output,
-                        )) = LogicalVectorSearch::resolve_vector_index_lookup(
-            scan,
-            &self.core.lookup_vector,
-            self.core.distance_type,
-            &self.core.lookup_output_indices,
-        )
+                index,
+                _covered_table_cols_idx,
+                non_covered_table_cols_idx,
+                primary_table_col_in_output,
+            )) = LogicalVectorSearch::resolve_vector_index_lookup(
+                scan,
+                &self.core.lookup_vector,
+                self.core.distance_type,
+                &self.core.lookup_output_indices,
+            )
             && non_covered_table_cols_idx.is_empty()
-            && self.core.include_distance // TODO: allow not include distance
-            && index.included_info_columns.len() == covered_table_cols_idx.len()
-            && primary_table_col_in_output.iter().enumerate().all(|(output_idx, (covered, idx_in_index_info_columns))| {
-            assert!(*covered);
-            output_idx == *idx_in_index_info_columns
-        }) {
-            let todo = 0;
+        {
             let hnsw_ef_search = match index.vector_index_info.config.as_ref().unwrap() {
                 vector_index_info::Config::Flat(_) => None,
                 vector_index_info::Config::HnswFlat(_) => Some(
@@ -318,6 +312,13 @@ impl ToBatch for LogicalVectorSearchLookupJoin {
                         .batch_hnsw_ef_search(),
                 ),
             };
+            let info_output_indices = primary_table_col_in_output
+                .iter()
+                .map(|(covered, idx_in_index_info_columns)| {
+                    assert!(*covered);
+                    *idx_in_index_info_columns
+                })
+                .collect();
             let core = BatchVectorSearchCore {
                 input: self.core.input.to_batch()?,
                 top_n: self.core.top_n,
@@ -328,6 +329,8 @@ impl ToBatch for LogicalVectorSearchLookupJoin {
                     .iter()
                     .map(|col| col.column_desc.clone())
                     .collect(),
+                info_output_indices,
+                include_distance: self.core.include_distance,
                 vector_column_idx: self.core.input_vector_col_idx,
                 hnsw_ef_search,
                 ctx: self.core.ctx(),
