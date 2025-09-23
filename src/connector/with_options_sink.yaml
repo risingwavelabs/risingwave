@@ -627,7 +627,7 @@ IcebergConfig:
     required: false
     default: 'true'
     allow_alter_on_fly: true
-  - name: max_snapshots_num
+  - name: max_snapshots_num_before_compaction
     field_type: usize
     comments: |-
       The maximum number of snapshots allowed since the last rewrite operation

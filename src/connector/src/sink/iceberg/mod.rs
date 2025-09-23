@@ -110,7 +110,7 @@ pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_ag
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
     "snapshot_expiration_clear_expired_meta_data";
-pub const MAX_SNAPSHOTS_NUM: &str = "max_snapshots_num";
+pub const MAX_SNAPSHOTS_NUM: &str = "max_snapshots_num_before_compaction";
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -228,10 +228,10 @@ pub struct IcebergConfig {
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
-    #[serde(rename = "max_snapshots_num", default)]
+    #[serde(rename = "max_snapshots_num_before_compaction", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
-    pub max_snapshots_num: Option<usize>,
+    pub max_snapshots_num_before_compaction: Option<usize>,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -605,13 +605,13 @@ impl Sink for IcebergSink {
             }
         }
 
-        if let Some(max_snapshots) = iceberg_config.max_snapshots_num {
-            if max_snapshots <= 0 {
-                bail!(
-                    "`max_snapshots_num` must be greater than 0, got: {}",
-                    max_snapshots
-                );
-            }
+        if let Some(max_snapshots) = iceberg_config.max_snapshots_num_before_compaction
+            && max_snapshots < 1
+        {
+            bail!(
+                "`max_snapshots_num_before_compaction` must be greater than 0, got: {}",
+                max_snapshots
+            );
         }
 
         Ok(())
@@ -2014,11 +2014,11 @@ impl IcebergSinkCommitter {
     /// Returns the number of snapshots since the last rewrite/overwrite
     fn count_snapshots_since_rewrite(&self) -> usize {
         let mut snapshots: Vec<_> = self.table.metadata().snapshots().collect();
-        snapshots.sort_by(|a, b| b.timestamp_ms().cmp(&a.timestamp_ms()));
+        snapshots.sort_by_key(|b| std::cmp::Reverse(b.timestamp_ms()));
 
         // Iterate through snapshots in reverse order (newest first) to find the last rewrite/overwrite
         let mut count = 0;
-        for snapshot in snapshots.iter() {
+        for snapshot in snapshots {
             // Check if this snapshot represents a rewrite or overwrite operation
             let summary = snapshot.summary();
             match &summary.operation {
@@ -2043,7 +2043,7 @@ impl IcebergSinkCommitter {
             return Ok(());
         }
 
-        if let Some(max_snapshots) = self.config.max_snapshots_num {
+        if let Some(max_snapshots) = self.config.max_snapshots_num_before_compaction {
             loop {
                 let current_count = self.count_snapshots_since_rewrite();
 
@@ -2528,7 +2528,7 @@ mod test {
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
             snapshot_expiration_clear_expired_meta_data: true,
-            max_snapshots_num: None,
+            max_snapshots_num_before_compaction: None,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
@@ -2676,6 +2676,6 @@ mod test {
             SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
             "snapshot_expiration_clear_expired_meta_data"
         );
-        assert_eq!(MAX_SNAPSHOTS_NUM, "max_snapshots_num");
+        assert_eq!(MAX_SNAPSHOTS_NUM, "max_snapshots_num_before_compaction");
     }
 }

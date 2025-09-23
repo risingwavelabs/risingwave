@@ -1939,17 +1939,24 @@ pub async fn create_iceberg_engine_table(
         );
     }
 
-    if let Some(max_snapshots_num) = handler_args.with_options.get(MAX_SNAPSHOTS_NUM) {
-        let max_snapshots_num = max_snapshots_num.parse::<u32>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "max_snapshots_num must be a positive integer: {}",
-                max_snapshots_num
-            ))
-        })?;
-        if max_snapshots_num == 0 {
-            bail!("max_snapshots_num must be a positive integer: 0");
+    if let Some(max_snapshots_num_before_compaction) =
+        handler_args.with_options.get(MAX_SNAPSHOTS_NUM)
+    {
+        let max_snapshots_num_before_compaction = max_snapshots_num_before_compaction
+            .parse::<u32>()
+            .map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "max_snapshots_num_before_compaction must be a positive integer: {}",
+                    max_snapshots_num_before_compaction
+                ))
+            })?;
+        if max_snapshots_num_before_compaction == 0 {
+            bail!("max_snapshots_num_before_compaction must be a positive integer: 0");
         }
-        sink_with.insert(MAX_SNAPSHOTS_NUM.to_owned(), max_snapshots_num.to_string());
+        sink_with.insert(
+            MAX_SNAPSHOTS_NUM.to_owned(),
+            max_snapshots_num_before_compaction.to_string(),
+        );
     }
 
     let partition_by = handler_args
