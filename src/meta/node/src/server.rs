@@ -94,7 +94,7 @@ use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
 use crate::rpc::metrics::{
-    GLOBAL_META_METRICS, start_fragment_info_monitor, start_worker_info_monitor,
+    GLOBAL_META_METRICS, start_info_monitor, start_worker_info_monitor,
 };
 use crate::serving::ServingVnodeMapping;
 use crate::stream::{GlobalStreamManager, SourceManager};
@@ -623,9 +623,10 @@ pub async fn start_service_as_election_leader(
         Duration::from_secs(env.opts.node_num_monitor_interval_sec),
         meta_metrics.clone(),
     ));
-    sub_tasks.push(start_fragment_info_monitor(
+    sub_tasks.push(start_info_monitor(
         metadata_manager.clone(),
         hummock_manager.clone(),
+        env.system_params_manager_impl_ref(),
         meta_metrics.clone(),
     ));
     sub_tasks.push(SystemParamsController::start_params_notifier(
