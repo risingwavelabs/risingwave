@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use super::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
+use crate::bitmap::Bitmap;
 use crate::hash::VirtualNode;
 
 /// The number of bits occupied by the vnode part and the sequence part of a row id.
@@ -23,6 +25,69 @@ const TIMESTAMP_SHIFT_BITS: u32 = 22;
 
 /// The number of bits occupied by the vnode part of a row id in the previous version.
 const COMPAT_VNODE_BITS: u32 = 10;
+
+/// Common timestamp management for row id generators.
+#[derive(Debug)]
+struct TimestampManager {
+    /// Specific base timestamp using for generating row ids.
+    base: SystemTime,
+    /// Last timestamp part of row id, based on `base`.
+    last_timestamp_ms: i64,
+}
+
+impl TimestampManager {
+    fn new() -> Self {
+        let base = *UNIX_RISINGWAVE_DATE_EPOCH;
+        Self {
+            base,
+            last_timestamp_ms: base.elapsed().unwrap().as_millis() as i64,
+        }
+    }
+
+    fn get_current_timestamp_ms(&self) -> i64 {
+        self.base.elapsed().unwrap().as_millis() as i64
+    }
+
+    fn try_update_timestamp(&mut self, should_update: bool) -> bool {
+        let current_timestamp_ms = self.get_current_timestamp_ms();
+        let to_update = match current_timestamp_ms.cmp(&self.last_timestamp_ms) {
+            Ordering::Less => {
+                tracing::warn!(
+                    "Clock moved backwards: last={}, current={}",
+                    self.last_timestamp_ms,
+                    current_timestamp_ms,
+                );
+                true
+            }
+            Ordering::Equal => should_update,
+            Ordering::Greater => true,
+        };
+
+        if to_update {
+            // If the timestamp is not increased, spin loop here and wait for next millisecond.
+            let mut current_timestamp_ms = current_timestamp_ms;
+            loop {
+                if current_timestamp_ms > self.last_timestamp_ms {
+                    break;
+                }
+                current_timestamp_ms = self.get_current_timestamp_ms();
+
+                #[cfg(madsim)]
+                tokio::time::advance(std::time::Duration::from_micros(10));
+                #[cfg(not(madsim))]
+                std::hint::spin_loop();
+            }
+            self.last_timestamp_ms = current_timestamp_ms;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn last_timestamp_ms(&self) -> i64 {
+        self.last_timestamp_ms
+    }
+}
 
 /// `RowIdGenerator` generates unique row ids using snowflake algorithm as following format:
 ///
@@ -34,11 +99,8 @@ const COMPAT_VNODE_BITS: u32 = 10;
 /// the sequence part will occupy 7..=12 bits. See [`bit_for_vnode`] for more details.
 #[derive(Debug)]
 pub struct RowIdGenerator {
-    /// Specific base timestamp using for generating row ids.
-    base: SystemTime,
-
-    /// Last timestamp part of row id, based on `base`.
-    last_timestamp_ms: i64,
+    /// Timestamp manager.
+    timestamp_mgr: TimestampManager,
 
     /// The number of bits used for vnode.
     vnode_bit: u32,
@@ -103,12 +165,10 @@ pub fn compute_vnode_from_row_id(id: RowId, vnode_count: usize) -> VirtualNode {
 impl RowIdGenerator {
     /// Create a new `RowIdGenerator` with given virtual nodes and vnode count.
     pub fn new(vnodes: impl IntoIterator<Item = VirtualNode>, vnode_count: usize) -> Self {
-        let base = *UNIX_RISINGWAVE_DATE_EPOCH;
         let vnode_bit = bit_for_vnode(vnode_count);
 
         Self {
-            base,
-            last_timestamp_ms: base.elapsed().unwrap().as_millis() as i64,
+            timestamp_mgr: TimestampManager::new(),
             vnode_bit,
             vnodes: vnodes.into_iter().collect(),
             vnodes_index: 0,
@@ -127,43 +187,9 @@ impl RowIdGenerator {
     /// sequence for the current millisecond. Otherwise, it will spin loop until the timestamp is
     /// increased.
     fn try_update_timestamp(&mut self) {
-        let get_current_timestamp_ms = || self.base.elapsed().unwrap().as_millis() as i64;
-
-        let current_timestamp_ms = get_current_timestamp_ms();
-        let to_update = match current_timestamp_ms.cmp(&self.last_timestamp_ms) {
-            Ordering::Less => {
-                tracing::warn!(
-                    "Clock moved backwards: last={}, current={}",
-                    self.last_timestamp_ms,
-                    current_timestamp_ms,
-                );
-                true
-            }
-            Ordering::Equal => {
-                // Update the timestamp if the sequence reaches the upper bound.
-                self.sequence == self.sequence_upper_bound()
-            }
-            Ordering::Greater => true,
-        };
-
-        if to_update {
-            // If the timestamp is not increased, spin loop here and wait for next millisecond. The
-            // case for time going backwards and sequence reaches the upper bound are both covered.
-            let mut current_timestamp_ms = current_timestamp_ms;
-            loop {
-                if current_timestamp_ms > self.last_timestamp_ms {
-                    break;
-                }
-                current_timestamp_ms = get_current_timestamp_ms();
-
-                #[cfg(madsim)]
-                tokio::time::advance(std::time::Duration::from_micros(10));
-                #[cfg(not(madsim))]
-                std::hint::spin_loop();
-            }
-
+        let should_update = self.sequence == self.sequence_upper_bound();
+        if self.timestamp_mgr.try_update_timestamp(should_update) {
             // Reset states. We do not reset the `vnode_index` to make all vnodes are evenly used.
-            self.last_timestamp_ms = current_timestamp_ms;
             self.sequence = 0;
         }
     }
@@ -185,7 +211,7 @@ impl RowIdGenerator {
         }
 
         Some(
-            self.last_timestamp_ms << TIMESTAMP_SHIFT_BITS
+            self.timestamp_mgr.last_timestamp_ms() << TIMESTAMP_SHIFT_BITS
                 | (vnode << (TIMESTAMP_SHIFT_BITS - self.vnode_bit)) as i64
                 | sequence as i64,
         )
@@ -228,6 +254,81 @@ impl RowIdGenerator {
         self.try_update_timestamp();
 
         self.gen_iter().next().unwrap()
+    }
+}
+
+/// `ChangelogRowIdGenerator` generates unique changelog row ids using snowflake algorithm.
+/// Unlike `RowIdGenerator`, it maintains a separate sequence for each vnode and generates
+/// row ids based on the input vnode.
+#[derive(Debug)]
+pub struct ChangelogRowIdGenerator {
+    /// Timestamp manager.
+    timestamp_mgr: TimestampManager,
+
+    /// The number of bits used for vnode.
+    vnode_bit: u32,
+
+    /// Sequence for each vnode. Key is vnode index, value is sequence.
+    vnodes_sequence: HashMap<VirtualNode, u16>,
+
+    vnodes: Bitmap,
+}
+
+impl ChangelogRowIdGenerator {
+    /// Create a new `ChangelogRowIdGenerator` with given vnode count.
+    pub fn new(vnodes: Bitmap) -> Self {
+        let vnode_count = vnodes.count_ones();
+        let vnode_bit = bit_for_vnode(vnode_count);
+        let mut generator = Self {
+            timestamp_mgr: TimestampManager::new(),
+            vnode_bit,
+            vnodes_sequence: HashMap::default(),
+            vnodes,
+        };
+        generator.try_update_timestamp();
+        generator
+    }
+
+    /// The upper bound of the sequence part for changelog, exclusive.
+    fn sequence_upper_bound(&self) -> u16 {
+        1 << (TIMESTAMP_SHIFT_BITS - self.vnode_bit)
+    }
+
+    fn try_update_timestamp(&mut self) {
+        if self.timestamp_mgr.try_update_timestamp(true) {
+            // Reset states: reset all vnode sequences to 0.
+            self.vnodes_sequence.clear();
+        }
+    }
+
+    fn next_changelog_row_id_in_current_timestamp(&mut self, vnode: &VirtualNode) -> Option<RowId> {
+        if !self.vnodes.is_set(vnode.to_index()) {
+            panic!("vnode {:?} not in generator", vnode);
+        }
+        let current_sequence = *self.vnodes_sequence.get(vnode).unwrap_or(&1);
+
+        if current_sequence >= self.sequence_upper_bound() {
+            return None;
+        }
+
+        let sequence = current_sequence;
+        self.vnodes_sequence.insert(*vnode, current_sequence + 1);
+
+        Some(
+            self.timestamp_mgr.last_timestamp_ms() << TIMESTAMP_SHIFT_BITS
+                | (vnode.to_index() << (TIMESTAMP_SHIFT_BITS - self.vnode_bit)) as i64
+                | sequence as i64,
+        )
+    }
+
+    pub fn next(&mut self, vnode: &VirtualNode) -> RowId {
+        if let Some(row_id) = self.next_changelog_row_id_in_current_timestamp(vnode) {
+            row_id
+        } else {
+            self.try_update_timestamp();
+            self.next_changelog_row_id_in_current_timestamp(vnode)
+                .expect("timestamp should be updated")
+        }
     }
 }
 

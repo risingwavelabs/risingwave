@@ -334,6 +334,7 @@ message FilterNode {
 message ChangeLogNode {
   // Whether or not there is an op in the final output.
   bool need_op = 1;
+  repeated uint32 distribution_keys = 2;
 }
 
 message CdcFilterNode {
