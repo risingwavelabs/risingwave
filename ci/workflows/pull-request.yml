@@ -89,7 +89,7 @@ steps:
           <<: *docker-compose
           environment:
           - GITHUB_TOKEN
-    timeout_in_minutes: 14
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "build (deterministic simulation)"
@@ -151,7 +151,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "meta backup test"

@@ -599,6 +599,15 @@ pub async fn handle(
         | Statement::Insert { .. }
         | Statement::Delete { .. }
         | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
+        Statement::Copy {
+            entity: CopyEntity::Query(query),
+            target: CopyTarget::Stdout,
+        } => {
+            let response =
+                query::handle_query(handler_args, Statement::Query(query), vec![Format::Text])
+                    .await?;
+            Ok(response.into_copy_query_to_stdout())
+        }
         Statement::CreateView {
             materialized,
             if_not_exists,

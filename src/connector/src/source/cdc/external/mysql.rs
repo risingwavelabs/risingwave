@@ -518,6 +518,14 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
+                            DataType::Timestamptz => {
+                                // Convert timestamptz to NaiveDateTime for MySQL TIMESTAMP comparison
+                                // MySQL expects NaiveDateTime for TIMESTAMP parameters
+                                let ts = value.into_timestamptz();
+                                let datetime_utc = ts.to_datetime_utc();
+                                let naive_datetime = datetime_utc.naive_utc();
+                                Value::from(naive_datetime)
+                            }
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
                         ConnectorResult::Ok((pk.to_lowercase(), val))

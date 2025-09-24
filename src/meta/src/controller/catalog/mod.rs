@@ -25,7 +25,7 @@ use std::iter;
 use std::mem::take;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_SCHEMA_NAME, FragmentTypeFlag, SYSTEM_SCHEMAS, TableOption,
@@ -37,7 +37,7 @@ use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
-use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::table::{RefreshState, TableType};
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
@@ -617,6 +617,49 @@ impl CatalogController {
         Ok(dirty_associated_source_ids)
     }
 
+    /// On recovery, reset refreshable table's `refresh_state` to a reasonable state.
+    pub async fn reset_refreshing_tables(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        // IDLE: no change
+        // REFRESHING: reset to IDLE (give up refresh for allowing re-trigger)
+        // FINISHING: no change (materialize executor will recover from state table and continue)
+        let filter_condition = table::Column::RefreshState.eq(RefreshState::Refreshing);
+
+        let filter_condition = if let Some(database_id) = database_id {
+            filter_condition.and(object::Column::DatabaseId.eq(database_id))
+        } else {
+            filter_condition
+        };
+
+        let table_ids: Vec<TableId> = Table::find()
+            .find_also_related(Object)
+            .filter(filter_condition)
+            .all(&txn)
+            .await
+            .context("reset_refreshing_tables: finding table ids")?
+            .into_iter()
+            .map(|(t, _)| t.table_id)
+            .collect();
+
+        let res = Table::update_many()
+            .col_expr(table::Column::RefreshState, Expr::value(RefreshState::Idle))
+            .filter(table::Column::TableId.is_in(table_ids))
+            .exec(&txn)
+            .await
+            .context("reset_refreshing_tables: update refresh state")?;
+
+        txn.commit().await?;
+
+        tracing::debug!(
+            "reset refreshing tables: {} tables updated",
+            res.rows_affected
+        );
+
+        Ok(())
+    }
+
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -676,12 +719,34 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn complete_dropped_tables(
-        &self,
-        table_ids: impl Iterator<Item = TableId>,
-    ) -> Vec<PbTable> {
+    async fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
+        let objects = tables
+            .into_iter()
+            .map(|t| PbObject {
+                object_info: Some(PbObjectInfo::Table(t)),
+            })
+            .collect();
+        let group = NotificationInfo::ObjectGroup(PbObjectGroup { objects });
+        self.env
+            .notification_manager()
+            .notify_hummock(NotificationOperation::Delete, group.clone())
+            .await;
+        self.env
+            .notification_manager()
+            .notify_compactor(NotificationOperation::Delete, group)
+            .await;
+    }
+
+    pub async fn complete_dropped_tables(&self, table_ids: impl Iterator<Item = TableId>) {
         let mut inner = self.inner.write().await;
-        inner.complete_dropped_tables(table_ids)
+        let tables = inner.complete_dropped_tables(table_ids);
+        self.notify_hummock_dropped_tables(tables).await;
+    }
+
+    pub async fn cleanup_dropped_tables(&self) {
+        let mut inner = self.inner.write().await;
+        let tables = inner.dropped_tables.drain().map(|(_, t)| t).collect();
+        self.notify_hummock_dropped_tables(tables).await;
     }
 }
 

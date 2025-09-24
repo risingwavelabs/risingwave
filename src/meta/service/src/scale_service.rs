@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::catalog::TableId;
-use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{
-    JobReschedulePlan, JobReschedulePostUpdates, RescheduleOptions, ScaleControllerRef,
-    WorkerReschedule,
+    JobReschedulePlan, JobReschedulePostUpdates, RescheduleOptions, WorkerReschedule,
 };
 use risingwave_meta_model::FragmentId;
 use risingwave_pb::common::WorkerType;
@@ -31,28 +30,27 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
-use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
+use crate::stream::GlobalStreamManagerRef;
 
 pub struct ScaleServiceImpl {
     metadata_manager: MetadataManager,
-    source_manager: SourceManagerRef,
     stream_manager: GlobalStreamManagerRef,
     barrier_manager: BarrierManagerRef,
+    env: MetaSrvEnv,
 }
 
 impl ScaleServiceImpl {
     pub fn new(
         metadata_manager: MetadataManager,
-        source_manager: SourceManagerRef,
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
-        _scale_controller: ScaleControllerRef,
+        env: MetaSrvEnv,
     ) -> Self {
         Self {
             metadata_manager,
-            source_manager,
             stream_manager,
             barrier_manager,
+            env,
         }
     }
 }
@@ -97,9 +95,9 @@ impl ScaleService for ScaleServiceImpl {
             .await?;
 
         let actor_splits = self
-            .source_manager
+            .env
+            .shared_actor_infos()
             .list_assignments()
-            .await
             .into_iter()
             .map(|(actor_id, splits)| {
                 (

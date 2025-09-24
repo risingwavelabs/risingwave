@@ -113,9 +113,9 @@ RisingWave is particularly effective for the following use cases:
 
 [**RisingWave Cloud**](https://cloud.risingwave.com) offers the easiest way to run RisingWave in production.
 
-For **Docker deployment**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-docker-compose/).
+For **Docker deployment**, please refer to [Docker Compose](https://docs.risingwave.com/deploy/risingwave-docker-compose/).
 
-For **Kubernetes deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
+For **Kubernetes deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/deploy/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/deploy/risingwave-kubernetes/).
 
 ## Community
 
@@ -126,7 +126,7 @@ Looking for help, discussions, collaboration opportunities, or a casual afternoo
 
 RisingWave uses [Scarf](https://scarf.sh/) to collect anonymized installation analytics. These analytics help support us understand and improve the distribution of our package. The privacy policy of Scarf is available at [https://about.scarf.sh/privacy-policy](https://about.scarf.sh/privacy-policy).
 
-RisingWave also collects anonymous usage statistics to better understand how the community is using RisingWave. The sole intention of this exercise is to help improve the product. Users may opt out easily at any time. Please refer to the [user documentation](https://docs.risingwave.com/docs/current/telemetry/) for more details.
+RisingWave also collects anonymous usage statistics to better understand how the community is using RisingWave. The sole intention of this exercise is to help improve the product. Users may opt out easily at any time. Please refer to the [user documentation](https://docs.risingwave.com/operate/telemetry/) for more details.
 
 ## License
 

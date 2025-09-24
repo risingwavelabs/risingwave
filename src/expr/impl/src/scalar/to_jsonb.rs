@@ -226,7 +226,7 @@ impl ToJsonb for JsonbRef<'_> {
 
 impl ToJsonb for ListRef<'_> {
     fn add_to(self, data_type: &DataType, builder: &mut Builder) -> Result<()> {
-        let elem_type = data_type.as_list_element_type();
+        let elem_type = data_type.as_list_elem();
         builder.begin_array();
         for value in self.iter() {
             value.add_to(elem_type, builder)?;
