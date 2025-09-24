@@ -384,14 +384,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 )
                                 .unwrap();
                                 debug_assert_eq!(mapping.len(), 1);
-                                if let Some((split_id, _offset)) = mapping.into_iter().next() {
+                                if let Some((split_id, offset)) = mapping.into_iter().next() {
                                     reading_file = Some(split_id.clone());
                                     let row = state_store_handler.get(&split_id).await?
                                         .unwrap_or_else(|| {
                                             panic!("The fs_split (file_name) {:?} should be in the state table.",
                                         split_id)
                                         });
-                                    let fs_split = match row.datum_at(1) {
+                                    let mut fs_split = match row.datum_at(1) {
                                         Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
                                             OpendalFsSplit::<Src>::restore_from_json(
                                                 jsonb_ref.to_owned_scalar(),
@@ -399,7 +399,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                         _ => unreachable!(),
                                     };
-
+                                    fs_split.update_offset(offset)?;
                                     state_store_handler
                                         .set(&split_id, fs_split.encode_to_json())
                                         .await?;
@@ -414,6 +414,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             }
                             None => {
                                 if let Some(ref delete_file_name) = reading_file {
+                                    tracing::info!("Deleting file: {}", delete_file_name);
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(delete_file_name).await?;
                                 }
