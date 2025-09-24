@@ -171,8 +171,13 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             true => op.read_with(&object_name).into_future().await?,
 
             false => {
+                let actual_start = if start_offset > 0 {
+                    start_offset + 1
+                } else {
+                    start_offset
+                };
                 op.read_with(&object_name)
-                    .range(start_offset as u64..)
+                    .range(actual_start as u64..)
                     .into_future()
                     .await?
             }
