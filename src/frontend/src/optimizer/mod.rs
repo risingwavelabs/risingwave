@@ -1225,13 +1225,13 @@ fn exist_and_no_exchange_before(
 }
 
 impl BatchPlanRef {
-    fn is_user_table(&self) -> bool {
+    fn is_user_table_scan(&self) -> bool {
         self.node_type() == BatchPlanNodeType::BatchSeqScan
             || self.node_type() == BatchPlanNodeType::BatchLogSeqScan
             || self.node_type() == BatchPlanNodeType::BatchVectorSearch
     }
 
-    fn is_source(&self) -> bool {
+    fn is_source_scan(&self) -> bool {
         self.node_type() == BatchPlanNodeType::BatchSource
             || self.node_type() == BatchPlanNodeType::BatchKafkaScan
             || self.node_type() == BatchPlanNodeType::BatchIcebergScan
@@ -1258,8 +1258,8 @@ impl BatchPlanRef {
 fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -> bool {
     assert_eq!(plan.distribution(), &Distribution::Single);
     exist_and_no_exchange_before(&plan, |plan| {
-        plan.is_user_table()
-            || plan.is_source()
+        plan.is_user_table_scan()
+            || plan.is_source_scan()
             || plan.is_insert()
             || plan.is_update()
             || plan.is_delete()
@@ -1271,7 +1271,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -
 fn require_additional_exchange_on_root_in_local_mode(plan: BatchPlanRef) -> bool {
     assert_eq!(plan.distribution(), &Distribution::Single);
     exist_and_no_exchange_before(&plan, |plan| {
-        plan.is_user_table() || plan.is_source() || plan.is_insert()
+        plan.is_user_table_scan() || plan.is_source_scan() || plan.is_insert()
     })
 }
 
