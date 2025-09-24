@@ -12,102 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::types::{DataType, StructType};
+use pretty_xmlish::XmlNode;
 use risingwave_pb::batch_plan::PbVectorIndexNearestNode;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::common::PbDistanceType;
 
-use crate::OptimizerContextRef;
-use crate::catalog::TableId;
-use crate::expr::{ExprDisplay, ExprImpl, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::generic::VectorIndexLookupJoin;
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
     Batch, BatchPlanRef as PlanRef, BatchPlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary,
     ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
-
-#[derive(Debug, Clone, educe::Educe)]
-#[educe(Hash, PartialEq, Eq)]
-pub struct BatchVectorSearchCore {
-    pub input: BatchPlanRef,
-    pub top_n: u64,
-    pub distance_type: PbDistanceType,
-    pub index_name: String,
-    pub index_table_id: TableId,
-    pub info_column_desc: Vec<ColumnDesc>,
-    pub info_output_indices: Vec<usize>,
-    pub include_distance: bool,
-
-    pub vector_column_idx: usize,
-    pub hnsw_ef_search: Option<usize>,
-    #[educe(Hash(ignore), Eq(ignore))]
-    pub ctx: OptimizerContextRef,
-}
-
-impl GenericPlanNode for BatchVectorSearchCore {
-    fn functional_dependency(&self) -> FunctionalDependencySet {
-        // FunctionalDependencySet::new(self.info_column_desc.len())
-        // TODO: include dependency derived from info columns
-        self.input.functional_dependency().clone()
-    }
-
-    fn schema(&self) -> Schema {
-        let mut schema = self.input.schema().clone();
-        schema.fields.push(Field::new(
-            "vector_info",
-            DataType::list(
-                StructType::new(
-                    self.info_output_indices
-                        .iter()
-                        .map(|idx| {
-                            (
-                                self.info_column_desc[*idx].name.clone(),
-                                self.info_column_desc[*idx].data_type.clone(),
-                            )
-                        })
-                        .chain(
-                            self.include_distance
-                                .then(|| [("__distance".to_owned(), DataType::Float64)].into_iter())
-                                .into_iter()
-                                .flatten(),
-                        ),
-                )
-                .into(),
-            ),
-        ));
-        schema
-    }
-
-    fn stream_key(&self) -> Option<Vec<usize>> {
-        None
-    }
-
-    fn ctx(&self) -> OptimizerContextRef {
-        self.ctx.clone()
-    }
-}
+use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchVectorSearch {
     pub base: PlanBase<Batch>,
-    pub core: BatchVectorSearchCore,
+    pub core: VectorIndexLookupJoin<BatchPlanRef>,
 }
 
 impl BatchVectorSearch {
-    pub(super) fn with_core(core: BatchVectorSearchCore) -> Self {
+    pub(super) fn with_core(core: VectorIndexLookupJoin<BatchPlanRef>) -> Self {
         Self::with_core_inner(core, Distribution::Single)
     }
 
-    fn with_core_someshard(core: BatchVectorSearchCore) -> Self {
+    fn with_core_someshard(core: VectorIndexLookupJoin<BatchPlanRef>) -> Self {
         Self::with_core_inner(core, Distribution::SomeShard)
     }
 
-    fn with_core_inner(core: BatchVectorSearchCore, distribution: Distribution) -> Self {
+    fn with_core_inner(
+        core: VectorIndexLookupJoin<BatchPlanRef>,
+        distribution: Distribution,
+    ) -> Self {
         // TODO: support specifying order in nested struct to avoid unnecessary sort
         let order = Order::any();
         let base = PlanBase::new_batch_with_core(&core, distribution, order);
@@ -117,31 +53,7 @@ impl BatchVectorSearch {
 
 impl Distill for BatchVectorSearch {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let mut fields = vec![
-            (
-                "schema",
-                Pretty::Array(self.schema().fields.iter().map(Pretty::debug).collect()),
-            ),
-            ("top_n", Pretty::debug(&self.core.top_n)),
-            ("distance_type", Pretty::debug(&self.core.distance_type)),
-            ("index_name", Pretty::debug(&self.core.index_name)),
-            (
-                "vector",
-                Pretty::debug(&ExprDisplay {
-                    expr: &ExprImpl::InputRef(
-                        InputRef::new(
-                            self.core.vector_column_idx,
-                            self.core.input.schema()[self.core.vector_column_idx].data_type(),
-                        )
-                        .into(),
-                    ),
-                    input_schema: self.core.input.schema(),
-                }),
-            ),
-        ];
-        if let Some(hnsw_ef_search) = self.core.hnsw_ef_search {
-            fields.push(("hnsw_ef_search", Pretty::debug(&hnsw_ef_search)));
-        }
+        let fields = self.core.distill();
         childless_record("BatchVectorSearch", fields)
     }
 }

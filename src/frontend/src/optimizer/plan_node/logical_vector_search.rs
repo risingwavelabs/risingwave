@@ -34,11 +34,8 @@ use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
     TableFunction, TableFunctionType, collect_input_refs,
 };
-use crate::optimizer::plan_node::batch_vector_search::BatchVectorSearchCore;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{
-    GenericPlanNode, GenericPlanRef, TopNLimit, ensure_sorted_required_cols,
-};
+use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef, TopNLimit, ensure_sorted_required_cols, VectorIndexLookupJoin};
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, *};
 use crate::optimizer::property::{FunctionalDependencySet, Order};
@@ -458,7 +455,7 @@ impl ToBatch for LogicalVectorSearch {
                     ),
                 };
                 let info_column_desc = index.info_column_desc();
-                let core = BatchVectorSearchCore {
+                let core = VectorIndexLookupJoin {
                     input: literal_vector_input,
                     top_n: self.core.top_n,
                     distance_type: self.core.distance_type,

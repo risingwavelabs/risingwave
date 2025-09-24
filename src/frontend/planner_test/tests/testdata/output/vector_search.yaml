@@ -160,7 +160,7 @@
       └─BatchSort { order: [$expr3 ASC] }
         └─BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
           └─BatchProjectSet { select_list: [Unnest($1)] }
-            └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector:  }
+            └─BatchVectorSearch { top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector: , lookup_output: [("name", Varchar), ("items.id", Int32)], include_distance: true }
               └─BatchValues { rows: [['[1,2,3]':Vector(3)]] }
 - id: no_vector_index_search_on_table_scan_with_predicate
   before:
@@ -201,7 +201,7 @@
       └─BatchSort { order: [$expr3 ASC] }
         └─BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
           └─BatchProjectSet { select_list: [Unnest($1)] }
-            └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector:  }
+            └─BatchVectorSearch { top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector: , lookup_output: [("name", Varchar), ("items.id", Int32)], include_distance: true }
               └─BatchValues { rows: [[OpenaiEmbedding('{"model": "model"}':Jsonb, 'hello':Varchar)::Vector(3)]] }
 - before:
   - create_table_and_index
@@ -228,7 +228,7 @@
         └─BatchExchange { order: [], dist: HashShard($expr1) }
           └─BatchProject { exprs: [(Field(Unnest($1), 1:Int32) + 1:Int32) as $expr1] }
             └─BatchProjectSet { select_list: [Unnest($1)] }
-              └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector:  }
+              └─BatchVectorSearch { top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector: , lookup_output: [("name", Varchar), ("items.id", Int32)], include_distance: true }
                 └─BatchValues { rows: [['[3,1,2]':Vector(3)]] }
 - before:
   - create_table_and_index
@@ -250,7 +250,7 @@
           └─BatchExchange { order: [], dist: UpstreamHashShard($expr2) }
             └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
               └─BatchProjectSet { select_list: [Unnest($1)] }
-                └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector:  }
+                └─BatchVectorSearch { top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector: , lookup_output: [("name", Varchar), ("items.id", Int32)], include_distance: true }
                   └─BatchValues { rows: [['[3,1,2]':Vector(3)]] }
 - before:
   - create_table_and_index
@@ -274,7 +274,7 @@
             └─BatchExchange { order: [], dist: UpstreamHashShard($expr2) }
               └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
                 └─BatchProjectSet { select_list: [Unnest($1)] }
-                  └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector:  }
+                  └─BatchVectorSearch { top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector: , lookup_output: [("name", Varchar), ("items.id", Int32)], include_distance: true }
                     └─BatchValues { rows: [['[3,1,2]':Vector(3)]] }
 - before:
   - create_table_and_index
@@ -296,7 +296,7 @@
         └─BatchExchange { order: [], dist: UpstreamHashShard($expr2) }
           └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
             └─BatchProjectSet { select_list: [Unnest($1)] }
-              └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: InnerProduct, index_name: "vector_index", vector:  }
+              └─BatchVectorSearch { top_n: 2, distance_type: InnerProduct, index_name: "vector_index", vector: , lookup_output: [("name", Varchar), ("items.id", Int32)], include_distance: true }
                 └─BatchValues { rows: [['[3,1,2]':Vector(3)]] }
 - before:
   - create_table_and_index
@@ -327,7 +327,7 @@
             └─BatchExchange { order: [], dist: UpstreamHashShard($expr2) }
               └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
                 └─BatchProjectSet { select_list: [Unnest($1)] }
-                  └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector:  }
+                  └─BatchVectorSearch { top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector: , lookup_output: [("name", Varchar), ("items.id", Int32)], include_distance: true }
                     └─BatchValues { rows: [['[3,1,2]':Vector(3)]] }
 - id: explain_create_function_index
   sql: |
@@ -360,7 +360,7 @@
       └─BatchSort { order: [$expr3 ASC] }
         └─BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
           └─BatchProjectSet { select_list: [Unnest($1)] }
-            └─BatchVectorSearch { schema: [:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector:  }
+            └─BatchVectorSearch { top_n: 5, distance_type: InnerProduct, index_name: "vector_index", vector: , lookup_output: [("name", Varchar), ("items.id", Int32)], include_distance: true }
               └─BatchValues { rows: [['[3,1,2]':Vector(3)]] }
 - id: create_correlated_tables
   sql: |
@@ -434,7 +434,7 @@
 - id: create_correlated_tables_with_column_value_index
   sql: |
     create table items (id int primary key, name string, embedding vector(3)) append only;
-    create table events (event_id int primary key, time timestamp, embedding vector(3));
+    create table events (event_id int primary key, time timestamp, embedding vector(3)) append only;
     create index i on items using flat (embedding) with (distance_type = 'l2');
 - id: correlated_read_without_embedding
   before:
@@ -459,7 +459,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [events.event_id, vector_info, events.time] }
-      └─BatchVectorSearch { schema: [events.event_id:Int32, events.time:Timestamp, events.embedding:Vector(3), vector_info:List(Struct(StructType { fields: [("name", Varchar)] }))], top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding }
+      └─BatchVectorSearch { top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding, lookup_output: [("name", Varchar)], include_distance: false }
         └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: Single }
 - id: correlated_read_without_embedding
   before:
@@ -483,5 +483,29 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [events.event_id, vector_info, events.time] }
-      └─BatchVectorSearch { schema: [events.event_id:Int32, events.time:Timestamp, events.embedding:Vector(3), vector_info:List(Struct(StructType { fields: [("id", Int32), ("name", Varchar), ("__distance", Float64)] }))], top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding }
+      └─BatchVectorSearch { top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding, lookup_output: [("id", Int32), ("name", Varchar)], include_distance: true }
         └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: Single }
+- id: correlated_read_without_embedding
+  before:
+  - create_correlated_tables_with_column_value_index
+  sql: "select \n  event_id, array(\n    select row(id, name, distance)\n    from (select id, name, events.embedding <-> items.embedding as distance from items order by distance limit 3)\n  ) as related_info, \n  time\nfrom events;\n"
+  logical_plan: |-
+    LogicalProject { exprs: [events.event_id, $expr3, events.time] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(StructType { fields: [("f1", Int32), ("f2", Varchar), ("f3", Float64)] }))) as $expr3] }
+        └─LogicalAgg { aggs: [array_agg($expr2)] }
+          └─LogicalProject { exprs: [Row(items.id, items.name, $expr1) as $expr2] }
+            └─LogicalTopN { order: [$expr1 ASC], limit: 3, offset: 0 }
+              └─LogicalProject { exprs: [items.id, items.name, L2Distance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
+                └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [events.event_id, array, events.time] }
+    └─LogicalVectorSearchLookupJoin { distance_type: L2Sqr, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.id:Int32, items.name:Varchar], include_distance: true }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.embedding, items._rw_timestamp] }
+  stream_plan: |-
+    StreamMaterialize { columns: [event_id, related_info, time], stream_key: [event_id], pk_columns: [event_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [events.event_id, vector_info, events.time] }
+      └─StreamVectorIndexLookupJoin { top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding, lookup_output: [("id", Int32), ("name", Varchar)], include_distance: true }
+        └─StreamTableScan { table: events, columns: [events.event_id, events.time, events.embedding], stream_scan_type: ArrangementBackfill, stream_key: [events.event_id], pk: [event_id], dist: UpstreamHashShard(events.event_id) }
