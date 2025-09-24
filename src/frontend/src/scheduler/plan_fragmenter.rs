@@ -516,7 +516,6 @@ pub struct QueryStage {
     pub source_info: Option<SourceScanInfo>,
     pub file_scan_info: Option<FileScanInfo>,
     pub has_lookup_join: bool,
-    pub has_vector_search: bool,
     pub dml_table_id: Option<TableId>,
     pub session_id: SessionId,
     pub batch_enable_distributed_dml: bool,
@@ -555,7 +554,6 @@ impl QueryStage {
                 source_info: self.source_info.clone(),
                 file_scan_info: self.file_scan_info.clone(),
                 has_lookup_join: self.has_lookup_join,
-                has_vector_search: self.has_vector_search,
                 dml_table_id: self.dml_table_id,
                 session_id: self.session_id,
                 batch_enable_distributed_dml: self.batch_enable_distributed_dml,
@@ -587,7 +585,6 @@ impl QueryStage {
             source_info: Some(source_info),
             file_scan_info: self.file_scan_info.clone(),
             has_lookup_join: self.has_lookup_join,
-            has_vector_search: self.has_vector_search,
             dml_table_id: self.dml_table_id,
             session_id: self.session_id,
             batch_enable_distributed_dml: self.batch_enable_distributed_dml,
@@ -635,7 +632,6 @@ struct QueryStageBuilder {
     source_info: Option<SourceScanInfo>,
     file_scan_file: Option<FileScanInfo>,
     has_lookup_join: bool,
-    has_vector_search: bool,
     dml_table_id: Option<TableId>,
     session_id: SessionId,
     batch_enable_distributed_dml: bool,
@@ -654,7 +650,6 @@ impl QueryStageBuilder {
         source_info: Option<SourceScanInfo>,
         file_scan_file: Option<FileScanInfo>,
         has_lookup_join: bool,
-        has_vector_search: bool,
         dml_table_id: Option<TableId>,
         session_id: SessionId,
         batch_enable_distributed_dml: bool,
@@ -670,7 +665,6 @@ impl QueryStageBuilder {
             source_info,
             file_scan_file,
             has_lookup_join,
-            has_vector_search,
             dml_table_id,
             session_id,
             batch_enable_distributed_dml,
@@ -694,7 +688,6 @@ impl QueryStageBuilder {
             source_info: self.source_info,
             file_scan_info: self.file_scan_file,
             has_lookup_join: self.has_lookup_join,
-            has_vector_search: self.has_vector_search,
             dml_table_id: self.dml_table_id,
             session_id: self.session_id,
             batch_enable_distributed_dml: self.batch_enable_distributed_dml,
@@ -985,7 +978,6 @@ impl BatchPlanFragmenter {
         let mut table_scan_info = None;
         let mut source_info = None;
         let mut file_scan_info = None;
-        let mut has_vector_search = false;
 
         // For current implementation, we can guarantee that each stage has only one table
         // scan(except System table) or one source.
@@ -995,8 +987,6 @@ impl BatchPlanFragmenter {
             source_info = Some(info);
         } else if let Some(info) = Self::collect_stage_file_scan(root.clone())? {
             file_scan_info = Some(info);
-        } else if Self::collect_stage_vector_search(root.clone()) {
-            has_vector_search = true;
         }
 
         let mut has_lookup_join = false;
@@ -1045,7 +1035,7 @@ impl BatchPlanFragmenter {
                     lookup_join_parallelism
                 } else if source_info.is_some() {
                     0
-                } else if file_scan_info.is_some() || has_vector_search {
+                } else if file_scan_info.is_some() {
                     1
                 } else {
                     self.batch_parallelism
@@ -1070,7 +1060,6 @@ impl BatchPlanFragmenter {
             source_info,
             file_scan_info,
             has_lookup_join,
-            has_vector_search,
             dml_table_id,
             root.ctx().session_ctx().session_id(),
             root.ctx()
@@ -1212,21 +1201,6 @@ impl BatchPlanFragmenter {
             .into_iter()
             .find_map(|n| Self::collect_stage_source(n).transpose())
             .transpose()
-    }
-
-    fn collect_stage_vector_search(node: PlanRef) -> bool {
-        if node.node_type() == BatchPlanNodeType::BatchExchange {
-            // Do not visit next stage.
-            return false;
-        }
-
-        if node.as_batch_vector_search().is_some() {
-            return true;
-        }
-
-        node.inputs()
-            .into_iter()
-            .any(Self::collect_stage_vector_search)
     }
 
     fn collect_stage_file_scan(node: PlanRef) -> SchedulerResult<Option<FileScanInfo>> {
