@@ -87,6 +87,34 @@ select * from query_view;
 statement ok
 drop view query_view;
 
+# test vector index lookup join on raw embedding column
+# query T
+# with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from no_index_mv order by input.embedding <-> no_index_mv.embedding limit 2) as related_info from input;
+# ----
+# {"(1,first)","(2,second)"}
+
+statement ok
+create view query_view as with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from items order by input.embedding <-> items.embedding limit 2) as related_info from input;
+
+# ensure that vector index is used
+query T
+explain(verbose) select * from query_view;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchProject { exprs: [vector_info] }
+  └─BatchVectorSearch { schema: ['[3,2,1]':Vector(3):Vector(3), vector_info:List(Struct(StructType { fields: [("items.id", Int32), ("text", Varchar)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: '[3,2,1]':Vector(3) }
+    └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
+
+
+
+query T
+select * from query_view;
+----
+{"(1,first)","(2,second)"}
+
+statement ok
+drop view query_view;
+
 statement ok
 drop index i;
 
@@ -154,6 +182,33 @@ select * from query_view;
 statement ok
 drop view query_view;
 
+# test vector index lookup join on functional embedding column
+# query T
+# with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from no_index_mv order by input.embedding <-> get_embedding(no_index_mv.text) limit 2) as related_info from input;
+# ----
+# {"(1,first)","(2,second)"}
+
+statement ok
+create view query_view as with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from items order by input.embedding <-> get_embedding(items.text) limit 2) as related_info from input;
+
+# ensure that vector index is used
+query T
+explain(verbose) select * from query_view;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchProject { exprs: [vector_info] }
+  └─BatchVectorSearch { schema: ['[3,2,1]':Vector(3):Vector(3), vector_info:List(Struct(StructType { fields: [("items.id", Int32), ("text", Varchar)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: '[3,2,1]':Vector(3) }
+    └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
+
+
+query T
+select * from query_view;
+----
+{"(1,first)","(2,second)"}
+
+statement ok
+drop view query_view;
+
 statement ok
 drop index i;
 
@@ -163,7 +218,7 @@ drop materialized view no_index_mv;
 statement ok
 drop table items;
 
-# test flat index
+# test hnsw index
 statement ok
 create table items (id int primary key, extra string, text string, embedding vector(3)) append only;
 

@@ -45,6 +45,9 @@ pub struct VectorIndexNearestExecutor<S: StateStore> {
 
     input: BoxedExecutor,
 
+    info_output_indices: Vec<usize>,
+    include_distance: bool,
+
     state_store: S,
     table_id: TableId,
     epoch: BatchQueryEpoch,
@@ -81,17 +84,35 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
                 .collect_vec(),
         );
 
+        let info_output_indices: Vec<usize> = vector_index_nearest_node
+            .info_output_indices
+            .iter()
+            .map(|&idx| idx as _)
+            .collect();
+
         let vector_info_struct_type = StructType::new(
-            vector_index_nearest_node
-                .info_column_desc
+            info_output_indices
                 .iter()
-                .map(|col| {
+                .map(|idx| {
                     (
-                        col.name.clone(),
-                        DataType::from(col.column_type.clone().unwrap()),
+                        vector_index_nearest_node.info_column_desc[*idx]
+                            .name
+                            .clone(),
+                        DataType::from(
+                            vector_index_nearest_node.info_column_desc[*idx]
+                                .column_type
+                                .clone()
+                                .unwrap(),
+                        ),
                     )
                 })
-                .chain([("__distance".to_owned(), DataType::Float64)]),
+                .chain(
+                    vector_index_nearest_node
+                        .include_distance
+                        .then(|| [("__distance".to_owned(), DataType::Float64)].into_iter())
+                        .into_iter()
+                        .flatten(),
+                ),
         );
 
         let mut schema = input.schema().clone();
@@ -107,6 +128,8 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
                 schema,
                 vector_info_struct_type,
                 input,
+                info_output_indices,
+                include_distance: vector_index_nearest_node.include_distance,
                 state_store,
                 table_id: vector_index_nearest_node.table_id.into(),
                 epoch,
@@ -149,6 +172,8 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             measure,
             deserializer,
             hnsw_ef_search,
+            info_output_indices,
+            include_distance,
             ..
         } = *self;
 
@@ -167,6 +192,8 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             | DistanceMeasurement::InnerProduct => false,
         };
 
+        let info_output_indices = Arc::new(info_output_indices);
+
         while let Some(chunk) = input.try_next().await? {
             let mut vector_info_columns_builder = ListArrayBuilder::with_type(
                 chunk.cardinality(),
@@ -177,6 +204,8 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             for (idx, vis) in vis.iter().enumerate() {
                 if vis && let Some(vector) = vector_column.value_at(idx) {
                     let deserializer = deserializer.clone();
+                    let info_output_indices = info_output_indices.clone();
+                    let struct_len = vector_info_struct_type.len();
                     let row_results: Vec<Result<StructValue>> = read_snapshot
                         .nearest(
                             vector.to_owned_scalar(),
@@ -187,15 +216,21 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
                             },
                             move |_vec, distance, value| {
                                 let mut values =
-                                    Vec::with_capacity(deserializer.data_types().len() + 1);
+                                    Vec::with_capacity(deserializer.data_types().len());
                                 deserializer.deserialize_to(value, &mut values)?;
-                                let distance = if sqrt_distance {
-                                    distance.sqrt()
-                                } else {
-                                    distance
-                                };
-                                values.push(Some(ScalarImpl::Float64(distance.into())));
-                                Ok(StructValue::new(values))
+                                let mut info = Vec::with_capacity(struct_len);
+                                for idx in &*info_output_indices {
+                                    info.push(values[*idx].clone());
+                                }
+                                if include_distance {
+                                    let distance = if sqrt_distance {
+                                        distance.sqrt()
+                                    } else {
+                                        distance
+                                    };
+                                    info.push(Some(ScalarImpl::Float64(distance.into())));
+                                }
+                                Ok(StructValue::new(info))
                             },
                         )
                         .await?;

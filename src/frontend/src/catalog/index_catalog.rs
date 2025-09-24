@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use educe::Educe;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, IndexId, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, IndexId, Schema};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbVectorIndexInfo};
@@ -66,6 +66,15 @@ pub struct VectorIndex {
     pub primary_key_idx_in_info_columns: Vec<usize>,
     pub included_info_columns: Vec<usize>,
     pub vector_index_info: PbVectorIndexInfo,
+}
+
+impl VectorIndex {
+    pub fn info_column_desc(&self) -> Vec<ColumnDesc> {
+        self.index_table.columns[1..=self.included_info_columns.len()]
+            .iter()
+            .map(|col| col.column_desc.clone())
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
