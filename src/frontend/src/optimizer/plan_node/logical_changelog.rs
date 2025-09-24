@@ -23,7 +23,6 @@ use super::{
 };
 use crate::error::ErrorCode::BindError;
 use crate::error::Result;
-use crate::optimizer::plan_node::StreamExchange;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
@@ -142,22 +141,14 @@ impl ToStream for LogicalChangeLog {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         let input = self.input().to_stream(ctx)?;
         let dist = input.distribution();
-        let (distribution_keys, new_input) = match dist {
+        let distribution_keys = match dist {
             Distribution::HashShard(distribution_keys)
-            | Distribution::UpstreamHashShard(distribution_keys, _) => {
-                (distribution_keys.clone(), input)
-            }
+            | Distribution::UpstreamHashShard(distribution_keys, _) => distribution_keys.clone(),
             _ => {
-                let stream_key = input
-                    .stream_key()
-                    .ok_or_else(|| anyhow::anyhow!("changelog input must have a stream key"))?
-                    .to_vec();
-                let new_input =
-                    StreamExchange::new(input, Distribution::HashShard(stream_key.clone())).into();
-                (stream_key, new_input)
+                vec![]
             }
         };
-        let core = self.core.clone_with_input(new_input);
+        let core = self.core.clone_with_input(input);
         let row_id_index = self.schema().fields().len() - 1;
         let plan = StreamChangeLog::new_with_dist(
             core,
