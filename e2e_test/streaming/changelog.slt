@@ -10,6 +10,29 @@ create table t2 (v1 int, v2 int);
 statement ok
 create table t3 (v1 int primary key, v2 int);
 
+# https://github.com/risingwavelabs/risingwave/issues/23177
+statement ok
+create table t4 (v1 int);
+
+statement ok
+create table wide (v1 int primary key, even int, odd int);
+
+statement ok
+create sink even into wide (v1, even) as select v1, v1*2 from t4;
+
+statement ok
+create sink odd into wide (v1, odd) as select v1, v1*2+1 from t4;
+
+statement ok
+create materialized view mv9 as with p as changelog from wide select _changelog_row_id::bigint as changelog_row_id, * from p;
+
+statement ok
+insert into t4 select generate_series(1020300, 1020399);
+
+query III rowsort
+with add as (select * from mv9 where changelog_op = 1), update as (select * from mv9 where changelog_op = 3) select add.v1 from add, update where add.v1 = update.v1 and add.changelog_row_id > update.changelog_row_id;
+----
+
 # test public.t1 due to https://github.com/risingwavelabs/risingwave/issues/18747
 statement ok
 create materialized view mv1 as with sub as changelog from public.t1 select * from sub;
@@ -146,6 +169,9 @@ select v1 from mv8 order by v1;
 2
 
 statement ok
+drop materialized view mv9;
+
+statement ok
 drop materialized view mv8;
 
 statement ok
@@ -170,6 +196,12 @@ statement ok
 drop materialized view mv1;
 
 statement ok
+drop sink even
+
+statement ok
+drop sink odd
+
+statement ok
 drop table t3_rename;
 
 statement ok
@@ -177,3 +209,9 @@ drop table t2;
 
 statement ok
 drop table t1;
+
+statement ok
+drop table t4;
+
+statement ok
+drop table wide;
