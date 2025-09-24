@@ -413,8 +413,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 yield Message::Chunk(chunk);
                             }
                             None => {
+                                tracing::info!("Deleting file: {}", reading_file);
                                 if let Some(ref delete_file_name) = reading_file {
-                                    tracing::info!("Deleting file: {}", delete_file_name);
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(delete_file_name).await?;
                                 }

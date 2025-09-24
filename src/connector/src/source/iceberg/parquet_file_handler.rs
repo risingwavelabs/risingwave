@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::IntoFuture;
 use std::ops::Range;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, bail};
 use bytes::Bytes;
@@ -38,6 +38,7 @@ use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_mat
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
+use tracing::info;
 use url::Url;
 
 use crate::error::ConnectorResult;
@@ -289,6 +290,48 @@ pub async fn read_parquet_file(
     let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
 
     let file_metadata = parquet_metadata.file_metadata();
+    // Print metadata only once per file
+    static PRINTED_META_FILES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let printed = PRINTED_META_FILES.get_or_init(|| Mutex::new(HashSet::new()));
+    let mut do_print = false;
+    {
+        let mut set = printed.lock().unwrap();
+        if !set.contains(&file_name) {
+            set.insert(file_name.clone());
+            do_print = true;
+        }
+    }
+    if do_print {
+        // Log parquet file-level metadata
+        tracing::info!(
+            "Reading parquet file: {}, from offset {}, num_row_groups={}, total_rows={}, kv_len={}",
+            file_name,
+            offset,
+            parquet_metadata.row_groups().len(),
+            file_metadata.num_rows(),
+            file_metadata
+                .key_value_metadata()
+                .map(|m| m.len())
+                .unwrap_or(0)
+        );
+        // Log each leaf column's path and types
+        let schema_descr = file_metadata.schema_descr();
+        for col in schema_descr.columns() {
+            let path = col.path().string();
+            let physical = col.physical_type();
+            let logical = col.logical_type();
+            info!(
+                file = %file_name,
+                column_path = path,
+                physical_type = ?physical,
+                logical_type = ?logical,
+                type_length = ?col.type_length(),
+                max_def_level = col.max_def_level(),
+                max_rep_level = col.max_rep_level(),
+                "Parquet file column schema: "
+            );
+        }
+    }
     let projection_mask = get_project_mask(rw_columns, file_metadata)?;
 
     // For the Parquet format, we directly convert from a record batch to a stream chunk.
