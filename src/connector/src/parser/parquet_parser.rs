@@ -127,18 +127,19 @@ impl ParquetParser {
                             .to_arrow_field(rw_column_name, rw_data_type)
                             .with_context(|| {
                                 format!(
-                                    "to_arrow_field failed: column='{}', rw_type='{}'",
-                                    rw_column_name, rw_data_type
+                                    "to_arrow_field failed: column='{}', rw_type='{}', offset={}",
+                                    rw_column_name, rw_data_type, self.offset
                                 )
                             })?;
                         let array_impl = IcebergArrowConvert
                             .array_from_arrow_array(&arrow_field, parquet_column)
                             .with_context(|| format!(
-                                "array_from_arrow_array failed: column='{}', rw_type='{}', arrow_field='{}', parquet_type='{}'",
+                                "array_from_arrow_array failed: column='{}', rw_type='{}', arrow_field='{}', parquet_type='{}', offset={}",
                                 rw_column_name,
                                 rw_data_type,
                                 arrow_field.data_type(),
-                                parquet_column.data_type()
+                                parquet_column.data_type(),
+                                self.offset
                             ))?;
                         chunk_columns.push(Arc::new(array_impl));
                     } else {
