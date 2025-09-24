@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use super::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
+use crate::bitmap::Bitmap;
 use crate::hash::VirtualNode;
 
 /// The number of bits occupied by the vnode part and the sequence part of a row id.
@@ -252,6 +254,81 @@ impl RowIdGenerator {
         self.try_update_timestamp();
 
         self.gen_iter().next().unwrap()
+    }
+}
+
+/// `ChangelogRowIdGenerator` generates unique changelog row ids using snowflake algorithm.
+/// Unlike `RowIdGenerator`, it maintains a separate sequence for each vnode and generates
+/// row ids based on the input vnode.
+#[derive(Debug)]
+pub struct ChangelogRowIdGenerator {
+    /// Timestamp manager.
+    timestamp_mgr: TimestampManager,
+
+    /// The number of bits used for vnode.
+    vnode_bit: u32,
+
+    /// Sequence for each vnode. Key is vnode index, value is sequence.
+    vnodes_sequence: HashMap<VirtualNode, u16>,
+
+    vnodes: Bitmap,
+}
+
+impl ChangelogRowIdGenerator {
+    /// Create a new `ChangelogRowIdGenerator` with given vnode count.
+    pub fn new(vnodes: Bitmap) -> Self {
+        let vnode_count = vnodes.count_ones();
+        let vnode_bit = bit_for_vnode(vnode_count);
+        let mut generator = Self {
+            timestamp_mgr: TimestampManager::new(),
+            vnode_bit,
+            vnodes_sequence: HashMap::default(),
+            vnodes,
+        };
+        generator.try_update_timestamp();
+        generator
+    }
+
+    /// The upper bound of the sequence part for changelog, exclusive.
+    fn sequence_upper_bound(&self) -> u16 {
+        1 << (TIMESTAMP_SHIFT_BITS - self.vnode_bit)
+    }
+
+    fn try_update_timestamp(&mut self) {
+        if self.timestamp_mgr.try_update_timestamp(true) {
+            // Reset states: reset all vnode sequences to 0.
+            self.vnodes_sequence.clear();
+        }
+    }
+
+    fn next_changelog_row_id_in_current_timestamp(&mut self, vnode: &VirtualNode) -> Option<RowId> {
+        if !self.vnodes.is_set(vnode.to_index()) {
+            panic!("vnode {:?} not in generator", vnode);
+        }
+        let current_sequence = *self.vnodes_sequence.get(vnode).unwrap_or(&1);
+
+        if current_sequence >= self.sequence_upper_bound() {
+            return None;
+        }
+
+        let sequence = current_sequence;
+        self.vnodes_sequence.insert(*vnode, current_sequence + 1);
+
+        Some(
+            self.timestamp_mgr.last_timestamp_ms() << TIMESTAMP_SHIFT_BITS
+                | (vnode.to_index() << (TIMESTAMP_SHIFT_BITS - self.vnode_bit)) as i64
+                | sequence as i64,
+        )
+    }
+
+    pub fn next(&mut self, vnode: &VirtualNode) -> RowId {
+        if let Some(row_id) = self.next_changelog_row_id_in_current_timestamp(vnode) {
+            row_id
+        } else {
+            self.try_update_timestamp();
+            self.next_changelog_row_id_in_current_timestamp(vnode)
+                .expect("timestamp should be updated")
+        }
     }
 }
 
