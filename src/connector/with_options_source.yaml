@@ -1216,6 +1216,10 @@ PulsarProperties:
       contains a generated suffix in the subscription name.
       The subscription name will be `{subscription_name_prefix}-{fragment_id}-{actor_id}`.
     required: false
+  - name: subscription.unacked.resend.delay
+    field_type: Duration
+    required: false
+    default: Default::default
 TestSourceProperties:
   fields:
   - name: properties
