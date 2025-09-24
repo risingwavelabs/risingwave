@@ -448,7 +448,7 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
                 }
             };
 
-            DataType::List(Box::new(item_type))
+            DataType::list(item_type)
         }
         SeaType::PgLsn => DataType::Int64,
         SeaType::Cidr

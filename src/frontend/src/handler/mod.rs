@@ -60,6 +60,7 @@ mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_table_drop_connector;
+pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
@@ -598,6 +599,15 @@ pub async fn handle(
         | Statement::Insert { .. }
         | Statement::Delete { .. }
         | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
+        Statement::Copy {
+            entity: CopyEntity::Query(query),
+            target: CopyTarget::Stdout,
+        } => {
+            let response =
+                query::handle_query(handler_args, Statement::Query(query), vec![Format::Text])
+                    .await?;
+            Ok(response.into_copy_query_to_stdout())
+        }
         Statement::CreateView {
             materialized,
             if_not_exists,
@@ -873,13 +883,7 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::AlterConnectorProps { alter_props } => {
-                // If exists a associated source, it should be of the same name.
-                crate::handler::alter_source_props::handle_alter_table_connector_props(
-                    handler_args,
-                    name,
-                    alter_props,
-                )
-                .await
+                alter_table_props::handle_alter_table_props(handler_args, name, alter_props).await
             }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }

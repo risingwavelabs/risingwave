@@ -45,7 +45,7 @@ use super::{
     StreamSyncLogStore, generic,
 };
 use crate::TableCatalog;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
@@ -256,6 +256,8 @@ impl StreamSink {
 
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
+        let derived_pk = pk.iter().map(|k| k.column_index).collect_vec();
+
         let mut downstream_pk = {
             let downstream_pk =
                 Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
@@ -293,11 +295,23 @@ impl StreamSink {
                 && sink_type == SinkType::Upsert
                 && downstream_pk.is_empty()
             {
-                pk.iter().map(|k| k.column_index).collect_vec()
+                derived_pk.clone()
             } else {
                 downstream_pk
             }
         };
+
+        // The "upsert" property is defined based on a specific stream key: columns other than the stream key
+        // might not be valid. We should reject the cases referencing such columns in primary key.
+        if let StreamKind::Upsert = input.stream_kind()
+            && !downstream_pk.iter().all(|i| derived_pk.contains(i))
+        {
+            bail_bind_error!(
+                "When sinking from an upsert stream, \
+                 the downstream primary key must be the same as or a subset of the one derived from the stream."
+            )
+        }
+
         if let Some(upstream_table) = &auto_refresh_schema_from_table
             && !downstream_pk.is_empty()
         {
@@ -338,7 +352,7 @@ impl StreamSink {
                     Some(s) if s == ICEBERG_SINK => {
                         // If user doesn't specify the downstream primary key, we use the stream key as the pk.
                         if sink_type.is_upsert() && downstream_pk.is_empty() {
-                            downstream_pk = pk.iter().map(|k| k.column_index).collect_vec();
+                            downstream_pk = derived_pk;
                         }
                         let (required_dist, new_input, partition_col_idx) =
                             Self::derive_iceberg_sink_distribution(

@@ -72,6 +72,8 @@ pub(super) struct CompleteBarrierTask {
     >,
     /// Source IDs that have finished loading data and need `LoadFinish` commands
     pub(super) load_finished_source_ids: Vec<u32>,
+    /// Table IDs that have finished materialize refresh and need completion signaling
+    pub(super) refresh_finished_table_ids: Vec<u32>,
 }
 
 impl CompleteBarrierTask {
@@ -111,6 +113,13 @@ impl CompleteBarrierTask {
             if !self.load_finished_source_ids.is_empty() {
                 context
                     .handle_load_finished_source_ids(self.load_finished_source_ids.clone())
+                    .await?;
+            }
+
+            // Handle refresh finished table IDs for materialized view refresh completion
+            if !self.refresh_finished_table_ids.is_empty() {
+                context
+                    .handle_refresh_finished_table_ids(self.refresh_finished_table_ids.clone())
                     .await?;
             }
 

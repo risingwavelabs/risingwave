@@ -57,13 +57,13 @@ impl GenericPlanNode for BatchVectorSearchCore {
         let mut schema = self.input.schema().clone();
         schema.fields.push(Field::new(
             "vector_info",
-            DataType::List(
-                DataType::Struct(StructType::new(
+            DataType::list(
+                StructType::new(
                     self.info_column_desc
                         .iter()
                         .map(|col| (col.name.clone(), col.data_type.clone()))
                         .chain([("__distance".to_owned(), DataType::Float64)]),
-                ))
+                )
                 .into(),
             ),
         ));

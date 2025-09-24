@@ -730,7 +730,7 @@ mod tests {
                 DataType::Timestamp,
                 DataType::Time,
                 StructType::unnamed(vec![DataType::Int32, DataType::Float32]).into(),
-                DataType::List(Box::new(DataType::Int32)),
+                DataType::Int32.list(),
             ],
         );
         assert_eq!(
