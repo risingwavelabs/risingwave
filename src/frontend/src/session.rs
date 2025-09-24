@@ -705,6 +705,9 @@ pub struct SessionImpl {
 
     /// temporary sources for the current session
     temporary_source_manager: Arc<Mutex<TemporarySourceManager>>,
+
+    /// staging catalogs for the current session
+    staging_catalog_manager: Arc<Mutex<StagingCatalogManager>>,
 }
 
 /// If TEMPORARY or TEMP is specified, the source is created as a temporary source.
@@ -741,6 +744,33 @@ impl TemporarySourceManager {
 
     pub fn keys(&self) -> Vec<String> {
         self.sources.keys().cloned().collect()
+    }
+}
+
+/// Staging catalog manager is used to manage the tables creating in the current session.
+#[derive(Default, Clone)]
+pub struct StagingCatalogManager {
+    // staging tables creating in the current session.
+    tables: HashMap<String, TableCatalog>,
+}
+
+impl StagingCatalogManager {
+    pub fn new() -> Self {
+        Self {
+            tables: HashMap::new(),
+        }
+    }
+
+    pub fn create_table(&mut self, name: String, table: TableCatalog) {
+        self.tables.insert(name, table);
+    }
+
+    pub fn drop_table(&mut self, name: &str) {
+        self.tables.remove(name);
+    }
+
+    pub fn get_table(&self, name: &str) -> Option<&TableCatalog> {
+        self.tables.get(name)
     }
 }
 
@@ -788,6 +818,7 @@ impl SessionImpl {
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
             temporary_source_manager: Default::default(),
+            staging_catalog_manager: Default::default(),
         }
     }
 
@@ -820,6 +851,7 @@ impl SessionImpl {
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
             temporary_source_manager: Default::default(),
+            staging_catalog_manager: Default::default(),
         }
     }
 
@@ -1322,6 +1354,24 @@ impl SessionImpl {
 
     pub fn temporary_source_manager(&self) -> TemporarySourceManager {
         self.temporary_source_manager.lock().clone()
+    }
+
+    pub fn create_staging_table(&self, table: TableCatalog) {
+        self.staging_catalog_manager
+            .lock()
+            .create_table(table.name.clone(), table);
+    }
+
+    pub fn get_staging_table(&self, name: &str) -> Option<TableCatalog> {
+        self.staging_catalog_manager.lock().get_table(name).cloned()
+    }
+
+    pub fn drop_staging_table(&self, name: &str) {
+        self.staging_catalog_manager.lock().drop_table(name);
+    }
+
+    pub fn staging_catalog_manager(&self) -> StagingCatalogManager {
+        self.staging_catalog_manager.lock().clone()
     }
 
     pub async fn check_cluster_limits(&self) -> Result<()> {

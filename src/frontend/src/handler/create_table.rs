@@ -54,14 +54,14 @@ use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, ConnectionRefValue, CreateSink,
-    CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions,
-    Format, FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
+    CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format,
+    FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 
-use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
 use super::RwPgResponse;
+use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -89,9 +89,10 @@ use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
+use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, MAX_SNAPSHOTS_NUM,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, MAX_SNAPSHOTS_NUM,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
     SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     parse_partition_by_exprs,
@@ -1477,8 +1478,10 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            create_iceberg_engine_table(
-                session,
+            let hummock_table_name = hummock_table.name.clone();
+            session.create_staging_table(hummock_table.clone());
+            let res = create_iceberg_engine_table(
+                session.clone(),
                 handler_args,
                 source.map(|s| s.to_prost()),
                 hummock_table,
@@ -1487,7 +1490,9 @@ pub async fn handle_create_table(
                 job_type,
                 if_not_exists,
             )
-            .await?;
+            .await;
+            session.drop_staging_table(&hummock_table_name);
+            res?
         }
     }
 
@@ -2005,6 +2010,13 @@ pub async fn create_iceberg_engine_table(
         ..
     } = gen_sink_plan(sink_handler_args, create_sink_stmt, None, true).await?;
     let sink_graph = build_graph(sink_plan, Some(GraphJobType::Sink))?;
+
+    // Create iceberg sink table.
+    {
+        let sink_param = SinkParam::try_from_sink_catalog(sink_catalog.clone())?;
+        let iceberg_sink = IcebergSink::try_from(sink_param)?;
+        iceberg_sink.create_table_if_not_exists().await?;
+    }
 
     let mut source_name = table_name.clone();
     *source_name.0.last_mut().unwrap() = Ident::from(

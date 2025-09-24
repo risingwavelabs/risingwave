@@ -1282,6 +1282,8 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateIcebergTableRequest>,
     ) -> Result<Response<CreateIcebergTableResponse>, Status> {
         let req = request.into_inner();
+        println!("heiheihei: {:?}", req);
+
         // TODO: reset rate limit if source is present.
         todo!()
     }
