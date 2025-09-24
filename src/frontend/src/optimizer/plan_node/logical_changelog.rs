@@ -144,8 +144,15 @@ impl ToStream for LogicalChangeLog {
         let distribution_keys = match dist {
             Distribution::HashShard(distribution_keys)
             | Distribution::UpstreamHashShard(distribution_keys, _) => distribution_keys.clone(),
-            _ => {
+            Distribution::Single => {
                 vec![]
+            }
+            _ => {
+                return Err(BindError(format!(
+                    "ChangeLog requires input to be hash distributed, single, but got {:?}",
+                    dist
+                ))
+                .into());
             }
         };
         let core = self.core.clone_with_input(input);
