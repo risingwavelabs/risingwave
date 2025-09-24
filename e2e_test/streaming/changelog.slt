@@ -24,13 +24,13 @@ statement ok
 create sink odd into wide (v1, odd) as select v1, v1*2+1 from t4;
 
 statement ok
-create materialized view mv9 as with p as changelog from wide select _changelog_row_id::bigint as changelog_row_id, * from p;
+create materialized view mv9 as with p as changelog from wide select * from p;
 
 statement ok
 insert into t4 select generate_series(1020300, 1020399);
 
 query III rowsort
-with add as (select * from mv9 where changelog_op = 1), update as (select * from mv9 where changelog_op = 3) select add.v1 from add, update where add.v1 = update.v1 and add.changelog_row_id > update.changelog_row_id;
+with add as (select _changelog_row_id,* from mv9 where changelog_op = 1), update as (select _changelog_row_id,* from mv9 where changelog_op = 3) select add.v1 from add, update where add.v1 = update.v1 and add._changelog_row_id > update._changelog_row_id;
 ----
 
 # test public.t1 due to https://github.com/risingwavelabs/risingwave/issues/18747
