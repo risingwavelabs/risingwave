@@ -421,10 +421,10 @@ impl MySqlExternalTableReader {
             if parts.len() >= 2 {
                 let major_version = parts[0]
                     .parse::<u8>()
-                    .map_err(|e| anyhow!("Failed to parse major version: {}", e))?;
+                    .map_err(|e| anyhow!("Failed to parse major version: {}", e.as_report()))?;
                 let minor_version = parts[1]
                     .parse::<u8>()
-                    .map_err(|e| anyhow!("Failed to parse minor version: {}", e))?;
+                    .map_err(|e| anyhow!("Failed to parse minor version: {}", e.as_report()))?;
                 return Ok((major_version, minor_version));
             }
         }
