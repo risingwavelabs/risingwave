@@ -20,18 +20,16 @@ use arrow::array::{Array, BooleanArray, RecordBatch};
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::collect;
 use datafusion::prelude::SessionContext;
-use datafusion_common::tree_node::{TreeNode, TreeNodeRecursion};
-use futures;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, BoolArrayBuilder, DataChunk};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::bail_not_implemented;
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
@@ -45,8 +43,7 @@ use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
     BatchPlanRoot, ExecutionModeDecider, IcebergScanDetector, OptimizerContext,
-    OptimizerContextRef, ReadStorageTableVisitor, RelationCollectorVisitor,
-    SysTableVisitor,
+    OptimizerContextRef, ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -77,10 +74,15 @@ pub async fn handle_query(
 
     let context = OptimizerContext::from_handler_args(handler_args);
 
-    match gen_batch_plan_by_statement(&session, context.into(), stmt)? {
+    let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
+    match plan_result {
         BatchPlanChoice::RW(plan_result) => {
-            let frag_result = gen_batch_plan_fragmenter(&session, plan_result)?;
-            execute(session, frag_result, formats).await
+            // Time zone is used by Hummock time travel query.
+            let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+                session.config().timezone().to_owned(),
+                || gen_batch_plan_fragmenter(&session, plan_result),
+            )?;
+            execute(session, plan_fragmenter_result, formats).await
         }
         BatchPlanChoice::DF { df_plan, .. } => {
             execute_datafusion_plan(session, df_plan, formats).await
