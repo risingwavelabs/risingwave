@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use datafusion::logical_expr::{LogicalPlan as DFLogicalPlan, Expr as DFExpr, LogicalPlan, Values};
-use datafusion_common::{DFSchema, ScalarValue};
 use datafusion::arrow::datatypes::{Field, Schema as ArrowSchema};
+use datafusion::logical_expr::{Expr as DFExpr, LogicalPlan as DFLogicalPlan, LogicalPlan, Values};
+use datafusion_common::{DFSchema, ScalarValue};
+use risingwave_common::types::{DataType as RWDataType, ScalarImpl};
+
+use crate::optimizer::PlanVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Logical, LogicalValues, PlanRef};
-use crate::optimizer::plan_visitor::{LogicalPlanVisitor, DefaultBehavior};
-use crate::optimizer::PlanVisitor;
-use risingwave_common::types::{ScalarImpl, DataType as RWDataType};
+use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
 
 #[derive(Debug, Clone, Default)]
 pub struct RWToDFConverter {}
@@ -31,9 +32,8 @@ impl RWToDFConverter {
 }
 
 impl LogicalPlanVisitor for RWToDFConverter {
-    type Result = DFLogicalPlan;
-
     type DefaultBehavior = DefaultValueBehavior;
+    type Result = DFLogicalPlan;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValueBehavior
@@ -89,10 +89,12 @@ impl LogicalPlanVisitor for RWToDFConverter {
                     }
                     _ => {
                         // unsupported expr in Values -> return an EmptyRelation so caller can handle
-                        return LogicalPlan::EmptyRelation(datafusion::logical_expr::EmptyRelation {
-                            produce_one_row: false,
-                            schema: std::sync::Arc::new(df_schema),
-                        });
+                        return LogicalPlan::EmptyRelation(
+                            datafusion::logical_expr::EmptyRelation {
+                                produce_one_row: false,
+                                schema: std::sync::Arc::new(df_schema),
+                            },
+                        );
                     }
                 }
             }

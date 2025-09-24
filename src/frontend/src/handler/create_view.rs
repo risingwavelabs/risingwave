@@ -52,15 +52,25 @@ pub async fn handle_create_view(
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let super::query::BatchQueryPlanResult {
-            schema,
-            dependent_relations,
-            ..
-        } = super::query::gen_batch_plan_by_statement(
+        let plan_choice = super::query::gen_batch_plan_by_statement(
             &session,
             context.into(),
             Statement::Query(Box::new(query.clone())),
         )?;
+        let super::query::BatchQueryPlanResult {
+            schema,
+            dependent_relations,
+            ..
+        } = match plan_choice {
+            super::query::BatchPlanChoice::RW(plan_result) => plan_result,
+            super::query::BatchPlanChoice::DF { .. } => {
+                return Err(crate::error::ErrorCode::NotSupported(
+                    "DataFusion plans in view creation".to_owned(),
+                    "Views with DataFusion plans are not supported".to_owned(),
+                )
+                .into());
+            }
+        };
 
         (dependent_relations, schema)
     };

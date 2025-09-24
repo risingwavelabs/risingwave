@@ -32,8 +32,8 @@ mod plan_rewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
-    SysTableVisitor, IcebergScanDetector, RWToDFConverter, 
+    ExecutionModeDecider, IcebergScanDetector, PlanVisitor, RWToDFConverter,
+    ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
 
 pub mod backfill_order_strategy;

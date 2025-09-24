@@ -198,10 +198,19 @@ pub async fn do_handle_explain(
                     Statement::Insert { .. }
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
-                    | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context, stmt)
-                            .map(|x| (PhysicalPlanRef::Batch(x.plan), None))
-                    }
+                    | Statement::Query { .. } => gen_batch_plan_by_statement(
+                        &session, context, stmt,
+                    )
+                    .and_then(|plan_choice| match plan_choice {
+                        super::query::BatchPlanChoice::RW(plan_result) => {
+                            Ok((PhysicalPlanRef::Batch(plan_result.plan), None))
+                        }
+                        super::query::BatchPlanChoice::DF { .. } => Err(ErrorCode::NotSupported(
+                            "EXPLAIN for DataFusion plans".to_owned(),
+                            "DataFusion plans are not supported in EXPLAIN yet".to_owned(),
+                        )
+                        .into()),
+                    }),
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
                 }?;

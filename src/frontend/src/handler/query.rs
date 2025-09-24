@@ -16,16 +16,22 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use datafusion::arrow::ipc::convert;
+use arrow::array::{Array, BooleanArray, RecordBatch};
+use datafusion::logical_expr::LogicalPlan;
+use datafusion::physical_plan::collect;
+use datafusion::prelude::SessionContext;
+use datafusion_common::tree_node::{TreeNode, TreeNodeRecursion};
+use futures;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
-use risingwave_common::bail_not_implemented;
+use risingwave_common::array::{ArrayBuilder, ArrayImpl, BoolArrayBuilder, DataChunk};
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::bail_not_implemented;
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
@@ -38,7 +44,9 @@ use crate::handler::flush::do_flush;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
-    BatchPlanRoot, ExecutionModeDecider, IcebergScanDetector, OptimizerContext, OptimizerContextRef, RWToDFConverter, ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor
+    BatchPlanRoot, ExecutionModeDecider, IcebergScanDetector, OptimizerContext,
+    OptimizerContextRef, ReadStorageTableVisitor, RelationCollectorVisitor,
+    SysTableVisitor,
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -66,23 +74,16 @@ pub async fn handle_query(
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    // Generate either an internal (RW) batch plan or a DataFusion (DF) logical plan choice.
-    let context = OptimizerContext::from_handler_args(handler_args);
-    let plan_choice = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
 
-    match plan_choice {
+    let context = OptimizerContext::from_handler_args(handler_args);
+
+    match gen_batch_plan_by_statement(&session, context.into(), stmt)? {
         BatchPlanChoice::RW(plan_result) => {
-            // Time zone is used by Hummock time travel query.
-            let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
-                session.config().timezone().to_owned(),
-                || gen_batch_plan_fragmenter(&session, plan_result),
-            )?;
-            execute(session, plan_fragmenter_result, formats).await
+            let frag_result = gen_batch_plan_fragmenter(&session, plan_result)?;
+            execute(session, frag_result, formats).await
         }
-        BatchPlanChoice::DF { df_plan, schema, stmt_type, dependent_relations, read_storage_tables } => {
-            // TODO: run DataFusion plan execution here.
-            tracing::info!("DataFusion plan chosen for execution: {:?}", df_plan);
-            todo!("DataFusion execution path not implemented yet")
+        BatchPlanChoice::DF { df_plan, .. } => {
+            execute_datafusion_plan(session, df_plan, formats).await
         }
     }
 }
@@ -120,7 +121,17 @@ pub async fn handle_execute(
             let session = handler_args.session.clone();
             let plan_fragmenter_result = {
                 let context = OptimizerContext::from_handler_args(handler_args);
-                let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                let plan_result =
+                    match gen_batch_query_plan(&session, context.into(), bound_result)? {
+                        BatchPlanChoice::RW(plan_result) => plan_result,
+                        BatchPlanChoice::DF { .. } => {
+                            return Err(ErrorCode::InternalError(
+                                "DataFusion plans not supported in prepared statement execution"
+                                    .to_string(),
+                            )
+                            .into());
+                        }
+                    };
                 // Time zone is used by Hummock time travel query.
                 risingwave_expr::expr_context::TIME_ZONE::sync_scope(
                     session.config().timezone().to_owned(),
@@ -181,7 +192,17 @@ pub async fn handle_execute(
                 let session = handler_args.session.clone();
                 let plan_fragmenter_result = {
                     let context = OptimizerContext::from_handler_args(handler_args.clone());
-                    let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                    let plan_result =
+                        match gen_batch_query_plan(&session, context.into(), bound_result)? {
+                            BatchPlanChoice::RW(plan_result) => plan_result,
+                            BatchPlanChoice::DF { .. } => {
+                                return Err(ErrorCode::InternalError(
+                                    "DataFusion plans not supported in cursor declaration"
+                                        .to_owned(),
+                                )
+                                .into());
+                            }
+                        };
                     gen_batch_plan_fragmenter(&session, plan_result)?
                 };
                 declare_cursor::handle_bound_declare_query_cursor(
@@ -282,14 +303,17 @@ fn gen_batch_query_plan(
 
     let logical = planner.plan(bound)?;
     let schema = logical.schema();
-    let contains_iceberg_scan = IcebergScanDetector::contains_logical_iceberg_scan(&logical);
+
+    let optimized_logical = logical.gen_optimized_logical_plan_for_batch()?;
+    let contains_iceberg_scan =
+        IcebergScanDetector::contains_logical_iceberg_scan(&optimized_logical);
     if contains_iceberg_scan {
         // Convert RisingWave logical plan to DataFusion logical plan for Iceberg queries.
         let mut converter = crate::optimizer::RWToDFConverter::default();
-        let df_plan = converter.convert(logical.clone().plan);
+        let df_plan = converter.convert(optimized_logical.clone().plan);
 
         // Prepare metadata for DF branch. We don't build RW physical plan in this branch.
-        let schema = logical.clone().schema();
+        let schema = optimized_logical.clone().schema();
         let dependent_relations_vec = dependent_relations.into_iter().collect_vec();
         let read_storage_tables = HashSet::new();
 
@@ -301,7 +325,8 @@ fn gen_batch_query_plan(
             read_storage_tables,
         });
     }
-    let batch_plan = logical.gen_batch_plan()?; // TODO: partially optimised logical plan 
+
+    let batch_plan = optimized_logical.gen_batch_plan()?;
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());
@@ -619,4 +644,164 @@ pub async fn local_execute(
     );
 
     Ok(execution.stream_rows())
+}
+
+pub async fn execute_datafusion_plan(
+    session: Arc<SessionImpl>,
+    plan: LogicalPlan,
+    formats: Vec<Format>,
+) -> Result<RwPgResponse> {
+    let ctx = SessionContext::new();
+    let state = ctx.state();
+
+    let physical_plan = state.create_physical_plan(&plan).await.unwrap();
+    let record_batches = collect(physical_plan, state.task_ctx()).await.unwrap();
+
+    let rw_fields: Vec<_> = plan
+        .schema()
+        .fields()
+        .iter()
+        .map(|arrow_field| {
+            risingwave_common::catalog::Field::new(
+                arrow_field.name(),
+                convert_arrow_type_to_rw_type(arrow_field.data_type()),
+            )
+        })
+        .collect();
+    let rw_schema = Schema::new(rw_fields.clone());
+
+    // RecordBatch -> DataChunk
+    let datachunks: Vec<DataChunk> = record_batches
+        .iter()
+        .map(|rb| record_batch_to_datachunk(rb, &rw_schema).unwrap())
+        .collect();
+
+    let pg_descs: Vec<PgFieldDescriptor> = rw_schema.fields().iter().map(to_pg_field).collect();
+
+    let column_types = rw_schema
+        .fields()
+        .iter()
+        .map(|f| f.data_type())
+        .collect_vec();
+
+    // Create a channel to match the expected ReceiverStream type
+    let (tx, rx) = tokio::sync::mpsc::channel(datachunks.len().max(1));
+
+    // Send all datachunks through the channel
+    for dc in datachunks {
+        if tx.send(Ok(dc)).await.is_err() {
+            break; // receiver dropped
+        }
+    }
+    drop(tx); // Close the channel
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let row_stream = PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+        stream,
+        column_types,
+        formats.clone(),
+        session.clone(),
+    ));
+
+    let stmt_type = StatementType::SELECT;
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
+
+    Ok(PgResponse::builder(stmt_type)
+        .row_cnt_format_opt(Some(first_field_format))
+        .values(row_stream, pg_descs)
+        .into())
+}
+
+pub fn record_batch_to_datachunk(rb: &RecordBatch, schema: &Schema) -> Result<DataChunk> {
+    assert_eq!(rb.num_columns(), schema.len());
+
+    let mut arrays: Vec<Arc<ArrayImpl>> = Vec::with_capacity(rb.num_columns());
+
+    for (i, field) in schema.fields().iter().enumerate() {
+        let arrow_array = rb.column(i);
+        let rw_type = field.data_type();
+
+        let col = arrow_array_to_array_impl(arrow_array.as_ref(), &rw_type)?;
+        arrays.push(Arc::new(col));
+    }
+
+    Ok(DataChunk::new(arrays, rb.num_rows()))
+}
+
+pub fn arrow_array_to_array_impl(
+    arr: &dyn arrow::array::Array,
+    ty: &DataType,
+) -> Result<ArrayImpl> {
+    match ty {
+        DataType::Boolean => {
+            let arr = arr.as_any().downcast_ref::<BooleanArray>().ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(
+                    "Failed to downcast to BooleanArray".to_string(),
+                ))
+            })?;
+
+            let mut builder = BoolArrayBuilder::new(arr.len());
+            for i in 0..arr.len() {
+                if arr.is_null(i) {
+                    builder.append(None);
+                } else {
+                    builder.append(Some(arr.value(i)));
+                }
+            }
+
+            Ok(builder.finish().into())
+        }
+        other => bail_not_implemented!("arrow type conversion for {:?}", other),
+    }
+}
+
+/// Convert DataFusion Arrow DataType to RisingWave DataType
+fn convert_arrow_type_to_rw_type(arrow_type: &datafusion::arrow::datatypes::DataType) -> DataType {
+    use datafusion::arrow::datatypes::DataType as ArrowDataType;
+
+    match arrow_type {
+        ArrowDataType::Boolean => DataType::Boolean,
+        ArrowDataType::Int16 => DataType::Int16,
+        ArrowDataType::Int32 => DataType::Int32,
+        ArrowDataType::Int64 => DataType::Int64,
+        ArrowDataType::Float32 => DataType::Float32,
+        ArrowDataType::Float64 => DataType::Float64,
+        ArrowDataType::Utf8 => DataType::Varchar,
+        ArrowDataType::LargeUtf8 => DataType::Varchar,
+        ArrowDataType::Date32 => DataType::Date,
+        ArrowDataType::Timestamp(unit, tz) => {
+            match unit {
+                datafusion::arrow::datatypes::TimeUnit::Microsecond => {
+                    if tz.is_some() {
+                        DataType::Timestamptz
+                    } else {
+                        DataType::Timestamp
+                    }
+                }
+                _ => DataType::Timestamp, // Default to timestamp for other units
+            }
+        }
+        ArrowDataType::Decimal128(_, _) => DataType::Decimal,
+        ArrowDataType::List(field) => {
+            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
+            DataType::List(Box::new(inner_type))
+        }
+        ArrowDataType::Struct(fields) => {
+            let struct_fields = fields.iter().map(|f| {
+                (
+                    f.name().clone(),
+                    convert_arrow_type_to_rw_type(f.data_type()),
+                )
+            });
+            DataType::Struct(risingwave_common::types::StructType::new(struct_fields))
+        }
+        // Add more type conversions as needed
+        _ => {
+            tracing::warn!(
+                "Unsupported Arrow type conversion: {:?}, defaulting to Varchar",
+                arrow_type
+            );
+            DataType::Varchar
+        }
+    }
 }

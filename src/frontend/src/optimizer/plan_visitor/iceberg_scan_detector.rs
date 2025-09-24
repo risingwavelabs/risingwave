@@ -14,7 +14,7 @@
 
 use crate::optimizer::plan_node::LogicalIcebergScan;
 use crate::optimizer::plan_visitor::{LogicalPlanVisitor, Merge};
-use crate::optimizer::{PlanPhaseLogical, PlanRoot, PlanVisitor};
+use crate::optimizer::{PlanPhaseBatchOptimizedLogical, PlanRoot, PlanVisitor};
 
 /// Visitor to check if Logical Plan contains any LogicalIcebergScan node.
 #[derive(Debug, Clone, Default)]
@@ -23,9 +23,8 @@ pub struct IcebergScanDetector {
 }
 
 impl LogicalPlanVisitor for IcebergScanDetector {
-    type Result = bool;
-    
     type DefaultBehavior = Merge<fn(bool, bool) -> bool>;
+    type Result = bool;
 
     fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a, b| a | b)
@@ -37,9 +36,10 @@ impl LogicalPlanVisitor for IcebergScanDetector {
 }
 
 impl IcebergScanDetector {
-    /// If the plan contains any LogicalIcebergScan node, return true; otherwise, return false. 
-
-    pub fn contains_logical_iceberg_scan(plan_root: &PlanRoot<PlanPhaseLogical>) -> bool {
+    /// If the plan contains any LogicalIcebergScan node, return true; otherwise, return false.
+    pub fn contains_logical_iceberg_scan(
+        plan_root: &PlanRoot<PlanPhaseBatchOptimizedLogical>,
+    ) -> bool {
         let mut detector = IcebergScanDetector::default();
         detector.visit(plan_root.plan.clone())
     }

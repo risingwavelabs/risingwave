@@ -10,6 +10,7 @@ repository = { workspace = true }
 [dependencies]
 anyhow = "1"
 arc-swap = { workspace = true }
+arrow = "54.0.0"
 async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
@@ -22,7 +23,6 @@ chrono = { workspace = true }
 clap = { workspace = true }
 datafusion = "45.0.0"
 datafusion-common = "45.0.0"
-arrow = "54.0.0"
 downcast-rs = "2.0"
 dyn-clone = "1.0.14"
 easy-ext = "1"
