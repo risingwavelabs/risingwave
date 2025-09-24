@@ -1004,6 +1004,22 @@ message VectorIndexWriteNode {
   catalog.Table table = 1;
 }
 
+message VectorIndexLookupJoinNode {
+  // The table_id of the vector index to search.
+  uint32 table_id = 2;
+  // The columns of the vector index info.
+  repeated plan_common.ColumnDesc info_column_desc = 3;
+  uint32 vector_column_idx = 4;
+  // The number of nearest neighbors to return.
+  uint32 top_n = 5;
+  // The distance metric to use for the search.
+  common.DistanceType distance_type = 6;
+  // The ef_search used to query hnsw index
+  uint32 hnsw_ef_search = 7;
+  repeated uint32 info_output_indices = 8;
+  bool include_distance = 9;
+}
+
 message UpstreamSinkUnionNode {
   // It is always empty in the persisted metadata, and get filled before we spawn the actors.
   // The actual upstream info may be added and removed dynamically at runtime.
@@ -1082,6 +1098,7 @@ message StreamNode {
     VectorIndexWriteNode vector_index_write = 150;
     UpstreamSinkUnionNode upstream_sink_union = 151;
     LocalityProviderNode locality_provider = 152;
+    VectorIndexLookupJoinNode vector_index_lookup_join = 153;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
