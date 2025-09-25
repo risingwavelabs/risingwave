@@ -57,6 +57,19 @@ function pushDockerhub() {
   docker manifest push --insecure "$DOCKERTAG"
 }
 
+# push images to ECR
+function pushECR() {
+  ECRTAG="${ecraddr}:$1"
+  echo "push to ECR, image tag: ${ECRTAG}"
+  args=()
+  for arch in "${arches[@]}"
+  do
+    args+=( --amend "${ecraddr}:${BUILDKITE_COMMIT}-${arch}" )
+  done
+  docker manifest create --insecure "$ECRTAG" "${args[@]}"
+  docker manifest push --insecure "$ECRTAG"
+}
+
 function isStableVersion() {
     local version=$1
     if [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -121,6 +134,7 @@ if [[ -n "${IMAGE_TAG+x}" ]]; then
   # Tag the image with the $IMAGE_TAG.
   TAG="${IMAGE_TAG}"
   pushGchr "${TAG}"
+  pushECR "${TAG}"
   if [[ "${PUSH_DOCKERHUB:-false}" == "true" ]]; then
     pushDockerhub "${TAG}"
   fi
@@ -131,12 +145,14 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   TAG="${BUILDKITE_TAG}"
   pushGchr "${TAG}"
   pushDockerhub "${TAG}"
+  pushECR "${TAG}"
 
   if isStableVersion "${TAG}" && isLatestVersion "${TAG}"; then
     # If the tag is a latest stable version, we tag the image with "latest".
     TAG="latest"
     pushGchr "${TAG}"
     pushDockerhub "${TAG}"
+    pushECR "${TAG}"
   fi
 fi
 
