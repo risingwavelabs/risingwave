@@ -50,11 +50,9 @@ pub async fn handle_alter_parallelism(
             StatementType::ALTER_TABLE
             | StatementType::ALTER_MATERIALIZED_VIEW
             | StatementType::ALTER_INDEX => {
-                println!("real_table_name: {}", real_table_name);
                 let (table, schema_name) =
                     reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
 
-                println!("table: {:#?}", table);
                 match (table.table_type(), stmt_type) {
                     (TableType::Internal, _) => {
                         // we treat internal table as NOT FOUND

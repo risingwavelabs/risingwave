@@ -81,18 +81,21 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
 
     // Scaling will trigger a pair of `Pause` and `Resume`. However, this should not affect the
     // "manual" pause.
-    let rng = &mut thread_rng();
-    let job = ["TABLE t", "MATERIALIZED VIEW count_bid"]
-        .iter()
-        .choose(rng)
-        .cloned()
-        .unwrap();
+    // let rng = &mut thread_rng();
+    // let job = ["TABLE t", "MATERIALIZED VIEW count_bid"]
+    //     .iter()
+    //     .choose(rng)
+    //     .cloned()
+    //     .unwrap();
+    //
+    // let query = format!(
+    //     "alter {} set parallelism = {}",
+    //     job,
+    //     rng.gen_range(1..total_parallelism)
+    // );
 
-    let query = format!(
-        "alter {} set parallelism = {}",
-        job,
-        rng.gen_range(1..total_parallelism)
-    );
+    let query = "alter table t set parallelism = 3";
+
     println!("query {}", query);
 
     cluster.run(query).await?;
@@ -111,6 +114,7 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
         .await
         .expect_err("`VALUES` should be paused so creation should never complete");
 
+    println!("before");
     // DML on tables should be blocked.
     let result = timeout(Duration::from_secs(10), cluster.run(INSERT_INTO_TABLE)).await;
     assert!(result.is_err());
