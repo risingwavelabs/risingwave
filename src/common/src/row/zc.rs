@@ -153,35 +153,88 @@ pub struct ZcRow {
     zc: Ref<[ZcDatum]>,
 }
 
+/// Reference to a [`ZcRow`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZcRowRef<'a> {
+    data: &'a ZcRowData,
+    /// The root metadata.
+    zc: Ref<[ZcDatum]>,
+}
+
 impl ZcRow {
+    /// Convert `self` into a reference.
+    pub fn as_ref(&self) -> ZcRowRef<'_> {
+        ZcRowRef {
+            data: &self.data,
+            zc: self.zc,
+        }
+    }
+}
+
+impl<'a> ZcRowRef<'a> {
     /// Load all `ZcDatum`s.
-    fn zc_datums(&self) -> &[ZcDatum] {
+    fn zc_datums(self) -> &'a [ZcDatum] {
         self.zc.load(&self.data.buf).unwrap()
     }
 
     /// Convert the given `ZcDatum` into `DatumRef` by loading necessary data from `data`.
-    fn load_datum(&self, datum: ZcDatum) -> DatumRef<'_> {
+    fn load_datum(self, datum: ZcDatum) -> DatumRef<'a> {
         datum.load(&self.data.buf, &self.data.todo)
     }
 }
 
-impl Row for ZcRow {
-    fn datum_at(&self, i: usize) -> DatumRef<'_> {
+/// A set of methods similar to `Row` trait but consuming `self`.
+impl<'a> ZcRowRef<'a> {
+    fn datum_at(self, i: usize) -> DatumRef<'a> {
         let zc = self.zc_datums()[i];
         self.load_datum(zc)
     }
 
-    unsafe fn datum_at_unchecked(&self, i: usize) -> crate::types::DatumRef<'_> {
+    unsafe fn datum_at_unchecked(self, i: usize) -> DatumRef<'a> {
         let zc = *unsafe { self.zc_datums().get_unchecked(i) };
         self.load_datum(zc)
+    }
+
+    fn iter(self) -> impl Iterator<Item = DatumRef<'a>> {
+        self.zc_datums().iter().map(move |zc| self.load_datum(*zc))
+    }
+}
+
+/// Implement `Row` trait by dereferencing `self` and calling consuming methods.
+impl<'a> Row for ZcRowRef<'a> {
+    fn datum_at(&self, i: usize) -> DatumRef<'a> {
+        ZcRowRef::datum_at(*self, i)
+    }
+
+    unsafe fn datum_at_unchecked(&self, i: usize) -> DatumRef<'a> {
+        unsafe { ZcRowRef::datum_at_unchecked(*self, i) }
     }
 
     fn len(&self) -> usize {
         self.zc.len()
     }
 
-    fn iter(&self) -> impl Iterator<Item = crate::types::DatumRef<'_>> {
-        self.zc_datums().iter().map(|zc| self.load_datum(*zc))
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        ZcRowRef::iter(*self)
+    }
+}
+
+/// Forward the implementation to `ZcRowRef`.
+impl Row for ZcRow {
+    fn datum_at(&self, i: usize) -> DatumRef<'_> {
+        self.as_ref().datum_at(i)
+    }
+
+    unsafe fn datum_at_unchecked(&self, i: usize) -> DatumRef<'_> {
+        unsafe { self.as_ref().datum_at_unchecked(i) }
+    }
+
+    fn len(&self) -> usize {
+        self.as_ref().len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        self.as_ref().iter()
     }
 }
 
