@@ -185,17 +185,23 @@ impl<'a> ZcRowRef<'a> {
 
 /// A set of methods similar to `Row` trait but consuming `self`.
 impl<'a> ZcRowRef<'a> {
-    fn datum_at(self, i: usize) -> DatumRef<'a> {
+    /// Returns the [`DatumRef`] at the given `index`.
+    pub fn datum_at(self, i: usize) -> DatumRef<'a> {
         let zc = self.zc_datums()[i];
         self.load_datum(zc)
     }
 
-    unsafe fn datum_at_unchecked(self, i: usize) -> DatumRef<'a> {
+    /// Returns the [`DatumRef`] at the given `index` without bounds checking.
+    ///
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is undefined behavior.
+    pub unsafe fn datum_at_unchecked(self, i: usize) -> DatumRef<'a> {
         let zc = *unsafe { self.zc_datums().get_unchecked(i) };
         self.load_datum(zc)
     }
 
-    fn iter(self) -> impl Iterator<Item = DatumRef<'a>> {
+    /// Returns an exact-size iterator over the datums in the row, in [`DatumRef`] form.
+    pub fn iter(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> {
         self.zc_datums().iter().map(move |zc| self.load_datum(*zc))
     }
 }
