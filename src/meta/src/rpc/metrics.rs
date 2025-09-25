@@ -933,7 +933,17 @@ pub async fn refresh_system_param_info_metrics(
     system_params_controller: &SystemParamsControllerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) {
-    use risingwave_common::system_param::system_params_to_kv;
+    use risingwave_common::system_param::{
+        BACKUP_STORAGE_URL_KEY, LICENSE_KEY_KEY, STATE_STORE_KEY, system_params_to_kv,
+    };
+
+    fn redact_value_by_name(name: &str, value: &str) -> String {
+        // Replace sensitive values entirely with *** to avoid leaking secrets.
+        if name == LICENSE_KEY_KEY || name == STATE_STORE_KEY || name == BACKUP_STORAGE_URL_KEY {
+            return "***".to_owned();
+        }
+        value.to_owned()
+    }
 
     let params = system_params_controller.get_pb_params().await;
     let kvs = match system_params_to_kv(&params) {
@@ -946,6 +956,7 @@ pub async fn refresh_system_param_info_metrics(
 
     meta_metrics.system_param_info.reset();
     for (name, value) in kvs {
+        let value = redact_value_by_name(&name, &value);
         meta_metrics
             .system_param_info
             .with_label_values(&[&name, &value])
@@ -1243,11 +1254,8 @@ pub fn start_info_monitor(
             .await;
 
             // System parameter info
-            refresh_system_param_info_metrics(
-                &system_params_controller,
-                meta_metrics.clone(),
-            )
-            .await;
+            refresh_system_param_info_metrics(&system_params_controller, meta_metrics.clone())
+                .await;
         }
     });
 
