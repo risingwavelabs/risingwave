@@ -26,8 +26,8 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
     BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
-    LogicalLocalityProvider, LogicalPlanRef as PlanRef, PlanBase, PlanNodeId,
-    PredicatePushdown, StreamTableScan, ToBatch, ToStream, generic,
+    LogicalLocalityProvider, LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown,
+    StreamTableScan, ToBatch, ToStream, generic,
 };
 use crate::TableCatalog;
 use crate::binder::BoundBaseTable;

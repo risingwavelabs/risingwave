@@ -20,18 +20,23 @@ use futures::stream::select_with_strategy;
 use futures::{TryStreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{Datum, ToOwnedDatum};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::cmp_datum_iter;
+use risingwave_common_rate_limit::RateLimit;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::StateTable;
+use crate::executor::backfill::utils::create_builder;
 use crate::executor::prelude::*;
 use crate::task::{CreateMviewProgressReporter, FragmentId};
+
+type Builders = HashMap<VirtualNode, DataChunkBuilder>;
 
 /// Progress state for tracking backfill per vnode
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -403,6 +408,28 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         let chunk = StreamChunk::with_visibility(ops, columns, new_visibility.finish());
         Ok(chunk)
     }
+
+    fn handle_snapshot_chunk(
+        data_chunk: DataChunk,
+        vnode: VirtualNode,
+        pk_indices: &[usize],
+        backfill_state: &mut LocalityBackfillState,
+        cur_barrier_snapshot_processed_rows: &mut u64,
+    ) -> StreamExecutorResult<StreamChunk> {
+        let chunk = StreamChunk::from_parts(vec![Op::Insert; data_chunk.cardinality()], data_chunk);
+        let chunk_cardinality = chunk.cardinality() as u64;
+
+        // Extract primary key from the last row to update progress
+        // As snapshot read streams are ordered by pk, we can use the last row to update current_pos
+        if let Some(last_row) = chunk.rows().last() {
+            let pk = last_row.1.project(pk_indices);
+            let pk_owned = pk.into_owned_row();
+            backfill_state.update_progress(vnode, pk_owned, chunk_cardinality);
+        }
+
+        *cur_barrier_snapshot_processed_rows += chunk_cardinality;
+        Ok(chunk)
+    }
 }
 
 impl<S: StateStore> Execute for LocalityProviderExecutor<S> {
@@ -528,6 +555,21 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 .metrics
                 .new_backfill_metrics(state_table.table_id(), self.actor_id);
 
+            // Create builders for snapshot data chunks
+            let snapshot_data_types = self.input_schema.data_types();
+            let mut builders: Builders = state_table
+                .vnodes()
+                .iter_vnodes()
+                .map(|vnode| {
+                    let builder = create_builder(
+                        RateLimit::Disabled,
+                        self.chunk_size,
+                        snapshot_data_types.clone(),
+                    );
+                    (vnode, builder)
+                })
+                .collect();
+
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
@@ -573,7 +615,21 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                 match msg? {
                                     None => {
                                         // End of the snapshot read stream.
-                                        // Consume remaining rows in the buffer.
+                                        // Consume remaining rows in the builders.
+                                        for (vnode, builder) in &mut builders {
+                                            if let Some(data_chunk) = builder.consume_all() {
+                                                let chunk = Self::handle_snapshot_chunk(
+                                                    data_chunk,
+                                                    *vnode,
+                                                    &pk_indices,
+                                                    &mut backfill_state,
+                                                    &mut cur_barrier_snapshot_processed_rows,
+                                                )?;
+                                                yield Message::Chunk(chunk);
+                                            }
+                                        }
+
+                                        // Consume remaining rows in the upstream buffer.
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             let chunk_cardinality = chunk.cardinality() as u64;
                                             cur_barrier_upstream_processed_rows +=
@@ -589,23 +645,21 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, row)) => {
-                                        // Extract primary key from row for progress tracking
-                                        let pk = row.clone().project(&pk_indices);
-
-                                        // Convert projected row to OwnedRow for progress tracking
-                                        let pk_owned = pk.into_owned_row();
-
-                                        // Update progress for this vnode
-                                        backfill_state.update_progress(vnode, pk_owned, 1);
-
-                                        cur_barrier_snapshot_processed_rows += 1;
-
-                                        // Create chunk with single row
-                                        let chunk = StreamChunk::from_rows(
-                                            &[(Op::Insert, row)],
-                                            &self.input_schema.data_types(),
-                                        );
-                                        yield Message::Chunk(chunk);
+                                        // Use builder to batch rows efficiently
+                                        let builder = builders.get_mut(&vnode).unwrap();
+                                        if let Some(data_chunk) = builder.append_one_row(row) {
+                                            // Builder is full, handle the chunk
+                                            let chunk = Self::handle_snapshot_chunk(
+                                                data_chunk,
+                                                vnode,
+                                                &pk_indices,
+                                                &mut backfill_state,
+                                                &mut cur_barrier_snapshot_processed_rows,
+                                            )?;
+                                            yield Message::Chunk(chunk);
+                                        }
+                                        // If append_one_row returns None, row is buffered but no chunk is produced yet
+                                        // Progress will be updated when the builder is consumed later
                                     }
                                 }
                             }
@@ -618,6 +672,20 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     Some(barrier) => barrier,
                     None => break 'backfill_loop, // Reached end of backfill
                 };
+
+                // Consume remaining rows from builders at barrier
+                for (vnode, builder) in &mut builders {
+                    if let Some(data_chunk) = builder.consume_all() {
+                        let chunk = Self::handle_snapshot_chunk(
+                            data_chunk,
+                            *vnode,
+                            &pk_indices,
+                            &mut backfill_state,
+                            &mut cur_barrier_snapshot_processed_rows,
+                        )?;
+                        yield Message::Chunk(chunk);
+                    }
+                }
 
                 // Process upstream buffer chunks with marking
                 for chunk in upstream_chunk_buffer.drain(..) {
@@ -655,11 +723,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 );
 
                 // Persist backfill progress
-                Self::persist_backfill_state(
-                    &mut progress_table,
-                    &backfill_state,
-                )
-                .await?;
+                Self::persist_backfill_state(&mut progress_table, &backfill_state).await?;
                 let barrier_epoch = barrier.epoch;
                 let post_commit = progress_table.commit(barrier_epoch).await?;
 
@@ -731,11 +795,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                             .finish(barrier.epoch, total_snapshot_processed_rows);
 
                         // Persist final state
-                        Self::persist_backfill_state(
-                            &mut progress_table,
-                            &backfill_state,
-                        )
-                        .await?;
+                        Self::persist_backfill_state(&mut progress_table, &backfill_state).await?;
                         let post_commit = progress_table.commit(barrier.epoch).await?;
 
                         yield Message::Barrier(barrier);
