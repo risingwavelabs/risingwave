@@ -606,6 +606,7 @@ impl Barrier {
     /// Whether this barrier requires the executor to pause its data stream on startup.
     pub fn is_pause_on_startup(&self) -> bool {
         match self.mutation.as_deref() {
+            // todo, update mutation
             Some(Mutation::Add(AddMutation { pause, .. }))
             | Some(Mutation::AddAndUpdate(AddMutation { pause, .. }, _)) => *pause,
             _ => false,
