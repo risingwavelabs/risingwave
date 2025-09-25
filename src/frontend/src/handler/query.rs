@@ -30,6 +30,7 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::tokio_util::either::Either;
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
@@ -74,17 +75,29 @@ pub async fn handle_query(
 
     let context = OptimizerContext::from_handler_args(handler_args);
 
-    let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
-    match plan_result {
-        BatchPlanChoice::RW(plan_result) => {
-            // Time zone is used by Hummock time travel query.
-            let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
-                session.config().timezone().to_owned(),
-                || gen_batch_plan_fragmenter(&session, plan_result),
-            )?;
+    let either =  {
+        let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
+        match plan_result {
+            BatchPlanChoice::RW(plan_result) => {
+                // Time zone is used by Hummock time travel query.
+                let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+                    session.config().timezone().to_owned(),
+                    || gen_batch_plan_fragmenter(&session, plan_result),
+                )?;
+                Either::Left(plan_fragmenter_result)
+
+            }
+            BatchPlanChoice::DF { df_plan, .. } => {
+                Either::Right(df_plan)
+            }
+        }
+    };
+
+    match either {
+        Either::Left(plan_fragmenter_result) => {
             execute(session, plan_fragmenter_result, formats).await
         }
-        BatchPlanChoice::DF { df_plan, .. } => {
+        Either::Right(df_plan) => {
             execute_datafusion_plan(session, df_plan, formats).await
         }
     }
