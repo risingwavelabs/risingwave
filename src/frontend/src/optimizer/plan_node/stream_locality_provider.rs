@@ -101,7 +101,7 @@ impl StreamNode for StreamLocalityProvider {
             progress_table: Some(progress_table.to_prost()),
         };
 
-        PbNodeBody::LocalityProvider(locality_provider_node)
+        PbNodeBody::LocalityProvider(Box::new(locality_provider_node))
     }
 }
 
