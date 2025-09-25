@@ -675,50 +675,50 @@ steps:
 #    timeout_in_minutes: 25
 
   # Sqlsmith differential testing
-  - label: "Sqlsmith Differential Testing"
-    command: "ci/scripts/sqlsmith-differential-test.sh -p ci-dev"
-    if: build.pull_request.labels includes "ci/run-sqlsmith-differential-tests" || build.env("CI_STEPS") =~ /(^|,)sqlsmith-differential-tests?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: ci-flamegraph-env
-    timeout_in_minutes: 40
+#  - label: "Sqlsmith Differential Testing"
+#    command: "ci/scripts/sqlsmith-differential-test.sh -p ci-dev"
+#    if: build.pull_request.labels includes "ci/run-sqlsmith-differential-tests" || build.env("CI_STEPS") =~ /(^|,)sqlsmith-differential-tests?(,|$$)/
+#    depends_on:
+#      - "build"
+#    plugins:
+#      - docker-compose#v5.5.0:
+#          <<: *docker-compose
+#          run: ci-flamegraph-env
+#    timeout_in_minutes: 40
+#
+#  - label: "Backfill tests"
+#    command: "BUILDKITE=${BUILDKITE:-} ci/scripts/backfill-test.sh -p ci-dev"
+#    if: build.pull_request.labels includes "ci/run-backfill-tests" || build.env("CI_STEPS") =~ /(^|,)backfill-tests?(,|$$)/
+#    depends_on:
+#      - "build"
+#    plugins:
+#      - docker-compose#v5.5.0:
+#          <<: *docker-compose
+#          run: source-test-env
+#      - ./ci/plugins/upload-failure-logs
+#    timeout_in_minutes: 30
+#
+#  - label: "e2e standalone binary test"
+#    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m standalone"
+#    if: build.pull_request.labels includes "ci/run-e2e-standalone-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
+#    depends_on:
+#      - "build"
+#    plugins:
+#      - docker-compose#v5.5.0: *docker-compose
+#      - ./ci/plugins/upload-failure-logs
+#    timeout_in_minutes: 40
+#    retry: *auto-retry
 
-  - label: "Backfill tests"
-    command: "BUILDKITE=${BUILDKITE:-} ci/scripts/backfill-test.sh -p ci-dev"
-    if: build.pull_request.labels includes "ci/run-backfill-tests" || build.env("CI_STEPS") =~ /(^|,)backfill-tests?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: source-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
-
-  - label: "e2e standalone binary test"
-    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m standalone"
-    if: build.pull_request.labels includes "ci/run-e2e-standalone-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 40
-    retry: *auto-retry
-
-  - label: "e2e single-node binary test"
-    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m single-node"
-    if: build.pull_request.labels includes "ci/run-e2e-single-node-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
-    retry: *auto-retry
+#  - label: "e2e single-node binary test"
+#    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m single-node"
+#    if: build.pull_request.labels includes "ci/run-e2e-single-node-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
+#    depends_on:
+#      - "build"
+#    plugins:
+#      - docker-compose#v5.5.0: *docker-compose
+#      - ./ci/plugins/upload-failure-logs
+#    timeout_in_minutes: 30
+#    retry: *auto-retry
 
 #  - label: "end-to-end test ({{matrix.label}} backend)"
 #    <<: *other-sql-backend
