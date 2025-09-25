@@ -525,3 +525,21 @@ impl CatalogController {
             .collect())
     }
 }
+
+pub(crate) fn redact_source_props(props: &Property) -> Property {
+    let redact_props = props.0.clone();
+    let allow_display_props =
+        ConnectorProperties::allow_display_props_source(props.inner_ref()).unwrap();
+    Property::from(
+        redact_props
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (k, mut v))| {
+                if !allow_display_props[idx] {
+                    v = "[redacted]".to_owned();
+                }
+                (k, v)
+            })
+            .collect::<crate::controller::BTreeMap<String, String>>(),
+    )
+}
