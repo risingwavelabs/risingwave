@@ -24,6 +24,7 @@ use crate::array::{VectorDistanceType, VectorItemType, VectorRef, VectorVal};
 use crate::types::F32;
 
 #[derive(Clone, Copy, PartialEq, Eq, EstimateSize)]
+#[repr(transparent)]
 pub struct VectorInner<T> {
     pub(crate) inner: T,
 }

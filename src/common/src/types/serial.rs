@@ -16,6 +16,7 @@ use std::error::Error;
 use std::hash::Hash;
 
 use bytes::BytesMut;
+use musli_zerocopy::ZeroCopy;
 use postgres_types::{IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Serialize, Serializer};
@@ -23,7 +24,8 @@ use serde::{Serialize, Serializer};
 use crate::util::row_id::RowId;
 
 // Serial is an alias for i64
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash, ZeroCopy)]
+#[repr(transparent)]
 pub struct Serial(pub(crate) i64);
 
 impl From<Serial> for i64 {

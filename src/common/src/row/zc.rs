@@ -20,7 +20,7 @@ use musli_zerocopy::{Buf, OwnedBuf, Ref, ZeroCopy};
 use static_assertions::const_assert_eq;
 
 use crate::row::{OwnedRow, Row};
-use crate::types::{Datum, DatumRef, ScalarRefImpl, ToOwnedDatum as _};
+use crate::types::{Datum, DatumRef, F32, F64, ScalarRefImpl, Serial, Timestamptz, ToOwnedDatum};
 
 /// The zero-copy representation of `Datum`.
 // TODO(zc): variants that are commented out are not supported yet.
@@ -31,9 +31,9 @@ enum ZcDatum {
     Int16(i16),
     Int32(i32),
     Int64(i64),
-    // Int256(Int256Ref<'scalar>),
-    Float32(f32),
-    Float64(f64),
+    Int256(Ref<[i128; 2]>),
+    Float32(F32),
+    Float64(F64),
     Utf8(Ref<str>),
     Bool(bool),
     // Decimal(crate::types::Decimal),
@@ -41,13 +41,13 @@ enum ZcDatum {
     // Date(crate::types::Date),
     // Time(crate::types::Time),
     // Timestamp(crate::types::Timestamp),
-    // Timestamptz(crate::types::Timestamptz),
+    Timestamptz(Timestamptz),
     // Jsonb(crate::types::JsonbRef<'scalar>),
-    // Serial(crate::types::Serial),
+    Serial(Serial),
     // Struct(crate::types::StructRef<'scalar>),
     // List(crate::types::ListRef<'scalar>),
     // Map(crate::types::MapRef<'scalar>),
-    // Vector(crate::types::VectorRef<'scalar>),
+    Vector(Ref<[F32]>),
     Bytea(Ref<[u8]>),
 
     /// For unsupported variants, we place the original [`Datum`] separately in an [`OwnedRow`]
@@ -68,10 +68,14 @@ impl ScalarRefImpl<'_> {
             ScalarRefImpl::Int16(v) => ZcDatum::Int16(v),
             ScalarRefImpl::Int32(v) => ZcDatum::Int32(v),
             ScalarRefImpl::Int64(v) => ZcDatum::Int64(v),
-            ScalarRefImpl::Float32(v) => ZcDatum::Float32(v.into_inner()),
-            ScalarRefImpl::Float64(v) => ZcDatum::Float64(v.into_inner()),
+            ScalarRefImpl::Int256(v) => ZcDatum::Int256(buf.store(&v.0.0)),
+            ScalarRefImpl::Float32(v) => ZcDatum::Float32(v),
+            ScalarRefImpl::Float64(v) => ZcDatum::Float64(v),
             ScalarRefImpl::Utf8(v) => ZcDatum::Utf8(buf.store_unsized(v)),
             ScalarRefImpl::Bool(v) => ZcDatum::Bool(v),
+            ScalarRefImpl::Timestamptz(v) => ZcDatum::Timestamptz(v),
+            ScalarRefImpl::Serial(v) => ZcDatum::Serial(v),
+            ScalarRefImpl::Vector(v) => ZcDatum::Vector(buf.store_unsized(v.as_slice())),
             ScalarRefImpl::Bytea(v) => ZcDatum::Bytea(buf.store_unsized(v)),
 
             _ => {
@@ -88,6 +92,8 @@ impl ZcDatum {
     /// - If it's inlined, we load the data from `buf`.
     /// - If it's not supported yet, we directly load the datum from `todo`.
     fn load<'a>(self, buf: &'a Buf, todo: &'a impl Row) -> DatumRef<'a> {
+        use crate::types::*;
+
         let scalar = match self {
             ZcDatum::Null => return None,
             ZcDatum::Todo(index) => return todo.datum_at(index),
@@ -95,10 +101,18 @@ impl ZcDatum {
             ZcDatum::Int16(v) => ScalarRefImpl::Int16(v),
             ZcDatum::Int32(v) => ScalarRefImpl::Int32(v),
             ZcDatum::Int64(v) => ScalarRefImpl::Int64(v),
-            ZcDatum::Float32(v) => ScalarRefImpl::Float32(v.into()),
-            ZcDatum::Float64(v) => ScalarRefImpl::Float64(v.into()),
+            ZcDatum::Int256(v) => {
+                ScalarRefImpl::Int256(Int256Ref::from_words(v.load(buf).unwrap()))
+            }
+            ZcDatum::Float32(v) => ScalarRefImpl::Float32(v),
+            ZcDatum::Float64(v) => ScalarRefImpl::Float64(v),
             ZcDatum::Utf8(v) => ScalarRefImpl::Utf8(v.load(buf).unwrap()),
             ZcDatum::Bool(v) => ScalarRefImpl::Bool(v),
+            ZcDatum::Timestamptz(v) => ScalarRefImpl::Timestamptz(v),
+            ZcDatum::Serial(v) => ScalarRefImpl::Serial(v),
+            ZcDatum::Vector(v) => {
+                ScalarRefImpl::Vector(VectorRef::from_slice_unchecked(v.load(buf).unwrap()))
+            }
             ZcDatum::Bytea(v) => ScalarRefImpl::Bytea(v.load(buf).unwrap()),
         };
         Some(scalar)
