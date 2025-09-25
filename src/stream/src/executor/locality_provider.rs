@@ -270,7 +270,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     async fn persist_backfill_state(
         progress_table: &mut StateTable<S>,
         backfill_state: &LocalityBackfillState,
-        _locality_columns: &[usize],
     ) -> StreamExecutorResult<()> {
         for (vnode, progress) in &backfill_state.per_vnode {
             let (is_finished, current_pos, row_count) = match progress {
@@ -525,6 +524,10 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
 
+            let metrics = self
+                .metrics
+                .new_backfill_metrics(state_table.table_id(), self.actor_id);
+
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
@@ -577,6 +580,12 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                                 chunk_cardinality;
                                             yield Message::Chunk(chunk);
                                         }
+                                        metrics
+                                            .backfill_snapshot_read_row_count
+                                            .inc_by(cur_barrier_snapshot_processed_rows);
+                                        metrics
+                                            .backfill_upstream_output_row_count
+                                            .inc_by(cur_barrier_upstream_processed_rows);
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, row)) => {
@@ -649,11 +658,17 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 Self::persist_backfill_state(
                     &mut progress_table,
                     &backfill_state,
-                    &self.locality_columns,
                 )
                 .await?;
                 let barrier_epoch = barrier.epoch;
                 let post_commit = progress_table.commit(barrier_epoch).await?;
+
+                metrics
+                    .backfill_snapshot_read_row_count
+                    .inc_by(cur_barrier_snapshot_processed_rows);
+                metrics
+                    .backfill_upstream_output_row_count
+                    .inc_by(cur_barrier_upstream_processed_rows);
 
                 yield Message::Barrier(barrier);
                 post_commit.post_yield_barrier(None).await?;
@@ -719,7 +734,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         Self::persist_backfill_state(
                             &mut progress_table,
                             &backfill_state,
-                            &self.locality_columns,
                         )
                         .await?;
                         let post_commit = progress_table.commit(barrier.epoch).await?;
