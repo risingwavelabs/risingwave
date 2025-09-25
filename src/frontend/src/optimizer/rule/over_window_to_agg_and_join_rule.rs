@@ -85,7 +85,7 @@ impl Rule for OverWindowToAggAndJoinRule {
             |on_clause, (idx, x)| {
                 on_clause.and(Condition::with_expr(
                     FunctionCall::new(
-                        Type::Equal,
+                        Type::IsNotDistinctFrom,
                         vec![
                             x.clone().into(),
                             InputRef::new(idx + input_len, x.data_type.clone()).into(),
