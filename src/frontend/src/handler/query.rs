@@ -75,7 +75,7 @@ pub async fn handle_query(
 
     let context = OptimizerContext::from_handler_args(handler_args);
 
-    let either =  {
+    let either = {
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         match plan_result {
             BatchPlanChoice::RW(plan_result) => {
@@ -85,11 +85,8 @@ pub async fn handle_query(
                     || gen_batch_plan_fragmenter(&session, plan_result),
                 )?;
                 Either::Left(plan_fragmenter_result)
-
             }
-            BatchPlanChoice::DF { df_plan, .. } => {
-                Either::Right(df_plan)
-            }
+            BatchPlanChoice::DF { df_plan, .. } => Either::Right(df_plan),
         }
     };
 
@@ -97,9 +94,7 @@ pub async fn handle_query(
         Either::Left(plan_fragmenter_result) => {
             execute(session, plan_fragmenter_result, formats).await
         }
-        Either::Right(df_plan) => {
-            execute_datafusion_plan(session, df_plan, formats).await
-        }
+        Either::Right(df_plan) => execute_datafusion_plan(session, df_plan, formats).await,
     }
 }
 
