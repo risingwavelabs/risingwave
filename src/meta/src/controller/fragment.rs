@@ -88,6 +88,7 @@ use crate::{MetaError, MetaResult};
 pub struct InflightActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<Bitmap>,
+    pub splits: Vec<SplitImpl>,
 }
 
 #[derive(Clone, Debug)]
@@ -1102,6 +1103,7 @@ impl CatalogController {
                     ActorId,
                     WorkerId,
                     Option<VnodeBitmap>,
+                    Option<ConnectorSplits>,
                     FragmentId,
                     StreamNode,
                     I32Array,
@@ -1116,6 +1118,7 @@ impl CatalogController {
             .column(actor::Column::ActorId)
             .column(actor::Column::WorkerId)
             .column(actor::Column::VnodeBitmap)
+            .column(actor::Column::Splits)
             .column(fragment::Column::FragmentId)
             .column(fragment::Column::StreamNode)
             .column(fragment::Column::StateTableIds)
@@ -1136,6 +1139,7 @@ impl CatalogController {
             actor_id,
             worker_id,
             vnode_bitmap,
+            splits,
             fragment_id,
             node,
             state_table_ids,
@@ -1154,9 +1158,20 @@ impl CatalogController {
                 .into_iter()
                 .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
                 .collect();
+
             let actor_info = InflightActorInfo {
                 worker_id,
                 vnode_bitmap: vnode_bitmap.map(|bitmap| bitmap.to_protobuf().into()),
+                splits: splits
+                    .map(|connector_splits| {
+                        connector_splits
+                            .to_protobuf()
+                            .splits
+                            .iter()
+                            .map(|connector_split| SplitImpl::try_from(connector_split).unwrap())
+                            .collect_vec()
+                    })
+                    .unwrap_or_default(),
             };
             match fragment_infos.entry(fragment_id) {
                 Entry::Occupied(mut entry) => {

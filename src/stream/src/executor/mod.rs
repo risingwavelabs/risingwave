@@ -144,7 +144,7 @@ pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
-pub use filter::FilterExecutor;
+pub use filter::{FilterExecutor, UpsertFilterExecutor};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};

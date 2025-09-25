@@ -370,12 +370,8 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
         DataType::Vector(dimension) => deserialize_vector(*dimension, data),
-        DataType::List(item_type) => deserialize_list(item_type, data)?,
-        DataType::Map(map_type) => {
-            // FIXME: clone type everytime here is inefficient
-            let list = deserialize_list(&map_type.clone().into_struct(), data)?.into_list();
-            ScalarImpl::Map(MapValue::from_entries(list))
-        }
+        DataType::List(list_type) => deserialize_list(list_type, data)?,
+        DataType::Map(map_type) => deserialize_map(map_type, data)?,
     })
 }
 
@@ -388,13 +384,20 @@ fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<Sc
     Ok(ScalarImpl::Struct(StructValue::new(field_values)))
 }
 
-fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
+fn deserialize_list(list_type: &ListType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    let elem_type = list_type.elem();
     let len = data.get_u32_le();
-    let mut builder = item_type.create_array_builder(len as usize);
+    let mut builder = elem_type.create_array_builder(len as usize);
     for _ in 0..len {
-        builder.append(inner_deserialize_datum(data, item_type)?);
+        builder.append(inner_deserialize_datum(data, elem_type)?);
     }
     Ok(ScalarImpl::List(ListValue::new(builder.finish())))
+}
+
+fn deserialize_map(map_type: &MapType, data: &mut impl Buf) -> Result<ScalarImpl> {
+    // FIXME: clone type everytime here is inefficient
+    let list = deserialize_list(&map_type.clone().into_list_type(), data)?.into_list();
+    Ok(ScalarImpl::Map(MapValue::from_entries(list)))
 }
 
 fn deserialize_vector(dimension: usize, data: &mut impl Buf) -> ScalarImpl {

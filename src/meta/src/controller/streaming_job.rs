@@ -654,23 +654,25 @@ impl CatalogController {
             }
         }
 
-        let dropped_tables = Table::find()
-            .find_also_related(Object)
-            .filter(
-                table::Column::TableId.is_in(
-                    internal_table_ids
-                        .iter()
-                        .cloned()
-                        .chain(table_obj.iter().map(|t| t.table_id as _)),
-                ),
-            )
-            .all(&txn)
-            .await?
-            .into_iter()
-            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
-        inner
-            .dropped_tables
-            .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
+        if is_cancelled {
+            let dropped_tables = Table::find()
+                .find_also_related(Object)
+                .filter(
+                    table::Column::TableId.is_in(
+                        internal_table_ids
+                            .iter()
+                            .cloned()
+                            .chain(table_obj.iter().map(|t| t.table_id as _)),
+                    ),
+                )
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
+            inner
+                .dropped_tables
+                .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
+        }
 
         if need_notify {
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
