@@ -44,7 +44,7 @@ macro_rules! iter_fields_ref {
     ($self:expr, $it:ident, { $($l_body:tt)* }, { $($r_body:tt)* }) => {
         match $self {
             StructRef::Indexed { arr, idx } => {
-                let $it = arr.children.iter().map(move |a| a.value_at(idx));
+                let $it = arr.children.iter().map(move |a| a.value_at(idx as usize));
                 $($l_body)*
             }
             StructRef::ValueRef { val } => {
@@ -176,7 +176,12 @@ impl Array for StructArray {
     type RefItem<'a> = StructRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> StructRef<'_> {
-        StructRef::Indexed { arr: self, idx }
+        StructRef::Indexed {
+            arr: self,
+            idx: idx
+                .try_into()
+                .expect("struct array length should fit in u32"),
+        }
     }
 
     fn len(&self) -> usize {
@@ -392,7 +397,8 @@ impl StructValue {
 
 #[derive(Copy, Clone)]
 pub enum StructRef<'a> {
-    Indexed { arr: &'a StructArray, idx: usize },
+    // We use `u32` here to save some bytes.
+    Indexed { arr: &'a StructArray, idx: u32 },
     ValueRef { val: &'a StructValue },
 }
 
@@ -409,7 +415,7 @@ impl<'a> StructRef<'a> {
     /// Panics if the index is out of bounds.
     pub fn field_at(&self, i: usize) -> DatumRef<'a> {
         match self {
-            StructRef::Indexed { arr, idx } => arr.field_at(i).value_at(*idx),
+            StructRef::Indexed { arr, idx } => arr.field_at(i).value_at(*idx as usize),
             StructRef::ValueRef { val } => val.fields[i].to_datum_ref(),
         }
     }
@@ -422,7 +428,7 @@ impl<'a> StructRef<'a> {
         unsafe {
             match self {
                 StructRef::Indexed { arr, idx } => {
-                    arr.field_at_unchecked(i).value_at_unchecked(*idx)
+                    arr.field_at_unchecked(i).value_at_unchecked(*idx as usize)
                 }
                 StructRef::ValueRef { val } => val.fields.get_unchecked(i).to_datum_ref(),
             }
