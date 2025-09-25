@@ -16,9 +16,9 @@ use super::expr_visitable::ExprVisitable;
 use super::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase,
-    PlanTreeNodeUnary, PredicatePushdown, RewriteStreamContext, StreamChangeLog,
-    ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase, PlanTreeNodeUnary,
+    PredicatePushdown, RewriteStreamContext, StreamChangeLog, ToBatch, ToStream, ToStreamContext,
+    gen_filter_and_pushdown, generic,
 };
 use crate::PlanRef;
 use crate::error::ErrorCode::BindError;
