@@ -100,6 +100,12 @@ where
     // If None, not expected to build ssl connection (panic).
     tls_context: Option<SslContext>,
 
+    // TLS configuration including SSL enforcement setting
+    tls_config: Option<TlsConfig>,
+
+    // Track whether this connection is using SSL
+    is_ssl_connection: bool,
+
     // Used in extended query protocol. When encounter error in extended query, we need to ignore
     // the following message util sync message.
     ignore_util_sync: bool,
@@ -118,14 +124,28 @@ pub struct TlsConfig {
     pub cert: String,
     /// The path to the TLS key.
     pub key: String,
+    /// Whether to enforce SSL connections (reject non-SSL clients).
+    pub enforce_ssl: bool,
 }
 
 impl TlsConfig {
     pub fn new_default() -> Option<Self> {
         let cert = std::env::var("RW_SSL_CERT").ok()?;
         let key = std::env::var("RW_SSL_KEY").ok()?;
-        tracing::info!("RW_SSL_CERT={}, RW_SSL_KEY={}", cert, key);
-        Some(Self { cert, key })
+        let enforce_ssl = std::env::var("RW_SSL_ENFORCE")
+            .map(|v| v.to_lowercase() == "true" || v == "1")
+            .unwrap_or(false);
+        tracing::info!(
+            "RW_SSL_CERT={}, RW_SSL_KEY={}, RW_SSL_ENFORCE={}",
+            cert,
+            key,
+            enforce_ssl
+        );
+        Some(Self {
+            cert,
+            key,
+            enforce_ssl,
+        })
     }
 }
 
@@ -219,6 +239,8 @@ where
             tls_context: tls_config
                 .as_ref()
                 .and_then(|e| build_ssl_ctx_from_config(e).ok()),
+            tls_config: tls_config.clone(),
+            is_ssl_connection: false,
             result_cache: Default::default(),
             unnamed_prepare_statement: Default::default(),
             prepare_statement_store: Default::default(),
@@ -602,6 +624,7 @@ where
             // Construct ssl stream and replace with current one.
             self.stream.write(BeMessage::EncryptionResponseSsl).await?;
             self.stream.upgrade_to_ssl(context).await?;
+            self.is_ssl_connection = true;
         } else {
             // If no, say no for encryption.
             self.stream.write(BeMessage::EncryptionResponseNo).await?;
@@ -611,6 +634,14 @@ where
     }
 
     fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
+        // Check SSL enforcement: if SSL is enforced but connection is not using SSL, reject
+        if let Some(ref tls_config) = self.tls_config
+            && tls_config.enforce_ssl && !self.is_ssl_connection {
+                return Err(PsqlError::StartupError(
+                    "SSL connection is required but not established".into(),
+                ));
+            }
+
         let db_name = msg
             .config
             .get("database")
