@@ -84,6 +84,9 @@ pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bo
     /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 
+    /// Minimum cache capacity per group from config
+    topn_cache_min_capacity: usize,
+
     metrics: GroupTopNMetrics,
 }
 
@@ -123,6 +126,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             group_by,
             caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
+            topn_cache_min_capacity: ctx.streaming_config.developer.topn_cache_min_capacity,
             metrics,
         })
     }
@@ -182,8 +186,12 @@ where
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
                 self.metrics.group_top_n_cache_miss_count.inc();
-                let mut topn_cache =
-                    TopNCache::new(self.offset, self.limit, self.schema.data_types());
+                let mut topn_cache = TopNCache::with_min_capacity(
+                    self.offset,
+                    self.limit,
+                    self.schema.data_types(),
+                    self.topn_cache_min_capacity,
+                );
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;

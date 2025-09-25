@@ -103,7 +103,11 @@ impl CreatingStreamingJobControl {
             )],
             version_stat,
         );
-        let fragment_infos: HashMap<_, _> = info.stream_job_fragments.new_fragment_info().collect();
+
+        let fragment_infos: HashMap<_, _> = info
+            .stream_job_fragments
+            .new_fragment_info(&info.init_split_assignment)
+            .collect();
 
         let actors_to_create =
             edges.collect_actors_to_create(info.stream_job_fragments.actors_to_create());

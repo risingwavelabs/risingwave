@@ -20,7 +20,7 @@ use risingwave_expr::function;
 #[function("array_sort(anyarray) -> anyarray")]
 pub fn array_sort(array: ListRef<'_>) -> ListValue {
     ListValue::from_datum_iter(
-        &array.data_type(),
+        &array.elem_type(),
         array.iter().map(DefaultOrdered).sorted().map(|v| v.0),
     )
 }

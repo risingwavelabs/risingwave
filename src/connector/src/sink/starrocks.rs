@@ -264,7 +264,7 @@ impl StarrocksSink {
                 if starrocks_data_type.contains("unknown") {
                     return Ok(true);
                 }
-                let check_result = Self::check_and_correct_column_type(list.as_ref(), starrocks_data_type)?;
+                let check_result = Self::check_and_correct_column_type(list.elem(), starrocks_data_type)?;
                 Ok(check_result && starrocks_data_type.contains("array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(

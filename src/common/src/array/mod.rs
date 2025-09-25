@@ -65,8 +65,8 @@ pub use stream_chunk_builder::StreamChunkBuilder;
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 pub use vector_array::{
-    Finite32, VECTOR_DISTANCE_TYPE, VECTOR_ITEM_TYPE, VectorArray, VectorArrayBuilder,
-    VectorDistanceType, VectorItemType, VectorRef, VectorVal,
+    Finite32, VECTOR_AS_LIST_TYPE, VECTOR_DISTANCE_TYPE, VECTOR_ITEM_TYPE, VectorArray,
+    VectorArrayBuilder, VectorDistanceType, VectorItemType, VectorRef, VectorVal,
 };
 
 pub use self::error::ArrayError;

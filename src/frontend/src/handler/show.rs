@@ -237,7 +237,7 @@ impl ShowColumnRow {
         // TODO(struct): use struct's type name once supported.
         let r#type = match &data_type {
             DataType::Struct(_) => "struct".to_owned(),
-            DataType::List(box DataType::Struct(_)) => "struct[]".to_owned(),
+            DataType::List(list) if let DataType::Struct(_) = list.elem() => "struct[]".to_owned(),
             d => d.to_string(),
         };
 
@@ -257,10 +257,10 @@ impl ShowColumnRow {
                 }));
             }
 
-            DataType::List(inner @ box DataType::Struct(_)) => {
+            DataType::List(list) if let DataType::Struct(_) = list.elem() => {
                 let mut name = name.clone();
                 name.0.push(ShowColumnNameSegment::ListElement);
-                rows.extend(Self::flatten(name, *inner, is_hidden, None));
+                rows.extend(Self::flatten(name, list.into_elem(), is_hidden, None));
             }
 
             _ => {}

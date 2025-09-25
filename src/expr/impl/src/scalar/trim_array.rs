@@ -85,7 +85,7 @@ fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
                 reason: "more than array length".into(),
             })?;
     Ok(ListValue::from_datum_iter(
-        &array.data_type(),
+        &array.elem_type(),
         values.take(len_to_retain),
     ))
 }
