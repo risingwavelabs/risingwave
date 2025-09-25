@@ -16,6 +16,7 @@ use anyhow::{Context, anyhow};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 
+use crate::sink::formatter::debezium_json::KEY_SCHEMA_ENABLE;
 use crate::sink::{Result, SinkError};
 
 mod append_only;
@@ -401,12 +402,19 @@ impl FormatterBuild for DebeziumJsonFormatter {
     async fn build(b: FormatterParams<'_>) -> Result<Self> {
         assert_eq!(b.builder.format_desc.encode, SinkEncode::Json);
 
+        let with_schema = b
+            .builder
+            .format_desc
+            .options
+            .get(KEY_SCHEMA_ENABLE)
+            .map_or(true, |s| s.to_lowercase().parse::<bool>().unwrap_or(true));
+
         Ok(DebeziumJsonFormatter::new(
             b.builder.schema,
             b.pk_indices,
             b.builder.db_name,
             b.builder.sink_from_name,
-            DebeziumAdapterOpts::default(),
+            DebeziumAdapterOpts::default().with_schema(with_schema),
         ))
     }
 }
