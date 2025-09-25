@@ -340,6 +340,7 @@ pub async fn create_pg_client(
     database: &str,
     ssl_mode: &SslMode,
     ssl_root_cert: &Option<String>,
+    application_name: &str,
 ) -> anyhow::Result<PgClient> {
     let mut pg_config = tokio_postgres::Config::new();
     pg_config
@@ -347,7 +348,8 @@ pub async fn create_pg_client(
         .password(password)
         .host(host)
         .port(port.parse::<u16>().unwrap())
-        .dbname(database);
+        .dbname(database)
+        .application_name(application_name);
 
     let (_verify_ca, verify_hostname) = match ssl_mode {
         SslMode::VerifyCa => (true, false),

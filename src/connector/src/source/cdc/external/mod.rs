@@ -92,14 +92,21 @@ impl ExternalCdcTableType {
         schema: Schema,
         pk_indices: Vec<usize>,
         schema_table_name: SchemaTableName,
+        table_id: u32,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(config, schema)?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(config, schema, pk_indices, schema_table_name)
-                    .await?,
+                PostgresExternalTableReader::new(
+                    config,
+                    schema,
+                    pk_indices,
+                    schema_table_name,
+                    table_id,
+                )
+                .await?,
             )),
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
