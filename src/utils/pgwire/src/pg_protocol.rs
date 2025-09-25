@@ -636,11 +636,13 @@ where
     fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
         // Check SSL enforcement: if SSL is enforced but connection is not using SSL, reject
         if let Some(ref tls_config) = self.tls_config
-            && tls_config.enforce_ssl && !self.is_ssl_connection {
-                return Err(PsqlError::StartupError(
-                    "SSL connection is required but not established".into(),
-                ));
-            }
+            && tls_config.enforce_ssl
+            && !self.is_ssl_connection
+        {
+            return Err(PsqlError::StartupError(
+                "SSL connection is required but not established".into(),
+            ));
+        }
 
         let db_name = msg
             .config
