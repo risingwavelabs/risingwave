@@ -436,8 +436,6 @@ impl GlobalBarrierWorkerContextImpl {
                     .await
                     .context("purge state table from hummock")?;
 
-                    println!("generated info {:?}", info);
-
                     let background_jobs = {
                         let mut background_jobs = HashMap::new();
 

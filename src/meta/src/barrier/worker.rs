@@ -235,6 +235,8 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
 
+            println!("xxpaused is {}", paused);
+
             self.recovery(paused, RecoveryReason::Bootstrap)
                 .instrument(span)
                 .await;
