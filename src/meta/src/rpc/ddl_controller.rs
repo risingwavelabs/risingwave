@@ -490,16 +490,16 @@ impl DdlController {
         &self,
         job_id: u32,
         target: ReschedulePolicy,
-        mut deferred: bool,
+        deferred: bool,
     ) -> MetaResult<()> {
         println!("altering job  {}", job_id);
         tracing::info!("alter parallelism");
-        if self.barrier_manager.check_status_running().is_err() {
-            tracing::info!(
-                "alter parallelism is set to deferred mode because the system is in recovery state"
-            );
-            deferred = true;
-        }
+        // if self.barrier_manager.check_status_running().is_err() {
+        //     tracing::info!(
+        //         "alter parallelism is set to deferred mode because the system is in recovery state"
+        //     );
+        //     deferred = true;
+        // }
 
         self.stream_manager
             .reschedule_streaming_job(job_id, target, deferred)
