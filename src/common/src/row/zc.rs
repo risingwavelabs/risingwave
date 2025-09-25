@@ -150,7 +150,7 @@ impl std::fmt::Debug for ZcRowData {
 pub struct ZcRow {
     data: Box<ZcRowData>,
     /// The root metadata.
-    zc: Ref<[ZcDatum]>,
+    zc_ref: Ref<[ZcDatum]>,
 }
 
 /// Reference to a [`ZcRow`].
@@ -158,7 +158,7 @@ pub struct ZcRow {
 pub struct ZcRowRef<'a> {
     data: &'a ZcRowData,
     /// The root metadata.
-    zc: Ref<[ZcDatum]>,
+    zc_ref: Ref<[ZcDatum]>,
 }
 
 impl ZcRow {
@@ -166,17 +166,12 @@ impl ZcRow {
     pub fn as_ref(&self) -> ZcRowRef<'_> {
         ZcRowRef {
             data: &self.data,
-            zc: self.zc,
+            zc_ref: self.zc_ref,
         }
     }
 }
 
 impl<'a> ZcRowRef<'a> {
-    /// Load all `ZcDatum`s.
-    fn zc_datums(self) -> &'a [ZcDatum] {
-        self.zc.load(&self.data.buf).unwrap()
-    }
-
     /// Convert the given `ZcDatum` into `DatumRef` by loading necessary data from `data`.
     fn load_datum(self, datum: ZcDatum) -> DatumRef<'a> {
         datum.load(&self.data.buf, &self.data.todo)
@@ -184,10 +179,12 @@ impl<'a> ZcRowRef<'a> {
 }
 
 /// A set of methods similar to `Row` trait but consuming `self`.
+/// Can be used to workaround some lifetime issues.
 impl<'a> ZcRowRef<'a> {
     /// Returns the [`DatumRef`] at the given `index`.
     pub fn datum_at(self, i: usize) -> DatumRef<'a> {
-        let zc = self.zc_datums()[i];
+        let zc_ref = self.zc_ref.get(i).expect("index out of bound");
+        let zc = *zc_ref.load(&self.data.buf).unwrap();
         self.load_datum(zc)
     }
 
@@ -196,13 +193,15 @@ impl<'a> ZcRowRef<'a> {
     /// # Safety
     /// Calling this method with an out-of-bounds index is undefined behavior.
     pub unsafe fn datum_at_unchecked(self, i: usize) -> DatumRef<'a> {
-        let zc = *unsafe { self.zc_datums().get_unchecked(i) };
+        let zc_ref = self.zc_ref.get_unchecked(i);
+        let zc = *zc_ref.load(&self.data.buf).unwrap();
         self.load_datum(zc)
     }
 
     /// Returns an exact-size iterator over the datums in the row, in [`DatumRef`] form.
     pub fn iter(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> {
-        self.zc_datums().iter().map(move |zc| self.load_datum(*zc))
+        let zcs = self.zc_ref.load(&self.data.buf).unwrap();
+        zcs.iter().map(move |zc| self.load_datum(*zc))
     }
 }
 
@@ -217,7 +216,7 @@ impl<'a> Row for ZcRowRef<'a> {
     }
 
     fn len(&self) -> usize {
-        self.zc.len()
+        self.zc_ref.len()
     }
 
     fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
@@ -267,14 +266,14 @@ impl<R: Row> R {
     pub fn zc_encode(&self) -> ZcRow {
         let mut buf = OwnedBuf::new();
         let mut todo = Vec::new(); // TODO: reserve first
-        let zc = row_store_to(self, &mut buf, &mut todo);
+        let zc_ref = row_store_to(self, &mut buf, &mut todo);
 
         ZcRow {
             data: Box::new(ZcRowData {
                 buf,
                 todo: OwnedRow::new(todo),
             }),
-            zc,
+            zc_ref,
         }
     }
 }
