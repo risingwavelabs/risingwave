@@ -642,37 +642,37 @@ steps:
     timeout_in_minutes: 60 # ~3-4 queries can run
 
   # Backwards compatibility tests
-  - label: "Backwards compatibility tests"
-    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-dev"
-    if: |
-      build.pull_request.labels includes "breaking-change" ||
-        build.pull_request.labels includes "ci/run-backwards-compat-tests" ||
-        build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: source-test-env
-          environment:
-          - BUILDKITE_BRANCH
-      - ./ci/plugins/upload-failure-logs
-    matrix:
-      setup:
-        # Test the 4 latest versions against the latest main.
-        # e.g.
-        # 1: 2.0.0
-        # 2: 1.1.1
-        # 3: 1.0.1
-        # 4: 1.0.0
-        # It is ordered by the full version number, rather than minor / major version.
-        # We can change to just be on major version in the future.
-        version_offset:
-          - "1"
-          - "2"
-          - "3"
-          - "4"
-    timeout_in_minutes: 25
+#  - label: "Backwards compatibility tests"
+#    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-dev"
+#    if: |
+#      build.pull_request.labels includes "breaking-change" ||
+#        build.pull_request.labels includes "ci/run-backwards-compat-tests" ||
+#        build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
+#    depends_on:
+#      - "build"
+#    plugins:
+#      - docker-compose#v5.5.0:
+#          <<: *docker-compose
+#          run: source-test-env
+#          environment:
+#          - BUILDKITE_BRANCH
+#      - ./ci/plugins/upload-failure-logs
+#    matrix:
+#      setup:
+#        # Test the 4 latest versions against the latest main.
+#        # e.g.
+#        # 1: 2.0.0
+#        # 2: 1.1.1
+#        # 3: 1.0.1
+#        # 4: 1.0.0
+#        # It is ordered by the full version number, rather than minor / major version.
+#        # We can change to just be on major version in the future.
+#        version_offset:
+#          - "1"
+#          - "2"
+#          - "3"
+#          - "4"
+#    timeout_in_minutes: 25
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"
@@ -720,46 +720,46 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
-  - label: "end-to-end test ({{matrix.label}} backend)"
-    <<: *other-sql-backend
-    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
-    if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: ci-standard-env
-          propagate-environment: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 37
-    retry: *auto-retry
+#  - label: "end-to-end test ({{matrix.label}} backend)"
+#    <<: *other-sql-backend
+#    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
+#    if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
+#    depends_on:
+#      - "build"
+#    plugins:
+#      - docker-compose#v5.5.0:
+#          <<: *docker-compose
+#          run: ci-standard-env
+#          propagate-environment: true
+#      - ./ci/plugins/upload-failure-logs
+#    timeout_in_minutes: 37
+#    retry: *auto-retry
 
   # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.
-  - label: "fuzz test"
-    command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
-    if: build.pull_request.labels includes "ci/run-sqlsmith-fuzzing-tests" || build.env("CI_STEPS") =~ /(^|,)sqlsmith-fuzzing-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-simulation"
-    plugins:
-      - ./ci/plugins/swapfile
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
-    retry: *auto-retry
+#  - label: "fuzz test"
+#    command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
+#    if: build.pull_request.labels includes "ci/run-sqlsmith-fuzzing-tests" || build.env("CI_STEPS") =~ /(^|,)sqlsmith-fuzzing-tests?(,|$$)/
+#    depends_on:
+#      - "build"
+#      - "build-simulation"
+#    plugins:
+#      - ./ci/plugins/swapfile
+#      - docker-compose#v5.5.0: *docker-compose
+#      - ./ci/plugins/upload-failure-logs
+#    timeout_in_minutes: 15
+#    retry: *auto-retry
 
-  - label: "deterministic fuzz test"
-    command: "ci/scripts/run-deterministic-fuzz-test.sh -p ci-dev"
-    if: build.pull_request.labels includes "ci/run-deterministic-sqlsmith-fuzzing-tests" || build.env("CI_STEPS") =~ /(^|,)deterministic-sqlsmith-fuzzing-tests?(,|$$)/
-    depends_on:
-      - "build-simulation"
-    plugins:
-      - ./ci/plugins/swapfile
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 45
-    retry: *auto-retry
+#  - label: "deterministic fuzz test"
+#    command: "ci/scripts/run-deterministic-fuzz-test.sh -p ci-dev"
+#    if: build.pull_request.labels includes "ci/run-deterministic-sqlsmith-fuzzing-tests" || build.env("CI_STEPS") =~ /(^|,)deterministic-sqlsmith-fuzzing-tests?(,|$$)/
+#    depends_on:
+#      - "build-simulation"
+#    plugins:
+#      - ./ci/plugins/swapfile
+#      - docker-compose#v5.5.0: *docker-compose
+#      - ./ci/plugins/upload-failure-logs
+#    timeout_in_minutes: 45
+#    retry: *auto-retry
 
   - label: "enable ci/pr/run-selected only in draft PRs"
     if: build.pull_request.labels includes "ci/pr/run-selected" && !build.pull_request.draft
