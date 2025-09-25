@@ -166,6 +166,7 @@ pub struct LocalityProviderExecutor<S: StateStore> {
     upstream: Executor,
 
     /// Locality columns (indices in input schema)
+    #[allow(dead_code)]
     locality_columns: Vec<usize>,
 
     /// State table for buffering input data
@@ -174,13 +175,13 @@ pub struct LocalityProviderExecutor<S: StateStore> {
     /// Progress table for tracking backfill progress per vnode
     progress_table: StateTable<S>,
 
-    /// Schema of the input
     input_schema: Schema,
 
     /// Progress reporter for materialized view creation
     progress: CreateMviewProgressReporter,
 
-    /// Actor ID for this executor
+    fragment_id: FragmentId,
+
     actor_id: ActorId,
 
     /// Metrics
@@ -188,9 +189,6 @@ pub struct LocalityProviderExecutor<S: StateStore> {
 
     /// Chunk size for output
     chunk_size: usize,
-
-    /// Fragment ID of the fragment this LocalityProvider belongs to
-    fragment_id: FragmentId,
 }
 
 impl<S: StateStore> LocalityProviderExecutor<S> {
@@ -320,7 +318,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     /// Load backfill state from progress table
     async fn load_backfill_state(
         progress_table: &StateTable<S>,
-        _locality_columns: &[usize],
     ) -> StreamExecutorResult<LocalityBackfillState> {
         let mut backfill_state = LocalityBackfillState::new(progress_table.vnodes().iter_vnodes());
         let mut total_snapshot_rows = 0;
@@ -387,7 +384,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         let pk_indices = state_table.pk_indices();
         let pk_order = state_table.pk_serde().get_order_types();
 
-        for (_i, row) in data.rows().enumerate() {
+        for row in data.rows() {
             // Project to primary key columns for comparison
             let pk = row.project(pk_indices);
             let vnode = state_table.compute_vnode_by_pk(pk);
@@ -458,8 +455,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         progress_table.init_epoch(first_epoch).await?;
 
         // Load backfill state from progress table
-        let mut backfill_state =
-            Self::load_backfill_state(&progress_table, &self.locality_columns).await?;
+        let mut backfill_state = Self::load_backfill_state(&progress_table).await?;
 
         // Get pk info from state table
         let pk_indices = state_table.pk_indices().iter().cloned().collect_vec();
@@ -707,12 +703,12 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 // Update progress with current epoch and snapshot read count
                 let total_snapshot_processed_rows: u64 = backfill_state
                     .vnodes()
-                    .map(|(_, progress)| match progress {
-                        &LocalityBackfillProgress::InProgress { processed_rows, .. } => {
+                    .map(|(_, progress)| match *progress {
+                        LocalityBackfillProgress::InProgress { processed_rows, .. } => {
                             processed_rows
                         }
-                        &LocalityBackfillProgress::Completed { total_rows, .. } => total_rows,
-                        &LocalityBackfillProgress::NotStarted => 0,
+                        LocalityBackfillProgress::Completed { total_rows, .. } => total_rows,
+                        LocalityBackfillProgress::NotStarted => 0,
                     })
                     .sum();
 
@@ -736,26 +732,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
                 yield Message::Barrier(barrier);
                 post_commit.post_yield_barrier(None).await?;
-
-                // Check if all vnodes are complete
-                if backfill_state.is_completed() {
-                    // Backfill is complete, finish progress reporting
-                    let total_snapshot_processed_rows: u64 = backfill_state
-                        .vnodes()
-                        .map(|(_, progress)| {
-                            match progress {
-                                &LocalityBackfillProgress::Completed { total_rows, .. } => {
-                                    total_rows
-                                }
-                                _ => 0, // Should all be completed at this point
-                            }
-                        })
-                        .sum();
-
-                    self.progress
-                        .finish(barrier_epoch, total_snapshot_processed_rows);
-                    break 'backfill_loop;
-                }
             }
         }
 
@@ -779,14 +755,14 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         // Calculate final total processed rows
                         let total_snapshot_processed_rows: u64 = backfill_state
                             .vnodes()
-                            .map(|(_, progress)| match progress {
-                                &LocalityBackfillProgress::Completed { total_rows, .. } => {
+                            .map(|(_, progress)| match *progress {
+                                LocalityBackfillProgress::Completed { total_rows, .. } => {
                                     total_rows
                                 }
-                                &LocalityBackfillProgress::InProgress {
-                                    processed_rows, ..
-                                } => processed_rows,
-                                &LocalityBackfillProgress::NotStarted => 0,
+                                LocalityBackfillProgress::InProgress { processed_rows, .. } => {
+                                    processed_rows
+                                }
+                                LocalityBackfillProgress::NotStarted => 0,
                             })
                             .sum();
 

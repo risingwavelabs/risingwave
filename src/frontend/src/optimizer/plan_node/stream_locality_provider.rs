@@ -124,7 +124,7 @@ impl ExprVisitable for StreamLocalityProvider {
 impl StreamLocalityProvider {
     /// Build the state table catalog for buffering input data
     /// Schema: same as input schema (locality handled by primary key ordering)
-    /// Key: locality_columns (vnode handled internally by StateTable)
+    /// Key: `locality_columns` (vnode handled internally by `StateTable`)
     fn build_state_catalog(&self, state: &mut BuildFragmentGraphState) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();
         let input = self.input();
@@ -146,7 +146,7 @@ impl StreamLocalityProvider {
             }
         }
 
-        catalog_builder.set_value_indices((0..input_schema.len()).into_iter().collect());
+        catalog_builder.set_value_indices((0..input_schema.len()).collect());
 
         catalog_builder
             .build(
@@ -157,7 +157,7 @@ impl StreamLocalityProvider {
     }
 
     /// Build the progress table catalog for tracking backfill progress
-    /// Schema: | vnode | pk(locality columns + input stream keys) | backfill_finished | row_count |
+    /// Schema: | vnode | pk(locality columns + input stream keys) | `backfill_finished` | `row_count` |
     /// Key: | vnode | pk(locality columns + input stream keys) |
     fn build_progress_catalog(&self, state: &mut BuildFragmentGraphState) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();

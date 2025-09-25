@@ -1094,13 +1094,13 @@ impl StreamFragmentGraph {
         fragment_ordering
     }
 
-    /// Find dependency relationships among fragments containing LocalityProvider nodes.
+    /// Find dependency relationships among fragments containing `LocalityProvider` nodes.
     /// Returns a mapping where each fragment ID maps to a list of fragment IDs that should be processed after it.
-    /// Following the same semantics as FragmentBackfillOrder:
-    /// `G[10] -> [1, 2, 11]` means LocalityProvider in fragment 10 should be processed
-    /// before LocalityProviders in fragments 1, 2, and 11.
+    /// Following the same semantics as `FragmentBackfillOrder`:
+    /// `G[10] -> [1, 2, 11]` means `LocalityProvider` in fragment 10 should be processed
+    /// before `LocalityProviders` in fragments 1, 2, and 11.
     ///
-    /// This method assumes each fragment contains at most one LocalityProvider node.
+    /// This method assumes each fragment contains at most one `LocalityProvider` node.
     pub fn find_locality_provider_dependencies(&self) -> HashMap<FragmentId, Vec<FragmentId>> {
         let mut locality_provider_fragments = HashSet::new();
         let mut dependencies: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
@@ -1143,7 +1143,6 @@ impl StreamFragmentGraph {
         dependencies
     }
 
-    /// Check if a fragment contains a LocalityProvider node
     fn fragment_has_locality_provider(&self, fragment: &BuildingFragment) -> bool {
         let mut has_locality_provider = false;
 
@@ -1161,7 +1160,7 @@ impl StreamFragmentGraph {
         has_locality_provider
     }
 
-    /// Recursively collect downstream LocalityProvider fragments
+    /// Recursively collect downstream `LocalityProvider` fragments
     fn collect_downstream_locality_providers(
         &self,
         current_fragment_id: GlobalFragmentId,
@@ -1175,7 +1174,7 @@ impl StreamFragmentGraph {
         visited.insert(current_fragment_id);
 
         // Check all downstream fragments
-        for (&downstream_id, _edge) in self.get_downstreams(current_fragment_id) {
+        for &downstream_id in self.get_downstreams(current_fragment_id).keys() {
             let downstream_fragment_id = downstream_id.as_global_id();
 
             // If the downstream fragment is a LocalityProvider, add it to results

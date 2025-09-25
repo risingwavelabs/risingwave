@@ -112,8 +112,8 @@ impl ToBatch for LogicalLocalityProvider {
     fn to_batch(&self) -> Result<BatchPlanRef> {
         // LocalityProvider is a streaming-only operator
         Err(crate::error::ErrorCode::NotSupported(
-            "LocalityProvider in batch mode".to_string(),
-            "LocalityProvider is only supported in streaming mode for backfilling".to_string(),
+            "LocalityProvider in batch mode".to_owned(),
+            "LocalityProvider is only supported in streaming mode for backfilling".to_owned(),
         )
         .into())
     }
@@ -168,12 +168,10 @@ impl LogicalLocalityProvider {
     pub fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
         if columns == self.locality_columns() {
             Some(self.clone().into())
+        } else if let Some(better_input) = self.input().try_better_locality(columns) {
+            Some(better_input)
         } else {
-            if let Some(better_input) = self.input().try_better_locality(columns) {
-                Some(better_input)
-            } else {
-                Some(Self::new(self.input(), columns.to_owned()).into())
-            }
+            Some(Self::new(self.input(), columns.to_owned()).into())
         }
     }
 }

@@ -1775,7 +1775,7 @@ impl ToStream for LogicalJoin {
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
         if let Some(better_plan) = self.try_better_locality_inner(columns) {
-            return Some(better_plan);
+            Some(better_plan)
         } else if self.ctx().session_ctx().config().enable_locality_backfill() {
             Some(
                 LogicalLocalityProvider::new(
