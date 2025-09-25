@@ -17,6 +17,9 @@ use crate::hummock::compactor::iceberg_compaction::iceberg_compactor_runner::Ice
 pub(crate) mod iceberg_compactor_runner;
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+
+use tokio::sync::Notify;
 
 type TaskId = u64;
 type TaskUniqueIdent = String; // format!("{}-{:?}", catalog_name, table_ident)
@@ -54,6 +57,7 @@ struct IcebergTaskQueueInner {
 /// 2. Dequeue (pop) -> transitions the task to running state.
 /// 3. Duplicate detection: if same unique ident already running, new task is rejected.
 /// 4. Cancel/remove only affects waiting tasks (not running).
+/// 5. Event-driven scheduling notifications when tasks become available
 ///
 /// NOTE: This MVP does not implement capacity eviction policy beyond a hard full rejection.
 pub struct IcebergTaskQueue {
@@ -62,6 +66,8 @@ pub struct IcebergTaskQueue {
     max_parallelism: u32,
     /// Budget for sum(required_parallelism) of waiting tasks (buffer), e.g. 4 * max_parallelism.
     pending_parallelism_budget: u32,
+    /// Notification for when tasks become schedulable
+    schedule_notify: Option<Arc<Notify>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -93,6 +99,54 @@ impl IcebergTaskQueue {
             },
             max_parallelism,
             pending_parallelism_budget,
+            schedule_notify: None,
+        }
+    }
+
+    /// Create queue with event-driven scheduling notifications using Notify
+    pub fn new_with_notify(
+        max_parallelism: u32,
+        pending_parallelism_budget: u32,
+    ) -> (Self, Arc<Notify>) {
+        let notify = Arc::new(Notify::new());
+        let mut queue = Self::new(max_parallelism, pending_parallelism_budget);
+        queue.schedule_notify = Some(notify.clone());
+        (queue, notify)
+    }
+
+    /// Provide an async method to wait for schedulable tasks
+    pub async fn wait_schedulable(&self) -> bool {
+        if let Some(notify) = &self.schedule_notify {
+            // Check if we have tasks that can be scheduled right now
+            if self.has_schedulable_tasks() {
+                return true;
+            }
+            // Otherwise wait for notification
+            notify.notified().await;
+            self.has_schedulable_tasks()
+        } else {
+            self.has_schedulable_tasks()
+        }
+    }
+
+    /// Check if there are tasks that can be scheduled with current capacity
+    fn has_schedulable_tasks(&self) -> bool {
+        if let Some(front_task) = self.inner.deque.front() {
+            let available_parallelism = self
+                .max_parallelism
+                .saturating_sub(self.inner.running_parallelism_sum);
+            available_parallelism >= front_task.required_parallelism
+        } else {
+            false
+        }
+    }
+
+    /// Notify that tasks might be schedulable now
+    fn notify_schedulable(&self) {
+        if let Some(notify) = &self.schedule_notify {
+            if self.has_schedulable_tasks() {
+                notify.notify_one();
+            }
         }
     }
 
@@ -186,11 +240,13 @@ impl IcebergTaskQueue {
         if let Some(r) = runner {
             self.inner.runners.insert(r.task_id, r);
         }
+        // Notify that we might have schedulable tasks now
+        self.notify_schedulable();
         PushResult::Added
     }
 
     /// Pop the head task (strict FIFO) if it fits remaining parallelism.
-    /// 内部自行维护 running_parallelism_sum, 不需要调用方传参。
+    /// Internally maintains running_parallelism_sum, no need for caller to pass parameters.
     pub fn pop(&mut self) -> Option<PoppedIcebergTask> {
         let front = self.inner.deque.front()?;
         if front.required_parallelism > self.available_parallelism() {
@@ -221,8 +277,10 @@ impl IcebergTaskQueue {
         if self.inner.running.remove(&uid) {
             self.inner.running_parallelism_sum =
                 self.inner.running_parallelism_sum.saturating_sub(required);
-            // runner 生命周期：由 take_runner 后的执行逻辑消费；若还留在 map 中这里清理避免泄漏。
+            // Runner lifecycle: consumed by logic after take_runner; cleanup here if still in map to avoid leak.
             self.inner.runners.remove(&task_id);
+            // Notify that we might have schedulable tasks now (capacity freed up)
+            self.notify_schedulable();
             true
         } else {
             false
@@ -230,11 +288,11 @@ impl IcebergTaskQueue {
     }
 }
 
-// Guidance 更新 (简化后):
-// 1. push 校验 0 < p <= max_parallelism 且等待并行度预算；重复 waiting 直接原位替换 (可选择性更新 runner)。
-// 2. pop 返回 meta + Option<runner>，不需要额外 take_runner。
-// 3. available = max_parallelism - running_parallelism_sum；严格 FIFO，不跳过 head。
-// 4. head-of-line blocking 暂不优化，后续可加 lookahead。
+// Updated Guidance (simplified):
+// 1. push validates 0 < p <= max_parallelism and waiting parallelism budget; duplicate waiting directly replaces in-place (optional runner update).
+// 2. pop returns meta + Option<runner>, no additional take_runner needed.
+// 3. available = max_parallelism - running_parallelism_sum; strict FIFO, don't skip head.
+// 4. head-of-line blocking not optimized for now, can add lookahead later.
 
 #[cfg(test)]
 mod tests {
@@ -252,7 +310,7 @@ mod tests {
     #[test]
     fn test_push_pop_with_runner() {
         let mut q = IcebergTaskQueue::new(8, 32); // max_parallelism=8, budget 32
-        // fabricate runner via minimal construction path is complex; we only test presence flag by pushing None and Some.
+        // Fabricating runner via minimal construction path is complex; we only test presence flag by pushing None and Some.
         let meta = mk_meta(1, "t1", 4);
         let res = q.push(meta.clone(), None); // no runner
         assert_eq!(res, PushResult::Added);

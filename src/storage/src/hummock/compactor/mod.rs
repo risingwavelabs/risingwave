@@ -312,11 +312,10 @@ pub fn start_iceberg_compactor(
     );
 
     let join_handle = tokio::spawn(async move {
-        // Initialize task queue with proper parallelism budget
-        // Use 4x max parallelism as pending budget to allow reasonable buffering
+        // Initialize task queue with event-driven scheduling using Notify
         let pending_parallelism_budget = max_task_parallelism * 4;
-        let mut task_queue =
-            IcebergTaskQueue::new(max_task_parallelism, pending_parallelism_budget);
+        let (mut task_queue, _schedule_notify) =
+            IcebergTaskQueue::new_with_notify(max_task_parallelism, pending_parallelism_budget);
 
         // Shutdown tracking for running tasks (task_id -> shutdown_sender)
         let shutdown_map = Arc::new(Mutex::new(
@@ -388,15 +387,24 @@ pub fn start_iceberg_compactor(
                         continue 'consume_stream;
                     }
 
-                    _ = periodic_event_interval.tick() => {
-                        let should_restart_stream = handle_iceberg_periodic_scheduling(
+                    // Event-driven task scheduling - wait for tasks to become schedulable
+                    _ = task_queue.wait_schedulable() => {
+                        schedule_queued_tasks(
                             &mut task_queue,
-                            &mut pull_task_ack,
-                            max_task_parallelism,
-                            max_pull_task_count,
                             &compactor_context,
                             &shutdown_map,
                             &task_completion_tx,
+                        ).await;
+                        continue 'consume_stream;
+                    }
+
+                    _ = periodic_event_interval.tick() => {
+                        // Only handle meta task pulling in periodic tick
+                        let should_restart_stream = handle_meta_task_pulling(
+                            &mut pull_task_ack,
+                            &task_queue,
+                            max_task_parallelism,
+                            max_pull_task_count,
                             &request_sender,
                         ).await;
 
@@ -1072,19 +1080,13 @@ fn get_task_progress(
     progress_list
 }
 
-/// Handle periodic task scheduling for iceberg compactor
-/// Returns true if the stream should be restarted
-async fn handle_iceberg_periodic_scheduling(
+/// Schedule queued tasks if we have capacity
+async fn schedule_queued_tasks(
     task_queue: &mut IcebergTaskQueue,
-    pull_task_ack: &mut bool,
-    max_task_parallelism: u32,
-    max_pull_task_count: u32,
     compactor_context: &CompactorContext,
     shutdown_map: &Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>>,
     task_completion_tx: &tokio::sync::mpsc::UnboundedSender<u64>,
-    request_sender: &mpsc::UnboundedSender<SubscribeIcebergCompactionEventRequest>,
-) -> bool {
-    // 1. First, try to schedule queued tasks if we have capacity
+) {
     while let Some(popped_task) = task_queue.pop() {
         let task_id = popped_task.meta.task_id;
         let Some(runner) = popped_task.runner else {
@@ -1134,8 +1136,17 @@ async fn handle_iceberg_periodic_scheduling(
             }
         });
     }
+}
 
-    // 2. Then, check if we should pull more tasks from meta
+/// Handle pulling new tasks from meta service
+/// Returns true if the stream should be restarted
+async fn handle_meta_task_pulling(
+    pull_task_ack: &mut bool,
+    task_queue: &IcebergTaskQueue,
+    max_task_parallelism: u32,
+    max_pull_task_count: u32,
+    request_sender: &mpsc::UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+) -> bool {
     let mut pending_pull_task_count = 0;
     if *pull_task_ack {
         // Use queue's running parallelism for pull decision
