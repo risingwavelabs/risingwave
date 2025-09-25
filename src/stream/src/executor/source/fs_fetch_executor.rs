@@ -21,6 +21,7 @@ use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -264,7 +265,19 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::error!(error = %e.as_report(), "Fetch Error");
+                    tracing::error!(
+                        source_id = %core.source_id,
+                        source_name = %core.source_name,
+                        fragment_id = %self.actor_ctx.fragment_id,
+                        error = %e.as_report(),
+                        "Fetch Error"
+                    );
+                    GLOBAL_ERROR_METRICS.user_source_error.report([
+                        "File source fetch error".to_owned(),
+                        core.source_id.to_string(),
+                        core.source_name.to_owned(),
+                        self.actor_ctx.fragment_id.to_string(),
+                    ]);
                     splits_on_fetch = 0;
                 }
                 Ok(msg) => {
