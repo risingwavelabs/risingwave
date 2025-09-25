@@ -893,6 +893,11 @@ mod tests {
                     65536,
                     "UPSTREAM_SINK_UNION",
                 ),
+                (
+                    LocalityProvider,
+                    131072,
+                    "LOCALITY_PROVIDER",
+                ),
             ]
         "#]]
         .assert_debug_eq(
