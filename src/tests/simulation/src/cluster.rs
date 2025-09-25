@@ -984,6 +984,18 @@ impl Session {
         let result = self.run("show streaming_use_arrangement_backfill").await?;
         Ok(result == "true")
     }
+
+    /// Run `SHOW INTERNAL TABLES`. Returns a list of `(schema_name, table_name)`.
+    pub async fn show_internal_tables(&mut self) -> Result<Vec<(String, String)>> {
+        let result = self.run("show internal tables").await?;
+        Ok(result
+            .lines()
+            .map(|line| {
+                let (schema_name, table_name) = line.split_once(char::is_whitespace).unwrap();
+                (schema_name.to_owned(), table_name.to_owned())
+            })
+            .collect())
+    }
 }
 
 /// Options for killing nodes.
