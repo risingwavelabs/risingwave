@@ -25,6 +25,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, BoolArrayBuilder, DataChunk};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
@@ -58,11 +59,8 @@ use crate::session::SessionImpl;
 pub enum BatchPlanChoice {
     RW(BatchQueryPlanResult),
     DF {
-        df_plan: datafusion::logical_expr::LogicalPlan,
-        schema: Schema,
+        df_plan: LogicalPlan,
         stmt_type: StatementType,
-        dependent_relations: Vec<TableId>,
-        read_storage_tables: HashSet<TableId>,
     },
 }
 
@@ -86,7 +84,7 @@ pub async fn handle_query(
                 )?;
                 Either::Left(plan_fragmenter_result)
             }
-            BatchPlanChoice::DF { df_plan, .. } => Either::Right(df_plan),
+            BatchPlanChoice::DF { df_plan, stmt_type } => Either::Right((df_plan, stmt_type)),
         }
     };
 
@@ -94,7 +92,9 @@ pub async fn handle_query(
         Either::Left(plan_fragmenter_result) => {
             execute(session, plan_fragmenter_result, formats).await
         }
-        Either::Right(df_plan) => execute_datafusion_plan(session, df_plan, formats).await,
+        Either::Right((df_plan, stmt_type)) => {
+            execute_datafusion_plan(session, df_plan, stmt_type, formats).await
+        }
     }
 }
 
@@ -321,19 +321,7 @@ fn gen_batch_query_plan(
         // Convert RisingWave logical plan to DataFusion logical plan for Iceberg queries.
         let mut converter = crate::optimizer::RWToDFConverter::default();
         let df_plan = converter.convert(optimized_logical.clone().plan);
-
-        // Prepare metadata for DF branch. We don't build RW physical plan in this branch.
-        let schema = optimized_logical.clone().schema();
-        let dependent_relations_vec = dependent_relations.into_iter().collect_vec();
-        let read_storage_tables = HashSet::new();
-
-        return Ok(BatchPlanChoice::DF {
-            df_plan,
-            schema,
-            stmt_type,
-            dependent_relations: dependent_relations_vec,
-            read_storage_tables,
-        });
+        return Ok(BatchPlanChoice::DF { df_plan, stmt_type });
     }
 
     let batch_plan = optimized_logical.gen_batch_plan()?;
@@ -659,6 +647,7 @@ pub async fn local_execute(
 pub async fn execute_datafusion_plan(
     session: Arc<SessionImpl>,
     plan: LogicalPlan,
+    stmt_type: StatementType,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let ctx = SessionContext::new();
@@ -680,10 +669,10 @@ pub async fn execute_datafusion_plan(
         .collect();
     let rw_schema = Schema::new(rw_fields.clone());
 
-    // RecordBatch -> DataChunk
+    let converter = IcebergArrowConvert {};
     let datachunks: Vec<DataChunk> = record_batches
         .iter()
-        .map(|rb| record_batch_to_datachunk(rb, &rw_schema).unwrap())
+        .map(|rb| converter.chunk_from_record_batch(rb).unwrap())
         .collect();
 
     let pg_descs: Vec<PgFieldDescriptor> = rw_schema.fields().iter().map(to_pg_field).collect();
@@ -700,10 +689,10 @@ pub async fn execute_datafusion_plan(
     // Send all datachunks through the channel
     for dc in datachunks {
         if tx.send(Ok(dc)).await.is_err() {
-            break; // receiver dropped
+            break;
         }
     }
-    drop(tx); // Close the channel
+    drop(tx);
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
     let row_stream = PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
@@ -713,56 +702,12 @@ pub async fn execute_datafusion_plan(
         session.clone(),
     ));
 
-    let stmt_type = StatementType::SELECT;
     let first_field_format = formats.first().copied().unwrap_or(Format::Text);
 
     Ok(PgResponse::builder(stmt_type)
         .row_cnt_format_opt(Some(first_field_format))
         .values(row_stream, pg_descs)
         .into())
-}
-
-pub fn record_batch_to_datachunk(rb: &RecordBatch, schema: &Schema) -> Result<DataChunk> {
-    assert_eq!(rb.num_columns(), schema.len());
-
-    let mut arrays: Vec<Arc<ArrayImpl>> = Vec::with_capacity(rb.num_columns());
-
-    for (i, field) in schema.fields().iter().enumerate() {
-        let arrow_array = rb.column(i);
-        let rw_type = field.data_type();
-
-        let col = arrow_array_to_array_impl(arrow_array.as_ref(), &rw_type)?;
-        arrays.push(Arc::new(col));
-    }
-
-    Ok(DataChunk::new(arrays, rb.num_rows()))
-}
-
-pub fn arrow_array_to_array_impl(
-    arr: &dyn arrow::array::Array,
-    ty: &DataType,
-) -> Result<ArrayImpl> {
-    match ty {
-        DataType::Boolean => {
-            let arr = arr.as_any().downcast_ref::<BooleanArray>().ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(
-                    "Failed to downcast to BooleanArray".to_string(),
-                ))
-            })?;
-
-            let mut builder = BoolArrayBuilder::new(arr.len());
-            for i in 0..arr.len() {
-                if arr.is_null(i) {
-                    builder.append(None);
-                } else {
-                    builder.append(Some(arr.value(i)));
-                }
-            }
-
-            Ok(builder.finish().into())
-        }
-        other => bail_not_implemented!("arrow type conversion for {:?}", other),
-    }
 }
 
 /// Convert DataFusion Arrow DataType to RisingWave DataType
