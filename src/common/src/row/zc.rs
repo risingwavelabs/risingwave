@@ -16,7 +16,7 @@
 //! `DatumRef` from it with no allocation (zero-copy).
 
 use musli_zerocopy::buf::Load;
-use musli_zerocopy::{Buf, OwnedBuf, Ref, ZeroCopy};
+use musli_zerocopy::{OwnedBuf, Ref, ZeroCopy};
 use static_assertions::const_assert_eq;
 
 use crate::row::{OwnedRow, Row};
@@ -98,7 +98,7 @@ impl ZcDatum {
     ///
     /// - If it's inlined, we load the data from `buf`.
     /// - If it's not supported yet, we directly load the datum from `todo`.
-    fn load<'a>(self, buf: &'a Buf, todo: &'a impl Row) -> DatumRef<'a> {
+    fn load<'a>(self, ZcRowData { buf, todo }: &'a ZcRowData) -> DatumRef<'a> {
         use crate::types::*;
 
         let scalar = match self {
@@ -182,7 +182,7 @@ impl ZcRow {
 impl<'a> ZcRowRef<'a> {
     /// Convert the given `ZcDatum` into `DatumRef` by loading necessary data from `data`.
     fn load_datum(self, datum: ZcDatum) -> DatumRef<'a> {
-        datum.load(&self.data.buf, &self.data.todo)
+        datum.load(self.data)
     }
 }
 
