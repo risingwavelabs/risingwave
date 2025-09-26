@@ -57,6 +57,8 @@ labels:
 - label: "ci/run-e2e-iceberg-tests"
   title: ".*iceberg.*"
 
+# Connector auto-labeling for tests based on file changes
+
 # S3 source tests
 - label: "ci/run-s3-source-tests"
   files:
@@ -68,3 +70,56 @@ labels:
   - "src\\/connector\\/src\\/source\\/filesystem.*"
   - ".*fs_fetch.*"
   - ".*fs_list.*"
+
+# Pulsar connector tests (both source and sink)
+- label: "ci/run-pulsar-source-tests"
+  files:
+  - "src\\/connector\\/src\\/source\\/pulsar.*"
+- label: "ci/run-e2e-pulsar-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/pulsar.*"
+
+# Redis sink tests
+- label: "ci/run-e2e-redis-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/redis.*"
+
+# MQTT connector tests
+- label: "ci/run-e2e-mqtt-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/mqtt.*"
+  - "src\\/connector\\/src\\/source\\/mqtt.*"
+
+# ClickHouse sink tests
+- label: "ci/run-e2e-clickhouse-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/clickhouse.*"
+
+# StarRocks sink tests
+- label: "ci/run-e2e-starrocks-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/starrocks.*"
+  - "src\\/connector\\/src\\/sink\\/doris_starrocks_connector.*"
+
+# Cassandra sink tests
+- label: "ci/run-e2e-cassandra-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/cassandra.*"
+
+# POSIX FS connector tests (filesystem-based)
+- label: "ci/run-s3-source-tests"
+  files:
+  - ".*posix_fs.*"
+  - ".*posixfs.*"
+
+# CDC connector tests (Postgres, MySQL, etc.)
+- label: "ci/run-e2e-source-tests"
+  files:
+  - "src\\/connector\\/src\\/source\\/cdc.*"
+  - ".*cdc.*"
+
+# Iceberg connector tests (already configured but ensuring completeness)
+- label: "ci/run-e2e-iceberg-tests"
+  files:
+  - "src\\/connector\\/src\\/source\\/iceberg.*"
+  - "src\\/connector\\/src\\/sink\\/iceberg.*"
