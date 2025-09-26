@@ -315,14 +315,6 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn list_active_worker_node(
-        &self,
-        worker_type: Option<WorkerType>,
-    ) -> MetaResult<Vec<PbWorkerNode>> {
-        self.list_worker_node(worker_type, Some(State::Running))
-            .await
-    }
-
     pub async fn subscribe_active_streaming_compute_nodes(
         &self,
     ) -> MetaResult<(Vec<WorkerNode>, UnboundedReceiver<LocalNotification>)> {

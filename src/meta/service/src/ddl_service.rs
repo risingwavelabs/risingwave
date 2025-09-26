@@ -132,7 +132,6 @@ impl DdlServiceImpl {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             async fn migrate_inner(
-                shutdown_rx: &mut tokio::sync::oneshot::Receiver<()>,
                 env: &MetaSrvEnv,
                 metadata_manager: &MetadataManager,
                 ddl_controller: &DdlController,
@@ -143,12 +142,13 @@ impl DdlServiceImpl {
                     .await?;
 
                 if tables.is_empty() {
+                    tracing::info!("no legacy table fragments need migration");
                     return Ok(());
                 }
 
                 let client = {
                     let workers = metadata_manager
-                        .list_active_worker_node(Some(WorkerType::Frontend))
+                        .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
                         .await?;
                     if workers.is_empty() {
                         return Err(anyhow::anyhow!("no active frontend nodes found").into());
@@ -158,14 +158,7 @@ impl DdlServiceImpl {
                 };
 
                 for table in tables {
-                    match shutdown_rx.try_recv() {
-                        Ok(_) | Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                            tracing::info!("shutting down migrate table fragments task");
-                            return Ok(());
-                        }
-                        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
-                    }
-
+                    let start = tokio::time::Instant::now();
                     let req = GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
@@ -182,7 +175,7 @@ impl DdlServiceImpl {
                     ddl_controller
                         .run_command(DdlCommand::ReplaceStreamJob(replace_info))
                         .await?;
-                    tracing::info!("migrated table fragments for table {}", table.name);
+                    tracing::info!(elapsed=?start.elapsed(), table_id=table.id, "migrated table fragments");
                 }
                 tracing::info!("successfully migrated all legacy table fragments");
 
@@ -190,22 +183,34 @@ impl DdlServiceImpl {
             }
 
             let mut attempt = 0;
-            while let Err(e) =
-                migrate_inner(&mut shutdown_rx, &env, &metadata_manager, &ddl_controller).await
-            {
-                attempt += 1;
-                tracing::error!(
-                    "failed to migrate legacy table fragments: {}, attempt {}, retrying in 5 secs",
-                    e.as_report(),
-                    attempt
-                );
+            loop {
                 tokio::select! {
                     biased;
                     _ = &mut shutdown_rx => {
                         tracing::info!("shutting down migrate table fragments task");
                         break;
                     },
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                    res = migrate_inner(&env, &metadata_manager, &ddl_controller) => {
+                        match res {
+                            Ok(_) => break,
+                            Err(e) => {
+                                attempt += 1;
+                                tracing::error!(
+                                    "failed to migrate legacy table fragments: {}, attempt {}, retrying in 5 secs",
+                                    e.as_report(),
+                                    attempt
+                                );
+                                tokio::select! {
+                                    biased;
+                                    _ = &mut shutdown_rx => {
+                                        tracing::info!("shutting down migrate table fragments task");
+                                        break;
+                                    },
+                                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                                }
+                            }
+                        }
+                    }
                 }
             }
         });

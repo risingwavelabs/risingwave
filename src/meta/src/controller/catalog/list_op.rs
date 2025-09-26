@@ -272,6 +272,8 @@ impl CatalogController {
         inner.list_functions().await
     }
 
+    /// `Unmigrated` refers to table-fragments that have not yet been migrated to the new plan (for now, this means
+    /// table-fragments that do not use `UpstreamSinkUnion` operator to receive multiple upstream sinks)
     pub async fn list_unmigrated_tables(&self) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
 
