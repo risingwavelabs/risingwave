@@ -55,7 +55,7 @@ impl ChangeLogExecutor {
         vnodes: Bitmap,
         distribution_keys: Vec<usize>,
     ) -> Self {
-        let changelog_row_id_generator = ChangelogRowIdGenerator::new(vnodes);
+        let changelog_row_id_generator = ChangelogRowIdGenerator::new(vnodes, all_vnode_count);
         Self {
             ctx,
             input,
