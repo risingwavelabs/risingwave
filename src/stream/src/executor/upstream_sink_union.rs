@@ -303,100 +303,7 @@ impl UpstreamSinkUnionExecutor {
             upstream_sink_barrier_mgr,
         }
     }
-}
 
-impl UpstreamSinkBarrierManager {
-    async fn new_sink_input_impl(
-        &mut self,
-        UpstreamFragmentInfo {
-            upstream_fragment_id,
-            upstream_actors,
-            merge_schema,
-            project_exprs,
-        }: UpstreamFragmentInfo,
-    ) -> StreamExecutorResult<BoxedSinkInput> {
-        let merge_executor = self
-            .new_merge_executor(upstream_fragment_id, upstream_actors, merge_schema)
-            .await?;
-
-        Ok(SinkHandlerInput::new(
-            upstream_fragment_id,
-            Box::new(merge_executor),
-            project_exprs,
-        )
-        .boxed_input())
-    }
-
-    async fn new_merge_executor(
-        &mut self,
-        upstream_fragment_id: FragmentId,
-        upstream_actors: Vec<PbActorInfo>,
-        schema: Schema,
-    ) -> StreamExecutorResult<MergeExecutor> {
-        let ctx = &self.build_input_ctx;
-        let inputs = try_join_all(upstream_actors.iter().map(|actor| {
-            new_input(
-                &ctx.local_barrier_manager,
-                ctx.executor_stats.clone(),
-                ctx.actor_context.id,
-                ctx.actor_context.fragment_id,
-                actor,
-                upstream_fragment_id,
-            )
-        }))
-        .await?;
-
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        self.barrier_tx_map
-            .try_insert(upstream_fragment_id, barrier_tx)
-            .expect("non-duplicate");
-
-        let upstreams =
-            MergeExecutor::new_select_receiver(inputs, &ctx.executor_stats, &ctx.actor_context);
-
-        Ok(MergeExecutor::new(
-            ctx.actor_context.clone(),
-            ctx.actor_context.fragment_id,
-            upstream_fragment_id,
-            upstreams,
-            ctx.local_barrier_manager.clone(),
-            ctx.executor_stats.clone(),
-            barrier_rx,
-            ctx.chunk_size,
-            schema,
-        ))
-    }
-}
-
-impl UpstreamSinkBarrierManager {
-    async fn new_sink_input(
-        &mut self,
-        pb_upstream_info: &PbNewUpstreamSink,
-    ) -> StreamExecutorResult<BoxedSinkInput> {
-        let info = pb_upstream_info.get_info().unwrap();
-        let merge_schema = info
-            .get_sink_output_schema()
-            .iter()
-            .map(Field::from)
-            .collect();
-        let project_exprs = info
-            .get_project_exprs()
-            .iter()
-            .map(|e| build_non_strict_from_prost(e, self.build_input_ctx.eval_error_report.clone()))
-            .try_collect()
-            .map_err(|err| anyhow::anyhow!(err))?;
-        let upstream_fragment_id = info.get_upstream_fragment_id();
-        self.new_sink_input_impl(UpstreamFragmentInfo {
-            upstream_fragment_id,
-            upstream_actors: pb_upstream_info.get_upstream_actors().clone(),
-            merge_schema,
-            project_exprs,
-        })
-        .await
-    }
-}
-
-impl UpstreamSinkUnionExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         let actor_id = self.actor_context.id;
@@ -534,6 +441,93 @@ impl UpstreamSinkBarrierManager {
                 .map_err(|e| StreamExecutorError::from(anyhow::anyhow!(e)))?;
         }
         Ok(())
+    }
+
+    async fn new_sink_input(
+        &mut self,
+        pb_upstream_info: &PbNewUpstreamSink,
+    ) -> StreamExecutorResult<BoxedSinkInput> {
+        let info = pb_upstream_info.get_info().unwrap();
+        let merge_schema = info
+            .get_sink_output_schema()
+            .iter()
+            .map(Field::from)
+            .collect();
+        let project_exprs = info
+            .get_project_exprs()
+            .iter()
+            .map(|e| build_non_strict_from_prost(e, self.build_input_ctx.eval_error_report.clone()))
+            .try_collect()
+            .map_err(|err| anyhow::anyhow!(err))?;
+        let upstream_fragment_id = info.get_upstream_fragment_id();
+        self.new_sink_input_impl(UpstreamFragmentInfo {
+            upstream_fragment_id,
+            upstream_actors: pb_upstream_info.get_upstream_actors().clone(),
+            merge_schema,
+            project_exprs,
+        })
+        .await
+    }
+
+    async fn new_sink_input_impl(
+        &mut self,
+        UpstreamFragmentInfo {
+            upstream_fragment_id,
+            upstream_actors,
+            merge_schema,
+            project_exprs,
+        }: UpstreamFragmentInfo,
+    ) -> StreamExecutorResult<BoxedSinkInput> {
+        let merge_executor = self
+            .new_merge_executor(upstream_fragment_id, upstream_actors, merge_schema)
+            .await?;
+
+        Ok(SinkHandlerInput::new(
+            upstream_fragment_id,
+            Box::new(merge_executor),
+            project_exprs,
+        )
+        .boxed_input())
+    }
+
+    async fn new_merge_executor(
+        &mut self,
+        upstream_fragment_id: FragmentId,
+        upstream_actors: Vec<PbActorInfo>,
+        schema: Schema,
+    ) -> StreamExecutorResult<MergeExecutor> {
+        let ctx = &self.build_input_ctx;
+        let inputs = try_join_all(upstream_actors.iter().map(|actor| {
+            new_input(
+                &ctx.local_barrier_manager,
+                ctx.executor_stats.clone(),
+                ctx.actor_context.id,
+                ctx.actor_context.fragment_id,
+                actor,
+                upstream_fragment_id,
+            )
+        }))
+        .await?;
+
+        let (barrier_tx, barrier_rx) = unbounded_channel();
+        self.barrier_tx_map
+            .try_insert(upstream_fragment_id, barrier_tx)
+            .expect("non-duplicate");
+
+        let upstreams =
+            MergeExecutor::new_select_receiver(inputs, &ctx.executor_stats, &ctx.actor_context);
+
+        Ok(MergeExecutor::new(
+            ctx.actor_context.clone(),
+            ctx.actor_context.fragment_id,
+            upstream_fragment_id,
+            upstreams,
+            ctx.local_barrier_manager.clone(),
+            ctx.executor_stats.clone(),
+            barrier_rx,
+            ctx.chunk_size,
+            schema,
+        ))
     }
 }
 
