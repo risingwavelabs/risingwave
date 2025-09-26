@@ -806,6 +806,9 @@ impl SplitImpl {
             SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
                 Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
             }
+            SplitImpl::BatchBigQuery(big_query_batch_split) => {
+                Some(BatchSourceSplitImpl::BatchBigQuery(big_query_batch_split))
+            }
             _ => None,
         }
     }
