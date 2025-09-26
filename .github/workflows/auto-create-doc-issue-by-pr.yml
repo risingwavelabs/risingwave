@@ -42,7 +42,7 @@ jobs:
       - name: Create issue in other repository
         if: steps.check_merged.outputs.merged == 'true' && steps.check_documentation_update.outputs.documentation_update == 'true'
         run: |
-          ISSUE_CONTENT="This issue tracks the documentation update needed for the merged PR #$PR_ID.\n\nSource PR URL: $PR_URL\nSource PR Merged At: $PR_MERGED_AT\n\nIf it is a major improvement that deserves a new page or a new section in the documentation, please check if we should label it as an experiment feature."
+          ISSUE_CONTENT="This issue tracks the documentation update needed for the merged PR #$PR_ID.\n\nSource PR URL: $PR_URL\nSource PR Merged At: $PR_MERGED_AT\n\nIf it is a major improvement that deserves a new page or a new section in the documentation, please check if we should label it as an experiment feature.\n\n@copilot please process this issue based on `.github/copilot-instructions.md` and follow the steps defined in `.github/copilot-prompt.md`."
 
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.DOC_GITHUB_ACCESS_TOKEN }}" \
