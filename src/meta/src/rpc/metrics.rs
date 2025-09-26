@@ -45,6 +45,7 @@ use tokio::task::JoinHandle;
 
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::ClusterControllerRef;
+use crate::controller::system_param::SystemParamsControllerRef;
 use crate::controller::utils::PartialFragmentStateTables;
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
@@ -198,6 +199,11 @@ pub struct MetaMetrics {
     pub sink_info: IntGaugeVec,
     /// A dummy gauge metrics with its label to be relation info
     pub relation_info: IntGaugeVec,
+
+    // ********************************** System Params ************************************
+    /// A dummy gauge metric with labels carrying system parameter info.
+    /// Labels: (name, value)
+    pub system_param_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -700,6 +706,15 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        // System parameter info
+        let system_param_info = register_int_gauge_vec_with_registry!(
+            "system_param_info",
+            "Information of system parameters",
+            &["name", "value"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "storage_compact_task_size",
             "Total size of compact that have been issued to state store",
@@ -889,6 +904,7 @@ impl MetaMetrics {
             table_info,
             sink_info,
             relation_info,
+            system_param_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -920,6 +936,42 @@ impl MetaMetrics {
 impl Default for MetaMetrics {
     fn default() -> Self {
         GLOBAL_META_METRICS.clone()
+    }
+}
+
+/// Refresh `system_param_info` metrics by reading current system parameters.
+pub async fn refresh_system_param_info_metrics(
+    system_params_controller: &SystemParamsControllerRef,
+    meta_metrics: Arc<MetaMetrics>,
+) {
+    use risingwave_common::system_param::{
+        BACKUP_STORAGE_URL_KEY, LICENSE_KEY_KEY, STATE_STORE_KEY, system_params_to_kv,
+    };
+
+    fn redact_value_by_name(name: &str, value: &str) -> String {
+        // Replace sensitive values entirely with *** to avoid leaking secrets.
+        if name == LICENSE_KEY_KEY || name == STATE_STORE_KEY || name == BACKUP_STORAGE_URL_KEY {
+            return "***".to_owned();
+        }
+        value.to_owned()
+    }
+
+    let params = system_params_controller.get_pb_params().await;
+    let kvs = match system_params_to_kv(&params) {
+        Ok(kv) => kv,
+        Err(e) => {
+            tracing::warn!("failed to convert system params to kv: {}", e);
+            vec![]
+        }
+    };
+
+    meta_metrics.system_param_info.reset();
+    for (name, value) in kvs {
+        let value = redact_value_by_name(&name, &value);
+        meta_metrics
+            .system_param_info
+            .with_label_values(&[&name, &value])
+            .set(1);
     }
 }
 
@@ -1173,9 +1225,10 @@ pub async fn refresh_relation_info_metrics(
     }
 }
 
-pub fn start_fragment_info_monitor(
+pub fn start_info_monitor(
     metadata_manager: MetadataManager,
     hummock_manager: HummockManagerRef,
+    system_params_controller: SystemParamsControllerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
     const COLLECT_INTERVAL_SECONDS: u64 = 60;
@@ -1191,11 +1244,12 @@ pub fn start_fragment_info_monitor(
                 _ = monitor_interval.tick() => {},
                 // Shutdown monitor
                 _ = &mut shutdown_rx => {
-                    tracing::info!("Fragment info monitor is stopped");
+                    tracing::info!("Meta info monitor is stopped");
                     return;
                 }
             }
 
+            // Fragment and relation info
             refresh_fragment_info_metrics(
                 &metadata_manager.catalog_controller,
                 &metadata_manager.cluster_controller,
@@ -1209,6 +1263,10 @@ pub fn start_fragment_info_monitor(
                 meta_metrics.clone(),
             )
             .await;
+
+            // System parameter info
+            refresh_system_param_info_metrics(&system_params_controller, meta_metrics.clone())
+                .await;
         }
     });
 

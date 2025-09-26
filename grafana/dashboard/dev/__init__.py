@@ -36,6 +36,7 @@ from . import udf as _
 from . import sync_logstore_metrics as _
 from . import iceberg_compaction_metrics as _
 from . import kinesis_metrics as _
+from . import system_params as _
 
 def generate_panels(panels: Panels):
     return [x for s in sections for x in s(panels)]
