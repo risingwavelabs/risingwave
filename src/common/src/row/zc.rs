@@ -50,7 +50,7 @@ enum ZcDatum {
     Timestamptz(Timestamptz),
     // Jsonb(crate::types::JsonbRef<'scalar>),
     Serial(Serial),
-    // Struct(crate::types::StructRef<'scalar>),
+    Struct(Ref<[ZcDatum]>),
     // List(crate::types::ListRef<'scalar>),
     // Map(crate::types::MapRef<'scalar>),
     Vector(Ref<[F32]>),
@@ -82,6 +82,10 @@ impl ScalarRefImpl<'_> {
             ScalarRefImpl::Interval(v) => ZcDatum::Interval(buf.store(&v)),
             ScalarRefImpl::Timestamptz(v) => ZcDatum::Timestamptz(v),
             ScalarRefImpl::Serial(v) => ZcDatum::Serial(v),
+            ScalarRefImpl::Struct(v) => {
+                let fields = row_store_to(v, buf, todo);
+                ZcDatum::Struct(fields)
+            }
             ScalarRefImpl::Vector(v) => ZcDatum::Vector(buf.store_unsized(v.as_slice())),
             ScalarRefImpl::Bytea(v) => ZcDatum::Bytea(buf.store_unsized(v)),
 
@@ -98,7 +102,8 @@ impl ZcDatum {
     ///
     /// - If it's inlined, we load the data from `buf`.
     /// - If it's not supported yet, we directly load the datum from `todo`.
-    fn load<'a>(self, ZcRowData { buf, todo }: &'a ZcRowData) -> DatumRef<'a> {
+    fn load<'a>(self, data: &'a ZcRowData) -> DatumRef<'a> {
+        let ZcRowData { buf, todo } = data;
         use crate::types::*;
 
         let scalar = match self {
@@ -118,6 +123,9 @@ impl ZcDatum {
             ZcDatum::Interval(v) => ScalarRefImpl::Interval(*v.load(buf).unwrap()),
             ZcDatum::Timestamptz(v) => ScalarRefImpl::Timestamptz(v),
             ZcDatum::Serial(v) => ScalarRefImpl::Serial(v),
+            ZcDatum::Struct(v) => ScalarRefImpl::Struct(StructRef::ZcRowRef {
+                row: ZcRowRef { data, zc_ref: v },
+            }),
             ZcDatum::Vector(v) => {
                 ScalarRefImpl::Vector(VectorRef::from_slice_unchecked(v.load(buf).unwrap()))
             }
