@@ -21,8 +21,8 @@ use static_assertions::const_assert_eq;
 
 use crate::row::{OwnedRow, Row};
 use crate::types::{
-    Datum, DatumRef, Decimal, F32, F64, Interval, ScalarRefImpl, Serial, Timestamptz, ToOwnedDatum,
-    ZcNormalizedDecimal,
+    Datum, DatumRef, F32, F64, Interval, ScalarRefImpl, Serial, Timestamptz, ToOwnedDatum,
+    ZcDecimal,
 };
 
 /// The zero-copy representation of `Datum`.
@@ -43,10 +43,7 @@ enum ZcDatum {
     Float64(F64),
     Utf8(Ref<str>),
     Bool(bool),
-    DecimalNormalized(ZcNormalizedDecimal),
-    DecimalNaN,
-    DecimalPositiveInf,
-    DecimalNegativeInf,
+    Decimal(ZcDecimal),
     Interval(Ref<Interval>),
     // Date(crate::types::Date),
     // Time(crate::types::Time),
@@ -83,12 +80,7 @@ impl ScalarRefImpl<'_> {
             ScalarRefImpl::Float64(v) => ZcDatum::Float64(v),
             ScalarRefImpl::Utf8(v) => ZcDatum::Utf8(buf.store_unsized(v)),
             ScalarRefImpl::Bool(v) => ZcDatum::Bool(v),
-            ScalarRefImpl::Decimal(d) => match d {
-                Decimal::Normalized(d) => ZcDatum::DecimalNormalized(d.into()),
-                Decimal::NaN => ZcDatum::DecimalNaN,
-                Decimal::PositiveInf => ZcDatum::DecimalPositiveInf,
-                Decimal::NegativeInf => ZcDatum::DecimalNegativeInf,
-            },
+            ScalarRefImpl::Decimal(d) => ZcDatum::Decimal(d.into()),
             ScalarRefImpl::Interval(v) => ZcDatum::Interval(buf.store(&v)),
             ScalarRefImpl::Timestamptz(v) => ZcDatum::Timestamptz(v),
             ScalarRefImpl::Serial(v) => ZcDatum::Serial(v),
@@ -130,10 +122,7 @@ impl ZcDatum {
             ZcDatum::Float64(v) => ScalarRefImpl::Float64(v),
             ZcDatum::Utf8(v) => ScalarRefImpl::Utf8(v.load(buf).unwrap()),
             ZcDatum::Bool(v) => ScalarRefImpl::Bool(v),
-            ZcDatum::DecimalNormalized(v) => ScalarRefImpl::Decimal(Decimal::Normalized(v.into())),
-            ZcDatum::DecimalNaN => ScalarRefImpl::Decimal(Decimal::NaN),
-            ZcDatum::DecimalPositiveInf => ScalarRefImpl::Decimal(Decimal::PositiveInf),
-            ZcDatum::DecimalNegativeInf => ScalarRefImpl::Decimal(Decimal::NegativeInf),
+            ZcDatum::Decimal(v) => ScalarRefImpl::Decimal(v.into()),
             ZcDatum::Interval(v) => ScalarRefImpl::Interval(*v.load(buf).unwrap()),
             ZcDatum::Timestamptz(v) => ScalarRefImpl::Timestamptz(v),
             ZcDatum::Serial(v) => ScalarRefImpl::Serial(v),
