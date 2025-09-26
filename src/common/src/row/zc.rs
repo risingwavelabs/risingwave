@@ -20,7 +20,9 @@ use musli_zerocopy::{Buf, OwnedBuf, Ref, ZeroCopy};
 use static_assertions::const_assert_eq;
 
 use crate::row::{OwnedRow, Row};
-use crate::types::{Datum, DatumRef, F32, F64, ScalarRefImpl, Serial, Timestamptz, ToOwnedDatum};
+use crate::types::{
+    Datum, DatumRef, F32, F64, Interval, ScalarRefImpl, Serial, Timestamptz, ToOwnedDatum,
+};
 
 /// The zero-copy representation of `Datum`.
 // TODO(zc): variants that are commented out are not supported yet.
@@ -37,7 +39,7 @@ enum ZcDatum {
     Utf8(Ref<str>),
     Bool(bool),
     // Decimal(crate::types::Decimal),
-    // Interval(crate::types::Interval),
+    Interval(Ref<Interval>),
     // Date(crate::types::Date),
     // Time(crate::types::Time),
     // Timestamp(crate::types::Timestamp),
@@ -73,6 +75,7 @@ impl ScalarRefImpl<'_> {
             ScalarRefImpl::Float64(v) => ZcDatum::Float64(v),
             ScalarRefImpl::Utf8(v) => ZcDatum::Utf8(buf.store_unsized(v)),
             ScalarRefImpl::Bool(v) => ZcDatum::Bool(v),
+            ScalarRefImpl::Interval(v) => ZcDatum::Interval(buf.store(&v)),
             ScalarRefImpl::Timestamptz(v) => ZcDatum::Timestamptz(v),
             ScalarRefImpl::Serial(v) => ZcDatum::Serial(v),
             ScalarRefImpl::Vector(v) => ZcDatum::Vector(buf.store_unsized(v.as_slice())),
@@ -108,6 +111,7 @@ impl ZcDatum {
             ZcDatum::Float64(v) => ScalarRefImpl::Float64(v),
             ZcDatum::Utf8(v) => ScalarRefImpl::Utf8(v.load(buf).unwrap()),
             ZcDatum::Bool(v) => ScalarRefImpl::Bool(v),
+            ZcDatum::Interval(v) => ScalarRefImpl::Interval(*v.load(buf).unwrap()),
             ZcDatum::Timestamptz(v) => ScalarRefImpl::Timestamptz(v),
             ZcDatum::Serial(v) => ScalarRefImpl::Serial(v),
             ZcDatum::Vector(v) => {
@@ -299,6 +303,7 @@ mod tests {
             Some(ScalarImpl::Float64(6.0.into())),
             Some(ScalarImpl::Utf8("7".into())),
             Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Interval(Interval::MIN)),
             Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(8))),
             Some(ScalarImpl::Serial(Serial::from(9))),
             Some(ScalarImpl::Vector(
