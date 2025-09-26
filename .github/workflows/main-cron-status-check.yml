@@ -2,7 +2,7 @@ name: Main Cron Status Check
 
 on:
     pull_request:
-        types: [opened, reopened, labeled, unlabeled]
+        types: [opened, reopened, labeled, unlabeled, synchronize]
 
 jobs:
     main_cron_status_check:
