@@ -25,6 +25,10 @@ use crate::types::{
 };
 
 /// The zero-copy representation of `Datum`.
+///
+/// Each datum is currently 16 bytes, including 1 byte for the tag. If the data can be fit in the
+/// rest 15 bytes with alignment, it will be inlined in `ZcDatum`. Otherwise, it will be stored
+/// somewhere else in the buffer, and a pointer (`Ref`) to it will be stored in `ZcDatum`.
 // TODO(zc): variants that are commented out are not supported yet.
 #[derive(Debug, Copy, Clone, ZeroCopy)]
 #[repr(u8)]
