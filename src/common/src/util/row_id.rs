@@ -302,7 +302,7 @@ impl ChangelogRowIdGenerator {
     }
 
     fn next_changelog_row_id_in_current_timestamp(&mut self, vnode: &VirtualNode) -> Option<RowId> {
-        if !self.vnodes.is_set(vnode.to_index()) {
+        if !self.vnodes.is_set(vnode.to_index()) && *vnode != VirtualNode::ZERO {
             panic!("vnode {:?} not in generator", vnode);
         }
         let current_sequence = *self.vnodes_sequence.get(vnode).unwrap_or(&1);
