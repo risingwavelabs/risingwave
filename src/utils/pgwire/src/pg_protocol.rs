@@ -29,6 +29,7 @@ use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
 use risingwave_common::util::deployment::Deployment;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
 use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
@@ -103,9 +104,6 @@ where
     // TLS configuration including SSL enforcement setting
     tls_config: Option<TlsConfig>,
 
-    // Track whether this connection is using SSL
-    is_ssl_connection: bool,
-
     // Used in extended query protocol. When encounter error in extended query, we need to ignore
     // the following message util sync message.
     ignore_util_sync: bool,
@@ -132,9 +130,7 @@ impl TlsConfig {
     pub fn new_default() -> Option<Self> {
         let cert = std::env::var("RW_SSL_CERT").ok()?;
         let key = std::env::var("RW_SSL_KEY").ok()?;
-        let enforce_ssl = std::env::var("RW_SSL_ENFORCE")
-            .map(|v| v.to_lowercase() == "true" || v == "1")
-            .unwrap_or(false);
+        let enforce_ssl = env_var_is_true("RW_SSL_ENFORCE");
         tracing::info!(
             "RW_SSL_CERT={}, RW_SSL_KEY={}, RW_SSL_ENFORCE={}",
             cert,
@@ -240,7 +236,6 @@ where
                 .as_ref()
                 .and_then(|e| build_ssl_ctx_from_config(e).ok()),
             tls_config: tls_config.clone(),
-            is_ssl_connection: false,
             result_cache: Default::default(),
             unnamed_prepare_statement: Default::default(),
             prepare_statement_store: Default::default(),
@@ -504,7 +499,7 @@ where
         match msg {
             FeMessage::Gss => self.process_gss_msg().await?,
             FeMessage::Ssl => self.process_ssl_msg().await?,
-            FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
+            FeMessage::Startup(msg) => self.process_startup_msg(msg).await?,
             FeMessage::Password(msg) => self.process_password_msg(msg).await?,
             FeMessage::Query(query_msg) => {
                 let sql = Arc::from(query_msg.get_sql()?);
@@ -624,7 +619,6 @@ where
             // Construct ssl stream and replace with current one.
             self.stream.write(BeMessage::EncryptionResponseSsl).await?;
             self.stream.upgrade_to_ssl(context).await?;
-            self.is_ssl_connection = true;
         } else {
             // If no, say no for encryption.
             self.stream.write(BeMessage::EncryptionResponseNo).await?;
@@ -633,11 +627,11 @@ where
         Ok(())
     }
 
-    fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
+    async fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
         // Check SSL enforcement: if SSL is enforced but connection is not using SSL, reject
         if let Some(ref tls_config) = self.tls_config
             && tls_config.enforce_ssl
-            && !self.is_ssl_connection
+            && !self.stream.is_ssl_connection().await
         {
             return Err(PsqlError::StartupError(
                 "SSL connection is required but not established".into(),
@@ -1209,6 +1203,12 @@ impl<S> PgStream<S> {
             write_buf: BytesMut::with_capacity(DEFAULT_WRITE_BUF_CAPACITY),
             read_header: None,
         }
+    }
+
+    /// Check if the current connection is using SSL
+    async fn is_ssl_connection(&self) -> bool {
+        let stream = self.stream.lock().await;
+        matches!(*stream, PgStreamInner::Ssl(_))
     }
 }
 
