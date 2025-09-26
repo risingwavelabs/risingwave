@@ -22,7 +22,7 @@ use static_assertions::const_assert_eq;
 use crate::row::{OwnedRow, Row};
 use crate::types::{
     Datum, DatumRef, F32, F64, Interval, ScalarRefImpl, Serial, Timestamptz, ToOwnedDatum,
-    ZcDecimal,
+    ZcDecimal, ZcJsonb,
 };
 
 /// The zero-copy representation of `Datum`.
@@ -49,7 +49,7 @@ enum ZcDatum {
     // Time(crate::types::Time),
     // Timestamp(crate::types::Timestamp),
     Timestamptz(Timestamptz),
-    // Jsonb(crate::types::JsonbRef<'scalar>),
+    Jsonb(ZcJsonb),
     Serial(Serial),
     Struct(Ref<[ZcDatum]>),
     // List(crate::types::ListRef<'scalar>),
@@ -83,6 +83,7 @@ impl ScalarRefImpl<'_> {
             ScalarRefImpl::Decimal(d) => ZcDatum::Decimal(d.into()),
             ScalarRefImpl::Interval(v) => ZcDatum::Interval(buf.store(&v)),
             ScalarRefImpl::Timestamptz(v) => ZcDatum::Timestamptz(v),
+            ScalarRefImpl::Jsonb(v) => ZcDatum::Jsonb(ZcJsonb::store(v, buf)),
             ScalarRefImpl::Serial(v) => ZcDatum::Serial(v),
             ScalarRefImpl::Struct(v) => {
                 let fields = row_store_to(v, buf, todo);
@@ -125,6 +126,7 @@ impl ZcDatum {
             ZcDatum::Decimal(v) => ScalarRefImpl::Decimal(v.into()),
             ZcDatum::Interval(v) => ScalarRefImpl::Interval(*v.load(buf).unwrap()),
             ZcDatum::Timestamptz(v) => ScalarRefImpl::Timestamptz(v),
+            ZcDatum::Jsonb(v) => ScalarRefImpl::Jsonb(v.load(buf)),
             ZcDatum::Serial(v) => ScalarRefImpl::Serial(v),
             ZcDatum::Struct(v) => ScalarRefImpl::Struct(StructRef::ZcRowRef {
                 row: ZcRowRef { data, zc_ref: v },
@@ -320,6 +322,8 @@ mod tests {
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Interval(Interval::MIN)),
             Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(8))),
+            Some(ScalarImpl::Jsonb(r#"{"a": 1, "b": "2"}"#.parse().unwrap())),
+            Some(ScalarImpl::Jsonb("true".parse().unwrap())),
             Some(ScalarImpl::Serial(Serial::from(9))),
             Some(ScalarImpl::Vector(
                 VectorVal::from_text("[10, 11, 12]", 3).unwrap(),
