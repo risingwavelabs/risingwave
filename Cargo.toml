@@ -289,8 +289,7 @@ tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 tracing-opentelemetry = "0.30"
 
 [workspace.lints.rust]
-# `forbid` will also prevent the misuse of `#[allow(unused)]`
-# unused_must_use = "forbid"
+unused_must_use = "deny"
 future_incompatible = { level = "warn", priority = -1 }
 nonstandard_style = { level = "warn", priority = -1 }
 rust_2018_idioms = { level = "warn", priority = -1 }
