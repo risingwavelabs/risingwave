@@ -1104,10 +1104,9 @@ steps:
   - label: ":github: label PR"
     if: build.pull_request.id != null && ((build.pull_request.labels includes "ci/main-cron/run-selected") || build.pull_request.labels includes "ci/main-cron/run-all")
     command: |
-      PR_NUMBER=${BUILDKITE_PULL_REQUEST}
-      curl -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
+      curl -X POST -H "Authorization: Bearer ${GITHUB_TOKEN}" \
         -H "Accept: application/vnd.github+json" \
-        https://api.github.com/repos/risingwavelabs/risingwave/issues/$PR_NUMBER/labels \
+        https://api.github.com/repos/risingwavelabs/risingwave/issues/${BUILDKITE_PULL_REQUEST}/labels \
         -d '{"labels":["main-cron-passed"]}'
     plugins:
       - seek-oss/aws-sm#v2.3.2:
