@@ -44,7 +44,7 @@ macro_rules! iter_fields_ref {
     ($self:expr, $it:ident, { $($a_body:tt)* }, { $($b_body:tt)* }, { $($c_body:tt)* }) => {
         match $self {
             StructRef::Indexed { arr, idx } => {
-                let $it = arr.children.iter().map(move |a| a.value_at(idx as usize));
+                let $it = arr.children.iter().map(move |a| a.value_at(idx));
                 $($a_body)*
             }
             StructRef::ValueRef { val } => {
@@ -180,12 +180,7 @@ impl Array for StructArray {
     type RefItem<'a> = StructRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> StructRef<'_> {
-        StructRef::Indexed {
-            arr: self,
-            idx: idx
-                .try_into()
-                .expect("struct array length should fit in u32"),
-        }
+        StructRef::Indexed { arr: self, idx }
     }
 
     fn len(&self) -> usize {
@@ -401,8 +396,7 @@ impl StructValue {
 
 #[derive(Copy, Clone)]
 pub enum StructRef<'a> {
-    // We use `u32` here to save some bytes.
-    Indexed { arr: &'a StructArray, idx: u32 },
+    Indexed { arr: &'a StructArray, idx: usize },
     ValueRef { val: &'a StructValue },
     ZcRowRef { row: ZcRowRef<'a> },
 }
@@ -426,7 +420,7 @@ impl<'a> StructRef<'a> {
     /// Panics if the index is out of bounds.
     pub fn field_at(&self, i: usize) -> DatumRef<'a> {
         match self {
-            StructRef::Indexed { arr, idx } => arr.field_at(i).value_at(*idx as usize),
+            StructRef::Indexed { arr, idx } => arr.field_at(i).value_at(*idx),
             StructRef::ValueRef { val } => val.fields[i].to_datum_ref(),
             StructRef::ZcRowRef { row } => (*row).datum_at(i),
         }
@@ -440,7 +434,7 @@ impl<'a> StructRef<'a> {
         unsafe {
             match self {
                 StructRef::Indexed { arr, idx } => {
-                    arr.field_at_unchecked(i).value_at_unchecked(*idx as usize)
+                    arr.field_at_unchecked(i).value_at_unchecked(*idx)
                 }
                 StructRef::ValueRef { val } => val.fields.get_unchecked(i).to_datum_ref(),
                 StructRef::ZcRowRef { row } => (*row).datum_at_unchecked(i),
