@@ -2066,9 +2066,9 @@ dependencies = [
 
 [[package]]
 name = "blocking"
-version = "1.6.1"
+version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "703f41c54fc768e63e091340b424302bb1c29ef4aa0c7f10fe849dfb114d29ea"
+checksum = "e83f8d02be6967315521be875afa792a316e28d57b5a2d401897e2a7921b7f21"
 dependencies = [
  "async-channel 2.2.1",
  "async-task",
@@ -5570,8 +5570,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.20.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=fe48121dceb7cfe362cdfccb6ddd9b76119f8935#fe48121dceb7cfe362cdfccb6ddd9b76119f8935"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa5d15035074ac205314ecc39ffb7697d59ba9deed2380fa12a7d54ddf35e9ba"
 dependencies = [
  "equivalent",
  "fastrace",
@@ -5589,8 +5590,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.20.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=fe48121dceb7cfe362cdfccb6ddd9b76119f8935#fe48121dceb7cfe362cdfccb6ddd9b76119f8935"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "181bfdf387bd81442dd529e46b4cf632fd75076349d962b8a96aea24eddf5848"
 dependencies = [
  "bincode 1.3.3",
  "bytes",
@@ -5618,8 +5620,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.20.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=fe48121dceb7cfe362cdfccb6ddd9b76119f8935#fe48121dceb7cfe362cdfccb6ddd9b76119f8935"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "757d608277911c2292b7563638b5b7f804904ff71a4e4757d97a94cd6a067e57"
 dependencies = [
  "arc-swap",
  "bitflags 2.9.0",
@@ -5642,8 +5645,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.20.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=fe48121dceb7cfe362cdfccb6ddd9b76119f8935#fe48121dceb7cfe362cdfccb6ddd9b76119f8935"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e1045dd1812baa313d8cb97b53f540bd8ed315f4585982f78ae7f6a1cdde4e2"
 dependencies = [
  "allocator-api2",
  "anyhow",
@@ -5877,9 +5881,9 @@ checksum = "9e5c1b78ca4aae1ac06c48a526a655760685149f0d465d21f37abfe57ce075c6"
 
 [[package]]
 name = "futures-lite"
-version = "2.3.0"
+version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52527eb5074e35e9339c6b4e8d12600c7128b68fb25dcb9fa9dec18f7c25f3a5"
+checksum = "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad"
 dependencies = [
  "fastrand",
  "futures-core",
@@ -9793,9 +9797,9 @@ dependencies = [
 
 [[package]]
 name = "polling"
-version = "3.7.2"
+version = "3.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3ed00ed3fbf728b5816498ecd316d1716eecaced9c0c8d2c5a6740ca214985b"
+checksum = "a604568c3202727d1507653cb121dbd627a58684eb09a820fd746bee38b4442f"
 dependencies = [
  "cfg-if",
  "concurrent-queue",
@@ -9803,7 +9807,7 @@ dependencies = [
  "pin-project-lite",
  "rustix 0.38.41",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10761,7 +10765,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e37ec3fd44bea2ec947ba6cc7634d7999a6590aca7c35827c250bc0de502bda6"
 dependencies = [
  "arc-swap",
- "async-std",
  "bytes",
  "combine",
  "crc16",
@@ -10773,10 +10776,15 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rand 0.8.5",
+ "rustls 0.23.5",
+ "rustls-native-certs 0.7.0",
+ "rustls-pemfile 2.2.0",
+ "rustls-pki-types",
  "ryu",
  "sha1_smol",
  "socket2 0.5.9",
  "tokio",
+ "tokio-rustls 0.26.0",
  "tokio-util",
  "url",
 ]
@@ -16136,9 +16144,9 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "value-bag"
-version = "1.9.0"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a84c137d37ab0142f0f2ddfe332651fdbf252e7b7dbb4e67b6c1f1b2e925101"
+checksum = "943ce29a8a743eb10d6082545d861b24f9d1b160b7d741e0f2cdf726bec909c5"
 
 [[package]]
 name = "value-trait"

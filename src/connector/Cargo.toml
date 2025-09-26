@@ -119,7 +119,8 @@ rdkafka = { workspace = true, features = [
 redis = { workspace = true, features = [
     "aio",
     "tokio-comp",
-    "async-std-comp",
+    "tls-rustls",
+    "tokio-rustls-comp",
     "cluster-async",
     "geospatial",
 ] }
