@@ -300,7 +300,7 @@ mod tests {
     use rw_iter_util::ZipEqDebug;
 
     use super::*;
-    use crate::array::VectorVal;
+    use crate::array::{StructValue, VectorVal};
     use crate::types::{Int256, ScalarImpl};
 
     #[test]
@@ -322,6 +322,10 @@ mod tests {
                 VectorVal::from_text("[10, 11, 12]", 3).unwrap(),
             )),
             Some(ScalarImpl::Bytea([13].into())),
+            Some(ScalarImpl::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int32(14)),
+                Some(ScalarImpl::Utf8("15".into())),
+            ]))),
         ]);
 
         let zc_row = row.zc_encode();
