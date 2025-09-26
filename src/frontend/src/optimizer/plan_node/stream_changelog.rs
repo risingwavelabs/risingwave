@@ -21,20 +21,23 @@ use super::stream::prelude::PhysicalPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, generic};
 use crate::PlanRef;
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamChangeLog {
     pub base: PlanBase<Stream>,
     core: generic::ChangeLog<PlanRef>,
+    distribution_keys: Vec<u32>,
 }
 
 impl StreamChangeLog {
-    pub fn new(core: generic::ChangeLog<PlanRef>) -> Self {
+    pub fn new_with_dist(
+        core: generic::ChangeLog<PlanRef>,
+        dist: Distribution,
+        distribution_keys: Vec<u32>,
+    ) -> Self {
         let input = core.input.clone();
-        let dist = input.distribution().clone();
-        // Filter executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
@@ -44,7 +47,11 @@ impl StreamChangeLog {
             input.watermark_columns().clone(),
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
-        StreamChangeLog { base, core }
+        StreamChangeLog {
+            base,
+            core,
+            distribution_keys,
+        }
     }
 }
 
@@ -56,7 +63,11 @@ impl PlanTreeNodeUnary for StreamChangeLog {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core)
+        Self::new_with_dist(
+            core,
+            self.base.distribution().clone(),
+            self.distribution_keys.clone(),
+        )
     }
 }
 
@@ -67,6 +78,7 @@ impl StreamNode for StreamChangeLog {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         PbNodeBody::Changelog(Box::new(ChangeLogNode {
             need_op: self.core.need_op,
+            distribution_keys: self.distribution_keys.clone(),
         }))
     }
 }
