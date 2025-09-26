@@ -15,12 +15,10 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::anyhow;
 use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
-use tokio::sync::mpsc;
 
 use super::permit::Receiver;
 use crate::executor::prelude::*;
@@ -87,25 +85,6 @@ pub(crate) fn apply_dispatcher_barrier(
     recv_barrier
         .passed_actors
         .extend(dispatcher_barrier.passed_actors);
-}
-
-pub(crate) async fn process_dispatcher_msg(
-    dispatcher_msg: DispatcherMessage,
-    barrier_rx: &mut mpsc::UnboundedReceiver<Barrier>,
-) -> StreamExecutorResult<Message> {
-    let msg = match dispatcher_msg {
-        DispatcherMessage::Chunk(chunk) => Message::Chunk(chunk),
-        DispatcherMessage::Barrier(barrier) => {
-            let mut recv_barrier = barrier_rx
-                .recv()
-                .await
-                .ok_or_else(|| anyhow!("end of barrier recv"))?;
-            apply_dispatcher_barrier(&mut recv_barrier, barrier);
-            Message::Barrier(recv_barrier)
-        }
-        DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
-    };
-    Ok(msg)
 }
 
 impl LocalInput {
