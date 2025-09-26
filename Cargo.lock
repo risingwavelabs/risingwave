@@ -8232,6 +8232,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9252111cf132ba0929b6f8e030cac2a24b507f3a4d6db6fb2896f27b354c714b"
 
 [[package]]
+name = "musli-zerocopy"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da9a03c73fde6d26e70749891df50baa0e663535797d91a7466f6caf48024b26"
+dependencies = [
+ "musli-zerocopy-macros",
+ "rand 0.9.0",
+]
+
+[[package]]
+name = "musli-zerocopy-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b627fb9c55d37c47fb1b0157e131e27f9ee8039053fe5d8384b01170ab1d18fd"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
+]
+
+[[package]]
 name = "mysql-common-derive"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11391,6 +11412,7 @@ dependencies = [
  "madsim-tokio",
  "memcomparable",
  "more-asserts",
+ "musli-zerocopy",
  "num-integer",
  "num-traits",
  "number_prefix",
