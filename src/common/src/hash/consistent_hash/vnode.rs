@@ -172,6 +172,14 @@ impl VirtualNode {
                     }
                 })
                 .collect();
+        } else {
+            tracing::error!("without serial key {:?}", keys);
+            for idx in keys {
+                tracing::error!(
+                    "without serial key dd {:?}",
+                    data_chunk.column_at(*idx).data_type()
+                );
+            }
         }
 
         data_chunk
