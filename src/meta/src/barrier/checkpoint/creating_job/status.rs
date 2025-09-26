@@ -215,13 +215,23 @@ impl CreatingStreamingJobStatus {
                 ..
             } => {
                 let mutation = {
-                    let pending_backfill_nodes = create_mview_tracker.take_pending_backfill_nodes();
-                    if pending_backfill_nodes.is_empty() {
+                    let (pending_backfill_nodes, last_backfill_nodes) =
+                        create_mview_tracker.take_pending_backfill_nodes();
+                    if pending_backfill_nodes.is_empty() && last_backfill_nodes.is_empty() {
                         None
                     } else {
+                        tracing::info!(
+                            "Injecting backfill mutation for new upstream epoch. pending_backfill_nodes: {:?}, last_backfill_nodes: {:?}",
+                            pending_backfill_nodes,
+                            last_backfill_nodes
+                        );
                         Some(Mutation::StartFragmentBackfill(
                             StartFragmentBackfillMutation {
                                 fragment_ids: pending_backfill_nodes
+                                    .into_iter()
+                                    .map(|fragment_id| fragment_id as _)
+                                    .collect(),
+                                truncate_locality_fragment_ids: last_backfill_nodes
                                     .into_iter()
                                     .map(|fragment_id| fragment_id as _)
                                     .collect(),

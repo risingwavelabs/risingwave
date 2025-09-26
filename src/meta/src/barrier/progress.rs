@@ -100,12 +100,15 @@ impl Progress {
     }
 
     /// Update the progress of `actor`.
+    /// Returns the next backfill nodes to start, and the last time backfill nodes if any.
+    /// The last time backfill nodes are used to truncate the states for locality backfill.
     fn update(
         &mut self,
         actor: ActorId,
         new_state: BackfillState,
         upstream_total_key_count: u64,
-    ) -> Vec<FragmentId> {
+    ) -> (Vec<FragmentId>, Vec<FragmentId>) {
+        let mut last_backfill_nodes = vec![];
         let mut next_backfill_nodes = vec![];
         self.upstream_mvs_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
@@ -130,7 +133,18 @@ impl Progress {
                 tracing::debug!("actor {} done", actor);
                 new = *new_consumed_rows;
                 self.done_count += 1;
+                let before_backfill_nodes = self
+                    .backfill_order_state
+                    .current_backfill_node_fragment_ids();
                 next_backfill_nodes = self.backfill_order_state.finish_actor(actor);
+                let after_backfill_nodes = self
+                    .backfill_order_state
+                    .current_backfill_node_fragment_ids();
+                // last_backfill_nodes = before_backfill_nodes - before_backfill_nodes
+                last_backfill_nodes = before_backfill_nodes
+                    .into_iter()
+                    .filter(|x| !after_backfill_nodes.contains(x))
+                    .collect();
                 tracing::debug!(
                     "{} actors out of {} complete",
                     self.done_count,
@@ -155,7 +169,7 @@ impl Progress {
             }
         }
         self.states.insert(actor, new_state);
-        next_backfill_nodes
+        (next_backfill_nodes, last_backfill_nodes)
     }
 
     /// Returns whether all backfill executors are done.
@@ -297,8 +311,10 @@ pub(super) struct TrackingCommand {
 
 pub(super) enum UpdateProgressResult {
     None,
-    Finished(TrackingJob),
-    BackfillNodeFinished(Vec<FragmentId>),
+    /// The finished job, along with its last time backfill nodes.
+    Finished(TrackingJob, Vec<FragmentId>),
+    /// The next backfill nodes to start and the last time backfill nodes.
+    BackfillNodeFinished(Vec<FragmentId>, Vec<FragmentId>),
 }
 
 /// Tracking is done as follows:
@@ -317,7 +333,10 @@ pub(super) struct CreateMviewProgressTracker {
     pending_finished_jobs: Vec<TrackingJob>,
 
     /// Stash of pending backfill nodes. They will start backfilling on checkpoint.
-    pending_backfill_nodes: Vec<FragmentId>,
+    /// (next_backfill_nodes, last_backfill_nodes)
+    /// `next_backfill_nodes` are used to start the next backfill nodes.
+    /// `last_backfill_nodes` are used to truncate the states for locality backfill.
+    pending_backfill_nodes: Vec<(Vec<FragmentId>, Vec<FragmentId>)>,
 }
 
 impl CreateMviewProgressTracker {
@@ -435,17 +454,21 @@ impl CreateMviewProgressTracker {
                             UpdateProgressResult::None => {
                                 tracing::trace!(?progress, "update progress");
                             }
-                            UpdateProgressResult::Finished(command) => {
+                            UpdateProgressResult::Finished(command, last_backfill_nodes) => {
+                                self.queue_backfill(vec![], last_backfill_nodes);
                                 tracing::trace!(?progress, "finish progress");
                                 commands.push(command);
                             }
-                            UpdateProgressResult::BackfillNodeFinished(next_backfill_nodes) => {
+                            UpdateProgressResult::BackfillNodeFinished(
+                                next_backfill_nodes,
+                                last_backfill_nodes,
+                            ) => {
                                 tracing::trace!(
                                     ?progress,
                                     ?next_backfill_nodes,
                                     "start next backfill node"
                                 );
-                                self.queue_backfill(next_backfill_nodes);
+                                self.queue_backfill(next_backfill_nodes, last_backfill_nodes);
                             }
                         }
                     }
@@ -506,8 +529,15 @@ impl CreateMviewProgressTracker {
         self.pending_finished_jobs.push(finished_job);
     }
 
-    fn queue_backfill(&mut self, backfill_nodes: impl IntoIterator<Item = FragmentId>) {
-        self.pending_backfill_nodes.extend(backfill_nodes);
+    fn queue_backfill(
+        &mut self,
+        next_backfill_nodes: impl IntoIterator<Item = FragmentId>,
+        last_backfill_nodes: impl IntoIterator<Item = FragmentId>,
+    ) {
+        self.pending_backfill_nodes.push((
+            next_backfill_nodes.into_iter().collect(),
+            last_backfill_nodes.into_iter().collect(),
+        ));
     }
 
     /// Finish stashed jobs on checkpoint.
@@ -516,8 +546,16 @@ impl CreateMviewProgressTracker {
         take(&mut self.pending_finished_jobs)
     }
 
-    pub(super) fn take_pending_backfill_nodes(&mut self) -> Vec<FragmentId> {
-        take(&mut self.pending_backfill_nodes)
+    /// Take the pending backfill nodes to start on checkpoint.
+    /// Merge all pending backfill nodes into one.
+    pub(super) fn take_pending_backfill_nodes(&mut self) -> (Vec<FragmentId>, Vec<FragmentId>) {
+        let mut next_backfill_nodes = vec![];
+        let mut last_backfill_nodes = vec![];
+        for (next, last) in take(&mut self.pending_backfill_nodes) {
+            next_backfill_nodes.extend(next);
+            last_backfill_nodes.extend(last);
+        }
+        (next_backfill_nodes, last_backfill_nodes)
     }
 
     pub(super) fn has_pending_finished_jobs(&self) -> bool {
@@ -640,7 +678,7 @@ impl CreateMviewProgressTracker {
                     calculate_total_key_count(&progress.upstream_mv_count, version_stats);
 
                 tracing::debug!(?table_id, "updating progress for table");
-                let next_backfill_nodes =
+                let (next_backfill_nodes, last_backfill_nodes) =
                     progress.update(actor, new_state, upstream_total_key_count);
 
                 if progress.is_done() {
@@ -654,10 +692,17 @@ impl CreateMviewProgressTracker {
                         self.actor_map.remove(&actor);
                     }
                     assert!(next_backfill_nodes.is_empty());
-                    UpdateProgressResult::Finished(o.remove().1)
-                } else if !next_backfill_nodes.is_empty() {
-                    tracing::debug!("scheduling next backfill nodes: {:?}", next_backfill_nodes);
-                    UpdateProgressResult::BackfillNodeFinished(next_backfill_nodes)
+                    UpdateProgressResult::Finished(o.remove().1, last_backfill_nodes)
+                } else if !next_backfill_nodes.is_empty() || !last_backfill_nodes.is_empty() {
+                    tracing::debug!(
+                        "scheduling next backfill nodes: {:?} and truncate last backfill nodes: {:?}",
+                        next_backfill_nodes,
+                        last_backfill_nodes
+                    );
+                    UpdateProgressResult::BackfillNodeFinished(
+                        next_backfill_nodes,
+                        last_backfill_nodes,
+                    )
                 } else {
                     UpdateProgressResult::None
                 }

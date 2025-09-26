@@ -34,7 +34,7 @@ use risingwave_storage::store::PrefetchOptions;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils::create_builder;
 use crate::executor::prelude::*;
-use crate::task::{CreateMviewProgressReporter, FragmentId};
+use crate::task::{CreateMviewProgressReporter, FragmentId, LocalBarrierManager};
 
 type Builders = HashMap<VirtualNode, DataChunkBuilder>;
 
@@ -189,6 +189,9 @@ pub struct LocalityProviderExecutor<S: StateStore> {
 
     /// Chunk size for output
     chunk_size: usize,
+
+    /// Local barrier manager for reporting events
+    barrier_manager: LocalBarrierManager,
 }
 
 impl<S: StateStore> LocalityProviderExecutor<S> {
@@ -203,6 +206,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         fragment_id: FragmentId,
+        barrier_manager: LocalBarrierManager,
     ) -> Self {
         Self {
             upstream,
@@ -215,6 +219,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             metrics,
             chunk_size,
             fragment_id,
+            barrier_manager,
         }
     }
 
@@ -490,12 +495,12 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         // Check for StartFragmentBackfill mutation
                         if let Some(mutation) = barrier.mutation.as_deref() {
                             use crate::executor::Mutation;
-                            if let Mutation::StartFragmentBackfill { fragment_ids } = mutation {
-                                tracing::info!(
-                                    "Start backfill of locality provider with fragment id: {:?}",
-                                    &self.fragment_id
-                                );
+                            if let Mutation::StartFragmentBackfill { fragment_ids, .. } = mutation {
                                 if fragment_ids.contains(&self.fragment_id) {
+                                    tracing::info!(
+                                        "Start backfill of locality provider with fragment id: {:?}",
+                                        &self.fragment_id
+                                    );
                                     start_backfill = true;
                                 }
                             }
@@ -789,8 +794,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             }
         }
 
-        // TODO: truncate the state table after backfill.
-
         // After backfill completion, forward messages directly
         #[for_await]
         for msg in upstream {
@@ -798,6 +801,36 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
             match msg {
                 Message::Barrier(barrier) => {
+                    // Truncate state table.
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        use crate::executor::Mutation;
+                        if let Mutation::StartFragmentBackfill {
+                            fragment_ids,
+                            truncate_locality_fragment_ids,
+                            ..
+                        } = mutation
+                        {
+                            tracing::info!(
+                                "self fragment_id: {} receive fragment_ids: {:?} truncate_locality_fragment_ids: {:?}",
+                                self.fragment_id,
+                                fragment_ids,
+                                truncate_locality_fragment_ids
+                            );
+                            if truncate_locality_fragment_ids.contains(&self.fragment_id) {
+                                tracing::info!(
+                                    "Truncate state table of locality provider with fragment id: {:?}",
+                                    &self.fragment_id
+                                );
+                                // Report the state table for truncation when receiving the mutation.
+                                self.barrier_manager.report_truncate_state(
+                                    barrier.epoch,
+                                    self.actor_id,
+                                    state_table.table_id(),
+                                );
+                            }
+                        }
+                    }
+
                     // Commit state tables but don't modify them
                     state_table
                         .commit_assert_no_update_vnode_bitmap(barrier.epoch)

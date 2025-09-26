@@ -67,6 +67,11 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         state: CdcTableBackfillState,
     },
+    ReportTruncateState {
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+    },
 }
 
 /// Can send [`LocalBarrierEvent`] to [`super::barrier_worker::managed_state::DatabaseManagedBarrierState::poll_next_event`]
@@ -190,6 +195,14 @@ impl LocalBarrierManager {
             actor_id,
             table_id,
             staging_table_id,
+        });
+    }
+
+    pub fn report_truncate_state(&self, epoch: EpochPair, actor_id: ActorId, table_id: u32) {
+        self.send_event(LocalBarrierEvent::ReportTruncateState {
+            epoch,
+            actor_id,
+            table_id,
         });
     }
 }
