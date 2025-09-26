@@ -277,3 +277,50 @@ impl<R: Row> R {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common_estimate_size::EstimateSize;
+    use rw_iter_util::ZipEqDebug;
+
+    use super::*;
+    use crate::array::VectorVal;
+    use crate::types::{Int256, ScalarImpl};
+
+    #[test]
+    fn test_all_supported_variants() {
+        let row = OwnedRow::new(vec![
+            None, // NULL
+            Some(ScalarImpl::Int16(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int64(3)),
+            Some(ScalarImpl::Int256(Int256::from(4))),
+            Some(ScalarImpl::Float32(5.0.into())),
+            Some(ScalarImpl::Float64(6.0.into())),
+            Some(ScalarImpl::Utf8("7".into())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(8))),
+            Some(ScalarImpl::Serial(Serial::from(9))),
+            Some(ScalarImpl::Vector(
+                VectorVal::from_text("[10, 11, 12]", 3).unwrap(),
+            )),
+            Some(ScalarImpl::Bytea([13].into())),
+        ]);
+
+        let zc_row = row.zc_encode();
+        assert!(
+            zc_row.data.todo.is_empty(),
+            "supported variants should not be stored in `todo`"
+        );
+        println!("Row size: {}", row.estimated_heap_size());
+        println!("Zc row size: {}", zc_row.data.buf.len());
+
+        for (expected, actual) in row.iter().zip_eq_debug(zc_row.iter()) {
+            assert_eq!(expected, actual);
+        }
+
+        let zc_row_ref = zc_row.as_ref();
+        assert!(Row::eq(&zc_row, zc_row_ref));
+        assert!(Row::eq(&row, zc_row_ref));
+    }
+}
