@@ -545,7 +545,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 resume_reader!();
                                             }
                                         }
-                                        Mutation::StartFragmentBackfill { fragment_ids } => {
+                                        Mutation::StartFragmentBackfill {
+                                            fragment_ids, ..
+                                        } => {
                                             if fragment_ids.contains(&self.actor_ctx.fragment_id)
                                                 && pause_control.backfill_resume()
                                             {

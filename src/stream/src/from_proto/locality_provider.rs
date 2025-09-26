@@ -79,6 +79,7 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             params.executor_stats.clone(),
             1024, // default chunk size
             params.actor_context.fragment_id,
+            params.local_barrier_manager.clone(),
         );
 
         Ok((params.info, exec).into())

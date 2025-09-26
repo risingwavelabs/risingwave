@@ -1137,11 +1137,17 @@ impl DatabaseCheckpointControl {
             if let Some(jobs_to_merge) = self.jobs_to_merge() {
                 command = Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge));
             } else {
-                let pending_backfill_nodes =
+                let (next_backfill_nodes, last_backfill_nodes) =
                     self.create_mview_tracker.take_pending_backfill_nodes();
-                if !pending_backfill_nodes.is_empty() {
+                if !next_backfill_nodes.is_empty() || !last_backfill_nodes.is_empty() {
+                    tracing::info!(
+                        "start fragment backfill for mview, next_backfill_nodes: {:?}, last_backfill_nodes: {:?}",
+                        next_backfill_nodes,
+                        last_backfill_nodes
+                    );
                     command = Some(Command::StartFragmentBackfill {
-                        fragment_ids: pending_backfill_nodes,
+                        fragment_ids: next_backfill_nodes,
+                        truncate_locality_fragment_ids: last_backfill_nodes,
                     });
                 }
             }
