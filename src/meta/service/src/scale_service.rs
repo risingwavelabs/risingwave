@@ -202,8 +202,15 @@ impl ScaleService for ScaleServiceImpl {
 
     async fn get_serverless_streaming_jobs_status(
         &self,
-        _request: Request<GetServerlessStreamingJobsStatusRequest>,
+        request: Request<GetServerlessStreamingJobsStatusRequest>,
     ) -> Result<Response<GetServerlessStreamingJobsStatusResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let progress = self.barrier_manager.get_ddl_progress().await?;
+        GetServerlessStreamingJobsStatusResponse {
+            streaming_job_statuses: progress
+                .into_iter()
+                .map(|x| sta)
+                .collect(),
+        }
     }
 }
