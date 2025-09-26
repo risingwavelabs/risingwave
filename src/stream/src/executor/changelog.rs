@@ -105,7 +105,7 @@ impl ChangeLogExecutor {
                 Message::Barrier(barrier) => {
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.changelog_row_id_generator =
-                            ChangelogRowIdGenerator::new(vnodes.as_ref().clone());
+                            ChangelogRowIdGenerator::new(vnodes.as_ref().clone(), all_vnode_count);
                     }
                     yield Message::Barrier(barrier);
                 }
