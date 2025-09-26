@@ -252,38 +252,23 @@ impl UpstreamSinkUnionExecutor {
             chunk_size,
             eval_error_report,
         };
-        let upstream_sink_barrier_mgr =
+        let mut upstream_sink_barrier_mgr =
             UpstreamSinkBarrierManager::new(build_input_ctx, barrier_rx);
-        let mut executor = Self {
+
+        let mut initial_inputs = Vec::with_capacity(initial_upstream_infos.len());
+        for info in initial_upstream_infos {
+            let input = upstream_sink_barrier_mgr.new_sink_input_impl(info).await?;
+            initial_inputs.push(input);
+        }
+
+        let executor = Self {
             actor_context: ctx,
             executor_stats,
-            initial_inputs: Vec::new(),
+            initial_inputs,
             upstream_sink_barrier_mgr,
         };
 
-        executor.init_with_upstreams(initial_upstream_infos).await?;
-
         Ok(executor)
-    }
-
-    async fn init_with_upstreams(
-        &mut self,
-        initial_upstream_infos: Vec<UpstreamFragmentInfo>,
-    ) -> StreamExecutorResult<()> {
-        self.initial_inputs.reserve(initial_upstream_infos.len());
-        for info in initial_upstream_infos {
-            let upstream_fragment_id = info.upstream_fragment_id;
-            let barrier_rx = self
-                .upstream_sink_barrier_mgr
-                .subscribe_local_barrier(upstream_fragment_id);
-            let input = self
-                .upstream_sink_barrier_mgr
-                .new_sink_input_impl(info, barrier_rx)
-                .await?;
-            self.initial_inputs.push(input);
-        }
-
-        Ok(())
     }
 
     #[cfg(test)]
@@ -291,6 +276,7 @@ impl UpstreamSinkUnionExecutor {
         actor_id: ActorId,
         local_barrier_manager: LocalBarrierManager,
         chunk_size: usize,
+        initial_inputs: Vec<BoxedSinkInput>,
     ) -> Self {
         let actor_ctx = ActorContext::for_test(actor_id);
         let executor_stats: Arc<StreamingMetrics> = StreamingMetrics::unused().into();
@@ -313,24 +299,13 @@ impl UpstreamSinkUnionExecutor {
         Self {
             actor_context: actor_ctx,
             executor_stats,
-            initial_inputs: Vec::new(),
+            initial_inputs,
             upstream_sink_barrier_mgr,
         }
     }
 }
 
 impl UpstreamSinkBarrierManager {
-    fn subscribe_local_barrier(
-        &mut self,
-        upstream_fragment_id: FragmentId,
-    ) -> UnboundedReceiver<Barrier> {
-        let (tx, rx) = unbounded_channel();
-        self.barrier_tx_map
-            .try_insert(upstream_fragment_id, tx)
-            .expect("non-duplicate");
-        rx
-    }
-
     async fn new_sink_input_impl(
         &mut self,
         UpstreamFragmentInfo {
@@ -339,15 +314,9 @@ impl UpstreamSinkBarrierManager {
             merge_schema,
             project_exprs,
         }: UpstreamFragmentInfo,
-        barrier_rx: UnboundedReceiver<Barrier>,
     ) -> StreamExecutorResult<BoxedSinkInput> {
         let merge_executor = self
-            .new_merge_executor(
-                upstream_fragment_id,
-                upstream_actors,
-                merge_schema,
-                barrier_rx,
-            )
+            .new_merge_executor(upstream_fragment_id, upstream_actors, merge_schema)
             .await?;
 
         Ok(SinkHandlerInput::new(
@@ -363,7 +332,6 @@ impl UpstreamSinkBarrierManager {
         upstream_fragment_id: FragmentId,
         upstream_actors: Vec<PbActorInfo>,
         schema: Schema,
-        barrier_rx: UnboundedReceiver<Barrier>,
     ) -> StreamExecutorResult<MergeExecutor> {
         let ctx = &self.build_input_ctx;
         let inputs = try_join_all(upstream_actors.iter().map(|actor| {
@@ -377,6 +345,11 @@ impl UpstreamSinkBarrierManager {
             )
         }))
         .await?;
+
+        let (barrier_tx, barrier_rx) = unbounded_channel();
+        self.barrier_tx_map
+            .try_insert(upstream_fragment_id, barrier_tx)
+            .expect("non-duplicate");
 
         let upstreams =
             MergeExecutor::new_select_receiver(inputs, &ctx.executor_stats, &ctx.actor_context);
@@ -395,23 +368,10 @@ impl UpstreamSinkBarrierManager {
     }
 }
 
-impl UpstreamSinkUnionExecutor {
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self: Box<Self>) {
-        let inputs = std::mem::take(&mut self.initial_inputs);
-        let execution_stream = self.execute_with_inputs(inputs);
-        pin_mut!(execution_stream);
-        while let Some(msg) = execution_stream.next().await {
-            yield msg?;
-        }
-    }
-}
-
 impl UpstreamSinkBarrierManager {
     async fn new_sink_input(
         &mut self,
         pb_upstream_info: &PbNewUpstreamSink,
-        barrier_rx: UnboundedReceiver<Barrier>,
     ) -> StreamExecutorResult<BoxedSinkInput> {
         let info = pb_upstream_info.get_info().unwrap();
         let merge_schema = info
@@ -426,22 +386,19 @@ impl UpstreamSinkBarrierManager {
             .try_collect()
             .map_err(|err| anyhow::anyhow!(err))?;
         let upstream_fragment_id = info.get_upstream_fragment_id();
-        self.new_sink_input_impl(
-            UpstreamFragmentInfo {
-                upstream_fragment_id,
-                upstream_actors: pb_upstream_info.get_upstream_actors().clone(),
-                merge_schema,
-                project_exprs,
-            },
-            barrier_rx,
-        )
+        self.new_sink_input_impl(UpstreamFragmentInfo {
+            upstream_fragment_id,
+            upstream_actors: pb_upstream_info.get_upstream_actors().clone(),
+            merge_schema,
+            project_exprs,
+        })
         .await
     }
 }
 
 impl UpstreamSinkUnionExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_with_inputs(self: Box<Self>, inputs: Vec<BoxedSinkInput>) {
+    async fn execute_inner(self: Box<Self>) {
         let actor_id = self.actor_context.id;
         let fragment_id = self.actor_context.fragment_id;
 
@@ -455,7 +412,8 @@ impl UpstreamSinkUnionExecutor {
                 "UpstreamSinkUnion",
             ]);
 
-        let upstreams = DynamicReceivers::new(inputs, Some(barrier_align.clone()), None);
+        let upstreams =
+            DynamicReceivers::new(self.initial_inputs, Some(barrier_align.clone()), None);
         pin_mut!(upstreams);
 
         let mut upstream_sink_barrier_mgr = self.upstream_sink_barrier_mgr;
@@ -534,13 +492,7 @@ impl UpstreamSinkBarrierManager {
             barrier.as_new_upstream_sink(self.build_input_ctx.actor_context.fragment_id)
         {
             // Create new inputs for the newly added upstream sinks.
-            let upstream_fragment_id = new_upstream_sink
-                .get_info()
-                .unwrap()
-                .get_upstream_fragment_id();
-            let barrier_rx = self.subscribe_local_barrier(upstream_fragment_id);
-            let new_input = self.new_sink_input(new_upstream_sink, barrier_rx).await?;
-
+            let new_input = self.new_sink_input(new_upstream_sink).await?;
             Some(new_input)
         } else {
             None
@@ -721,10 +673,11 @@ mod tests {
             actor_id,
             test_env.local_barrier_manager.clone(),
             10,
+            inputs,
         );
         // Flush subscribe_barrier events to ensure the executor is ready.
         test_env.flush_all_events().await;
-        let mut sink_union = Box::new(sink_union).execute_with_inputs(inputs).boxed();
+        let mut sink_union = Box::new(sink_union).execute_inner().boxed();
 
         for tx in txs {
             tx.send(MessageInner::Chunk(build_test_chunk(10)).into())
@@ -798,6 +751,7 @@ mod tests {
             actor_id,
             test_env.local_barrier_manager.clone(),
             10,
+            Vec::new(), // no initial inputs
         );
         // Flush subscribe_barrier events to ensure the executor is ready.
         test_env.flush_all_events().await;
