@@ -569,7 +569,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
-                let _snapshot_read_complete = false;
 
                 // Create the backfill stream with upstream and snapshot
                 {
