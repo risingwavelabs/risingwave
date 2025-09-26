@@ -118,7 +118,9 @@ pub mod vacuum;
 pub mod variable;
 mod wait;
 
-pub use alter_table_column::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
+pub use alter_table_column::{
+    fetch_table_catalog_for_alter, get_new_table_definition_for_cdc_table, get_replace_table_plan,
+};
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;

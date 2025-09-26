@@ -329,10 +329,7 @@ impl CatalogController {
         Ok(())
     }
 
-    /// Returns the IDs of tables whose catalogs have been updated.
-    pub(crate) async fn clean_dirty_sink_downstreams(
-        txn: &DatabaseTransaction,
-    ) -> MetaResult<Vec<TableId>> {
+    pub(crate) async fn clean_dirty_sink_downstreams(txn: &DatabaseTransaction) -> MetaResult<()> {
         // clean incoming sink from (table)
         // clean upstream fragment ids from (fragment)
         // clean stream node from (fragment)
@@ -366,13 +363,11 @@ impl CatalogController {
 
         // no need to update, returning
         if table_with_incoming_sinks.is_empty() {
-            return Ok(vec![]);
+            return Ok(());
         }
 
-        let mut updated_table_ids = vec![];
         for table_id in table_with_incoming_sinks {
             tracing::info!("cleaning dirty table sink downstream table {}", table_id);
-            updated_table_ids.push(table_id);
 
             let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
                 .select_only()
@@ -453,7 +448,7 @@ impl CatalogController {
             }
         }
 
-        Ok(updated_table_ids)
+        Ok(())
     }
 
     pub async fn has_any_streaming_jobs(&self) -> MetaResult<bool> {
