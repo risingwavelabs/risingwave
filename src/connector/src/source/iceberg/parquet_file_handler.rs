@@ -289,6 +289,37 @@ pub async fn read_parquet_file(
     let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
 
     let file_metadata = parquet_metadata.file_metadata();
+    {
+        // Log parquet file-level metadata
+        tracing::info!(
+            "Reading parquet file: {}, from offset {}, num_row_groups={}, total_rows={}, kv_len={}",
+            file_name,
+            offset,
+            parquet_metadata.row_groups().len(),
+            file_metadata.num_rows(),
+            file_metadata
+                .key_value_metadata()
+                .map(|m| m.len())
+                .unwrap_or(0)
+        );
+        // Log each leaf column's path and types
+        let schema_descr = file_metadata.schema_descr();
+        for col in schema_descr.columns() {
+            let path = col.path().string();
+            let physical = col.physical_type();
+            let logical = col.logical_type();
+            tracing::debug!(
+                file = %file_name,
+                column_path = path,
+                physical_type = ?physical,
+                logical_type = ?logical,
+                type_length = ?col.type_length(),
+                max_def_level = col.max_def_level(),
+                max_rep_level = col.max_rep_level(),
+                "Parquet file column schema: "
+            );
+        }
+    }
     let projection_mask = get_project_mask(rw_columns, file_metadata)?;
 
     // For the Parquet format, we directly convert from a record batch to a stream chunk.
