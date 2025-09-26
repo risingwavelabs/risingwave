@@ -144,6 +144,7 @@ message ConnectorPropsChangeMutation {
 
 message StartFragmentBackfillMutation {
   repeated uint32 fragment_ids = 1;
+  repeated uint32 truncate_locality_fragment_ids = 2;
 }
 
 message RefreshStartMutation {

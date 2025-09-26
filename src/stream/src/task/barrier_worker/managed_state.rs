@@ -1014,6 +1014,13 @@ impl DatabaseManagedBarrierState {
                 } => {
                     self.update_cdc_table_backfill_progress(epoch, actor_id, state);
                 }
+                LocalBarrierEvent::ReportTruncateState {
+                    epoch,
+                    actor_id,
+                    table_id,
+                } => {
+                    self.report_truncate_state(epoch, actor_id, table_id);
+                }
             }
         }
 
@@ -1167,6 +1174,47 @@ impl DatabaseManagedBarrierState {
             .entry(epoch.curr)
             .or_default()
             .insert(staging_table_id);
+    }
+
+    /// Report that a state table should be truncated for a specific epoch
+    /// This is used by locality provider to truncate its state table after backfill completion
+    pub(super) fn report_truncate_state(
+        &mut self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+    ) {
+        // Find the correct partial graph state by matching the actor's partial graph id
+        let Some(actor_state) = self.actor_states.get(&actor_id) else {
+            warn!(
+                ?epoch,
+                actor_id, table_id, "ignore truncate state table: actor_state not found"
+            );
+            return;
+        };
+        let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev) else {
+            let inflight_barriers = actor_state.inflight_barriers.keys().collect::<Vec<_>>();
+            warn!(
+                ?epoch,
+                actor_id,
+                table_id,
+                ?inflight_barriers,
+                "ignore truncate state table: partial_graph_id not found in inflight_barriers"
+            );
+            return;
+        };
+        let Some(graph_state) = self.graph_states.get_mut(partial_graph_id) else {
+            warn!(
+                ?epoch,
+                actor_id, table_id, "ignore truncate state table: graph_state not found"
+            );
+            return;
+        };
+        graph_state
+            .truncate_tables
+            .entry(epoch.curr)
+            .or_default()
+            .insert(table_id);
     }
 }
 

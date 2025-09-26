@@ -40,6 +40,16 @@ enum BackfillState {
     Done(ConsumedRows),
 }
 
+/// Represents the backfill nodes that need to be scheduled or cleaned up.
+#[derive(Debug, Default)]
+pub(super) struct PendingBackfillFragments {
+    /// Fragment IDs that should start backfilling in the next checkpoint
+    pub next_backfill_nodes: Vec<FragmentId>,
+    /// Fragment IDs whose locality backfill state should be truncated
+    /// (they have just completed backfilling)
+    pub last_backfill_nodes: Vec<FragmentId>,
+}
+
 /// Progress of all actors containing backfill executors while creating mview.
 #[derive(Debug)]
 pub(super) struct Progress {
@@ -100,13 +110,14 @@ impl Progress {
     }
 
     /// Update the progress of `actor`.
+    /// Returns the backfill fragments that need to be scheduled or cleaned up.
     fn update(
         &mut self,
         actor: ActorId,
         new_state: BackfillState,
         upstream_total_key_count: u64,
-    ) -> Vec<FragmentId> {
-        let mut next_backfill_nodes = vec![];
+    ) -> PendingBackfillFragments {
+        let mut result = PendingBackfillFragments::default();
         self.upstream_mvs_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
         let backfill_upstream_type = self.backfill_upstream_types.get(&actor).unwrap();
@@ -130,7 +141,18 @@ impl Progress {
                 tracing::debug!("actor {} done", actor);
                 new = *new_consumed_rows;
                 self.done_count += 1;
-                next_backfill_nodes = self.backfill_order_state.finish_actor(actor);
+                let before_backfill_nodes = self
+                    .backfill_order_state
+                    .current_backfill_node_fragment_ids();
+                result.next_backfill_nodes = self.backfill_order_state.finish_actor(actor);
+                let after_backfill_nodes = self
+                    .backfill_order_state
+                    .current_backfill_node_fragment_ids();
+                // last_backfill_nodes = before_backfill_nodes - after_backfill_nodes
+                result.last_backfill_nodes = before_backfill_nodes
+                    .into_iter()
+                    .filter(|x| !after_backfill_nodes.contains(x))
+                    .collect();
                 tracing::debug!(
                     "{} actors out of {} complete",
                     self.done_count,
@@ -155,7 +177,7 @@ impl Progress {
             }
         }
         self.states.insert(actor, new_state);
-        next_backfill_nodes
+        result
     }
 
     /// Returns whether all backfill executors are done.
@@ -297,8 +319,10 @@ pub(super) struct TrackingCommand {
 
 pub(super) enum UpdateProgressResult {
     None,
-    Finished(TrackingJob),
-    BackfillNodeFinished(Vec<FragmentId>),
+    /// The finished job, along with its pending backfill fragments for cleanup.
+    Finished(TrackingJob, PendingBackfillFragments),
+    /// Backfill nodes have finished and new ones need to be scheduled.
+    BackfillNodeFinished(PendingBackfillFragments),
 }
 
 /// Tracking is done as follows:
@@ -316,8 +340,8 @@ pub(super) struct CreateMviewProgressTracker {
     /// Stash of finished jobs. They will be finally finished on checkpoint.
     pending_finished_jobs: Vec<TrackingJob>,
 
-    /// Stash of pending backfill nodes. They will start backfilling on checkpoint.
-    pending_backfill_nodes: Vec<FragmentId>,
+    /// Stash of pending backfill fragments. They will start backfilling or be cleaned up on checkpoint.
+    pending_backfill_fragments: Vec<PendingBackfillFragments>,
 }
 
 impl CreateMviewProgressTracker {
@@ -361,7 +385,7 @@ impl CreateMviewProgressTracker {
             progress_map,
             actor_map,
             pending_finished_jobs: Vec::new(),
-            pending_backfill_nodes: Vec::new(),
+            pending_backfill_fragments: Vec::new(),
         }
     }
 
@@ -435,17 +459,18 @@ impl CreateMviewProgressTracker {
                             UpdateProgressResult::None => {
                                 tracing::trace!(?progress, "update progress");
                             }
-                            UpdateProgressResult::Finished(command) => {
+                            UpdateProgressResult::Finished(command, fragments) => {
+                                self.queue_backfill(fragments);
                                 tracing::trace!(?progress, "finish progress");
                                 commands.push(command);
                             }
-                            UpdateProgressResult::BackfillNodeFinished(next_backfill_nodes) => {
+                            UpdateProgressResult::BackfillNodeFinished(fragments) => {
                                 tracing::trace!(
                                     ?progress,
-                                    ?next_backfill_nodes,
+                                    next_backfill_nodes = ?fragments.next_backfill_nodes,
                                     "start next backfill node"
                                 );
-                                self.queue_backfill(next_backfill_nodes);
+                                self.queue_backfill(fragments);
                             }
                         }
                     }
@@ -506,8 +531,8 @@ impl CreateMviewProgressTracker {
         self.pending_finished_jobs.push(finished_job);
     }
 
-    fn queue_backfill(&mut self, backfill_nodes: impl IntoIterator<Item = FragmentId>) {
-        self.pending_backfill_nodes.extend(backfill_nodes);
+    fn queue_backfill(&mut self, fragments: PendingBackfillFragments) {
+        self.pending_backfill_fragments.push(fragments);
     }
 
     /// Finish stashed jobs on checkpoint.
@@ -516,8 +541,15 @@ impl CreateMviewProgressTracker {
         take(&mut self.pending_finished_jobs)
     }
 
-    pub(super) fn take_pending_backfill_nodes(&mut self) -> Vec<FragmentId> {
-        take(&mut self.pending_backfill_nodes)
+    /// Take the pending backfill fragments to start on checkpoint.
+    /// Merge all pending backfill fragments into one.
+    pub(super) fn take_pending_backfill_nodes(&mut self) -> PendingBackfillFragments {
+        let mut result = PendingBackfillFragments::default();
+        for fragments in take(&mut self.pending_backfill_fragments) {
+            result.next_backfill_nodes.extend(fragments.next_backfill_nodes);
+            result.last_backfill_nodes.extend(fragments.last_backfill_nodes);
+        }
+        result
     }
 
     pub(super) fn has_pending_finished_jobs(&self) -> bool {
@@ -640,8 +672,7 @@ impl CreateMviewProgressTracker {
                     calculate_total_key_count(&progress.upstream_mv_count, version_stats);
 
                 tracing::debug!(?table_id, "updating progress for table");
-                let next_backfill_nodes =
-                    progress.update(actor, new_state, upstream_total_key_count);
+                let fragments = progress.update(actor, new_state, upstream_total_key_count);
 
                 if progress.is_done() {
                     tracing::debug!(
@@ -653,11 +684,17 @@ impl CreateMviewProgressTracker {
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }
-                    assert!(next_backfill_nodes.is_empty());
-                    UpdateProgressResult::Finished(o.remove().1)
-                } else if !next_backfill_nodes.is_empty() {
-                    tracing::debug!("scheduling next backfill nodes: {:?}", next_backfill_nodes);
-                    UpdateProgressResult::BackfillNodeFinished(next_backfill_nodes)
+                    assert!(fragments.next_backfill_nodes.is_empty());
+                    UpdateProgressResult::Finished(o.remove().1, fragments)
+                } else if !fragments.next_backfill_nodes.is_empty()
+                    || !fragments.last_backfill_nodes.is_empty()
+                {
+                    tracing::debug!(
+                        "scheduling next backfill nodes: {:?} and truncate last backfill nodes: {:?}",
+                        fragments.next_backfill_nodes,
+                        fragments.last_backfill_nodes
+                    );
+                    UpdateProgressResult::BackfillNodeFinished(fragments)
                 } else {
                     UpdateProgressResult::None
                 }
