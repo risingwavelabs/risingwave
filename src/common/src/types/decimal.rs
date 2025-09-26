@@ -559,7 +559,7 @@ impl Decimal {
 
     pub fn unordered_serialize(&self) -> [u8; 16] {
         // according to https://docs.rs/rust_decimal/1.18.0/src/rust_decimal/decimal.rs.html#665-684
-        // the lower 15 bits is not used, so we can use first byte to distinguish nan and inf
+        // the lower 16 bits is not used, so we can use first byte to distinguish nan and inf
         match self {
             Self::Normalized(d) => d.serialize(),
             Self::NaN => [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -802,6 +802,35 @@ impl From<RustDecimal> for Decimal {
         Self::Normalized(d)
     }
 }
+
+mod zc {
+    use musli_zerocopy::ZeroCopy;
+
+    use super::*;
+
+    /// A normalized decimal implementing `ZeroCopy`.
+    #[derive(Debug, Clone, Copy, ZeroCopy)]
+    #[repr(transparent)]
+    pub struct ZcNormalizedDecimal([u8; 15]);
+
+    impl From<RustDecimal> for ZcNormalizedDecimal {
+        // according to https://docs.rs/rust_decimal/1.18.0/src/rust_decimal/decimal.rs.html#665-684
+        // the lower 16 bits is not used, so we can omit the first byte
+        fn from(value: RustDecimal) -> Self {
+            Self(value.serialize()[1..].try_into().unwrap())
+        }
+    }
+
+    impl From<ZcNormalizedDecimal> for RustDecimal {
+        fn from(value: ZcNormalizedDecimal) -> Self {
+            let mut bytes = [0; 16];
+            bytes[1..].copy_from_slice(&value.0);
+            Self::deserialize(bytes)
+        }
+    }
+}
+
+pub use zc::ZcNormalizedDecimal;
 
 #[cfg(test)]
 mod tests {
