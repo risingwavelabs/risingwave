@@ -163,8 +163,8 @@ pub async fn create_stream_for_cursor_stmt(
         let context = OptimizerContext::from_handler_args(handler_args);
         let plan_choice = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         let plan_result = match plan_choice {
-            super::query::BatchPlanChoice::RW(plan_result) => plan_result,
-            super::query::BatchPlanChoice::DF { .. } => {
+            super::query::BatchPlanChoice::Rw(plan_result) => plan_result,
+            super::query::BatchPlanChoice::Df { .. } => {
                 return Err(ErrorCode::InternalError(
                     "DataFusion plans not supported in cursor declaration".to_owned(),
                 )

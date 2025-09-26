@@ -12195,7 +12195,6 @@ version = "2.7.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
- "arrow 54.2.1",
  "assert_matches",
  "async-recursion",
  "async-trait",

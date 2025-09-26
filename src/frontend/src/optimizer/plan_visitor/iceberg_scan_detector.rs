@@ -16,7 +16,7 @@ use crate::optimizer::plan_node::LogicalIcebergScan;
 use crate::optimizer::plan_visitor::{LogicalPlanVisitor, Merge};
 use crate::optimizer::{PlanPhaseBatchOptimizedLogical, PlanRoot, PlanVisitor};
 
-/// Visitor to check if Logical Plan contains any LogicalIcebergScan node.
+/// Visitor to check if Logical Plan contains any `LogicalIcebergScan` node.
 #[derive(Debug, Clone, Default)]
 pub struct IcebergScanDetector {
     pub found: bool,
@@ -36,7 +36,7 @@ impl LogicalPlanVisitor for IcebergScanDetector {
 }
 
 impl IcebergScanDetector {
-    /// If the plan contains any LogicalIcebergScan node, return true; otherwise, return false.
+    /// If the plan contains any `LogicalIcebergScan` node, return true; otherwise, return false.
     pub fn contains_logical_iceberg_scan(
         plan_root: &PlanRoot<PlanPhaseBatchOptimizedLogical>,
     ) -> bool {

@@ -13,25 +13,31 @@
 // limitations under the License.
 
 use datafusion::arrow::datatypes::{Field, Schema as ArrowSchema};
-use datafusion::logical_expr::{Expr as DFExpr, LogicalPlan as DFLogicalPlan, LogicalPlan, Values};
-use datafusion_common::{DFSchema, ScalarValue};
-use risingwave_common::types::{DataType as RWDataType, ScalarImpl};
+use datafusion::logical_expr::{
+    Expr as DFExpr, Join, JoinConstraint, JoinType as DFJoinType, LogicalPlan as DFLogicalPlan,
+    LogicalPlan, Values, build_join_schema,
+};
+use datafusion_common::{Column, DFSchema, ScalarValue};
+use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::types::ScalarImpl;
+use risingwave_pb::plan_common::JoinType;
 
+use crate::expr::ExprImpl;
 use crate::optimizer::PlanVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Logical, LogicalValues, PlanRef};
+use crate::optimizer::plan_node::{Logical, LogicalValues, PlanRef, PlanTreeNodeBinary};
 use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
 
 #[derive(Debug, Clone, Default)]
-pub struct RWToDFConverter {}
+pub struct RwToDfConverter {}
 
-impl RWToDFConverter {
+impl RwToDfConverter {
     pub fn convert(&mut self, plan: PlanRef<Logical>) -> DFLogicalPlan {
         PlanVisitor::visit(self, plan)
     }
 }
 
-impl LogicalPlanVisitor for RWToDFConverter {
+impl LogicalPlanVisitor for RwToDfConverter {
     type DefaultBehavior = DefaultValueBehavior;
     type Result = DFLogicalPlan;
 
@@ -40,23 +46,16 @@ impl LogicalPlanVisitor for RWToDFConverter {
     }
 
     fn visit_logical_values(&mut self, plan: &LogicalValues) -> Self::Result {
-        // Build Arrow fields from RW schema (names + types). For basic implementation,
-        // map a few common types; unsupported types default to Utf8.
         let rw_schema = plan.schema();
+
+        let converter = IcebergArrowConvert {};
         let arrow_fields: Vec<Field> = rw_schema
             .fields()
             .iter()
             .map(|f| {
-                let name = f.name.clone();
-                // map basic types; for simplicity assume nullable true
-                let arrow_dt = match f.data_type() {
-                    RWDataType::Int32 => datafusion::arrow::datatypes::DataType::Int32,
-                    RWDataType::Int64 => datafusion::arrow::datatypes::DataType::Int64,
-                    RWDataType::Float64 => datafusion::arrow::datatypes::DataType::Float64,
-                    RWDataType::Boolean => datafusion::arrow::datatypes::DataType::Boolean,
-                    _ => datafusion::arrow::datatypes::DataType::Utf8,
-                };
-                Field::new(&name, arrow_dt, true)
+                converter
+                    .to_arrow_field(&f.name, &f.data_type)
+                    .expect("failed to convert RW field to Arrow field")
             })
             .collect();
 
@@ -64,13 +63,12 @@ impl LogicalPlanVisitor for RWToDFConverter {
         let df_schema = DFSchema::try_from(std::sync::Arc::new(arrow_schema))
             .expect("failed to create DFSchema from Arrow schema");
 
-        // Convert rows: only support Literal for now
         let mut df_rows: Vec<Vec<DFExpr>> = Vec::with_capacity(plan.rows().len());
         for row in plan.rows() {
             let mut df_row: Vec<DFExpr> = Vec::with_capacity(row.len());
             for expr in row {
                 match expr {
-                    crate::expr::ExprImpl::Literal(lit) => {
+                    ExprImpl::Literal(lit) => {
                         let scalar = match lit.get_data() {
                             None => ScalarValue::Null,
                             Some(sv) => match sv {
@@ -102,8 +100,91 @@ impl LogicalPlanVisitor for RWToDFConverter {
         }
 
         LogicalPlan::Values(Values {
-            values: df_rows,
             schema: std::sync::Arc::new(df_schema),
+            values: df_rows,
+        })
+    }
+
+    fn visit_logical_join(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalJoin,
+    ) -> Self::Result {
+        // Recursively convert left and right children
+        let left_plan = self.convert(plan.left());
+        let right_plan = self.convert(plan.right());
+
+        // Convert join type from RisingWave to DataFusion
+        let df_join_type = match plan.join_type() {
+            JoinType::Inner => DFJoinType::Inner,
+            JoinType::LeftOuter => DFJoinType::Left,
+            JoinType::RightOuter => DFJoinType::Right,
+            JoinType::FullOuter => DFJoinType::Full,
+            JoinType::LeftSemi => DFJoinType::LeftSemi,
+            JoinType::LeftAnti => DFJoinType::LeftAnti,
+            JoinType::RightSemi => DFJoinType::RightSemi,
+            JoinType::RightAnti => DFJoinType::RightAnti,
+            _ => {
+                // For unsupported join types (like AsOf joins), return EmptyRelation
+                let empty_schema = DFSchema::empty();
+                return LogicalPlan::EmptyRelation(datafusion::logical_expr::EmptyRelation {
+                    produce_one_row: false,
+                    schema: std::sync::Arc::new(empty_schema),
+                });
+            }
+        };
+
+        // Extract equijoin conditions - get equal join key pairs
+        let eq_indexes = plan.eq_indexes();
+        let on: Vec<(DFExpr, DFExpr)> = eq_indexes
+            .into_iter()
+            .map(|(left_idx, right_idx)| {
+                let left_schema = left_plan.schema();
+                let right_schema = right_plan.schema();
+
+                // Create column references for the join keys
+                let left_field = &left_schema.fields()[left_idx];
+                let right_field = &right_schema.fields()[right_idx - left_schema.fields().len()];
+
+                let left_expr = DFExpr::Column(Column::from_qualified_name(left_field.name()));
+                let right_expr = DFExpr::Column(Column::from_qualified_name(right_field.name()));
+
+                (left_expr, right_expr)
+            })
+            .collect();
+
+        // Convert non-equijoin conditions (filter)
+        let condition = plan.on();
+        let filter = if condition.always_true() {
+            None
+        } else {
+            // For now, convert complex conditions to a simple true condition
+            // A full implementation would need to convert the entire condition tree
+            Some(DFExpr::Literal(ScalarValue::Boolean(Some(true))))
+        };
+
+        // Build the join schema
+        let join_schema =
+            match build_join_schema(left_plan.schema(), right_plan.schema(), &df_join_type) {
+                Ok(schema) => schema,
+                Err(_) => {
+                    // If schema building fails, return empty relation
+                    let empty_schema = DFSchema::empty();
+                    return LogicalPlan::EmptyRelation(datafusion::logical_expr::EmptyRelation {
+                        produce_one_row: false,
+                        schema: std::sync::Arc::new(empty_schema),
+                    });
+                }
+            };
+
+        LogicalPlan::Join(Join {
+            left: std::sync::Arc::new(left_plan),
+            right: std::sync::Arc::new(right_plan),
+            on,
+            filter,
+            join_type: df_join_type,
+            join_constraint: JoinConstraint::On,
+            schema: std::sync::Arc::new(join_schema),
+            null_equals_null: false,
         })
     }
 }
@@ -111,6 +192,6 @@ impl LogicalPlanVisitor for RWToDFConverter {
 pub struct DefaultValueBehavior;
 impl DefaultBehavior<DFLogicalPlan> for DefaultValueBehavior {
     fn apply(&self, _results: impl IntoIterator<Item = DFLogicalPlan>) -> DFLogicalPlan {
-        panic!("RWToDFConverter: encountered unsupported node in default_behavior")
+        panic!("RwToDfConverter: encountered unsupported node in default_behavior")
     }
 }

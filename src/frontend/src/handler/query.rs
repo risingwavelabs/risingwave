@@ -24,8 +24,8 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::DataChunk;
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::session_config::QueryMode;
@@ -54,10 +54,10 @@ use crate::scheduler::{
 };
 use crate::session::SessionImpl;
 
-/// Choice between running RisingWave's own batch executor (RW) or a DataFusion (DF) logical plan.
+/// Choice between running RisingWave's own batch executor (Rw) or a `DataFusion` (DF) logical plan.
 pub enum BatchPlanChoice {
-    RW(BatchQueryPlanResult),
-    DF {
+    Rw(BatchQueryPlanResult),
+    Df {
         df_plan: LogicalPlan,
         stmt_type: StatementType,
     },
@@ -75,7 +75,7 @@ pub async fn handle_query(
     let either = {
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         match plan_result {
-            BatchPlanChoice::RW(plan_result) => {
+            BatchPlanChoice::Rw(plan_result) => {
                 // Time zone is used by Hummock time travel query.
                 let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
                     session.config().timezone().to_owned(),
@@ -83,7 +83,7 @@ pub async fn handle_query(
                 )?;
                 Either::Left(plan_fragmenter_result)
             }
-            BatchPlanChoice::DF { df_plan, stmt_type } => Either::Right((df_plan, stmt_type)),
+            BatchPlanChoice::Df { df_plan, stmt_type } => Either::Right((df_plan, stmt_type)),
         }
     };
 
@@ -132,11 +132,11 @@ pub async fn handle_execute(
                 let context = OptimizerContext::from_handler_args(handler_args);
                 let plan_result =
                     match gen_batch_query_plan(&session, context.into(), bound_result)? {
-                        BatchPlanChoice::RW(plan_result) => plan_result,
-                        BatchPlanChoice::DF { .. } => {
+                        BatchPlanChoice::Rw(plan_result) => plan_result,
+                        BatchPlanChoice::Df { .. } => {
                             return Err(ErrorCode::InternalError(
                                 "DataFusion plans not supported in prepared statement execution"
-                                    .to_string(),
+                                    .to_owned(),
                             )
                             .into());
                         }
@@ -203,8 +203,8 @@ pub async fn handle_execute(
                     let context = OptimizerContext::from_handler_args(handler_args.clone());
                     let plan_result =
                         match gen_batch_query_plan(&session, context.into(), bound_result)? {
-                            BatchPlanChoice::RW(plan_result) => plan_result,
-                            BatchPlanChoice::DF { .. } => {
+                            BatchPlanChoice::Rw(plan_result) => plan_result,
+                            BatchPlanChoice::Df { .. } => {
                                 return Err(ErrorCode::InternalError(
                                     "DataFusion plans not supported in cursor declaration"
                                         .to_owned(),
@@ -318,9 +318,9 @@ fn gen_batch_query_plan(
         IcebergScanDetector::contains_logical_iceberg_scan(&optimized_logical);
     if contains_iceberg_scan {
         // Convert RisingWave logical plan to DataFusion logical plan for Iceberg queries.
-        let mut converter = crate::optimizer::RWToDFConverter::default();
+        let mut converter = crate::optimizer::RwToDfConverter::default();
         let df_plan = converter.convert(optimized_logical.clone().plan);
-        return Ok(BatchPlanChoice::DF { df_plan, stmt_type });
+        return Ok(BatchPlanChoice::Df { df_plan, stmt_type });
     }
 
     let batch_plan = optimized_logical.gen_batch_plan()?;
@@ -354,7 +354,7 @@ fn gen_batch_query_plan(
         QueryMode::Distributed => batch_plan.gen_batch_distributed_plan()?,
     };
 
-    Ok(BatchPlanChoice::RW(BatchQueryPlanResult {
+    Ok(BatchPlanChoice::Rw(BatchQueryPlanResult {
         plan: physical,
         query_mode,
         schema,
@@ -709,7 +709,7 @@ pub async fn execute_datafusion_plan(
         .into())
 }
 
-/// Convert DataFusion Arrow DataType to RisingWave DataType
+/// Convert `DataFusion` Arrow `DataType` to RisingWave `DataType`
 fn convert_arrow_type_to_rw_type(arrow_type: &datafusion::arrow::datatypes::DataType) -> DataType {
     use datafusion::arrow::datatypes::DataType as ArrowDataType;
 
@@ -783,8 +783,8 @@ fn convert_arrow_type_to_rw_type(arrow_type: &datafusion::arrow::datatypes::Data
             });
             DataType::Struct(risingwave_common::types::StructType::new(struct_fields))
         }
-        ArrowDataType::Union(fileds, _) => {
-            let struct_fields = fileds.iter().map(|(_, f)| {
+        ArrowDataType::Union(fields, _) => {
+            let struct_fields = fields.iter().map(|(_, f)| {
                 (
                     f.name().clone(),
                     convert_arrow_type_to_rw_type(f.data_type()),
@@ -792,18 +792,16 @@ fn convert_arrow_type_to_rw_type(arrow_type: &datafusion::arrow::datatypes::Data
             });
             DataType::Struct(risingwave_common::types::StructType::new(struct_fields))
         }
-        ArrowDataType::Dictionary(key_type, value_type) => {
-            DataType::Map(MapType::from_kv(
-                convert_arrow_type_to_rw_type(key_type),
-                convert_arrow_type_to_rw_type(value_type),
-            ))
-        }
+        ArrowDataType::Dictionary(key_type, value_type) => DataType::Map(MapType::from_kv(
+            convert_arrow_type_to_rw_type(key_type),
+            convert_arrow_type_to_rw_type(value_type),
+        )),
         ArrowDataType::Map(field, _) => {
             let value_type = convert_arrow_type_to_rw_type(field.data_type());
             // The value_type should be struct
             if let DataType::Struct(struct_type) = value_type {
                 if struct_type.len() != 2
-                    || struct_type.iter().nth(0).unwrap().0 != "key"
+                    || struct_type.iter().next().unwrap().0 != "key"
                     || struct_type.iter().nth(1).unwrap().0 != "value"
                 {
                     tracing::warn!(
@@ -812,7 +810,7 @@ fn convert_arrow_type_to_rw_type(arrow_type: &datafusion::arrow::datatypes::Data
                     );
                     return DataType::Varchar;
                 }
-                let key_type = struct_type.iter().nth(0).unwrap().1.clone();
+                let key_type = struct_type.iter().next().unwrap().1.clone();
                 let value_type_inner = struct_type.iter().nth(1).unwrap().1.clone();
                 match MapType::check_key_type_valid(&key_type) {
                     Ok(_) => DataType::Map(MapType::from_kv(key_type, value_type_inner)),

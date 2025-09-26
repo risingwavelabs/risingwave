@@ -62,8 +62,8 @@ pub async fn handle_create_view(
             dependent_relations,
             ..
         } = match plan_choice {
-            super::query::BatchPlanChoice::RW(plan_result) => plan_result,
-            super::query::BatchPlanChoice::DF { .. } => {
+            super::query::BatchPlanChoice::Rw(plan_result) => plan_result,
+            super::query::BatchPlanChoice::Df { .. } => {
                 return Err(crate::error::ErrorCode::NotSupported(
                     "DataFusion plans in view creation".to_owned(),
                     "Views with DataFusion plans are not supported".to_owned(),
