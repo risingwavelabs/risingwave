@@ -261,11 +261,6 @@ impl<'a> JsonbRef<'a> {
         Self(ValueRef::Null)
     }
 
-    /// Returns a value for empty string.
-    pub const fn empty_string() -> Self {
-        Self(ValueRef::String(""))
-    }
-
     /// Returns true if this is a jsonb `null`.
     pub fn is_jsonb_null(&self) -> bool {
         self.0.is_null()
@@ -358,7 +353,7 @@ impl<'a> JsonbRef<'a> {
     ///   * Jsonb string is displayed with quotes but treated as its inner value here.
     pub fn force_str<W: std::fmt::Write>(&self, writer: &mut W) -> std::fmt::Result {
         match self.0 {
-            ValueRef::String(v) => writer.write_str(v),
+            ValueRef::String(v) => writer.write_str(v.as_str()),
             ValueRef::Null => Ok(()),
             ValueRef::Bool(_) | ValueRef::Number(_) | ValueRef::Array(_) | ValueRef::Object(_) => {
                 use crate::types::to_text::ToText as _;
@@ -662,3 +657,36 @@ impl ToSql for JsonbRef<'_> {
         Ok(IsNull::No)
     }
 }
+
+mod zc {
+    use jsonbb::Entry;
+    use musli_zerocopy::buf::Load;
+    use musli_zerocopy::{Buf, OwnedBuf, Ref, ZeroCopy};
+
+    use super::*;
+
+    /// A Jsonb implementing `ZeroCopy`.
+    #[derive(Debug, Clone, Copy, ZeroCopy)]
+    #[repr(C)]
+    pub struct ZcJsonb {
+        entry: [u8; 4],
+        data: Ref<[u8]>,
+    }
+
+    impl ZcJsonb {
+        pub fn store(scalar: JsonbRef<'_>, buf: &mut OwnedBuf) -> Self {
+            let (entry, data) = scalar.0.to_raw_parts();
+            Self {
+                entry: entry.0,
+                data: buf.store_slice(data),
+            }
+        }
+
+        pub fn load(self, buf: &Buf) -> JsonbRef<'_> {
+            let data = self.data.load(buf).unwrap();
+            JsonbRef(ValueRef::from_raw_parts(Entry(self.entry), data))
+        }
+    }
+}
+
+pub use zc::ZcJsonb;

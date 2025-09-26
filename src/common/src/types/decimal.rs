@@ -558,8 +558,8 @@ impl Decimal {
     }
 
     pub fn unordered_serialize(&self) -> [u8; 16] {
-        // according to https://docs.rs/rust_decimal/1.18.0/src/rust_decimal/decimal.rs.html#665-684
-        // the lower 15 bits is not used, so we can use first byte to distinguish nan and inf
+        // according to https://docs.rs/rust_decimal/1.38.0/src/rust_decimal/decimal.rs.html#1053-1072
+        // the lower 16 bits is not used, so we can use first byte to distinguish nan and inf
         match self {
             Self::Normalized(d) => d.serialize(),
             Self::NaN => [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -802,6 +802,52 @@ impl From<RustDecimal> for Decimal {
         Self::Normalized(d)
     }
 }
+
+mod zc {
+    use musli_zerocopy::ZeroCopy;
+
+    use super::*;
+
+    /// A decimal implementing `ZeroCopy`.
+    #[derive(Debug, Clone, Copy, ZeroCopy)]
+    #[repr(u8)]
+    pub enum ZcDecimal {
+        NegativeInf,
+        Normalized([u8; 14]),
+        PositiveInf,
+        NaN,
+    }
+
+    impl From<Decimal> for ZcDecimal {
+        // according to https://docs.rs/rust_decimal/1.38.0/src/rust_decimal/decimal.rs.html#1053-1072
+        // the lower 16 bits is not used, so we can omit the first 2 bytes
+        fn from(value: Decimal) -> Self {
+            match value {
+                Decimal::Normalized(d) => Self::Normalized(d.serialize()[2..].try_into().unwrap()),
+                Decimal::NegativeInf => Self::NegativeInf,
+                Decimal::PositiveInf => Self::PositiveInf,
+                Decimal::NaN => Self::NaN,
+            }
+        }
+    }
+
+    impl From<ZcDecimal> for Decimal {
+        fn from(value: ZcDecimal) -> Self {
+            match value {
+                ZcDecimal::NegativeInf => Self::NegativeInf,
+                ZcDecimal::Normalized(d) => {
+                    let mut bytes = [0; 16];
+                    bytes[2..].copy_from_slice(&d);
+                    Self::Normalized(RustDecimal::deserialize(bytes))
+                }
+                ZcDecimal::PositiveInf => Self::PositiveInf,
+                ZcDecimal::NaN => Self::NaN,
+            }
+        }
+    }
+}
+
+pub use zc::ZcDecimal;
 
 #[cfg(test)]
 mod tests {
