@@ -761,10 +761,6 @@ pub async fn start_service_as_election_leader(
     started::set();
     let _server_handle = tokio::spawn(server);
 
-    // sub_tasks.push(metadata_manager.spawn_migrate_table_fragments(
-    //     env.frontend_client_pool_ref(),
-    // ).0);
-
     // Wait for the shutdown signal.
     shutdown.cancelled().await;
     // TODO(shutdown): may warn user if there's any other node still running in the cluster.
