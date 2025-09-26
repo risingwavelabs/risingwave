@@ -1325,7 +1325,7 @@ mod tests {
         assert_item_size_eq!(DecimalArray, 20);
 
         const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
-        const_assert_eq!(std::mem::size_of::<ScalarRefImpl<'_>>(), 24);
+        const_assert_eq!(std::mem::size_of::<ScalarRefImpl<'_>>(), 32);
         const_assert_eq!(std::mem::size_of::<Datum>(), 24);
         const_assert_eq!(std::mem::size_of::<StructType>(), 8);
         const_assert_eq!(std::mem::size_of::<DataType>(), 16);
