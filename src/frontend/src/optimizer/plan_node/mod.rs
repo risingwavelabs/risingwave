@@ -1011,6 +1011,7 @@ mod logical_intersect;
 mod logical_join;
 mod logical_kafka_scan;
 mod logical_limit;
+mod logical_locality_provider;
 mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
@@ -1045,6 +1046,7 @@ mod stream_hash_join;
 mod stream_hop_window;
 mod stream_join_common;
 mod stream_local_approx_percentile;
+mod stream_locality_provider;
 mod stream_materialize;
 mod stream_materialized_exprs;
 mod stream_now;
@@ -1139,6 +1141,7 @@ pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
+pub use logical_locality_provider::LogicalLocalityProvider;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_mysql_query::LogicalMySqlQuery;
@@ -1177,6 +1180,7 @@ pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
+pub use stream_locality_provider::StreamLocalityProvider;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_materialized_exprs::StreamMaterializedExprs;
 pub use stream_now::StreamNow;
@@ -1264,6 +1268,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
             , { Logical, VectorSearch }
+            , { Logical, LocalityProvider }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1340,6 +1345,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, MaterializedExprs }
             , { Stream, VectorIndexWrite }
             , { Stream, UpstreamSinkUnion }
+            , { Stream, LocalityProvider }
             $(,$rest)*
         }
     };

@@ -28,9 +28,9 @@ use super::generic::{
 };
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject, ToBatch,
-    ToStream, generic,
+    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalLocalityProvider,
+    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin,
+    StreamPlanRef, StreamProject, ToBatch, ToStream, generic,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -1541,6 +1541,26 @@ impl LogicalJoin {
             .into()),
         }
     }
+
+    fn try_better_locality_inner(&self, columns: &[usize]) -> Option<PlanRef> {
+        let mut ctx = ToStreamContext::new(false);
+        // only pass through the locality information if it can be converted to dynamic filter
+        if let Ok(Some(_)) = self.to_stream_dynamic_filter(self.on().clone(), &mut ctx) {
+            // since dynamic filter only supports left input ref in the output indices, we can safely use o2i mapping to convert the required columns.
+            let o2i_mapping = self.core.o2i_col_mapping();
+            let left_input_columns = columns
+                .iter()
+                .map(|&col| o2i_mapping.try_map(col))
+                .collect::<Option<Vec<usize>>>()?;
+            if let Some(better_left_plan) = self.left().try_better_locality(&left_input_columns) {
+                return Some(
+                    self.clone_with_left_right(better_left_plan, self.right())
+                        .into(),
+                );
+            }
+        }
+        None
+    }
 }
 
 impl ToBatch for LogicalJoin {
@@ -1754,23 +1774,19 @@ impl ToStream for LogicalJoin {
     }
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        let mut ctx = ToStreamContext::new(false);
-        // only pass through the locality information if it can be converted to dynamic filter
-        if let Ok(Some(_)) = self.to_stream_dynamic_filter(self.on().clone(), &mut ctx) {
-            // since dynamic filter only supports left input ref in the output indices, we can safely use o2i mapping to convert the required columns.
-            let o2i_mapping = self.core.o2i_col_mapping();
-            let left_input_columns = columns
-                .iter()
-                .map(|&col| o2i_mapping.try_map(col))
-                .collect::<Option<Vec<usize>>>()?;
-            if let Some(better_left_plan) = self.left().try_better_locality(&left_input_columns) {
-                return Some(
-                    self.clone_with_left_right(better_left_plan, self.right())
-                        .into(),
-                );
-            }
+        if let Some(better_plan) = self.try_better_locality_inner(columns) {
+            Some(better_plan)
+        } else if self.ctx().session_ctx().config().enable_locality_backfill() {
+            Some(
+                LogicalLocalityProvider::new(
+                    self.clone_with_left_right(self.left(), self.right()).into(),
+                    columns.to_owned(),
+                )
+                .into(),
+            )
+        } else {
+            None
         }
-        None
     }
 }
 

@@ -170,6 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.sync_log_store")
         .boxed(".stream_plan.StreamNode.node_body.materialized_exprs")
         .boxed(".stream_plan.StreamNode.node_body.vector_index_write")
+        .boxed(".stream_plan.StreamNode.node_body.locality_provider")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // Eq + Hash are for plan nodes to do common sub-plan detection.

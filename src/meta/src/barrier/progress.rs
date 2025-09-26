@@ -149,6 +149,10 @@ impl Progress {
             BackfillUpstreamType::Values => {
                 // do not consider progress for values
             }
+            BackfillUpstreamType::LocalityProvider => {
+                // Track LocalityProvider progress similar to MView
+                self.mv_backfill_consumed_rows += new - old;
+            }
         }
         self.states.insert(actor, new_state);
         next_backfill_nodes
@@ -183,6 +187,7 @@ impl Progress {
                 BackfillUpstreamType::MView => mv_count += 1,
                 BackfillUpstreamType::Source => source_count += 1,
                 BackfillUpstreamType::Values => (),
+                BackfillUpstreamType::LocalityProvider => mv_count += 1, /* Count LocalityProvider as an MView for progress */
             }
         }
 
