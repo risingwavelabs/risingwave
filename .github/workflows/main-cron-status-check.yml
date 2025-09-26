@@ -1,0 +1,26 @@
+name: Main Cron Status Check
+
+on:
+    pull_request:
+        types: [opened, reopened, labeled, unlabeled]
+
+jobs:
+    main_cron_status_check:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Check
+              uses: actions/github-script@v7
+              with:
+                script: |
+                    const labels = context.payload.pull_request.labels.map(l => l.name);
+                    if (labels.includes('ci/main-cron/run-all') || labels.includes('ci/main-cron/run-selected')) {
+                        if (!labels.includes('ci/main-cron/passed')) {
+                            core.setFailed('Please make sure the main-cron jobs pass before merging.');
+                        } else {
+                            console.log('The main-cron jobs have passed.');
+                        }
+                    } else {
+                        console.log('No need to check the main-cron status.');
+                    }
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
