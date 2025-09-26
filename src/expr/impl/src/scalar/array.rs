@@ -24,7 +24,7 @@ use super::array_positions::array_position;
 
 #[function("array(...) -> anyarray", type_infer = "unreachable")]
 fn array(row: impl Row, ctx: &Context) -> ListValue {
-    ListValue::from_datum_iter(ctx.return_type.as_list_element_type(), row.iter())
+    ListValue::from_datum_iter(ctx.return_type.as_list_elem(), row.iter())
 }
 
 #[function("row(...) -> struct", type_infer = "unreachable")]
@@ -34,16 +34,16 @@ fn row_(row: impl Row) -> StructValue {
 
 fn map_from_key_values_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
     let map = MapType::try_from_kv(
-        args[0].as_list_element_type().clone(),
-        args[1].as_list_element_type().clone(),
+        args[0].as_list_elem().clone(),
+        args[1].as_list_elem().clone(),
     )
     .map_err(ExprError::Custom)?;
     Ok(map.into())
 }
 
 fn map_from_entries_type_infer(args: &[DataType]) -> Result<DataType, ExprError> {
-    let map = MapType::try_from_entries(args[0].as_list_element_type().clone())
-        .map_err(ExprError::Custom)?;
+    let map =
+        MapType::try_from_entries(args[0].as_list_elem().clone()).map_err(ExprError::Custom)?;
     Ok(map.into())
 }
 
@@ -64,8 +64,9 @@ fn map_from_entries_type_infer(args: &[DataType]) -> Result<DataType, ExprError>
     "map_from_key_values(anyarray, anyarray) -> anymap",
     type_infer = "map_from_key_values_type_infer"
 )]
-fn map_from_key_values(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue, ExprError> {
-    MapValue::try_from_kv(key.to_owned(), value.to_owned()).map_err(ExprError::Custom)
+fn map_from_key_values(keys: ListRef<'_>, values: ListRef<'_>) -> Result<MapValue, ExprError> {
+    MapValue::try_from_kv(keys.to_owned_scalar(), values.to_owned_scalar())
+        .map_err(ExprError::Custom)
 }
 
 #[function(
@@ -73,7 +74,7 @@ fn map_from_key_values(key: ListRef<'_>, value: ListRef<'_>) -> Result<MapValue,
     type_infer = "map_from_entries_type_infer"
 )]
 fn map_from_entries(entries: ListRef<'_>) -> Result<MapValue, ExprError> {
-    MapValue::try_from_entries(entries.to_owned()).map_err(ExprError::Custom)
+    MapValue::try_from_entries(entries.to_owned_scalar()).map_err(ExprError::Custom)
 }
 
 /// # Example
@@ -204,7 +205,7 @@ fn map_length<T: TryFrom<usize>>(map: MapRef<'_>) -> Result<T, ExprError> {
 fn map_cat(m1: Option<MapRef<'_>>, m2: Option<MapRef<'_>>) -> Result<Option<MapValue>, ExprError> {
     match (m1, m2) {
         (None, None) => Ok(None),
-        (Some(m), None) | (None, Some(m)) => Ok(Some(m.to_owned())),
+        (Some(m), None) | (None, Some(m)) => Ok(Some(m.to_owned_scalar())),
         (Some(m1), Some(m2)) => Ok(Some(MapValue::concat(m1, m2))),
     }
 }
@@ -233,7 +234,7 @@ fn map_insert(
     value: Option<ScalarRefImpl<'_>>,
 ) -> MapValue {
     let Some(key) = key else {
-        return map.to_owned();
+        return map.to_owned_scalar();
     };
     MapValue::insert(map, key.into_scalar_impl(), value.to_owned_datum())
 }
@@ -258,7 +259,7 @@ fn map_insert(
 #[function("map_delete(anymap, any) -> anymap")]
 fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>) -> MapValue {
     let Some(key) = key else {
-        return map.to_owned();
+        return map.to_owned_scalar();
     };
     MapValue::delete(map, key)
 }
@@ -274,7 +275,7 @@ fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>) -> MapValue {
 #[function(
     "map_keys(anymap) -> anyarray",
     type_infer = "|args|{
-        Ok(DataType::List(Box::new(args[0].as_map().key().clone())))
+        Ok(DataType::list(args[0].as_map().key().clone()))
     }"
 )]
 fn map_keys(map: MapRef<'_>) -> ListValue {
@@ -292,7 +293,7 @@ fn map_keys(map: MapRef<'_>) -> ListValue {
 #[function(
     "map_values(anymap) -> anyarray",
     type_infer = "|args|{
-        Ok(DataType::List(Box::new(args[0].as_map().value().clone())))
+        Ok(DataType::list(args[0].as_map().value().clone()))
     }"
 )]
 fn map_values(map: MapRef<'_>) -> ListValue {
@@ -314,7 +315,7 @@ fn map_values(map: MapRef<'_>) -> ListValue {
     }"
 )]
 fn map_entries(map: MapRef<'_>) -> ListValue {
-    map.into_inner().to_owned()
+    map.into_inner().to_owned_scalar()
 }
 
 #[cfg(test)]

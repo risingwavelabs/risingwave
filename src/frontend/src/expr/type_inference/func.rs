@@ -98,8 +98,8 @@ pub fn infer_some_all(
 ) -> Result<DataType> {
     let element_type = if inputs[1].is_untyped() {
         None
-    } else if let DataType::List(datatype) = inputs[1].return_type() {
-        Some(*datatype)
+    } else if let DataType::List(list) = inputs[1].return_type() {
+        Some(list.into_elem())
     } else {
         return Err(ErrorCode::BindError(
             "op SOME/ANY/ALL (array) requires array on right side".to_owned(),
@@ -135,7 +135,7 @@ pub fn infer_some_all(
                 ErrorCode::BindError("array/struct on left are not supported yet".into()).into(),
             );
         };
-        inputs[1].cast_implicit_mut(&DataType::List(Box::new(t.clone())))?;
+        inputs[1].cast_implicit_mut(&DataType::list(t.clone()))?;
     }
 
     let inputs_owned = std::mem::take(inputs);
@@ -466,7 +466,7 @@ fn infer_type_for_special(
                 | (t @ Some(DataType::List(_)), None) => {
                     // when neither type is available, default to `varchar[]`
                     // when one side is unknown and other side is list, use that list type
-                    let t = t.unwrap_or_else(|| DataType::List(DataType::Varchar.into()));
+                    let t = t.unwrap_or_else(|| DataType::Varchar.list());
                     for input in &mut *inputs {
                         input.cast_implicit_mut(&t)?;
                     }
@@ -562,7 +562,7 @@ fn infer_type_for_special(
             ensure_arity!("array_positions", | inputs | == 2);
             let common_type = align_array_and_element(0, &[1], inputs);
             match common_type {
-                Ok(_) => Ok(Some(DataType::List(Box::new(DataType::Int32)))),
+                Ok(_) => Ok(Some(DataType::Int32.list())),
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot get position of {} in {}",
                     inputs[1].return_type(),
@@ -575,7 +575,9 @@ fn infer_type_for_special(
             ensure_arity!("array_dims", | inputs | == 1);
             inputs[0].ensure_array_type()?;
 
-            if let DataType::List(box DataType::List(_)) = inputs[0].return_type() {
+            if let DataType::List(list) = inputs[0].return_type()
+                && let DataType::List(_) = list.elem()
+            {
                 return Err(ErrorCode::BindError(
                     "array_dims for dimensions greater than 1 not supported".into(),
                 )
@@ -594,8 +596,8 @@ fn infer_type_for_special(
                 }
                 (Some(DataType::List(left)), Some(DataType::List(right))) => {
                     // cannot directly cast, find unnest type and judge if they are same type
-                    let left = left.unnest_list();
-                    let right = right.unnest_list();
+                    let left = left.elem().unnest_list();
+                    let right = right.elem().unnest_list();
                     if left.equals_datatype(right) {
                         Ok(Some(DataType::Boolean))
                     } else {

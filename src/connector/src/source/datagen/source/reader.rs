@@ -295,11 +295,11 @@ fn generator_from_data_type(
                 .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields).map_err(Into::into)
         }
-        DataType::List(datatype) => {
+        DataType::List(list_type) => {
             let length_key = format!("fields.{}.length", name);
             let length_value = fields_option_map.get(&length_key).cloned();
             let generator = generator_from_data_type(
-                *datatype,
+                list_type.into_elem(),
                 fields_option_map,
                 &format!("{}._", name),
                 split_index,
