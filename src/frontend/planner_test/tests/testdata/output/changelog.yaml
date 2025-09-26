@@ -11,6 +11,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [changelog_row_id, v1, changelog_op, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [_changelog_row_id::Int64 as $expr1, t1.v1, changelog_op, _changelog_row_id] }
         └── StreamChangeLog
             └── StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
