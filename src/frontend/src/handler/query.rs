@@ -16,15 +16,21 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use datafusion::logical_expr::LogicalPlan;
+use datafusion::physical_plan::collect;
+use datafusion::prelude::SessionContext;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
+use risingwave_common::array::DataChunk;
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::session_config::QueryMode;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, MapType};
+use risingwave_common::util::tokio_util::either::Either;
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
@@ -37,8 +43,8 @@ use crate::handler::flush::do_flush;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
-    BatchPlanRoot, ExecutionModeDecider, OptimizerContext, OptimizerContextRef,
-    ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor,
+    BatchPlanRoot, ExecutionModeDecider, IcebergScanDetector, OptimizerContext,
+    OptimizerContextRef, ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -48,22 +54,47 @@ use crate::scheduler::{
 };
 use crate::session::SessionImpl;
 
+/// Choice between running RisingWave's own batch executor (Rw) or a `DataFusion` (DF) logical plan.
+pub enum BatchPlanChoice {
+    Rw(BatchQueryPlanResult),
+    Df {
+        df_plan: LogicalPlan,
+        stmt_type: StatementType,
+    },
+}
+
 pub async fn handle_query(
     handler_args: HandlerArgs,
     stmt: Statement,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let plan_fragmenter_result = {
-        let context = OptimizerContext::from_handler_args(handler_args);
+
+    let context = OptimizerContext::from_handler_args(handler_args);
+
+    let either = {
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
-        // Time zone is used by Hummock time travel query.
-        risingwave_expr::expr_context::TIME_ZONE::sync_scope(
-            session.config().timezone().to_owned(),
-            || gen_batch_plan_fragmenter(&session, plan_result),
-        )?
+        match plan_result {
+            BatchPlanChoice::Rw(plan_result) => {
+                // Time zone is used by Hummock time travel query.
+                let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+                    session.config().timezone().to_owned(),
+                    || gen_batch_plan_fragmenter(&session, plan_result),
+                )?;
+                Either::Left(plan_fragmenter_result)
+            }
+            BatchPlanChoice::Df { df_plan, stmt_type } => Either::Right((df_plan, stmt_type)),
+        }
     };
-    execute(session, plan_fragmenter_result, formats).await
+
+    match either {
+        Either::Left(plan_fragmenter_result) => {
+            execute(session, plan_fragmenter_result, formats).await
+        }
+        Either::Right((df_plan, stmt_type)) => {
+            execute_datafusion_plan(session, df_plan, stmt_type, formats).await
+        }
+    }
 }
 
 pub fn handle_parse(
@@ -99,7 +130,17 @@ pub async fn handle_execute(
             let session = handler_args.session.clone();
             let plan_fragmenter_result = {
                 let context = OptimizerContext::from_handler_args(handler_args);
-                let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                let plan_result =
+                    match gen_batch_query_plan(&session, context.into(), bound_result)? {
+                        BatchPlanChoice::Rw(plan_result) => plan_result,
+                        BatchPlanChoice::Df { .. } => {
+                            return Err(ErrorCode::InternalError(
+                                "DataFusion plans not supported in prepared statement execution"
+                                    .to_owned(),
+                            )
+                            .into());
+                        }
+                    };
                 // Time zone is used by Hummock time travel query.
                 risingwave_expr::expr_context::TIME_ZONE::sync_scope(
                     session.config().timezone().to_owned(),
@@ -160,7 +201,17 @@ pub async fn handle_execute(
                 let session = handler_args.session.clone();
                 let plan_fragmenter_result = {
                     let context = OptimizerContext::from_handler_args(handler_args.clone());
-                    let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                    let plan_result =
+                        match gen_batch_query_plan(&session, context.into(), bound_result)? {
+                            BatchPlanChoice::Rw(plan_result) => plan_result,
+                            BatchPlanChoice::Df { .. } => {
+                                return Err(ErrorCode::InternalError(
+                                    "DataFusion plans not supported in cursor declaration"
+                                        .to_owned(),
+                                )
+                                .into());
+                            }
+                        };
                     gen_batch_plan_fragmenter(&session, plan_result)?
                 };
                 declare_cursor::handle_bound_declare_query_cursor(
@@ -188,7 +239,7 @@ pub fn gen_batch_plan_by_statement(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
-) -> Result<BatchQueryPlanResult> {
+) -> Result<BatchPlanChoice> {
     let bound_result = gen_bound(session, stmt, vec![])?;
     gen_batch_query_plan(session, context, bound_result)
 }
@@ -244,7 +295,7 @@ fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     bind_result: BoundResult,
-) -> Result<BatchQueryPlanResult> {
+) -> Result<BatchPlanChoice> {
     let BoundResult {
         stmt_type,
         must_dist,
@@ -261,7 +312,18 @@ fn gen_batch_query_plan(
 
     let logical = planner.plan(bound)?;
     let schema = logical.schema();
-    let batch_plan = logical.gen_batch_plan()?;
+
+    let optimized_logical = logical.gen_optimized_logical_plan_for_batch()?;
+    let contains_iceberg_scan =
+        IcebergScanDetector::contains_logical_iceberg_scan(&optimized_logical);
+    if contains_iceberg_scan {
+        // Convert RisingWave logical plan to DataFusion logical plan for Iceberg queries.
+        let mut converter = crate::optimizer::RwToDfConverter::default();
+        let df_plan = converter.convert(optimized_logical.clone().plan);
+        return Ok(BatchPlanChoice::Df { df_plan, stmt_type });
+    }
+
+    let batch_plan = optimized_logical.gen_batch_plan()?;
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());
@@ -292,14 +354,14 @@ fn gen_batch_query_plan(
         QueryMode::Distributed => batch_plan.gen_batch_distributed_plan()?,
     };
 
-    Ok(BatchQueryPlanResult {
+    Ok(BatchPlanChoice::Rw(BatchQueryPlanResult {
         plan: physical,
         query_mode,
         schema,
         stmt_type,
         dependent_relations: dependent_relations.into_iter().collect_vec(),
         read_storage_tables,
-    })
+    }))
 }
 
 fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
@@ -579,4 +641,194 @@ pub async fn local_execute(
     );
 
     Ok(execution.stream_rows())
+}
+
+pub async fn execute_datafusion_plan(
+    session: Arc<SessionImpl>,
+    plan: LogicalPlan,
+    stmt_type: StatementType,
+    formats: Vec<Format>,
+) -> Result<RwPgResponse> {
+    let ctx = SessionContext::new();
+    let state = ctx.state();
+
+    let physical_plan = state.create_physical_plan(&plan).await.unwrap();
+    let record_batches = collect(physical_plan, state.task_ctx()).await.unwrap();
+
+    let rw_fields: Vec<_> = plan
+        .schema()
+        .fields()
+        .iter()
+        .map(|arrow_field| {
+            risingwave_common::catalog::Field::new(
+                arrow_field.name(),
+                convert_arrow_type_to_rw_type(arrow_field.data_type()),
+            )
+        })
+        .collect();
+    let rw_schema = Schema::new(rw_fields.clone());
+
+    let converter = IcebergArrowConvert {};
+    let datachunks: Vec<DataChunk> = record_batches
+        .iter()
+        .map(|rb| converter.chunk_from_record_batch(rb).unwrap())
+        .collect();
+
+    let pg_descs: Vec<PgFieldDescriptor> = rw_schema.fields().iter().map(to_pg_field).collect();
+
+    let column_types = rw_schema
+        .fields()
+        .iter()
+        .map(|f| f.data_type())
+        .collect_vec();
+
+    // Create a channel to match the expected ReceiverStream type
+    let (tx, rx) = tokio::sync::mpsc::channel(datachunks.len().max(1));
+
+    // Send all datachunks through the channel
+    for dc in datachunks {
+        if tx.send(Ok(dc)).await.is_err() {
+            break;
+        }
+    }
+    drop(tx);
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let row_stream = PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+        stream,
+        column_types,
+        formats.clone(),
+        session.clone(),
+    ));
+
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
+
+    Ok(PgResponse::builder(stmt_type)
+        .row_cnt_format_opt(Some(first_field_format))
+        .values(row_stream, pg_descs)
+        .into())
+}
+
+/// Convert `DataFusion` Arrow `DataType` to RisingWave `DataType`
+fn convert_arrow_type_to_rw_type(arrow_type: &datafusion::arrow::datatypes::DataType) -> DataType {
+    use datafusion::arrow::datatypes::DataType as ArrowDataType;
+
+    match arrow_type {
+        ArrowDataType::Null => DataType::Varchar, // No direct equivalent, default to Varchar
+        ArrowDataType::Boolean => DataType::Boolean,
+        ArrowDataType::Int8 => DataType::Int16, // No Int8 in RisingWave, use Int16
+        ArrowDataType::Int16 => DataType::Int16,
+        ArrowDataType::Int32 => DataType::Int32,
+        ArrowDataType::Int64 => DataType::Int64,
+        ArrowDataType::UInt8 => DataType::Int16, // No UInt8 in RisingWave, use Int16
+        ArrowDataType::UInt16 => DataType::Int32, // No UInt16 in RisingWave, use Int32
+        ArrowDataType::UInt32 => DataType::Int64, // No UInt32 in RisingWave, use Int64
+        ArrowDataType::UInt64 => DataType::Decimal, // No UInt64 in RisingWave, use Decimal
+        ArrowDataType::Float16 => DataType::Float32, // No Float16 in RisingWave, use Float32
+        ArrowDataType::Float32 => DataType::Float32,
+        ArrowDataType::Float64 => DataType::Float64,
+        ArrowDataType::Utf8 => DataType::Varchar,
+        ArrowDataType::LargeUtf8 => DataType::Varchar,
+        ArrowDataType::Utf8View => DataType::Varchar,
+        ArrowDataType::Date32 => DataType::Date,
+        ArrowDataType::Date64 => DataType::Timestamp, // Date64 includes time, map to Timestamp
+        ArrowDataType::Time32(_) => DataType::Time,
+        ArrowDataType::Time64(_) => DataType::Time,
+        ArrowDataType::Duration(_) => DataType::Interval,
+        ArrowDataType::Interval(_) => DataType::Interval,
+        ArrowDataType::Binary => DataType::Bytea,
+        ArrowDataType::FixedSizeBinary(_) => DataType::Bytea,
+        ArrowDataType::LargeBinary => DataType::Bytea,
+        ArrowDataType::BinaryView => DataType::Bytea,
+        ArrowDataType::Timestamp(unit, tz) => {
+            match unit {
+                datafusion::arrow::datatypes::TimeUnit::Microsecond => {
+                    if tz.is_some() {
+                        DataType::Timestamptz
+                    } else {
+                        DataType::Timestamp
+                    }
+                }
+                _ => DataType::Timestamp, // Default to timestamp for other units
+            }
+        }
+        ArrowDataType::Decimal128(_, _) => DataType::Decimal,
+        ArrowDataType::Decimal256(_, _) => DataType::Decimal,
+        ArrowDataType::List(field) => {
+            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
+            DataType::List(Box::new(inner_type))
+        }
+        ArrowDataType::ListView(field) => {
+            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
+            DataType::List(Box::new(inner_type))
+        }
+        ArrowDataType::LargeList(field) => {
+            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
+            DataType::List(Box::new(inner_type))
+        }
+        ArrowDataType::FixedSizeList(field, _) => {
+            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
+            DataType::List(Box::new(inner_type))
+        }
+        ArrowDataType::LargeListView(field) => {
+            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
+            DataType::List(Box::new(inner_type))
+        }
+        ArrowDataType::Struct(fields) => {
+            let struct_fields = fields.iter().map(|f| {
+                (
+                    f.name().clone(),
+                    convert_arrow_type_to_rw_type(f.data_type()),
+                )
+            });
+            DataType::Struct(risingwave_common::types::StructType::new(struct_fields))
+        }
+        ArrowDataType::Union(fields, _) => {
+            let struct_fields = fields.iter().map(|(_, f)| {
+                (
+                    f.name().clone(),
+                    convert_arrow_type_to_rw_type(f.data_type()),
+                )
+            });
+            DataType::Struct(risingwave_common::types::StructType::new(struct_fields))
+        }
+        ArrowDataType::Dictionary(key_type, value_type) => DataType::Map(MapType::from_kv(
+            convert_arrow_type_to_rw_type(key_type),
+            convert_arrow_type_to_rw_type(value_type),
+        )),
+        ArrowDataType::Map(field, _) => {
+            let value_type = convert_arrow_type_to_rw_type(field.data_type());
+            // The value_type should be struct
+            if let DataType::Struct(struct_type) = value_type {
+                if struct_type.len() != 2
+                    || struct_type.iter().next().unwrap().0 != "key"
+                    || struct_type.iter().nth(1).unwrap().0 != "value"
+                {
+                    tracing::warn!(
+                        "Invalid map struct type: {:?}, defaulting to Varchar",
+                        struct_type
+                    );
+                    return DataType::Varchar;
+                }
+                let key_type = struct_type.iter().next().unwrap().1.clone();
+                let value_type_inner = struct_type.iter().nth(1).unwrap().1.clone();
+                match MapType::check_key_type_valid(&key_type) {
+                    Ok(_) => DataType::Map(MapType::from_kv(key_type, value_type_inner)),
+                    Err(err) => {
+                        tracing::warn!("Invalid map key type: {}, defaulting to Varchar", err);
+                        DataType::Varchar
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    "Invalid map value type: {:?}, defaulting to Varchar",
+                    value_type
+                );
+                DataType::Varchar
+            }
+        }
+        ArrowDataType::RunEndEncoded(_, values_field) => {
+            convert_arrow_type_to_rw_type(values_field.data_type())
+        }
+    }
 }
