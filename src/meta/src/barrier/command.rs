@@ -20,7 +20,7 @@ use std::iter;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ActorMapping;
+use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
@@ -73,9 +73,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
-    JobReschedulePostUpdates, SplitAssignment, SplitState, ThrottleConfig, UpstreamSinkInfo,
-    build_actor_connector_splits,
+    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
+    SplitState, ThrottleConfig, UpstreamSinkInfo, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -245,7 +244,10 @@ impl StreamJobFragments {
                 fragment.fragment_id,
                 InflightFragmentInfo {
                     fragment_id: fragment.fragment_id,
+                    job_id: self.stream_job_id.table_id as _,
                     distribution_type: fragment.distribution_type.into(),
+                    fragment_type_mask: fragment.fragment_type_mask,
+                    vnode_count: fragment.vnode_count(),
                     nodes: fragment.nodes.clone(),
                     actors: fragment
                         .actors
@@ -357,7 +359,7 @@ pub enum Command {
         // Should contain the actor ids in upstream and downstream fragment of `reschedules`
         fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
         // Used for updating additional metadata after the barrier ends
-        post_updates: JobReschedulePostUpdates,
+        // post_updates: JobReschedulePostUpdates,
     },
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `replace_upstream`. This is
@@ -1095,6 +1097,7 @@ impl Command {
             } => {
                 let mut dispatcher_update = HashMap::new();
                 for reschedule in reschedules.values() {
+                    println!("actor splits {:#?}", reschedule.actor_splits);
                     for &(upstream_fragment_id, dispatcher_id) in
                         &reschedule.upstream_fragment_dispatcher_ids
                     {
@@ -1270,7 +1273,7 @@ impl Command {
                     actor_cdc_table_snapshot_splits,
                     sink_add_columns: Default::default(),
                 });
-                tracing::debug!("update mutation: {mutation:?}");
+                tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
             }
 

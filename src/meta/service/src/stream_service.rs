@@ -320,17 +320,14 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListFragmentDistributionRequest>,
     ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
-        let fragment_descs = self
+        let distributions = self
             .metadata_manager
             .catalog_controller
-            .list_fragment_descs()
-            .await?;
-        let distributions = fragment_descs
+            .list_fragment_descs(false)
+            .await?
             .into_iter()
-            .map(|(fragment_desc, upstreams)| {
-                fragment_desc_to_distribution(fragment_desc, upstreams)
-            })
-            .collect_vec();
+            .map(|(dist, _)| dist)
+            .collect();
 
         Ok(Response::new(ListFragmentDistributionResponse {
             distributions,
@@ -341,17 +338,14 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListCreatingFragmentDistributionRequest>,
     ) -> Result<Response<ListCreatingFragmentDistributionResponse>, Status> {
-        let fragment_descs = self
+        let distributions = self
             .metadata_manager
             .catalog_controller
-            .list_creating_fragment_descs()
-            .await?;
-        let distributions = fragment_descs
+            .list_fragment_descs(true)
+            .await?
             .into_iter()
-            .map(|(fragment_desc, upstreams)| {
-                fragment_desc_to_distribution(fragment_desc, upstreams)
-            })
-            .collect_vec();
+            .map(|(dist, _)| dist)
+            .collect();
 
         Ok(Response::new(ListCreatingFragmentDistributionResponse {
             distributions,
@@ -380,8 +374,7 @@ impl StreamManagerService for StreamServiceImpl {
         let actor_locations = self
             .metadata_manager
             .catalog_controller
-            .list_actor_locations()
-            .await?;
+            .list_actor_locations()?;
         let states = actor_locations
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {
@@ -429,11 +422,26 @@ impl StreamManagerService for StreamServiceImpl {
 
         let mut actor_splits = self.env.shared_actor_infos().list_assignments();
 
-        let source_actors = self
-            .metadata_manager
-            .catalog_controller
-            .list_source_actors()
-            .await?;
+        let source_actors: HashMap<_, _> = {
+            let all_fragment_ids: HashSet<_> = backfill_fragments
+                .values()
+                .flat_map(|set| set.iter().flat_map(|&(id1, id2)| [id1, id2]))
+                .chain(source_fragments.values().flatten().copied())
+                .collect();
+
+            let guard = self.env.shared_actor_info.read_guard();
+            guard
+                .iter_over_fragments()
+                .filter(|(frag_id, _)| all_fragment_ids.contains(&{ **frag_id }))
+                .flat_map(|(fragment_id, fragment_info)| {
+                    fragment_info
+                        .actors
+                        .keys()
+                        .copied()
+                        .map(|actor_id| (actor_id, *fragment_id))
+                })
+                .collect()
+        };
 
         let is_shared_source = self
             .metadata_manager
