@@ -19,13 +19,20 @@ use std::sync::Arc;
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{ArrayImpl, I16Array, Op, SerialArray, StreamChunk};
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::types::Serial;
+use risingwave_common::util::row_id::ChangelogRowIdGenerator;
 
 use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 
 pub struct ChangeLogExecutor {
-    _ctx: ActorContextRef,
+    ctx: ActorContextRef,
     input: Executor,
     need_op: bool,
+    all_vnode_count: usize,
+    distribution_keys: Vec<usize>,
+    changelog_row_id_generator: ChangelogRowIdGenerator,
 }
 
 impl Debug for ChangeLogExecutor {
@@ -40,27 +47,46 @@ impl Execute for ChangeLogExecutor {
     }
 }
 impl ChangeLogExecutor {
-    pub fn new(ctx: ActorContextRef, input: Executor, need_op: bool) -> Self {
+    pub fn new(
+        ctx: ActorContextRef,
+        input: Executor,
+        need_op: bool,
+        all_vnode_count: usize,
+        vnodes: Bitmap,
+        distribution_keys: Vec<usize>,
+    ) -> Self {
+        let changelog_row_id_generator = ChangelogRowIdGenerator::new(vnodes);
         Self {
-            _ctx: ctx,
+            ctx,
             input,
             need_op,
+            all_vnode_count,
+            distribution_keys,
+            changelog_row_id_generator,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         let input = self.input.execute();
         #[for_await]
         for msg in input {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
+                    let data_chunk = chunk.data_chunk();
+                    let vnodes = VirtualNode::compute_chunk(
+                        data_chunk,
+                        &self.distribution_keys,
+                        self.all_vnode_count,
+                    );
                     let (ops, mut columns, bitmap) = chunk.into_inner();
                     let new_ops = vec![Op::Insert; ops.len()];
-                    // They are all 0, will be add in row id gen executor.
+                    let changelog_row_ids = vnodes
+                        .iter()
+                        .map(|vnode| self.changelog_row_id_generator.next(vnode));
                     let changelog_row_id_array = Arc::new(ArrayImpl::Serial(
-                        SerialArray::from_iter(std::iter::repeat_n(None, ops.len())),
+                        SerialArray::from_iter(changelog_row_ids.map(Serial::from)),
                     ));
                     let new_chunk = if self.need_op {
                         let ops: Vec<Option<i16>> =
@@ -76,7 +102,13 @@ impl ChangeLogExecutor {
                     yield Message::Chunk(new_chunk);
                 }
                 Message::Watermark(_w) => {}
-                m => yield m,
+                Message::Barrier(barrier) => {
+                    if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+                        self.changelog_row_id_generator =
+                            ChangelogRowIdGenerator::new(vnodes.as_ref().clone());
+                    }
+                    yield Message::Barrier(barrier);
+                }
             }
         }
     }
