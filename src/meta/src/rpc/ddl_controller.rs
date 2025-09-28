@@ -1418,6 +1418,12 @@ impl DdlController {
             .drop_object(object_type, object_id, drop_mode)
             .await?;
 
+        if object_type == ObjectType::Source {
+            self.env
+                .notification_manager_ref()
+                .notify_local_subscribers(LocalNotification::SourceDropped(object_id));
+        }
+
         if let Some(replace_table_info) = target_replace_info {
             let stream_ctx =
                 StreamContext::from_protobuf(replace_table_info.fragment_graph.get_ctx().unwrap());

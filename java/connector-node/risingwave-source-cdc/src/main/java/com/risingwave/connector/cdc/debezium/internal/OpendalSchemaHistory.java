@@ -18,7 +18,6 @@
 
 package com.risingwave.connector.cdc.debezium.internal;
 
-import static com.risingwave.java.binding.Binding.deleteObjects;
 import static com.risingwave.java.binding.Binding.getObject;
 import static com.risingwave.java.binding.Binding.getObjectStoreType;
 import static com.risingwave.java.binding.Binding.listObject;
@@ -51,7 +50,6 @@ import org.slf4j.LoggerFactory;
 
 public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpendalSchemaHistory.class);
-    private String objectName = "";
     private String sourceId = "";
     public static final String SOURCE_ID = "schema.history.internal.source.id";
     public static final String MAX_RECORDS_PER_FILE_CONFIG =
@@ -103,7 +101,6 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                     "Source ID is required for schema history. Please provide a unique source ID to avoid path conflicts between multiple sources.");
         }
         objectDir = String.format("rw-cdc-schema-history/source-%s", sourceId);
-        objectName = String.format("%s/schema_history.dat", objectDir);
         String maxRecordsStr = config.getString(MAX_RECORDS_PER_FILE_CONFIG);
         if (maxRecordsStr != null) {
             try {
@@ -156,13 +153,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     }
 
     @Override
-    public void doStop() {
-        LOGGER.info(
-                "Source {} is dropped, deleting all schema history records under directory {}",
-                sourceId,
-                objectDir);
-        deleteObjects(objectDir);
-    }
+    public void doStop() {}
 
     @Override
     protected void doPreStoreRecord(HistoryRecord record) {}

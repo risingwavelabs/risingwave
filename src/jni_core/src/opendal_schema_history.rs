@@ -235,10 +235,11 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
                     tracing::warn!("Skipping deletion of non-.dat file: {}", obj.key);
                 }
             }
-            for key in keys {
-                tracing::debug!("Deleting schema history file: {}", key);
-                object_store.delete(&key).await.map_err(|e| anyhow!(e))?;
-            }
+            tracing::debug!(?keys, "Deleting schema history files");
+            object_store
+                .delete_objects(&keys)
+                .await
+                .map_err(|e| anyhow!(e))?;
             Ok::<_, anyhow::Error>(())
         })?;
         Ok(())
