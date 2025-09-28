@@ -20,7 +20,7 @@ use jni::objects::{JByteArray, JObject, JString};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
-use risingwave_object_store::object::{ObjectError, ObjectStoreImpl, build_remote_object_store};
+use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
 
@@ -49,9 +49,7 @@ fn prepend_data_directory(path: &str) -> String {
         "DATA_DIRECTORY is not set. This is dangerous in cloud environments as it can cause data conflicts between multiple instances sharing the same bucket. Please ensure data_directory is properly configured."
     );
 
-    if path.starts_with(data_dir) {
-        path.to_owned()
-    } else if data_dir.ends_with('/') || path.starts_with('/') {
+    if data_dir.ends_with('/') || path.starts_with('/') {
         format!("{}{}", data_dir, path)
     } else {
         format!("{}/{}", data_dir, path)
@@ -136,6 +134,25 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObjectStoreTy
     })
 }
 
+fn strip_data_directory_prefix(path: &str) -> Result<String, String> {
+    let data_directory = DATA_DIRECTORY
+        .get()
+        .map(|s| s.as_str())
+        .ok_or_else(|| "expect DATA_DIRECTORY")?;
+    let relative_path = path.strip_prefix(data_directory).ok_or_else(|| {
+        format!(
+            "DATA_DIRECTORY {} is not prefix of path {}",
+            data_directory, path
+        )
+    })?;
+    let stripped = if let Some(stripped) = relative_path.strip_prefix('/') {
+        stripped.to_owned()
+    } else {
+        relative_path.to_owned()
+    };
+    Ok(stripped)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
     env: EnvParam<'a>,
@@ -149,35 +166,28 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
 
         let dir = prepend_data_directory(&dir);
 
-        let files: Vec<String> = JAVA_BINDING_ASYNC_RUNTIME
-            .block_on(async {
-                let object_store = get_object_store().await;
-                let mut file_names = Vec::new();
-                let mut stream = object_store.list(&dir, None, None).await?;
-                use futures::StreamExt;
-                while let Some(obj) = stream.next().await {
-                    let obj = obj?;
-                    // Additional security: only return files that pass validation
-                    // Remove the data directory prefix for validation
-                    let relative_path = obj
-                        .key
-                        .strip_prefix(DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or(""))
-                        .unwrap_or(&obj.key);
-                    let relative_path = if let Some(stripped) = relative_path.strip_prefix('/') {
-                        stripped
-                    } else {
-                        relative_path
-                    };
-
-                    if validate_dat_file_extension(relative_path).is_ok() {
-                        file_names.push(obj.key);
-                    } else {
-                        tracing::warn!("Filtering out non-.dat file from list: {}", obj.key);
-                    }
+        let files: Vec<String> = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+            let object_store = get_object_store().await;
+            let mut prefix_stripped_paths = Vec::new();
+            let mut stream = object_store
+                .list(&dir, None, None)
+                .await
+                .map_err(|e| anyhow!(e))?;
+            use futures::StreamExt;
+            while let Some(obj) = stream.next().await {
+                let obj = obj.map_err(|e| anyhow!(e))?;
+                // Additional security: only return files that pass validation
+                // Remove the data directory prefix for validation
+                let relative_path =
+                    strip_data_directory_prefix(&obj.key).map_err(|e| anyhow!(e))?;
+                if validate_dat_file_extension(&relative_path).is_ok() {
+                    prefix_stripped_paths.push(relative_path);
+                } else {
+                    tracing::warn!("Filtering out non-.dat file from list: {}", obj.key);
                 }
-                Ok::<_, ObjectError>(file_names)
-            })
-            .map_err(|e| anyhow!(e))?;
+            }
+            Ok::<_, anyhow::Error>(prefix_stripped_paths)
+        })?;
 
         let string_class = env.find_class("java/lang/String").map_err(|e| anyhow!(e))?;
         let array = env
@@ -205,39 +215,32 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
 
         let dir = prepend_data_directory(&dir);
 
-        JAVA_BINDING_ASYNC_RUNTIME
-            .block_on(async {
-                let object_store = get_object_store().await;
-                let mut keys = Vec::new();
-                let mut stream = object_store.list(&dir, None, None).await?;
-                use futures::StreamExt;
-                while let Some(obj) = stream.next().await {
-                    let obj = obj?;
-                    // Additional security: only delete files that pass validation
-                    // Remove the data directory prefix for validation
-                    let relative_path = obj
-                        .key
-                        .strip_prefix(DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or(""))
-                        .unwrap_or(&obj.key);
-                    let relative_path = if let Some(stripped) = relative_path.strip_prefix('/') {
-                        stripped
-                    } else {
-                        relative_path
-                    };
-
-                    if validate_dat_file_extension(relative_path).is_ok() {
-                        keys.push(obj.key);
-                    } else {
-                        tracing::warn!("Skipping deletion of non-.dat file: {}", obj.key);
-                    }
+        JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+            let object_store = get_object_store().await;
+            let mut keys = Vec::new();
+            let mut stream = object_store
+                .list(&dir, None, None)
+                .await
+                .map_err(|e| anyhow!(e))?;
+            use futures::StreamExt;
+            while let Some(obj) = stream.next().await {
+                let obj = obj.map_err(|e| anyhow!(e))?;
+                // Additional security: only delete files that pass validation
+                // Remove the data directory prefix for validation
+                let relative_path =
+                    strip_data_directory_prefix(&obj.key).map_err(|e| anyhow!(e))?;
+                if validate_dat_file_extension(&relative_path).is_ok() {
+                    keys.push(obj.key);
+                } else {
+                    tracing::warn!("Skipping deletion of non-.dat file: {}", obj.key);
                 }
-                for key in keys {
-                    tracing::debug!("Deleting schema history file: {}", key);
-                    object_store.delete(&key).await?;
-                }
-                Ok::<_, ObjectError>(())
-            })
-            .map_err(|e| anyhow!(e))?;
+            }
+            for key in keys {
+                tracing::debug!("Deleting schema history file: {}", key);
+                object_store.delete(&key).await.map_err(|e| anyhow!(e))?;
+            }
+            Ok::<_, anyhow::Error>(())
+        })?;
         Ok(())
     });
 }
