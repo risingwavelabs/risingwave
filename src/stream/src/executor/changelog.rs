@@ -55,7 +55,7 @@ impl ChangeLogExecutor {
         vnodes: Bitmap,
         distribution_keys: Vec<usize>,
     ) -> Self {
-        let changelog_row_id_generator = ChangelogRowIdGenerator::new(vnodes);
+        let changelog_row_id_generator = ChangelogRowIdGenerator::new(vnodes, all_vnode_count);
         Self {
             ctx,
             input,
@@ -104,8 +104,10 @@ impl ChangeLogExecutor {
                 Message::Watermark(_w) => {}
                 Message::Barrier(barrier) => {
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        self.changelog_row_id_generator =
-                            ChangelogRowIdGenerator::new(vnodes.as_ref().clone());
+                        self.changelog_row_id_generator = ChangelogRowIdGenerator::new(
+                            vnodes.as_ref().clone(),
+                            self.all_vnode_count,
+                        );
                     }
                     yield Message::Barrier(barrier);
                 }
