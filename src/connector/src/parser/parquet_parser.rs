@@ -20,6 +20,7 @@ use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_mat
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::types::{Datum, ScalarImpl};
+use thiserror_ext::AsReport;
 
 use crate::parser::ConnectorResult;
 use crate::source::SourceColumnDesc;
