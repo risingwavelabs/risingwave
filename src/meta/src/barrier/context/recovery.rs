@@ -611,7 +611,16 @@ impl GlobalBarrierWorkerContextImpl {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
 
-        let mut info = HashMap::from([(database_id, all_info[&database_id].clone())]);
+        println!(
+            "db_id {} all info {:#?}",
+            database_id,
+            all_info.keys().copied().collect::<Vec<_>>()
+        );
+
+        let mut info = all_info.get(&database_id).cloned().map_or_else(
+            || HashMap::new(),
+            |table_map| HashMap::from([(database_id, table_map)]),
+        );
 
         self.recovery_table_with_upstream_sinks(&mut info).await?;
 
