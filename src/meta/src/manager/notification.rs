@@ -209,6 +209,11 @@ impl NotificationManager {
             .await
     }
 
+    pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify_with_version(SubscribeType::Compactor.into(), operation, info)
+            .await
+    }
+
     pub fn notify_compute_without_version(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Compute.into(), operation, info)
     }
