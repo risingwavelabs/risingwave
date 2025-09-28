@@ -51,6 +51,8 @@ pub struct StorageCatalogS3Config {
     endpoint: Option<String>,
     region: Option<String>,
     path_style_access: Option<bool>,
+    /// Enable SSL certificate verification for S3 connections.
+    /// When set to `false`, disables SSL certificate verification for MinIO compatibility.
     ssl_verify: Option<bool>,
     enable_config_load: Option<bool>,
 }

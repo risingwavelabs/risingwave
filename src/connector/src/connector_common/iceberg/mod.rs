@@ -58,8 +58,12 @@ pub struct IcebergCommon {
     pub access_key: Option<String>,
     #[serde(rename = "s3.secret.key")]
     pub secret_key: Option<String>,
+    /// Enable SSL certificate verification for S3 connections.
+    /// When set to `false`, disables SSL certificate verification, allowing connections
+    /// to MinIO instances with self-signed or untrusted certificates.
+    /// This is useful for development environments or when using MinIO with custom certificates.
     #[serde(
-        rename = "s3.ss.verify"
+        rename = "s3.ssl.verify",
         default,
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
