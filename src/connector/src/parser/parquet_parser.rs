@@ -128,7 +128,7 @@ impl ParquetParser {
                                 crate::parser::AccessError::ParquetParser {
                                     message: format!(
                                         "to_arrow_field failed, column='{}', rw_type='{}', offset={}, error={}",
-                                        rw_column_name, rw_data_type, self.offset, e
+                                        rw_column_name, rw_data_type, self.offset, e.as_report()
                                     )
                                 }
                             })?;
@@ -143,7 +143,7 @@ impl ParquetParser {
                                         arrow_field.data_type(),
                                         parquet_column.data_type(),
                                         self.offset,
-                                        e
+                                        e.as_report()
                                     )
                                 }
                             })?;
