@@ -15,6 +15,7 @@
 use std::borrow::Cow;
 use std::sync::{Arc, OnceLock};
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use jni::objects::{JByteArray, JObject, JString};
 use risingwave_common::config::ObjectStoreConfig;
@@ -84,29 +85,19 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
     data: JByteArray<'_>,
 ) {
     execute_and_catch(env, move |env| {
-        let object_name = env.get_string(&object_name)?;
+        let object_name = env.get_string(&object_name).map_err(|e| anyhow!(e))?;
         let object_name: Cow<'_, str> = (&object_name).into();
-
         // Security check: validate file extension before any operation
-        if let Err(error_msg) = validate_dat_file_extension(&object_name) {
-            tracing::error!(
-                "putObject security validation failed, skipping operation: {}",
-                error_msg
-            );
-            return Ok(()); // Skip this operation
-        }
-
+        validate_dat_file_extension(&object_name).map_err(|e| anyhow!(e))?;
         let object_name = prepend_data_directory(&object_name);
-
-        let data_guard = to_guarded_slice(&data, env)?;
+        let data_guard = to_guarded_slice(&data, env).map_err(|e| anyhow!(e))?;
         let data: Vec<u8> = data_guard.slice.to_vec();
         JAVA_BINDING_ASYNC_RUNTIME
             .block_on(async {
                 let object_store = get_object_store().await;
                 object_store.upload(&object_name, data.into()).await
             })
-            .unwrap();
-
+            .map_err(|e| anyhow!(e))?;
         Ok(())
     });
 }
