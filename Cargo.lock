@@ -4932,9 +4932,9 @@ dependencies = [
 
 [[package]]
 name = "elasticsearch"
-version = "8.17.0-alpha.1"
+version = "8.19.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52be486463ef0b89e45191803db146387d5f594c26a0c8790807bb3e988ec5f6"
+checksum = "4b8b65fab4532c837038a5cc305508006a8cd54660b2b8b0cda7d3bac5ffdaf9"
 dependencies = [
  "base64 0.22.1",
  "bytes",
