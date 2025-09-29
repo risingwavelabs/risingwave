@@ -25,6 +25,7 @@ use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_connector::source::cdc::SchemaChangeFailurePolicy;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -95,6 +96,10 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Local barrier manager for reporting source load finished events
     barrier_manager: LocalBarrierManager,
+
+    /// Table ID -> Schema Change Failure Policy mapping for CDC tables
+    /// Key: TableId, Value: SchemaChangeFailurePolicy
+    cdc_table_schema_change_policies: HashMap<String, SchemaChangeFailurePolicy>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -118,6 +123,56 @@ impl<S: StateStore> SourceExecutor<S> {
             rate_limit_rps,
             is_shared_non_cdc,
             barrier_manager,
+            cdc_table_schema_change_policies: HashMap::new(),
+        }
+    }
+
+    /// Get the current CDC table schema change policies mapping
+    pub fn get_cdc_table_schema_change_policies(
+        &self,
+    ) -> &HashMap<String, SchemaChangeFailurePolicy> {
+        &self.cdc_table_schema_change_policies
+    }
+
+    /// Print current CDC table schema change policies for debugging
+    pub fn debug_print_cdc_table_schema_policies(&self) {
+        tracing::info!(
+            "SourceExecutor cdc_table_schema_change_policies count: {}, policies: {:?}",
+            self.cdc_table_schema_change_policies.len(),
+            self.cdc_table_schema_change_policies
+        );
+    }
+
+    /// Handle CDC table schema change policies from ConnectorPropsChange
+    fn handle_cdc_table_schema_policies_change(&mut self, new_props: &HashMap<String, String>) {
+        println!("这里new_props: {:?}", new_props);
+        if let Some(table_policies_json) = new_props.get("cdc_table_schema_change_policies") {
+            tracing::info!(
+                "Received CDC table schema change policies: {}",
+                table_policies_json
+            );
+
+            match serde_json::from_str::<HashMap<String, SchemaChangeFailurePolicy>>(
+                table_policies_json,
+            ) {
+                Ok(table_policies) => {
+                    tracing::info!(
+                        "Successfully parsed CDC table schema change policies: {:?}",
+                        table_policies
+                    );
+                    self.cdc_table_schema_change_policies = table_policies;
+                    self.debug_print_cdc_table_schema_policies();
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to parse CDC table schema change policies: {}, error: {}",
+                        table_policies_json,
+                        e
+                    );
+                }
+            }
+        } else {
+            tracing::debug!("No cdc_table_schema_change_policies found in new properties");
         }
     }
 
@@ -628,6 +683,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
 
                             Mutation::ConnectorPropsChange(maybe_mutation) => {
+                                println!("这里maybe_mutation: {:?}", maybe_mutation);
                                 if let Some(new_props) = maybe_mutation.get(&source_id.table_id()) {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
@@ -636,6 +692,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                         new_props
                                     );
                                     source_desc.update_reader(new_props.clone())?;
+
+                                    // Handle CDC table schema change policies
+                                    self.handle_cdc_table_schema_policies_change(new_props);
+
                                     // suppose the connector props change will not involve state change
                                     split_change = Some((
                                         &source_desc,

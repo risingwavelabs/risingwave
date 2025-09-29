@@ -40,7 +40,7 @@ use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFr
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
 /// Policy for handling schema change failures
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SchemaChangeFailurePolicy {
     /// Block source execution when encountering unsupported schema changes (default)
     Block,

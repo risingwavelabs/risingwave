@@ -34,16 +34,18 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
-use risingwave_connector::source::cdc::CdcScanOptions;
+use risingwave_connector::source::cdc::{CdcScanOptions, SchemaChangeFailurePolicy};
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
 use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::table::CdcTableType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId, WorkerId,
 };
+use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
     Subscription, Table, View,
@@ -891,6 +893,31 @@ impl DdlController {
         }
     }
 
+    /// Extract schema change failure policy from source properties
+    fn extract_schema_change_failure_policy(
+        &self,
+        source: &Source,
+    ) -> MetaResult<SchemaChangeFailurePolicy> {
+        use risingwave_connector::WithPropertiesExt;
+
+        let properties = source.get_with_properties();
+
+        // Parse schema change failure policy from properties
+        let schema_change_failure_policy = properties
+            .get("schema.change.failure.policy")
+            .map(|s| s.parse::<SchemaChangeFailurePolicy>())
+            .transpose()
+            .map_err(|e| {
+                MetaError::invalid_parameter(&format!(
+                    "Invalid schema change failure policy: {}",
+                    e
+                ))
+            })?
+            .unwrap_or_default();
+
+        Ok(schema_change_failure_policy)
+    }
+
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
     #[await_tree::instrument(boxed, "create_streaming_job({streaming_job})")]
@@ -1042,12 +1069,121 @@ impl DdlController {
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
+                println!("其实走的是这里");
                 self.validate_cdc_table(table, &stream_job_fragments)
                     .await?;
+
+                // Check if this is a CDC table and add schema change policy
+                if let Some(cdc_table_type) = table.cdc_table_type.as_ref() {
+                    println!("这里获取到了cdc_table_type: {:?}", cdc_table_type);
+                    println!("cdc table id: {:?}", table.cdc_table_id);
+                    println!(
+                        "table.optional_associated_source_id: {:?}",
+                        table.optional_associated_source_id
+                    );
+                    let pb_cdc_table_type =
+                        PbCdcTableType::try_from(*cdc_table_type).map_err(|e| {
+                            MetaError::invalid_parameter(&format!("Invalid CDC table type: {}", e))
+                        })?;
+                    let cdc_table_type = CdcTableType::from(pb_cdc_table_type);
+                    if cdc_table_type != CdcTableType::Unspecified {
+                        // Extract source ID from cdc_table_id (format: "source_id.schema.table_name")
+                        if let Some(cdc_table_id) = table.cdc_table_id.as_ref() {
+                            if let Some(source_id_str) = cdc_table_id.split('.').next() {
+                                if let Ok(source_id) = source_id_str.parse::<u32>() {
+                                    // Get the source from the metadata manager to extract schema change failure policy
+                                    let sources = self.metadata_manager.list_sources().await?;
+                                    let source = sources.iter().find(|s| s.id == source_id);
+
+                                    if let Some(source) = source {
+                                        let schema_change_failure_policy =
+                                            self.extract_schema_change_failure_policy(source)?;
+
+                                        tracing::info!(
+                                            table_id = table.id,
+                                            source_id = source_id,
+                                            cdc_table_id = cdc_table_id,
+                                            cdc_table_type = ?cdc_table_type,
+                                            schema_change_failure_policy = ?schema_change_failure_policy,
+                                            "Adding CDC table schema change policy for SharedCdcSource"
+                                        );
+
+                                        // Add CDC table schema change policy
+                                        self.source_manager
+                                            .add_cdc_table_schema_policy(
+                                                risingwave_common::catalog::TableId::new(table.id),
+                                                source_id as i32,
+                                                schema_change_failure_policy,
+                                            )
+                                            .await?;
+                                    } else {
+                                        tracing::warn!(
+                                            table_id = table.id,
+                                            source_id = source_id,
+                                            cdc_table_id = cdc_table_id,
+                                            "Source not found for CDC table"
+                                        );
+                                    }
+                                } else {
+                                    tracing::warn!(
+                                        table_id = table.id,
+                                        cdc_table_id = cdc_table_id,
+                                        "Failed to parse source ID from cdc_table_id"
+                                    );
+                                }
+                            } else {
+                                tracing::warn!(
+                                    table_id = table.id,
+                                    cdc_table_id = cdc_table_id,
+                                    "Invalid cdc_table_id format"
+                                );
+                            }
+                        } else {
+                            tracing::warn!(
+                                table_id = table.id,
+                                cdc_table_type = ?cdc_table_type,
+                                "CDC table has no cdc_table_id"
+                            );
+                        }
+                    }
+                }
             }
-            StreamingJob::Table(Some(source), ..) => {
+            StreamingJob::Table(Some(source), table, ..) => {
                 // Register the source on the connector node.
                 self.source_manager.register_source(source).await?;
+
+                // Check if this is a CDC table and add schema change policy
+                if let Some(cdc_table_type) = table.cdc_table_type.as_ref() {
+                    let pb_cdc_table_type =
+                        PbCdcTableType::try_from(*cdc_table_type).map_err(|e| {
+                            MetaError::invalid_parameter(&format!("Invalid CDC table type: {}", e))
+                        })?;
+                    let cdc_table_type = CdcTableType::from(pb_cdc_table_type);
+                    println!("这里获取到了cdc_table_type: {:?}", cdc_table_type);
+                    if cdc_table_type != CdcTableType::Unspecified {
+                        // Extract schema change failure policy from source properties
+                        let schema_change_failure_policy =
+                            self.extract_schema_change_failure_policy(source)?;
+
+                        tracing::info!(
+                            table_id = table.id,
+                            source_id = source.id,
+                            cdc_table_type = ?cdc_table_type,
+                            schema_change_failure_policy = ?schema_change_failure_policy,
+                            "Adding CDC table schema change policy"
+                        );
+
+                        // Add CDC table schema change policy
+                        self.source_manager
+                            .add_cdc_table_schema_policy(
+                                risingwave_common::catalog::TableId::new(table.id),
+                                source.id as i32,
+                                schema_change_failure_policy,
+                            )
+                            .await?;
+                    }
+                }
+
                 let connector_name = source
                     .get_with_properties()
                     .get(UPSTREAM_SOURCE_KEY)
