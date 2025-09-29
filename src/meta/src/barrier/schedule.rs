@@ -418,6 +418,7 @@ impl PeriodicBarriers {
         // Reset the `IntervalStream` for all databases that use default param.
         for (db_id, db_state) in &mut self.databases {
             if db_state.barrier_interval.is_none() {
+                tracing::info!(?db_id, ?duration, "set interval stream");
                 let interval_stream = Self::new_interval_stream(duration, db_id);
                 self.timer_streams.insert(*db_id, interval_stream);
             }
