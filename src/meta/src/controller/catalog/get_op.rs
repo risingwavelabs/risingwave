@@ -613,6 +613,40 @@ impl CatalogController {
         Ok(status)
     }
 
+    pub async fn get_streaming_job_runtime_info(
+        &self,
+        job_ids: Vec<ObjectId>,
+    ) -> MetaResult<HashMap<ObjectId, (Option<String>, String)>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let timezone_pairs: Vec<(ObjectId, Option<String>)> = StreamingJob::find()
+            .select_only()
+            .columns([
+                streaming_job::Column::JobId,
+                streaming_job::Column::Timezone,
+            ])
+            .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let job_ids = job_ids.into_iter().collect();
+
+        let mut definitions = resolve_streaming_job_definition(&txn, &job_ids).await?;
+
+        let result = timezone_pairs
+            .into_iter()
+            .map(|(job_id, timezone)| {
+                (
+                    job_id,
+                    (timezone, definitions.remove(&job_id).unwrap_or_default()),
+                )
+            })
+            .collect();
+        Ok(result)
+    }
+
     pub async fn restore_background_streaming_job(
         &self,
         job_infos: HashMap<ObjectId, HashMap<FragmentId, InflightFragmentInfo>>,

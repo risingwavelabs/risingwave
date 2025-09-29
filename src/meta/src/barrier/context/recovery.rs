@@ -25,7 +25,6 @@ use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGenera
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::table::PbTableType;
-use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
@@ -37,7 +36,7 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightActorInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActor, StreamJobFragments};
+use crate::model::{ActorId, StreamActor, StreamContext, StreamJobFragments};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{SourceChange, StreamFragmentGraph};
@@ -499,7 +498,7 @@ impl GlobalBarrierWorkerContextImpl {
                     //     warn!(error = %err.as_report(), "update actors failed");
                     // })?;
 
-                    let stream_actors = Self::fake_stream_actors(info.clone());
+                    let stream_actors = self.load_stream_actors(info.clone()).await?;
 
                     let fragment_relations = self
                         .metadata_manager
@@ -618,7 +617,7 @@ impl GlobalBarrierWorkerContextImpl {
         );
 
         let mut info = all_info.get(&database_id).cloned().map_or_else(
-            || HashMap::new(),
+            HashMap::new,
             |table_map| HashMap::from([(database_id, table_map)]),
         );
 
@@ -727,7 +726,7 @@ impl GlobalBarrierWorkerContextImpl {
         //     warn!(error = %err.as_report(), "update actors failed");
         // })?;
 
-        let stream_actors = Self::fake_stream_actors(all_info);
+        let stream_actors = self.load_stream_actors(all_info).await?;
 
         // get split assignments for all actors
         let mut source_splits = HashMap::new();
@@ -777,12 +776,40 @@ impl GlobalBarrierWorkerContextImpl {
         }))
     }
 
-    fn fake_stream_actors(
+    async fn load_stream_actors(
+        &self,
         all_info: HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
-    ) -> HashMap<ActorId, StreamActor> {
+    ) -> MetaResult<HashMap<ActorId, StreamActor>> {
+        let job_ids = all_info
+            .values()
+            .flat_map(|jobs| jobs.keys().map(|job_id| job_id.table_id as i32))
+            .collect_vec();
+
+        let job_infos = self
+            .metadata_manager
+            .catalog_controller
+            .get_streaming_job_runtime_info(job_ids)
+            .await?;
+
         let mut stream_actors = HashMap::new();
 
         for (_, streaming_info) in all_info.values().flatten() {
+            let job_info = job_infos.get(&(streaming_info.job_id.table_id as i32));
+
+            let (mview_definition, expr_context) = job_info
+                .map(|(timezone, definition)| {
+                    (
+                        definition,
+                        Some(
+                            StreamContext {
+                                timezone: timezone.clone(),
+                            }
+                            .to_expr_context(),
+                        ),
+                    )
+                })
+                .unwrap();
+
             for (fragment_id, fragment_info) in &streaming_info.fragment_infos {
                 for (actor_id, InflightActorInfo { vnode_bitmap, .. }) in &fragment_info.actors {
                     stream_actors.insert(
@@ -791,14 +818,14 @@ impl GlobalBarrierWorkerContextImpl {
                             actor_id: *actor_id as _,
                             fragment_id: *fragment_id as _,
                             vnode_bitmap: vnode_bitmap.clone(),
-                            mview_definition: "".to_owned(),
-                            expr_context: Some(ExprContext::default()),
+                            mview_definition: mview_definition.clone(),
+                            expr_context: expr_context.clone(),
                         },
                     );
                 }
             }
         }
         // TODO
-        stream_actors
+        Ok(stream_actors)
     }
 }
