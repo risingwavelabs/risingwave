@@ -2428,12 +2428,12 @@ mod tests {
 
         let actors = (0..actor_count)
             .map(|actor_id| {
-                let actor_splits = Some(ConnectorSplits::from(&PbConnectorSplits {
+                let actor_splits = ConnectorSplits::from(&PbConnectorSplits {
                     splits: vec![PbConnectorSplit {
                         split_type: "dummy".to_owned(),
                         ..Default::default()
                     }],
-                }));
+                });
 
                 ActorModel {
                     actor_id: actor_id as ActorId,
@@ -2549,7 +2549,10 @@ mod tests {
 
             assert_eq!(
                 splits,
-                pb_actor_splits.get(&pb_actor_id).map(ConnectorSplits::from)
+                pb_actor_splits
+                    .get(&pb_actor_id)
+                    .map(ConnectorSplits::from)
+                    .unwrap_or_default()
             );
 
             assert_eq!(Some(expr_context_2.to_protobuf()), pb_expr_context);
