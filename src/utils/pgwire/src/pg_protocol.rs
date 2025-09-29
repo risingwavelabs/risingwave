@@ -679,7 +679,9 @@ where
                     })?;
                 self.ready_for_query()?;
             }
-            UserAuthenticator::ClearText(_) | UserAuthenticator::OAuth(_) => {
+            UserAuthenticator::ClearText(_)
+            | UserAuthenticator::OAuth(_)
+            | UserAuthenticator::Ldap(_) => {
                 self.stream
                     .write_no_flush(BeMessage::AuthenticationCleartextPassword)?;
             }

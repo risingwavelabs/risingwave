@@ -49,6 +49,7 @@ hashbrown = "0.15.2"
 hex = "0.4.3"
 http = "1"
 humantime = "2.2"
+ipnet = "2.9"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"
