@@ -29,7 +29,7 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::session_config::QueryMode;
-use risingwave_common::types::{DataType, Datum, MapType};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::tokio_util::either::Either;
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
