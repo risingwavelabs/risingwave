@@ -22,8 +22,6 @@ use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::Executor;
 use crate::executor::locality_provider::LocalityProviderExecutor;
 
-pub struct LocalityProviderBuilder;
-
 impl ExecutorBuilder for LocalityProviderBuilder {
     type Node = LocalityProviderNode;
 
@@ -77,10 +75,12 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             input_schema,
             progress,
             params.executor_stats.clone(),
-            1024, // default chunk size
+            params.env.config().developer.chunk_size,
             params.actor_context.fragment_id,
         );
 
         Ok((params.info, exec).into())
     }
 }
+
+pub struct LocalityProviderBuilder;

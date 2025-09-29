@@ -32,6 +32,10 @@ use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalLocalityProvider` provides locality for operators during backfilling.
 /// It buffers input data into a state table using locality columns as primary key prefix.
+///
+/// The `LocalityProvider` has 2 states:
+/// - One is used to buffer data during backfilling and provide data locality.
+/// - The other one is a progress table like normal backfill operator to track the backfilling progress of itself.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalLocalityProvider {
     pub base: PlanBase<Logical>,
@@ -45,12 +49,10 @@ impl LogicalLocalityProvider {
         LogicalLocalityProvider { base, core }
     }
 
-    /// Create a `LogicalLocalityProvider` with the given input and locality columns
     pub fn create(input: PlanRef, locality_columns: Vec<usize>) -> PlanRef {
         LogicalLocalityProvider::new(input, locality_columns).into()
     }
 
-    /// Get the locality columns of the locality provider.
     pub fn locality_columns(&self) -> &[usize] {
         &self.core.locality_columns
     }
@@ -128,7 +130,9 @@ impl ToStream for LogicalLocalityProvider {
             RequiredDist::shard_by_key(self.input().schema().len(), self.locality_columns());
         let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
         let input = if input.as_stream_exchange().is_none() {
-            // force a no shuffle exchange to ensure locality provider is in its own fragment
+            // Force a no shuffle exchange to ensure locality provider is in its own fragment.
+            // This is important to ensure the backfill ordering can recognize and build
+            // the dependency graph among different backfill-needed fragments.
             StreamExchange::new_no_shuffle(input).into()
         } else {
             input
@@ -164,7 +168,6 @@ impl ExprVisitable for LogicalLocalityProvider {
 }
 
 impl LogicalLocalityProvider {
-    /// Try to provide better locality by transforming input
     pub fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
         if columns == self.locality_columns() {
             Some(self.clone().into())

@@ -45,7 +45,9 @@ impl StreamLocalityProvider {
         let dist = match input.distribution() {
             Distribution::HashShard(keys) => {
                 // If the input is hash-distributed, we make it a UpstreamHashShard distribution
-                // just like a normal table scan. It is used to ensure locality provider is in its own fragment
+                // just like a normal table scan. It is used to ensure locality provider is in its own fragment.
+                // This is important to ensure the backfill ordering can recognize and build
+                // the dependency graph among different backfill-needed fragments.
                 Distribution::UpstreamHashShard(keys.clone(), TableId::placeholder())
             }
             Distribution::UpstreamHashShard(keys, table_id) => {
@@ -135,7 +137,7 @@ impl StreamLocalityProvider {
             catalog_builder.add_column(field);
         }
 
-        // Set locality columns as primary key (vnode will be handled internally)
+        // Set locality columns as primary key.
         for locality_col_idx in self.locality_columns() {
             catalog_builder.add_order_column(*locality_col_idx, OrderType::ascending());
         }

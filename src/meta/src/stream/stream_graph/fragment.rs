@@ -1044,13 +1044,9 @@ impl StreamFragmentGraph {
                 }
             }
         }
-        tracing::info!("Backfill fragment ordering from frontend: {fragment_ordering:?}");
 
         // 2. Add dependencies: all backfill fragments should run before LocalityProvider fragments
         let locality_provider_dependencies = self.find_locality_provider_dependencies();
-        tracing::info!(
-            "LocalityProvider fragment dependencies: {locality_provider_dependencies:?}"
-        );
 
         let backfill_fragments: HashSet<u32> = mapping.values().flatten().copied().collect();
 
@@ -1067,9 +1063,6 @@ impl StreamFragmentGraph {
             .difference(&downstream_locality_provider_fragments)
             .copied()
             .collect();
-        tracing::info!(
-            "LocalityProvider root fragments (zero indegree): {locality_provider_root_fragments:?}"
-        );
 
         // For each backfill fragment, add only the root LocalityProvider fragments as dependents
         // This ensures backfill completes before any LocalityProvider starts, while minimizing dependencies
@@ -1087,9 +1080,6 @@ impl StreamFragmentGraph {
                 .or_default()
                 .extend(downstream_fragments);
         }
-        tracing::info!(
-            "Backfill fragments dependencies include scan backfill and locality provider: {fragment_ordering:?}"
-        );
 
         fragment_ordering
     }
