@@ -1097,7 +1097,6 @@ impl Command {
             } => {
                 let mut dispatcher_update = HashMap::new();
                 for reschedule in reschedules.values() {
-                    println!("actor splits {:#?}", reschedule.actor_splits);
                     for &(upstream_fragment_id, dispatcher_id) in
                         &reschedule.upstream_fragment_dispatcher_ids
                     {

@@ -323,7 +323,6 @@ impl CommandContext {
                     }
                 }
 
-                println!("b22222");
                 // Do `post_collect_job_fragments` of the original streaming job in the end, so that in any previous failure,
                 // we won't mark the job as `Creating`, and then the job will be later clean by the recovery triggered by the returned error.
                 let CreateStreamingJobCommandInfo {
@@ -362,16 +361,12 @@ impl CommandContext {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
-
-                println!("b55555");
             }
             Command::RescheduleFragment { reschedules, .. } => {
-                println!("before post collect");
                 barrier_manager_context
                     .scale_controller
                     .post_apply_reschedule(reschedules)
                     .await?;
-                println!("after post collect");
             }
 
             Command::ReplaceStreamJob(

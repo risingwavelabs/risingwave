@@ -110,7 +110,6 @@ async fn test_scale_on_schema_change() -> Result<()> {
 
     cluster.run(MV1).await?;
 
-    println!("q111111");
     cluster
         .run(format!(
             "alter table t set parallelism = {}",
@@ -120,18 +119,14 @@ async fn test_scale_on_schema_change() -> Result<()> {
 
     insert_and_flush!(cluster);
 
-    println!("q222222");
     cluster.run("alter table t add column v2 int").await?;
 
-    println!("q3333333");
     cluster
         .run(format!(
             "alter table t set parallelism = {}",
             total_core - 2
         ))
         .await?;
-
-    println!("q44444");
 
     let fragment = cluster
         .locate_one_fragment([identity_contains("materialize"), identity_contains("union")])

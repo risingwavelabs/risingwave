@@ -654,9 +654,6 @@ impl CatalogController {
         let fragment_actors_from_cache: Vec<(_, Vec<ActorModel>)> = {
             let info = self.env.shared_actor_infos().read_guard();
 
-            let x = info.iter_over_fragments().collect_vec();
-
-            println!("all fragments {:?}", x);
             fragments
                 .into_iter()
                 .map(|fm| {
@@ -720,30 +717,21 @@ impl CatalogController {
         c: &impl ConnectionTrait,
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<FragmentActorDispatchers> {
-        println!("enter get_fragment_actor_dispatchers");
-
-        println!("read lock acquired");
         let fragment_relations = FragmentRelation::find()
             .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids))
             .all(c)
             .await?;
-
-        println!("all relations");
 
         type FragmentActorInfo = (
             DistributionType,
             Arc<HashMap<crate::model::ActorId, Option<Bitmap>>>,
         );
 
-        println!("xxx");
         let shared_info = self.env.shared_actor_infos();
         let mut fragment_actor_cache: HashMap<FragmentId, FragmentActorInfo> = HashMap::new();
-        println!("yyyy");
         let get_fragment_actors = |fragment_id: FragmentId| async move {
             let result: MetaResult<FragmentActorInfo> = try {
-                println!("try get");
                 let read_guard = shared_info.read_guard();
-                println!("try get read lock");
 
                 let fragment = read_guard.get_fragment(fragment_id as _).unwrap();
 
@@ -768,9 +756,7 @@ impl CatalogController {
             };
             result
         };
-        println!("zzz");
 
-        println!("before iterating over fragment relations");
         let mut actor_dispatchers_map: HashMap<_, HashMap<_, Vec<_>>> = HashMap::new();
         for fragment_relation::Model {
             source_fragment_id,
@@ -1061,10 +1047,8 @@ impl CatalogController {
         )
         .await?;
 
-        println!("calling table_fragments");
         let mut table_fragments = BTreeMap::new();
         for job in jobs {
-            println!("\tcalling table_fragments for job {}", job.job_id);
             let fragments = FragmentModel::find()
                 .filter(fragment::Column::JobId.eq(job.job_id))
                 .all(&inner.db)
@@ -1076,16 +1060,7 @@ impl CatalogController {
                 fragments
                     .into_iter()
                     .map(|fragment| {
-                        println!(
-                            "\t\tcalling table_fragments for job {} fragment {}",
-                            job.job_id, fragment.fragment_id
-                        );
-
                         let fragment_info = guard.get_fragment(fragment.fragment_id as _).unwrap();
-
-                        for (actor_id, actor) in &fragment_info.actors {
-                            println!("\t\t\tactor id {} worker id {}", actor_id, actor.worker_id);
-                        }
 
                         let actors = fragment_info
                             .actors
@@ -1412,7 +1387,6 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        println!("111");
         let database_fragment_infos = load_fragment_info(
             &txn,
             id_gen,
@@ -1978,7 +1952,7 @@ impl CatalogController {
 
         let root_fragment_to_jobs: HashMap<_, _> = root_fragments
             .iter()
-            .map(|(k, v)| (v.fragment_id as u32, *k))
+            .map(|(job_id, fragment)| (fragment.fragment_id as u32, *job_id))
             .collect();
 
         // for (fragment_id, fragment_info) in info
@@ -2010,8 +1984,6 @@ impl CatalogController {
                 all_actor_locations.push((*actor_id as ActorId, actor_info.worker_id));
             }
         }
-
-        println!("actor locations should be optimized");
 
         Ok((root_fragments_pb, all_actor_locations))
     }

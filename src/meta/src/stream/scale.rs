@@ -330,13 +330,6 @@ impl ScaleController {
         &self,
         reschedules: &HashMap<FragmentId, Reschedule>,
     ) -> MetaResult<()> {
-        // Update fragment info after rescheduling in meta store.
-        // self.metadata_manager
-        //     .post_apply_reschedules(reschedules.clone(), post_updates)
-        //     .await?;
-
-        println!("post apply");
-
         // Update serving fragment info after rescheduling in meta store.
         if !reschedules.is_empty() {
             let workers = self
@@ -397,15 +390,12 @@ impl ScaleController {
         policy: HashMap<ObjectId, ReschedulePolicy>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
-        println!("aaaaaaaa");
         // jobs: HashMap<ObjectId, TargetResourcePolicy>,
         // workers: BTreeMap<WorkerId, Worker>,
         // ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, crate::controller::fragment::InflightFragmentInfo >>>>
 
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         let txn = inner.db.begin().await?;
-
-        println!("xxxxxx");
 
         for (table_id, target) in &policy {
             let streaming_job = StreamingJob::find_by_id(*table_id)
@@ -432,8 +422,6 @@ impl ScaleController {
                 _ => {}
             }
 
-            println!("yyyyyyy");
-
             match &target {
                 ReschedulePolicy::ResourceGroup(r) | ReschedulePolicy::Both(_, r) => {
                     streaming_job.specific_resource_group = Set(r.resource_group.clone());
@@ -444,7 +432,6 @@ impl ScaleController {
             streaming_job.update(&txn).await?;
         }
 
-        println!("zzzzz");
         // update
         let jobs = policy.keys().copied().collect();
 
@@ -462,7 +449,6 @@ impl ScaleController {
             .collect();
 
         let command = self.rerender_inner(&txn, jobs, workers).await?;
-        println!("111111");
 
         txn.commit().await?;
 
@@ -491,7 +477,6 @@ impl ScaleController {
 
         let id_gen = self.env.id_gen_manager();
 
-        println!("render for {:#?}, workers {:#?}", jobs, workers);
         let RenderedGraph {
             fragments: render_result,
             ..
@@ -505,27 +490,25 @@ impl ScaleController {
         )
         .await?;
 
-        for (db, jobs) in &render_result {
-            println!("\tdb: {db}");
-            for (job, fragments) in jobs {
-                println!("\t\tjob: {job}");
-                for (fragment, fragment_info) in fragments {
-                    println!("\t\t\tfragment: {fragment:?}");
-                    for (actor, actor_info) in &fragment_info.actors {
-                        println!("\t\t\t\tactor: {actor:?}, {actor_info:?}");
-                    }
-                }
-            }
-        }
+        // for (db, jobs) in &render_result {
+        //     println!("\tdb: {db}");
+        //     for (job, fragments) in jobs {
+        //         println!("\t\tjob: {job}");
+        //         for (fragment, fragment_info) in fragments {
+        //             println!("\t\t\tfragment: {fragment:?}");
+        //             for (actor, actor_info) in &fragment_info.actors {
+        //                 println!("\t\t\t\tactor: {actor:?}, {actor_info:?}");
+        //             }
+        //         }
+        //     }
+        // }
 
-        println!("???????");
         let fragment_ids = render_result
             .values()
             .flat_map(|jobs| jobs.values())
             .flatten()
             .map(|(fragment_id, _)| *fragment_id)
             .collect_vec();
-        println!("!!!!!!!!");
 
         let upstreams: Vec<(
             risingwave_meta_model::FragmentId,
@@ -543,8 +526,6 @@ impl ScaleController {
             .all(txn)
             .await
             .unwrap();
-
-        println!("oooooooo");
 
         let downstreams = FragmentRelation::find()
             .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids.clone()))
@@ -564,7 +545,6 @@ impl ScaleController {
 
         let mut all_downstream_fragments = HashMap::new();
 
-        println!("pppppppppp");
         let mut downstream_relations = HashMap::new();
         for relation in downstreams {
             let source_fragment_id = relation.source_fragment_id as FragmentId;
@@ -596,7 +576,6 @@ impl ScaleController {
 
         let all_related_fragment_ids = all_related_fragment_ids.into_iter().collect_vec();
 
-        println!("qqqqqqqq");
         // let all_fragments_from_db: HashMap<_, _> = Fragment::find()
         //     .filter(fragment::Column::FragmentId.is_in(all_related_fragment_ids.clone()))
         //     .all(&txn)
@@ -621,7 +600,6 @@ impl ScaleController {
                 .collect()
         };
 
-        println!("rrrrrr");
         let all_rendered_fragments: HashMap<_, _> = render_result
             .values()
             .flat_map(|jobs| jobs.values())
@@ -648,9 +626,6 @@ impl ScaleController {
                     .remove(&(*fragment_id as FragmentId))
                     .unwrap_or_default();
 
-                println!("fragment {} down {:?}", fragment_id, downstream_fragments);
-                println!("fragment {} up {:?}", fragment_id, upstream_fragments);
-
                 let fragment_actors: HashMap<_, _> = upstream_fragments
                     .keys()
                     .copied()
@@ -674,14 +649,9 @@ impl ScaleController {
                 let mut all_actor_dispatchers: HashMap<_, Vec<_>> = HashMap::new();
 
                 for downstream_fragment_id in downstream_fragments.keys() {
-                    println!("for down {}", downstream_fragment_id);
                     let target_fragment_actors =
                         match all_rendered_fragments.get(&(*downstream_fragment_id as i32)) {
                             None => {
-                                println!(
-                                    "no more downstream_fragments for {}",
-                                    downstream_fragment_id
-                                );
                                 let external_fragment = all_prev_fragments
                                     .get(&(*downstream_fragment_id as i32))
                                     .unwrap();
@@ -692,17 +662,12 @@ impl ScaleController {
                                     .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
                                     .collect()
                             }
-                            Some(downstream_rendered) => {
-                                println!("down frag actors found for {}", downstream_fragment_id);
-                                downstream_rendered
-                                    .actors
-                                    .iter()
-                                    .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-                                    .collect()
-                            }
+                            Some(downstream_rendered) => downstream_rendered
+                                .actors
+                                .iter()
+                                .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
+                                .collect(),
                         };
-
-                    println!("down frag actors {:#?}", target_fragment_actors);
 
                     let target_fragment_distribution = *distribution_type;
 
@@ -756,12 +721,9 @@ impl ScaleController {
                     all_actor_dispatchers,
                 )?;
 
-                //
-
                 reschedules.insert(*fragment_id as FragmentId, reschedule);
             }
 
-            println!("ssssss");
             let command = Command::RescheduleFragment {
                 reschedules,
                 fragment_actors: all_fragment_actors,
@@ -769,8 +731,6 @@ impl ScaleController {
 
             commands.insert(DatabaseId::new(*database_id as u32), command);
         }
-
-        println!("commands {:#?}", commands);
 
         Ok(commands)
     }
@@ -896,9 +856,10 @@ impl GlobalStreamManager {
             return Ok(false);
         }
 
-        println!(
+        tracing::info!(
             "trigger parallelism control for jobs: {:#?}, workers {:#?}",
-            job_ids, schedulable_workers
+            job_ids,
+            schedulable_workers
         );
 
         let batch_size = match self.env.opts.parallelism_control_batch_size {
@@ -930,7 +891,6 @@ impl GlobalStreamManager {
 
             let futures = commands.into_iter().map(|(database_id, command)| {
                 let barrier_scheduler = self.barrier_scheduler.clone();
-                println!("running command for db {}", database_id);
                 async move { barrier_scheduler.run_command(database_id, command).await }
             });
 

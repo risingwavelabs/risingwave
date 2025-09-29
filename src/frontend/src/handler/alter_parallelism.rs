@@ -105,20 +105,14 @@ pub async fn handle_alter_parallelism(
         }
     };
 
-    println!("f111");
-
     let target_parallelism = extract_table_parallelism(parallelism)?;
 
     let mut builder = RwPgResponse::builder(stmt_type);
-
-    println!("f222");
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_parallelism(job_id, target_parallelism, deferred)
         .await?;
-
-    println!("f3333");
 
     if deferred {
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());
