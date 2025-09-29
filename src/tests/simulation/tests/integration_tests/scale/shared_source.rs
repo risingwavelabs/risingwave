@@ -79,7 +79,7 @@ async fn validate_splits_aligned(cluster: &mut Cluster) -> Result<()> {
     // So we just print the result here, instead of asserting with a fixed value.
     let actor_upstream =
         source_backfill_upstream(&source_backfill_fragment.inner, &source_fragment.inner);
-    println!(
+    tracing::info!(
         "{}",
         actor_upstream
             .iter()
@@ -89,9 +89,7 @@ async fn validate_splits_aligned(cluster: &mut Cluster) -> Result<()> {
             )))
     );
 
-    println!("actor ups {:#?}", actor_upstream);
     let actor_splits = cluster.list_source_splits().await?;
-    println!("actor splits {:#?}", actor_splits);
     for (actor, upstream) in actor_upstream {
         assert_eq!(
             actor_splits.get(&actor).unwrap(),

@@ -150,8 +150,6 @@ where
         })
         .collect();
 
-    println!("before render");
-
     let RenderedGraph { fragments, .. } = render_jobs(
         txn,
         id_gen,
@@ -195,11 +193,6 @@ pub async fn render_jobs<C>(
 where
     C: ConnectionTrait,
 {
-    println!("render jobs");
-
-    println!("jobs {:?}", job_ids);
-    println!("workers {:?}", workers);
-
     let jobs: HashMap<_, _> = StreamingJob::find()
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
         .all(txn)
@@ -246,10 +239,6 @@ where
     let (fragment_source_ids, source_splits) =
         resolve_source_fragments(txn, source_properties, &fragment_map).await?;
 
-    println!("fragment source id {:#?}", fragment_source_ids);
-
-    println!("source splits {:#?}", source_splits);
-
     let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
         .select_only()
         .column(streaming_job::Column::JobId)
@@ -272,8 +261,6 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
-    println!("ensembles {:#?}", ensembles);
-
     let mut result: HashMap<
         DatabaseId,
         HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
@@ -284,7 +271,7 @@ where
         components,
     } in &ensembles
     {
-        println!("ensemble entries {:#?}", entries);
+        tracing::debug!("rendering ensemble entries {:?}", entries);
 
         let entry_fragments = entries
             .iter()
@@ -297,8 +284,6 @@ where
             .dedup()
             .exactly_one()
             .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
-
-        println!("entry job {}", job_id);
 
         let job = jobs
             .get(&job_id)
@@ -339,11 +324,10 @@ where
             }
             StreamingParallelism::Fixed(n) => n,
         }
-        //.min(total_parallelism) // limit fixed
         .min(job.max_parallelism as usize) // limit max parallelism
         .min(vnode_count); // limit vnode count
 
-        println!(
+        tracing::debug!(
             "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {}",
             job_id,
             actual_parallelism,
@@ -360,19 +344,6 @@ where
 
         let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
 
-        // println!("entry frags {:#?}", entry_fragments.iter().map(|x| x.fragment_id).collect_vec());
-
-        for x in &entry_fragments {
-            println!("entry frag id {}", x.fragment_id);
-            println!("entry frag job id {}", x.job_id);
-            println!(
-                "entry type mask {:?}",
-                FragmentTypeMask::from(x.fragment_type_mask)
-            );
-        }
-
-        println!("frag source id {:#?}", fragment_source_ids);
-
         let source_entry_fragment = entry_fragments.iter().find(|f| {
             let mask = FragmentTypeMask::from(f.fragment_type_mask);
             if mask.contains(FragmentTypeFlag::Source) {
@@ -383,18 +354,14 @@ where
 
         let (fragment_splits, shared_source_id) = match source_entry_fragment {
             Some(entry_fragment) => {
-                let source_id =
-                    fragment_source_ids
-                        .get(&entry_fragment.fragment_id)
-                        .unwrap_or_else(|| panic!("missing source id in source fragment {}",
-                            entry_fragment.fragment_id));
-
-                println!(
-                    "fragment {} source_id {}",
-                    entry_fragment.fragment_id, source_id
-                );
-                println!("fragment source id{:?}", fragment_source_ids);
-                println!("entry fragment {:?}", entry_fragment);
+                let source_id = fragment_source_ids
+                    .get(&entry_fragment.fragment_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "missing source id in source fragment {}",
+                            entry_fragment.fragment_id
+                        )
+                    });
 
                 let entry_fragment_id = entry_fragment.fragment_id;
 
@@ -423,8 +390,6 @@ where
             None => (HashMap::new(), None),
         };
 
-        println!("fragment splits {:#?}", fragment_splits);
-
         for fragment_id in components {
             let fragment::Model {
                 fragment_id,
@@ -435,11 +400,6 @@ where
                 state_table_ids,
                 ..
             } = fragment_map.remove(fragment_id).unwrap();
-
-            println!(
-                "{fragment_id} type mask {:?}",
-                FragmentTypeMask::from(fragment_type_mask)
-            );
 
             let actor_id_base =
                 id_gen.generate_interval::<{ IdCategory::Actor }>(actors.len() as u64) as u32;
@@ -459,10 +419,6 @@ where
 
                     let actor_id = actor_id_base + actor_idx as u32;
 
-                    println!("fragment source ids {:#?}", fragment_source_ids);
-                    println!("fragment id {}", fragment_id);
-                    println!("shared source id {:?}", shared_source_id);
-
                     let splits = if let Some(source_id) = fragment_source_ids.get(&fragment_id) {
                         assert_eq!(shared_source_id, Some(*source_id));
 
@@ -473,8 +429,6 @@ where
                     } else {
                         vec![]
                     };
-
-                    println!("xxactor split {} splits {:#?}", actor_id, splits);
 
                     (
                         actor_id,
@@ -893,25 +847,3 @@ mod tests {
         assert_eq!(graphs[1].components, to_hashset(&[6, 7]));
     }
 }
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//
-//     #[test]
-//     fn test_dag() {
-//         let x = find_no_shuffle_graphs(
-//             &[1, 2, 4, 6],
-//             &HashMap::from([
-//                 (1, vec![3, 8]),
-//                 (2, vec![3]),
-//                 (4, vec![3]),
-//                 (3, vec![5]),
-//                 (6, vec![7]),
-//             ]),
-//             &HashMap::from([(7, vec![6]), (8, vec![1]), (3, vec![1, 2, 4]), (5, vec![3])]),
-//         )
-//         .unwrap();
-//
-//         println!("{:?}", x);
-//     }
-// }

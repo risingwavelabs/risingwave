@@ -961,8 +961,6 @@ impl ActorGraphBuilder {
                             .map(|m: &HashMap<ActorAlignmentId, Bitmap>| &m[&alignment_id])
                             .cloned();
 
-                        println!("actor_id {:?}, fragment {:?}", actor_id, fragment_id);
-
                         state
                             .inner
                             .add_actor((fragment_id, actor_id), alignment_id, vnode_bitmap);

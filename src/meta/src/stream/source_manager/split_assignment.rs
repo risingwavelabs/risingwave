@@ -332,11 +332,6 @@ impl SourceManagerCore {
                         .unwrap_or_default()
                 };
 
-                println!(
-                    "fragment {} prev actor splits {:#?}",
-                    fragment_id, prev_actor_splits
-                );
-
                 source_splits_discovered.insert(
                     *source_id,
                     discovered_splits.values().cloned().collect_vec(),
