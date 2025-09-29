@@ -265,6 +265,12 @@ seed_old_cluster() {
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_original.slt"
   fi
 
+  echo "--- SINK INTO TABLE TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/seed.slt"
+
+  echo "--- SINK INTO TABLE TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_original.slt"
+
   # work around https://github.com/risingwavelabs/risingwave/issues/18650
   echo "--- wait for a version checkpoint"
   sleep 60
@@ -309,6 +315,9 @@ validate_new_cluster() {
     echo "--- KAFKA TEST (invalid options): Validating new cluster"
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_restart.slt"
   fi
+
+  echo "--- SINK INTO TABLE TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_restart.slt"
 
   kill_cluster
 }
