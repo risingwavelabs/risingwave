@@ -235,7 +235,7 @@ mod scalar {
         /// Returns error if [map invariants](`super::MapArray`) are violated.
         pub fn try_from_entries(entries: ListValue) -> Result<Self, String> {
             // validates list type is valid
-            let _ = MapType::try_from_entries(entries.data_type())?;
+            let _ = MapType::try_from_entries(entries.elem_type())?;
             let mut keys = HashSet::with_capacity(entries.len());
             let struct_array = entries.into_array();
             for key in struct_array.as_struct().field_at(0).iter() {
@@ -250,24 +250,24 @@ mod scalar {
         }
 
         /// Returns error if [map invariants](`super::MapArray`) are violated.
-        pub fn try_from_kv(key: ListValue, value: ListValue) -> Result<Self, String> {
-            if key.len() != value.len() {
+        pub fn try_from_kv(keys: ListValue, values: ListValue) -> Result<Self, String> {
+            if keys.len() != values.len() {
                 return Err("map keys and values have different length".to_owned());
             }
-            let unique_keys: HashSet<_> = key.iter().unique().collect();
-            if unique_keys.len() != key.len() {
+            let unique_keys: HashSet<_> = keys.iter().unique().collect();
+            if unique_keys.len() != keys.len() {
                 return Err("map keys must be unique".to_owned());
             }
             if unique_keys.contains(&None) {
                 return Err("map keys must not be NULL".to_owned());
             }
 
-            let len = key.len();
-            let key_type = key.data_type();
-            let value_type = value.data_type();
+            let len = keys.len();
+            let key_type = keys.elem_type();
+            let value_type = values.elem_type();
             let struct_array = StructArray::new(
                 MapType::struct_type_for_map(key_type, value_type),
-                vec![key.into_array().into_ref(), value.into_array().into_ref()],
+                vec![keys.into_array().into_ref(), values.into_array().into_ref()],
                 Bitmap::ones(len),
             );
             Ok(MapValue(ListValue::new(struct_array.into())))
@@ -276,10 +276,10 @@ mod scalar {
         /// # Panics
         /// Panics if `m1` and `m2` have different types.
         pub fn concat(m1: MapRef<'_>, m2: MapRef<'_>) -> Self {
-            debug_assert_eq!(m1.inner().data_type(), m2.inner().data_type());
+            debug_assert_eq!(m1.inner().elem_type(), m2.inner().elem_type());
             let m2_keys = m2.keys();
             let l = ListValue::from_datum_iter(
-                &m1.inner().data_type(),
+                &m1.inner().elem_type(),
                 m1.iter_struct()
                     .filter(|s| !m2_keys.contains(&s.field_at(0).expect("map key is not null")))
                     .chain(m2.iter_struct())
@@ -290,7 +290,7 @@ mod scalar {
 
         pub fn insert(m: MapRef<'_>, key: ScalarImpl, value: Datum) -> Self {
             let l = ListValue::from_datum_iter(
-                &m.inner().data_type(),
+                &m.inner().elem_type(),
                 m.iter_struct()
                     .filter(|s| {
                         key.as_scalar_ref_impl() != s.field_at(0).expect("map key is not null")
@@ -305,7 +305,7 @@ mod scalar {
 
         pub fn delete(m: MapRef<'_>, key: ScalarRefImpl<'_>) -> Self {
             let l = ListValue::from_datum_iter(
-                &m.inner().data_type(),
+                &m.inner().elem_type(),
                 m.iter_struct()
                     .filter(|s| key != s.field_at(0).expect("map key is not null"))
                     .map(|s| Some(ScalarRefImpl::Struct(s))),
@@ -335,10 +335,6 @@ mod scalar {
 
         pub fn keys(&self) -> HashSet<ScalarRefImpl<'_>> {
             self.iter().map(|(k, _v)| k).collect()
-        }
-
-        pub fn to_owned(self) -> MapValue {
-            MapValue(self.0.to_owned())
         }
 
         pub fn len(&self) -> usize {
@@ -495,7 +491,7 @@ impl MapValue {
         datatype: &MapType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
-        let list = ListValue::memcmp_deserialize(&datatype.clone().into_struct(), deserializer)?;
+        let list = ListValue::memcmp_deserialize(&datatype.clone().into_list_type(), deserializer)?;
         Ok(Self::from_entries(list))
     }
 }

@@ -413,6 +413,14 @@ pub struct SessionConfig {
     /// This config may be removed in the future.
     #[parameter(default = false, flags = "NO_ALTER_SYS")]
     disable_purify_definition: bool,
+
+    /// The `ef_search` used in querying hnsw vector index
+    #[parameter(default = 40_usize)] // default value borrowed from pg_vector
+    batch_hnsw_ef_search: usize,
+
+    /// Enable index selection for queries
+    #[parameter(default = true)]
+    enable_index_selection: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

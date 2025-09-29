@@ -27,7 +27,9 @@ use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::source::{PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplits};
+use risingwave_pb::source::{
+    PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration,
+};
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
@@ -211,7 +213,7 @@ impl<T: CdcSourceTypeTrait> EnforceSecret for CdcProperties<T> {} // todo: enfor
 impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
 where
     DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = crate::error::ConnectorError> + Into<SplitImpl>,
-    DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T>,
+    DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T> + enumerator::CdcMonitor,
 {
     type Split = DebeziumCdcSplit<T>;
     type SplitEnumerator = DebeziumSplitEnumerator<T>;
@@ -290,6 +292,39 @@ impl<T: CdcSourceTypeTrait> CdcProperties<T> {
 
 pub type CdcTableSnapshotSplitAssignment = HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>;
 
+pub const INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID: u64 = 0;
+pub const INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID: u64 = 1;
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct CdcTableSnapshotSplitAssignmentWithGeneration {
+    pub splits: HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>,
+    pub generation: u64,
+}
+
+impl CdcTableSnapshotSplitAssignmentWithGeneration {
+    pub fn new(splits: HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>, generation: u64) -> Self {
+        Self { splits, generation }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            splits: HashMap::default(),
+            generation: INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID,
+        }
+    }
+}
+
+pub fn build_pb_actor_cdc_table_snapshot_splits_with_generation(
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+) -> PbCdcTableSnapshotSplitsWithGeneration {
+    let splits =
+        build_pb_actor_cdc_table_snapshot_splits(cdc_table_snapshot_split_assignment.splits);
+    PbCdcTableSnapshotSplitsWithGeneration {
+        splits,
+        generation: cdc_table_snapshot_split_assignment.generation,
+    }
+}
+
 pub fn build_pb_actor_cdc_table_snapshot_splits(
     cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 ) -> HashMap<u32, PbCdcTableSnapshotSplits> {
@@ -311,10 +346,11 @@ pub fn build_pb_actor_cdc_table_snapshot_splits(
         .collect()
 }
 
-pub fn build_actor_cdc_table_snapshot_splits(
-    pb_cdc_table_snapshot_split_assignment: HashMap<u32, PbCdcTableSnapshotSplits>,
-) -> CdcTableSnapshotSplitAssignment {
-    pb_cdc_table_snapshot_split_assignment
+pub fn build_actor_cdc_table_snapshot_splits_with_generation(
+    pb_cdc_table_snapshot_split_assignment: PbCdcTableSnapshotSplitsWithGeneration,
+) -> CdcTableSnapshotSplitAssignmentWithGeneration {
+    let splits = pb_cdc_table_snapshot_split_assignment
+        .splits
         .into_iter()
         .map(|(actor_id, splits)| {
             let splits = splits
@@ -328,7 +364,9 @@ pub fn build_actor_cdc_table_snapshot_splits(
                 .collect();
             (actor_id, splits)
         })
-        .collect()
+        .collect();
+    let generation = pb_cdc_table_snapshot_split_assignment.generation;
+    CdcTableSnapshotSplitAssignmentWithGeneration { splits, generation }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq)]
@@ -355,9 +393,9 @@ impl Default for CdcScanOptions {
             disable_backfill: false,
             snapshot_barrier_interval: 1,
             snapshot_batch_size: 1000,
-            backfill_parallelism: 1,
             // 0 means disable backfill v2.
-            backfill_num_rows_per_split: 0,
+            backfill_parallelism: 0,
+            backfill_num_rows_per_split: 100_000,
             backfill_as_even_splits: true,
             backfill_split_pk_column_index: 0,
         }

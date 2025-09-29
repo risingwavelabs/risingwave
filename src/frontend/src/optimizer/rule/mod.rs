@@ -245,6 +245,8 @@ mod apply_hop_window_transpose_rule;
 pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
+mod unify_first_last_value_rule;
+pub use unify_first_last_value_rule::*;
 mod empty_agg_remove_rule;
 pub use empty_agg_remove_rule::*;
 mod add_logstore_rule;
@@ -256,6 +258,7 @@ mod table_function_to_internal_backfill_progress;
 mod table_function_to_internal_source_backfill_progress;
 mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
+mod top_n_to_vector_search_rule;
 mod values_extract_project_rule;
 
 pub use add_logstore_rule::*;
@@ -270,6 +273,7 @@ pub use table_function_to_internal_backfill_progress::*;
 pub use table_function_to_internal_source_backfill_progress::*;
 pub use table_function_to_mysql_query_rule::*;
 pub use table_function_to_postgres_query_rule::*;
+pub use top_n_to_vector_search_rule::*;
 pub use values_extract_project_rule::*;
 
 use crate::optimizer::plan_node::ConventionMarker;
@@ -350,6 +354,7 @@ macro_rules! for_all_rules {
             , { AggGroupBySimplifyRule }
             , { ApplyHopWindowTransposeRule }
             , { AggCallMergeRule }
+            , { UnifyFirstLastValueRule }
             , { ValuesExtractProjectRule }
             , { BatchPushLimitToScanRule }
             , { BatchIcebergPredicatePushDownRule }
@@ -359,6 +364,7 @@ macro_rules! for_all_rules {
             , { SourceToIcebergScanRule }
             , { AddLogstoreRule }
             , { EmptyAggRemoveRule }
+            , { TopNToVectorSearchRule }
         }
     };
 }

@@ -274,7 +274,6 @@ impl DdlService for DdlServiceImpl {
                     .run_command(DdlCommand::CreateStreamingJob {
                         stream_job,
                         fragment_graph,
-                        affected_table_replace_info: None,
                         dependencies: HashSet::new(),
                         specific_resource_group: None,
                         if_not_exists: req.if_not_exists,
@@ -316,33 +315,17 @@ impl DdlService for DdlServiceImpl {
 
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
-        let affected_table_change = req
-            .get_affected_table_change()
-            .cloned()
-            .ok()
-            .map(Self::extract_replace_table_info);
         let dependencies = req
             .get_dependencies()
             .iter()
             .map(|id| *id as ObjectId)
             .collect();
 
-        let stream_job = match &affected_table_change {
-            None => StreamingJob::Sink(sink, None),
-            Some(change) => {
-                let (source, table, _) = change
-                    .streaming_job
-                    .clone()
-                    .try_as_table()
-                    .expect("must be replace table");
-                StreamingJob::Sink(sink, Some((table, source)))
-            }
-        };
+        let stream_job = StreamingJob::Sink(sink);
 
         let command = DdlCommand::CreateStreamingJob {
             stream_job,
             fragment_graph,
-            affected_table_replace_info: affected_table_change,
             dependencies,
             specific_resource_group: None,
             if_not_exists: req.if_not_exists,
@@ -367,9 +350,6 @@ impl DdlService for DdlServiceImpl {
         let command = DdlCommand::DropStreamingJob {
             job_id: StreamingJobId::Sink(sink_id as _),
             drop_mode,
-            target_replace_info: request
-                .affected_table_change
-                .map(Self::extract_replace_table_info),
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -443,7 +423,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                affected_table_replace_info: None,
                 dependencies,
                 specific_resource_group,
                 if_not_exists: req.if_not_exists,
@@ -471,7 +450,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::MaterializedView(table_id as _),
                 drop_mode,
-                target_replace_info: None,
             })
             .await?;
 
@@ -498,7 +476,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                affected_table_replace_info: None,
                 dependencies: HashSet::new(),
                 specific_resource_group: None,
                 if_not_exists: req.if_not_exists,
@@ -525,7 +502,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Index(index_id as _),
                 drop_mode,
-                target_replace_info: None,
             })
             .await?;
 
@@ -594,7 +570,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                affected_table_replace_info: None,
                 dependencies,
                 specific_resource_group: None,
                 if_not_exists: request.if_not_exists,
@@ -624,7 +599,6 @@ impl DdlService for DdlServiceImpl {
                     table_id as _,
                 ),
                 drop_mode,
-                target_replace_info: None,
             })
             .await?;
 
@@ -1061,6 +1035,18 @@ impl DdlService for DdlServiceImpl {
                                     original_columns = ?original_columns,
                                     new_columns = ?new_columns,
                                     "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported");
+
+                    let fail_info = "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported".to_owned();
+                    add_auto_schema_change_fail_event_log(
+                        &self.meta_metrics,
+                        table.id,
+                        table.name.clone(),
+                        table_change.cdc_table_id.clone(),
+                        table_change.upstream_ddl.clone(),
+                        &self.env.event_log_manager_ref(),
+                        fail_info,
+                    );
+
                     return Err(Status::invalid_argument(
                         "New columns should be a subset or superset of the original columns (including hidden columns)",
                     ));
@@ -1138,6 +1124,8 @@ impl DdlService for DdlServiceImpl {
                                         upstraem_ddl = table_change.upstream_ddl,
                                         "failed to replace the table",
                                     );
+                                    let fail_info =
+                                        format!("failed to replace the table: {}", e.as_report());
                                     add_auto_schema_change_fail_event_log(
                                         &self.meta_metrics,
                                         table.id,
@@ -1145,6 +1133,7 @@ impl DdlService for DdlServiceImpl {
                                         table_change.cdc_table_id.clone(),
                                         table_change.upstream_ddl.clone(),
                                         &self.env.event_log_manager_ref(),
+                                        fail_info,
                                     );
                                 }
                             };
@@ -1158,6 +1147,8 @@ impl DdlService for DdlServiceImpl {
                             cdc_table_id = table.cdc_table_id,
                             "failed to get replace table plan",
                         );
+                        let fail_info =
+                            format!("failed to get replace table plan: {}", e.as_report());
                         add_auto_schema_change_fail_event_log(
                             &self.meta_metrics,
                             table.id,
@@ -1165,6 +1156,7 @@ impl DdlService for DdlServiceImpl {
                             table_change.cdc_table_id.clone(),
                             table_change.upstream_ddl.clone(),
                             &self.env.event_log_manager_ref(),
+                            fail_info,
                         );
                     }
                 };
@@ -1291,6 +1283,7 @@ fn add_auto_schema_change_fail_event_log(
     cdc_table_id: String,
     upstream_ddl: String,
     event_log_manager: &EventLogManagerRef,
+    fail_info: String,
 ) {
     meta_metrics
         .auto_schema_change_failure_cnt
@@ -1301,6 +1294,7 @@ fn add_auto_schema_change_fail_event_log(
         table_name,
         cdc_table_id,
         upstream_ddl,
+        fail_info,
     };
     event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
 }

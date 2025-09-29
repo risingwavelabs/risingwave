@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::sync::LazyLock;
 
 use anyhow::Context;
 use futures::stream::BoxStream;
@@ -20,11 +21,12 @@ use futures::{StreamExt, pin_mut};
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
-use serde_derive::{Deserialize, Serialize};
-use tokio_postgres::types::PgLsn;
+use serde::{Deserialize, Serialize};
+use tokio_postgres::types::{PgLsn, Type as PgType};
 
 use crate::connector_common::create_pg_client;
 use crate::error::{ConnectorError, ConnectorResult};
@@ -32,22 +34,78 @@ use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::parser::{postgres_cell_to_scalar_impl, postgres_row_to_owned_row};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName,
+    CDC_TABLE_SPLIT_ID_START, CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption,
+    DebeziumOffset, ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PostgresOffset {
     pub txid: i64,
     // In postgres, an LSN is a 64-bit integer, representing a byte position in the write-ahead log stream.
     // It is printed as two hexadecimal numbers of up to 8 digits each, separated by a slash; for example, 16/B374D848
     pub lsn: u64,
+    // Additional LSN fields for improved tracking
+    #[serde(default)]
+    pub lsn_commit: Option<u64>,
+    #[serde(default)]
+    pub lsn_proc: Option<u64>,
 }
 
-// only compare the lsn field
 impl PartialOrd for PostgresOffset {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.lsn.partial_cmp(&other.lsn)
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for PostgresOffset {}
+impl PartialEq for PostgresOffset {
+    fn eq(&self, other: &Self) -> bool {
+        match (
+            self.lsn_commit,
+            self.lsn_proc,
+            other.lsn_commit,
+            other.lsn_proc,
+        ) {
+            (_, Some(_), _, Some(_)) => {
+                self.lsn_commit == other.lsn_commit && self.lsn_proc == other.lsn_proc
+            }
+            _ => self.lsn == other.lsn,
+        }
+    }
+}
+
+// only compare the lsn field, prefer lsn_commit and lsn_proc if both available
+impl Ord for PostgresOffset {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (
+            self.lsn_commit,
+            self.lsn_proc,
+            other.lsn_commit,
+            other.lsn_proc,
+        ) {
+            (_, Some(self_proc), _, Some(other_proc)) => {
+                // if both have `lsn_commit` and `lsn_proc`, compare `lsn_commit` first, then `lsn_proc`
+                // if `lsn_commit` is None, fall back to `lsn_proc`
+                match self.lsn_commit.cmp(&other.lsn_commit) {
+                    Ordering::Equal => self_proc.cmp(&other_proc),
+                    other_result => other_result,
+                }
+            }
+            _ => {
+                // Fall back to lsn comparison when either lsn_commit or lsn_proc is missing
+                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
+                    LazyLock::new(LogSuppresser::default);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::warn!(
+                        suppressed_count,
+                        self_lsn = self.lsn,
+                        other_lsn = other.lsn,
+                        "lsn_commit and lsn_proc are missing, fall back to lsn comparison"
+                    );
+                }
+                self.lsn.cmp(&other.lsn)
+            }
+        }
     }
 }
 
@@ -56,15 +114,27 @@ impl PostgresOffset {
         let dbz_offset: DebeziumOffset = serde_json::from_str(offset)
             .with_context(|| format!("invalid upstream offset: {}", offset))?;
 
+        let lsn = dbz_offset
+            .source_offset
+            .lsn
+            .context("invalid postgres lsn")?;
+
+        // `lsn_commit` may not be present in the offset for the first tx.
+        let lsn_commit = dbz_offset.source_offset.lsn_commit;
+
+        let lsn_proc = dbz_offset
+            .source_offset
+            .lsn_proc
+            .context("invalid postgres lsn_proc")?;
+
         Ok(Self {
             txid: dbz_offset
                 .source_offset
                 .txid
                 .context("invalid postgres txid")?,
-            lsn: dbz_offset
-                .source_offset
-                .lsn
-                .context("invalid postgres lsn")?,
+            lsn,
+            lsn_commit,
+            lsn_proc: Some(lsn_proc),
         })
     }
 }
@@ -168,7 +238,6 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-
         let client = create_pg_client(
             &config.username,
             &config.password,
@@ -179,7 +248,6 @@ impl PostgresExternalTableReader {
             &config.ssl_root_cert,
         )
         .await?;
-
         let field_names = rw_schema
             .fields
             .iter()
@@ -552,7 +620,7 @@ impl PostgresExternalTableReader {
     #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
     async fn as_uneven_splits(&self, options: CdcTableSnapshotSplitOption) {
         let split_column = self.split_column(&options);
-        let mut split_id = 1;
+        let mut split_id = CDC_TABLE_SPLIT_ID_START;
         let Some((min_value, max_value)) = self.min_and_max(&split_column).await? else {
             let left_bound_row = OwnedRow::new(vec![None]);
             let right_bound_row = OwnedRow::new(vec![None]);
@@ -711,8 +779,135 @@ fn is_supported_even_split_data_type(data_type: &DataType) -> bool {
     )
 }
 
+pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
+    let ty_name_lower = ty_name.to_lowercase();
+    // Handle array types (prefixed with _)
+    if let Some(base_type) = ty_name_lower.strip_prefix('_') {
+        match base_type {
+            "int2" => Some(PgType::INT2_ARRAY),
+            "int4" => Some(PgType::INT4_ARRAY),
+            "int8" => Some(PgType::INT8_ARRAY),
+            "bit" => Some(PgType::BIT_ARRAY),
+            "float4" => Some(PgType::FLOAT4_ARRAY),
+            "float8" => Some(PgType::FLOAT8_ARRAY),
+            "numeric" => Some(PgType::NUMERIC_ARRAY),
+            "bool" => Some(PgType::BOOL_ARRAY),
+            "xml" | "macaddr" | "macaddr8" | "cidr" | "inet" | "int4range" | "int8range"
+            | "numrange" | "tsrange" | "tstzrange" | "daterange" | "citext" => {
+                Some(PgType::VARCHAR_ARRAY)
+            }
+            "varchar" => Some(PgType::VARCHAR_ARRAY),
+            "text" => Some(PgType::TEXT_ARRAY),
+            "bytea" => Some(PgType::BYTEA_ARRAY),
+            "date" => Some(PgType::DATE_ARRAY),
+            "time" => Some(PgType::TIME_ARRAY),
+            "timetz" => Some(PgType::TIMETZ_ARRAY),
+            "timestamp" => Some(PgType::TIMESTAMP_ARRAY),
+            "timestamptz" => Some(PgType::TIMESTAMPTZ_ARRAY),
+            "interval" => Some(PgType::INTERVAL_ARRAY),
+            "json" => Some(PgType::JSON_ARRAY),
+            "jsonb" => Some(PgType::JSONB_ARRAY),
+            "uuid" => Some(PgType::UUID_ARRAY),
+            "point" => Some(PgType::POINT_ARRAY),
+            "oid" => Some(PgType::OID_ARRAY),
+            "money" => Some(PgType::MONEY_ARRAY),
+            _ => None,
+        }
+    } else {
+        // Handle non-array types
+        match ty_name_lower.as_str() {
+            "int2" => Some(PgType::INT2),
+            "bit" => Some(PgType::BIT),
+            "int" | "int4" => Some(PgType::INT4),
+            "int8" => Some(PgType::INT8),
+            "float4" => Some(PgType::FLOAT4),
+            "float8" => Some(PgType::FLOAT8),
+            "numeric" => Some(PgType::NUMERIC),
+            "money" => Some(PgType::MONEY),
+            "boolean" | "bool" => Some(PgType::BOOL),
+            "inet" | "xml" | "varchar" | "character varying" | "int4range" | "int8range"
+            | "numrange" | "tsrange" | "tstzrange" | "daterange" | "macaddr" | "macaddr8"
+            | "cidr" => Some(PgType::VARCHAR),
+            "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
+            "citext" | "text" => Some(PgType::TEXT),
+            "bytea" => Some(PgType::BYTEA),
+            "date" => Some(PgType::DATE),
+            "time" => Some(PgType::TIME),
+            "timetz" => Some(PgType::TIMETZ),
+            "timestamp" => Some(PgType::TIMESTAMP),
+            "timestamptz" => Some(PgType::TIMESTAMPTZ),
+            "interval" => Some(PgType::INTERVAL),
+            "json" => Some(PgType::JSON),
+            "jsonb" => Some(PgType::JSONB),
+            "uuid" => Some(PgType::UUID),
+            "point" => Some(PgType::POINT),
+            "oid" => Some(PgType::OID),
+            _ => None,
+        }
+    }
+}
+
+pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
+    let data_type = match *pg_type {
+        PgType::BOOL => DataType::Boolean,
+        PgType::BIT => DataType::Boolean,
+        PgType::INT2 => DataType::Int16,
+        PgType::INT4 => DataType::Int32,
+        PgType::INT8 => DataType::Int64,
+        PgType::FLOAT4 => DataType::Float32,
+        PgType::FLOAT8 => DataType::Float64,
+        PgType::NUMERIC | PgType::MONEY => DataType::Decimal,
+        PgType::DATE => DataType::Date,
+        PgType::TIME => DataType::Time,
+        PgType::TIMETZ => DataType::Time,
+        PgType::POINT => DataType::Struct(risingwave_common::types::StructType::new(vec![
+            ("x", DataType::Float32),
+            ("y", DataType::Float32),
+        ])),
+        PgType::TIMESTAMP => DataType::Timestamp,
+        PgType::TIMESTAMPTZ => DataType::Timestamptz,
+        PgType::INTERVAL => DataType::Interval,
+        PgType::VARCHAR | PgType::TEXT | PgType::BPCHAR | PgType::UUID => DataType::Varchar,
+        PgType::BYTEA => DataType::Bytea,
+        PgType::JSON | PgType::JSONB => DataType::Jsonb,
+        // Array types
+        PgType::BOOL_ARRAY => DataType::Boolean.list(),
+        PgType::BIT_ARRAY => DataType::Boolean.list(),
+        PgType::INT2_ARRAY => DataType::Int16.list(),
+        PgType::INT4_ARRAY => DataType::Int32.list(),
+        PgType::INT8_ARRAY => DataType::Int64.list(),
+        PgType::FLOAT4_ARRAY => DataType::Float32.list(),
+        PgType::FLOAT8_ARRAY => DataType::Float64.list(),
+        PgType::NUMERIC_ARRAY => DataType::Decimal.list(),
+        PgType::VARCHAR_ARRAY => DataType::Varchar.list(),
+        PgType::TEXT_ARRAY => DataType::Varchar.list(),
+        PgType::BYTEA_ARRAY => DataType::Bytea.list(),
+        PgType::DATE_ARRAY => DataType::Date.list(),
+        PgType::TIME_ARRAY => DataType::Time.list(),
+        PgType::TIMESTAMP_ARRAY => DataType::Timestamp.list(),
+        PgType::TIMESTAMPTZ_ARRAY => DataType::Timestamptz.list(),
+        PgType::INTERVAL_ARRAY => DataType::Interval.list(),
+        PgType::JSON_ARRAY => DataType::Jsonb.list(),
+        PgType::JSONB_ARRAY => DataType::Jsonb.list(),
+        PgType::UUID_ARRAY => DataType::Varchar.list(),
+        PgType::OID => DataType::Int64,
+        PgType::OID_ARRAY => DataType::Int64.list(),
+        PgType::MONEY_ARRAY => DataType::Decimal.list(),
+        PgType::POINT_ARRAY => {
+            DataType::list(DataType::Struct(risingwave_common::types::StructType::new(
+                vec![("x", DataType::Float32), ("y", DataType::Float32)],
+            )))
+        }
+        _ => {
+            return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
+        }
+    };
+    Ok(data_type)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
     use std::collections::HashMap;
 
     use futures::pin_mut;
@@ -764,13 +959,159 @@ mod tests {
 
     #[test]
     fn test_postgres_offset() {
-        let off1 = PostgresOffset { txid: 4, lsn: 2 };
-        let off2 = PostgresOffset { txid: 1, lsn: 3 };
-        let off3 = PostgresOffset { txid: 5, lsn: 1 };
+        let off1 = PostgresOffset {
+            txid: 4,
+            lsn: 2,
+            ..Default::default()
+        };
+        let off2 = PostgresOffset {
+            txid: 1,
+            lsn: 3,
+            ..Default::default()
+        };
+        let off3 = PostgresOffset {
+            txid: 5,
+            lsn: 1,
+            ..Default::default()
+        };
 
         assert!(off1 < off2);
         assert!(off3 < off1);
         assert!(off2 > off3);
+    }
+
+    #[test]
+    fn test_postgres_offset_partial_ord_with_lsn_commit() {
+        // Test comparison with both lsn_commit and lsn_proc fields
+        let off1 = PostgresOffset {
+            txid: 1,
+            lsn: 100,
+            lsn_commit: Some(200),
+            lsn_proc: Some(150),
+        };
+        let off2 = PostgresOffset {
+            txid: 2,
+            lsn: 300,
+            lsn_commit: Some(250),
+            lsn_proc: Some(200),
+        };
+
+        // Should compare using lsn_commit first when both have both fields
+        assert!(off1 < off2);
+
+        // Test with same lsn_commit but different lsn_proc
+        let off3 = PostgresOffset {
+            txid: 3,
+            lsn: 500,
+            lsn_commit: Some(200), // same as off1
+            lsn_proc: Some(160),   // higher than off1
+        };
+
+        // Should compare lsn_proc when lsn_commit is equal
+        assert!(off1 < off3);
+
+        // Test with missing lsn_proc - should fall back to lsn comparison
+        let off4 = PostgresOffset {
+            txid: 4,
+            lsn: 400,
+            lsn_commit: Some(100), // lower than off1's lsn_commit
+            lsn_proc: None,        // missing lsn_proc
+        };
+
+        // Should fall back to lsn comparison (off1.lsn=100 < off4.lsn=400)
+        assert!(off1 < off4);
+
+        // Test with missing lsn_commit - should fall back to lsn comparison
+        let off5 = PostgresOffset {
+            txid: 5,
+            lsn: 50,             // lower than off1.lsn
+            lsn_commit: None,    // missing lsn_commit
+            lsn_proc: Some(300), // higher than off1's lsn_proc
+        };
+
+        // Should fall back to lsn comparison (off5.lsn=50 < off1.lsn=100)
+        assert!(off5 < off1);
+
+        // Additional test cases: equal lsn_commit values with different lsn_proc
+        let off6 = PostgresOffset {
+            txid: 6,
+            lsn: 600,
+            lsn_commit: Some(500),
+            lsn_proc: Some(300),
+        };
+        let off7 = PostgresOffset {
+            txid: 7,
+            lsn: 700,
+            lsn_commit: Some(500), // same as off6
+            lsn_proc: Some(400),   // higher than off6
+        };
+
+        // Should compare lsn_proc since lsn_commit is equal
+        assert!(off6 < off7);
+
+        // Test reverse order
+        let off8 = PostgresOffset {
+            txid: 8,
+            lsn: 800,
+            lsn_commit: Some(500), // same as others
+            lsn_proc: Some(200),   // lower than off6
+        };
+
+        assert!(off8 < off6);
+        assert!(off8 < off7);
+
+        // Test equal lsn_commit and lsn_proc
+        let off9 = PostgresOffset {
+            txid: 9,
+            lsn: 900,
+            lsn_commit: Some(500), // same as off6
+            lsn_proc: Some(300),   // same as off6
+        };
+
+        // Should be equal
+        assert_eq!(off6.partial_cmp(&off9), Some(Ordering::Equal));
+    }
+
+    #[test]
+    fn test_debezium_offset_parsing() {
+        // Test parsing with all required fields present
+        let debezium_offset_with_fields = r#"{
+            "sourcePartition": {"server": "RW_CDC_1004"},
+            "sourceOffset": {
+                "last_snapshot_record": false,
+                "lsn": 29973552,
+                "txId": 1046,
+                "ts_usec": 1670826189008456,
+                "snapshot": true,
+                "lsn_commit": 29973600,
+                "lsn_proc": 29973580
+            },
+            "isHeartbeat": false
+        }"#;
+
+        let offset = PostgresOffset::parse_debezium_offset(debezium_offset_with_fields).unwrap();
+        assert_eq!(offset.txid, 1046);
+        assert_eq!(offset.lsn, 29973552);
+        assert_eq!(offset.lsn_commit, Some(29973600));
+        assert_eq!(offset.lsn_proc, Some(29973580));
+
+        // Test parsing should fail when required fields are missing
+        let debezium_offset_missing_fields = r#"{
+            "sourcePartition": {"server": "RW_CDC_1004"},
+            "sourceOffset": {
+                "last_snapshot_record": false,
+                "lsn": 29973552,
+                "txId": 1046,
+                "ts_usec": 1670826189008456,
+                "snapshot": true
+            },
+            "isHeartbeat": false
+        }"#;
+
+        let result = PostgresOffset::parse_debezium_offset(debezium_offset_missing_fields);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("invalid postgres lsn_proc"));
     }
 
     #[test]

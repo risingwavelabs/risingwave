@@ -21,7 +21,7 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Decimal};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use tiberius::numeric::Numeric;
@@ -419,7 +419,7 @@ impl SqlServerSinkWriter {
                 SqlOp::Merge(_) => {
                     write!(
                         &mut query_str,
-                        r#"MERGE {} AS [TARGET]
+                        r#"MERGE {} WITH (HOLDLOCK) AS [TARGET]
                         USING (VALUES ({})) AS [SOURCE] ({})
                         ON {}
                         WHEN MATCHED THEN UPDATE SET {}

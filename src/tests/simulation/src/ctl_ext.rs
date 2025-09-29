@@ -360,17 +360,15 @@ impl Cluster {
         let info = self.get_cluster_info().await?;
         let mut res = BTreeMap::new();
 
-        for table in info.table_fragments {
-            for (actor_id, splits) in table.actor_splits {
-                let splits = splits
-                    .splits
-                    .iter()
-                    .map(|split| SplitImpl::try_from(split).unwrap())
-                    .map(|split| split.id())
-                    .collect_vec()
-                    .join(",");
-                res.insert(actor_id, splits);
-            }
+        for (actor_id, splits) in info.actor_splits {
+            let splits = splits
+                .splits
+                .iter()
+                .map(|split| SplitImpl::try_from(split).unwrap())
+                .map(|split| split.id())
+                .collect_vec()
+                .join(",");
+            res.insert(actor_id, splits);
         }
 
         Ok(res)

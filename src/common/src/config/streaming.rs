@@ -92,6 +92,10 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::unsafe_stream_extreme_cache_size")]
     pub unsafe_extreme_cache_size: usize,
 
+    /// Minimum cache size for TopN cache per group key.
+    #[serde(default = "default::developer::stream_topn_cache_min_capacity")]
+    pub topn_cache_min_capacity: usize,
+
     /// The maximum size of the chunk produced by executor at a time.
     #[serde(default = "default::developer::stream_chunk_size")]
     pub chunk_size: usize,
@@ -224,13 +228,36 @@ pub struct StreamingDeveloperConfig {
     /// `IcebergSink`: The maximum number of rows in a row group when writing Parquet files.
     #[serde(default = "default::developer::iceberg_sink_write_parquet_max_row_group_rows")]
     pub iceberg_sink_write_parquet_max_row_group_rows: usize,
+
+    /// Whether by default enable preloading all rows in memory for state table.
+    /// If true, all capable state tables will preload its state to memory
+    #[serde(default = "default::streaming::default_enable_mem_preload_state_table")]
+    pub default_enable_mem_preload_state_table: bool,
+
+    /// The list of state table ids to *enable* preloading all rows in memory for state table.
+    /// Only takes effect when `default_enable_mem_preload_state_table` is false.
+    #[serde(default)]
+    pub mem_preload_state_table_ids_whitelist: Vec<u32>,
+
+    /// The list of state table ids to *disable* preloading all rows in memory for state table.
+    /// Only takes effect when `default_enable_mem_preload_state_table` is true.
+    #[serde(default)]
+    pub mem_preload_state_table_ids_blacklist: Vec<u32>,
+
+    /// Eliminate unnecessary updates aggressively, even if it impacts performance. Enable this
+    /// only if it's confirmed that no-op updates are causing significant streaming amplification.
+    #[serde(default)]
+    pub aggressive_noop_update_elimination: bool,
 }
 
 pub mod default {
     pub use crate::config::default::developer;
 
     pub mod streaming {
+        use tracing::info;
+
         use crate::config::AsyncStackTraceOption;
+        use crate::util::env_var::env_var_is_true;
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -248,6 +275,15 @@ pub mod default {
 
         pub fn unsafe_enable_strict_consistency() -> bool {
             true
+        }
+
+        pub fn default_enable_mem_preload_state_table() -> bool {
+            if env_var_is_true("DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE") {
+                info!("enabled mem_preload_state_table globally by env var");
+                true
+            } else {
+                false
+            }
         }
     }
 }

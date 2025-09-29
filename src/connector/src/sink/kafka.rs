@@ -26,7 +26,7 @@ use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use strum_macros::{Display, EnumString};
 use thiserror_ext::AsReport;

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_meta_model::table::RefreshState;
 
 use super::*;
 use crate::controller::utils::{
@@ -89,6 +90,22 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))
     }
 
+    pub async fn get_table_by_associate_source_id(
+        &self,
+        associated_source_id: SourceId,
+    ) -> MetaResult<PbTable> {
+        let inner = self.inner.read().await;
+        Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::OptionalAssociatedSourceId.eq(associated_source_id))
+            .one(&inner.db)
+            .await?
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found("table associated source", associated_source_id)
+            })
+    }
+
     pub async fn get_table_by_id(&self, table_id: TableId) -> MetaResult<PbTable> {
         let inner = self.inner.read().await;
         let table_obj = Table::find_by_id(table_id)
@@ -100,6 +117,27 @@ impl CatalogController {
         } else {
             Err(MetaError::catalog_id_not_found("table", table_id))
         }
+    }
+
+    pub async fn get_user_created_table_by_ids(
+        &self,
+        table_ids: Vec<TableId>,
+    ) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(
+                table::Column::TableId
+                    .is_in(table_ids.clone())
+                    .and(table::Column::TableType.eq(TableType::Table)),
+            )
+            .all(&inner.db)
+            .await?;
+        let tables = table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect();
+        Ok(tables)
     }
 
     pub async fn get_table_by_ids(
@@ -140,6 +178,37 @@ impl CatalogController {
             .into_iter()
             .map(|col| col.into())
             .collect())
+    }
+
+    pub async fn get_table_incoming_sinks(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
+        let inner = self.inner.read().await;
+        let sink_objs = Sink::find()
+            .find_also_related(Object)
+            .filter(sink::Column::TargetTable.eq(table_id))
+            .all(&inner.db)
+            .await?;
+        Ok(sink_objs
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect())
+    }
+
+    /// Get the refresh state of a table
+    pub async fn get_table_refresh_state(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<Option<RefreshState>> {
+        let inner = self.inner.read().await;
+        let (refresh_state,): (Option<RefreshState>,) = Table::find_by_id(table_id)
+            .select_only()
+            .select_column(table::Column::RefreshState)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+
+        // Default to IDLE if not set (for backward compatibility)
+        Ok(Some(refresh_state.unwrap_or(RefreshState::Idle)))
     }
 
     pub async fn get_sink_by_ids(&self, sink_ids: Vec<SinkId>) -> MetaResult<Vec<PbSink>> {
@@ -504,5 +573,20 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?)
+    }
+
+    pub async fn get_streaming_job_status(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<JobStatus> {
+        let inner = self.inner.read().await;
+        let status = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .column(streaming_job::Column::JobStatus)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+        Ok(status)
     }
 }

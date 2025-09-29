@@ -18,7 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, Schema};
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
@@ -33,7 +33,7 @@ use crate::TableCatalog;
 use crate::binder::BoundBaseTable;
 use crate::catalog::ColumnId;
 use crate::catalog::index_catalog::{IndexType, TableIndex, VectorIndex};
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::ApplyResult;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -578,7 +578,14 @@ impl ToBatch for LogicalScan {
     ) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new = self.clone_with_predicate(self.predicate().clone());
 
-        if !new.table_indexes().is_empty() {
+        if !new.table_indexes().is_empty()
+            && self
+                .base
+                .ctx()
+                .session_ctx()
+                .config()
+                .enable_index_selection()
+        {
             let index_selection_rule = IndexSelectionRule::create();
             if let ApplyResult::Ok(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
@@ -608,20 +615,21 @@ impl ToStream for LogicalScan {
         ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self.predicate().always_true() {
-            // Force rewrite scan type to cross-db scan
-            if self.core.table_catalog.database_id != self.base.ctx().session_ctx().database_id() {
-                Ok(StreamTableScan::new_with_stream_scan_type(
-                    self.core.clone(),
-                    StreamScanType::CrossDbSnapshotBackfill,
+            if self.core.cross_database() && ctx.stream_scan_type() == StreamScanType::UpstreamOnly
+            {
+                return Err(ErrorCode::NotSupported(
+                    "We currently do not support cross database scan in upstream only mode."
+                        .to_owned(),
+                    "Please ensure the source table is in the same database.".to_owned(),
                 )
-                .into())
-            } else {
-                Ok(StreamTableScan::new_with_stream_scan_type(
-                    self.core.clone(),
-                    ctx.stream_scan_type(),
-                )
-                .into())
+                .into());
             }
+
+            Ok(StreamTableScan::new_with_stream_scan_type(
+                self.core.clone(),
+                ctx.stream_scan_type(),
+            )
+            .into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);
@@ -669,5 +677,51 @@ impl ToStream for LogicalScan {
                 ColIndexMapping::identity(self.schema().len()),
             )),
         }
+    }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if !self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .enable_index_selection()
+        {
+            return None;
+        }
+        if columns.is_empty() {
+            return None;
+        }
+        if self.table_indexes().is_empty() {
+            return None;
+        }
+        let orders = if columns.len() <= 3 {
+            OrderType::all()
+        } else {
+            // Limit the number of order type combinations to avoid explosion.
+            // For more than 3 columns, we only consider ascending nulls last and descending.
+            // Since by default, indexes are created with ascending nulls last.
+            // This is a heuristic to reduce the search space.
+            vec![OrderType::ascending_nulls_last(), OrderType::descending()]
+        };
+        for order_type_combo in columns
+            .iter()
+            .map(|&col| orders.iter().map(move |ot| ColumnOrder::new(col, *ot)))
+            .multi_cartesian_product()
+            .take(256)
+        // limit the number of combinations
+        {
+            let required_order = Order {
+                column_orders: order_type_combo,
+            };
+
+            let order_satisfied_index = self.indexes_satisfy_order(&required_order);
+            for index in order_satisfied_index {
+                if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
+                    return Some(index_scan.into());
+                }
+            }
+        }
+        None
     }
 }

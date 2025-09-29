@@ -78,6 +78,7 @@ async fn build_accessor_builder(
                     .timestamp_handling
                     .unwrap_or(TimestampHandling::GuessNumberUnit),
                 json_config.time_handling.unwrap_or(TimeHandling::Micro),
+                json_config.handle_toast_columns,
             )?,
         )),
         _ => bail!("unsupported encoding for Debezium"),
@@ -120,6 +121,7 @@ impl DebeziumParser {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -226,6 +228,7 @@ mod tests {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -300,6 +303,7 @@ mod tests {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };

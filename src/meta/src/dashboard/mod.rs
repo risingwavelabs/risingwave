@@ -59,7 +59,7 @@ pub(super) mod handlers {
     use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::catalog::{FragmentTypeFlag, TableId};
+    use risingwave_common::catalog::TableId;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
@@ -323,25 +323,15 @@ pub(super) mod handlers {
             .table_fragments()
             .await
             .map_err(err)?;
-        let mut in_map = HashMap::new();
-        let mut out_map = HashMap::new();
+        let mut fragment_to_relation_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
-            for (fragment_id, fragment) in &tf.fragments {
-                if fragment
-                    .fragment_type_mask
-                    .contains(FragmentTypeFlag::StreamScan)
-                {
-                    in_map.insert(*fragment_id, relation_id as u32);
-                }
-                if fragment
-                    .fragment_type_mask
-                    .contains(FragmentTypeFlag::Mview)
-                {
-                    out_map.insert(*fragment_id, relation_id as u32);
-                }
+            for fragment_id in tf.fragments.keys() {
+                fragment_to_relation_map.insert(*fragment_id, relation_id as u32);
             }
         }
-        let map = FragmentToRelationMap { in_map, out_map };
+        let map = FragmentToRelationMap {
+            fragment_to_relation_map,
+        };
         Ok(Json(map))
     }
 

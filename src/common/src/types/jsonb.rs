@@ -24,7 +24,10 @@ use thiserror_ext::AsReport;
 use super::{
     Datum, F64, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum,
 };
-use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
+use crate::types::{
+    DEBEZIUM_UNAVAILABLE_JSON, DEBEZIUM_UNAVAILABLE_VALUE, DataType, ListType, Scalar, ScalarRef,
+    StructType, StructValue,
+};
 use crate::util::iter_util::ZipEqDebug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -143,6 +146,18 @@ impl std::str::FromStr for JsonbVal {
     type Err = <Value as std::str::FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.parse()?))
+    }
+}
+
+impl JsonbVal {
+    /// Create a `JsonbVal` from a string, with special handling for Debezium's unavailable value placeholder.
+    /// Returns a Result to handle parsing errors properly.
+    pub fn from_debezium_unavailable_value(s: &str) -> Result<Self, serde_json::Error> {
+        // Special handling for Debezium's unavailable value placeholder
+        if s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE {
+            return Ok(DEBEZIUM_UNAVAILABLE_JSON.clone());
+        }
         Ok(Self(s.parse()?))
     }
 }
@@ -414,7 +429,7 @@ impl<'a> JsonbRef<'a> {
         }
         let datum = match ty {
             DataType::Jsonb => ScalarImpl::Jsonb(self.into()),
-            DataType::List(t) => ScalarImpl::List(self.to_list(t)?),
+            DataType::List(l) => ScalarImpl::List(self.to_list(l)?),
             DataType::Struct(s) => ScalarImpl::Struct(self.to_struct(s)?),
             _ => {
                 let s = self.force_string();
@@ -425,7 +440,8 @@ impl<'a> JsonbRef<'a> {
     }
 
     /// Convert the jsonb value to a list value.
-    pub fn to_list(self, elem_type: &DataType) -> Result<ListValue, String> {
+    pub fn to_list(self, ty: &ListType) -> Result<ListValue, String> {
+        let elem_type = ty.elem();
         let array = self
             .0
             .as_array()

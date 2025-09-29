@@ -302,10 +302,10 @@ fn datum_to_json_object(
             }
             JsonbHandlingMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
         },
-        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
+        (DataType::List(lt), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
             let mut vec = Vec::with_capacity(elems.len());
-            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
+            let inner_field = Field::unnamed(lt.into_elem());
             for sub_datum_ref in elems {
                 let value = datum_to_json_object(&inner_field, sub_datum_ref, config)?;
                 vec.push(value);
@@ -313,7 +313,7 @@ fn datum_to_json_object(
             json!(vec)
         }
         (DataType::Vector(_), ScalarRefImpl::Vector(vector)) => {
-            let elems = vector.into_slice();
+            let elems = vector.as_raw_slice();
             let mut vec = Vec::with_capacity(elems.len());
             for v in elems {
                 let value = serde_json::Number::from_f64(*v as _)
@@ -435,8 +435,11 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
                 .collect_vec();
             mapping.insert("fields".to_owned(), json!(sub_fields));
         }
-        DataType::List(sub_type) => {
-            mapping.insert("items".to_owned(), json!(type_as_json_schema(sub_type)));
+        DataType::List(list_type) => {
+            mapping.insert(
+                "items".to_owned(),
+                json!(type_as_json_schema(list_type.elem())),
+            );
         }
         _ => {}
     }
@@ -783,9 +786,10 @@ mod tests {
                 name: "v10".into(),
             },
             Field {
-                data_type: DataType::List(Box::new(DataType::List(Box::new(DataType::Struct(
-                    StructType::new(vec![("aa", DataType::Int64), ("bb", DataType::Float64)]),
-                ))))),
+                data_type: DataType::list(DataType::list(DataType::Struct(StructType::new(vec![
+                    ("aa", DataType::Int64),
+                    ("bb", DataType::Float64),
+                ])))),
                 name: "v11".into(),
             },
             Field {

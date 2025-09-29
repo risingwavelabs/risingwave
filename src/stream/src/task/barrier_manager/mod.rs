@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod cdc_progress;
 pub mod progress;
+
 pub use progress::CreateMviewProgressReporter;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::util::epoch::EpochPair;
@@ -23,6 +25,7 @@ use crate::error::{IntoUnexpectedExit, StreamError};
 use crate::executor::exchange::permit::{self, channel_from_config};
 use crate::executor::{Barrier, BarrierInner};
 use crate::task::barrier_manager::progress::BackfillState;
+use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, StreamEnvironment};
 
 /// Events sent from actors via [`LocalBarrierManager`] to [`super::barrier_worker::managed_state::DatabaseManagedBarrierState`].
@@ -44,6 +47,12 @@ pub(super) enum LocalBarrierEvent {
         table_id: u32,
         associated_source_id: u32,
     },
+    RefreshFinished {
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+        staging_table_id: u32,
+    },
     RegisterBarrierSender {
         actor_id: ActorId,
         barrier_sender: mpsc::UnboundedSender<Barrier>,
@@ -52,6 +61,11 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
         tx: permit::Sender,
+    },
+    ReportCdcTableBackfillProgress {
+        actor_id: ActorId,
+        epoch: EpochPair,
+        state: CdcTableBackfillState,
     },
 }
 
@@ -92,7 +106,6 @@ impl LocalBarrierManager {
         )
     }
 
-    #[cfg(test)]
     pub fn for_test() -> Self {
         Self::new(
             DatabaseId {
@@ -162,6 +175,21 @@ impl LocalBarrierManager {
             actor_id,
             table_id,
             associated_source_id,
+        });
+    }
+
+    pub fn report_refresh_finished(
+        &self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+        staging_table_id: u32,
+    ) {
+        self.send_event(LocalBarrierEvent::RefreshFinished {
+            epoch,
+            actor_id,
+            table_id,
+            staging_table_id,
         });
     }
 }

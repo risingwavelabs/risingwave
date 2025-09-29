@@ -65,6 +65,38 @@ pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub const WEBHOOK_CONNECTOR: &str = "webhook";
 
+/// Callback wrapper for reporting CDC auto schema change fail events
+/// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
+#[derive(Clone)]
+pub struct CdcAutoSchemaChangeFailCallback(
+    Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>,
+);
+
+impl CdcAutoSchemaChangeFailCallback {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(u32, String, String, String, String) + Send + Sync + 'static,
+    {
+        Self(Arc::new(f))
+    }
+
+    pub fn call(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        self.0(table_id, table_name, cdc_table_id, upstream_ddl, fail_info);
+    }
+}
+
+impl std::fmt::Debug for CdcAutoSchemaChangeFailCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CdcAutoSchemaChangeFailCallback")
+    }
+}
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
     fn try_from_btreemap(
@@ -202,6 +234,12 @@ pub trait SplitEnumerator: Sized + Send {
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
         Ok(())
     }
+    /// Called after `worker.tick()` execution to perform periodic operations,
+    /// such as monitoring upstream PostgreSQL `confirmed_flush_lsn`, etc.
+    /// This can be extended to support more periodic operations in the future.
+    async fn on_tick(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type SourceContextRef = Arc<SourceContext>;
@@ -213,10 +251,11 @@ pub trait AnySplitEnumerator: Send {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
     async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
+    async fn on_tick(&mut self) -> Result<()>;
 }
 
 #[async_trait]
-impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
+impl<T: SplitEnumerator<Split: Into<SplitImpl>> + 'static> AnySplitEnumerator for T {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
         SplitEnumerator::list_splits(self)
             .await
@@ -229,6 +268,10 @@ impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
 
     async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
         SplitEnumerator::on_finish_backfill(self, _fragment_ids).await
+    }
+
+    async fn on_tick(&mut self) -> Result<()> {
+        SplitEnumerator::on_tick(self).await
     }
 }
 
@@ -279,7 +322,7 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct SourceContext {
     pub actor_id: u32,
     pub source_id: TableId,
@@ -292,6 +335,8 @@ pub struct SourceContext {
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
     pub schema_change_failure_policy: crate::source::cdc::SchemaChangeFailurePolicy,
+    // callback function to report CDC auto schema change fail events
+    pub on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
 }
 
 impl SourceContext {
@@ -308,6 +353,34 @@ impl SourceContext {
         >,
         schema_change_failure_policy: crate::source::cdc::SchemaChangeFailurePolicy,
     ) -> Self {
+        Self::new_with_auto_schema_change_callback(
+            actor_id,
+            source_id,
+            fragment_id,
+            source_name,
+            metrics,
+            source_ctrl_opts,
+            connector_props,
+            schema_change_channel,
+            None,
+            schema_change_failure_policy,
+        )
+    }
+
+    pub fn new_with_auto_schema_change_callback(
+        actor_id: u32,
+        source_id: TableId,
+        fragment_id: u32,
+        source_name: String,
+        metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
+        connector_props: ConnectorProperties,
+        schema_change_channel: Option<
+            mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
+        >,
+        on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
+        schema_change_failure_policy: crate::source::cdc::SchemaChangeFailurePolicy,
+    ) -> Self {
         Self {
             actor_id,
             source_id,
@@ -317,6 +390,8 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+
+            on_cdc_auto_schema_change_failure,
             schema_change_failure_policy,
         }
     }
@@ -338,6 +413,29 @@ impl SourceContext {
             None,
             crate::source::cdc::SchemaChangeFailurePolicy::default(),
         )
+    }
+
+    /// Report CDC auto schema change fail event
+    /// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
+    pub fn on_cdc_auto_schema_change_failure(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        if let Some(ref cdc_auto_schema_change_fail_callback) =
+            self.on_cdc_auto_schema_change_failure
+        {
+            cdc_auto_schema_change_fail_callback.call(
+                table_id,
+                table_name,
+                cdc_table_id,
+                upstream_ddl,
+                fail_info,
+            );
+        }
     }
 }
 
@@ -711,11 +809,10 @@ impl SplitImpl {
     }
 
     pub fn into_batch_split(self) -> Option<BatchSourceSplitImpl> {
-        #[expect(clippy::match_single_binding)]
         match self {
-            // SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
-            //     Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
-            // }
+            SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
+                Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
+            }
             _ => None,
         }
     }

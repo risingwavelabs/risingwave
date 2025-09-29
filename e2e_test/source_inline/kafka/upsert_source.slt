@@ -1,0 +1,157 @@
+control substitution on
+
+system ok
+rpk topic delete 'test_include_key' || true;
+
+system ok
+rpk topic create 'test_include_key'
+
+# TODO: test batch query from upsert source.
+statement ok
+CREATE SOURCE upsert_students (
+    primary key (rw_key),
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+INCLUDE KEY AS rw_key
+WITH (
+ ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+ topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+
+query TT
+SHOW CREATE SOURCE upsert_students
+----
+public.upsert_students CREATE SOURCE upsert_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL, PRIMARY KEY (rw_key)) INCLUDE KEY AS rw_key WITH (<slt:ignore>) FORMAT UPSERT ENCODE JSON
+
+# 1. Sink-into-table
+statement ok
+CREATE TABLE students (
+    rw_key BYTEA PRIMARY KEY,
+    id INT,
+    name VARCHAR,
+    age INT,
+)
+
+statement ok
+CREATE SINK sk INTO students AS
+  SELECT
+    rw_key,
+    "ID",
+    "firstName" || ' ' || "lastName" AS name,
+    age
+  FROM upsert_students;
+
+# 2. MV
+statement ok
+CREATE MATERIALIZED VIEW filtered_students_mv AS
+  SELECT
+    "ID",
+    "firstName" || ' ' || "lastName" AS name,
+    age
+  FROM upsert_students
+  WHERE age >= 20;
+
+# Start producing data and check results
+system ok
+cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\n"
+{"ID": 1}^{"ID": 1, "firstName": "John", "lastName": "Doe", "age": 18, "height": 5.10, "weight": 150}
+{"ID": 2}^{"ID": 2, "firstName": "Sarah", "lastName": "Smith", "age": 19, "height": 5.5, "weight": 120}
+{"ID": 3}^{"ID": 3, "firstName": "Ben", "lastName": "Johnson", "age": 21, "height": 6.0, "weight": 175}
+{"ID": 4}^{"ID": 4, "firstName": "Emma", "lastName": "Brown", "age": 20, "height": 5.3, "weight": 130}
+{"ID": 5}^{"ID": 5, "firstName": "Michael", "lastName": "Williams", "age": 22, "height": 6.2, "weight": 190}
+{"ID": 6}^{"ID": 6, "firstName": "Leah", "lastName": "Davis", "age": 18, "height": 5.7, "weight": 140}
+{"ID": 7}^{"ID": 7, "firstName": "Connor", "lastName": "Wilson", "age": 19, "height": 5.9, "weight": 160}
+{"ID": 8}^{"ID": 8, "firstName": "Ava", "lastName": "Garcia", "age": 21, "height": 5.2, "weight": 115}
+{"ID": 9}^{"ID": 9, "firstName": "Jacob", "lastName": "Anderson", "age": 20, "height": 5.8, "weight": 155}
+EOF
+
+query ITI rowsort retry 10 backoff 1s
+SELECT id, name, age FROM students;
+----
+1 John Doe 18
+2 Sarah Smith 19
+3 Ben Johnson 21
+4 Emma Brown 20
+5 Michael Williams 22
+6 Leah Davis 18
+7 Connor Wilson 19
+8 Ava Garcia 21
+9 Jacob Anderson 20
+
+query ITI rowsort
+SELECT * FROM filtered_students_mv;
+----
+3 Ben Johnson 21
+4 Emma Brown 20
+5 Michael Williams 22
+8 Ava Garcia 21
+9 Jacob Anderson 20
+
+system ok
+cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\n"
+{"ID": 1}^{"ID": 1, "firstName": "Ethan", "lastName": "Martinez", "age": 18, "height": 6.1, "weight": 180}
+{"ID": 1}^{"ID": 1, "firstName": "Olivia", "lastName": "Hernandez", "age": 22, "height": 5.6, "weight": 125}
+{"ID": 2}^{"ID": 2, "firstName": "Emily", "lastName": "Jackson", "age": 19, "height": 5.4, "weight": 110}
+{"ID": 3}^{"ID": 3, "firstName": "Noah", "lastName": "Thompson", "age": 21, "height": 6.3, "weight": 195}
+{"ID": 7}^
+{"ID": 8}^
+EOF
+
+query ITI rowsort retry 10 backoff 1s
+SELECT id, name, age FROM students;
+----
+1 Olivia Hernandez 22
+2 Emily Jackson 19
+3 Noah Thompson 21
+4 Emma Brown 20
+5 Michael Williams 22
+6 Leah Davis 18
+9 Jacob Anderson 20
+
+query ITI rowsort
+SELECT * FROM filtered_students_mv;
+----
+1 Olivia Hernandez 22
+3 Noah Thompson 21
+4 Emma Brown 20
+5 Michael Williams 22
+9 Jacob Anderson 20
+
+statement ok
+DROP TABLE students;
+
+statement ok
+DROP MATERIALIZED VIEW filtered_students_mv;
+
+# Demonstrate that we cannot use a different column as the sink primary key.
+statement ok
+CREATE TABLE students_id_as_pk (
+    id INT PRIMARY KEY,
+    name VARCHAR,
+    age INT,
+)
+
+statement error
+CREATE SINK sk INTO students_id_as_pk AS
+  SELECT
+    "ID",
+    "firstName" || ' ' || "lastName" AS name,
+    age
+  FROM upsert_students;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Bind error: When sinking from an upsert stream, the downstream primary key must be the same as or a subset of the one derived from the stream.
+
+
+statement ok
+DROP TABLE students_id_as_pk;
+
+statement ok
+DROP SOURCE upsert_students;

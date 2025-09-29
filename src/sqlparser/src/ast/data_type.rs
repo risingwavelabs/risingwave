@@ -112,7 +112,15 @@ impl fmt::Display for DataType {
             DataType::Array(ty) => write!(f, "{}[]", ty),
             DataType::Custom(ty) => write!(f, "{}", ty),
             DataType::Struct(defs) => {
-                write!(f, "STRUCT<{}>", display_comma_separated(defs))
+                write!(f, "STRUCT<")?;
+                if defs.is_empty() {
+                    // We require a whitespace for empty(zero-field) struct to prevent `<>` from
+                    // being tokenized as a single token `Neq`.
+                    write!(f, " ")?;
+                } else {
+                    write!(f, "{}", display_comma_separated(defs))?;
+                }
+                write!(f, ">")
             }
             DataType::Map(kv) => {
                 write!(f, "MAP({},{})", kv.0, kv.1)
