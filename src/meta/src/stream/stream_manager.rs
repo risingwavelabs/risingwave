@@ -345,7 +345,6 @@ impl GlobalStreamManager {
                     })
                     .await?;
 
-                println!("xxxx");
                 let version = stream_manager
                     .metadata_manager
                     .wait_streaming_job_finished(
@@ -380,8 +379,6 @@ impl GlobalStreamManager {
             }
         }
             .in_current_span();
-
-        println!("1111111");
 
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
@@ -488,7 +485,6 @@ impl GlobalStreamManager {
             .source_manager
             .allocate_splits(&stream_job_fragments)
             .await?;
-        println!("step a {:#?}", init_split_assignment);
 
         init_split_assignment.extend(
             self.source_manager
@@ -499,8 +495,6 @@ impl GlobalStreamManager {
                 )
                 .await?,
         );
-
-        println!("init split {:#?}", init_split_assignment);
 
         let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
             stream_job_fragments.stream_job_id.table_id,
@@ -537,8 +531,6 @@ impl GlobalStreamManager {
             CdcTableSnapshotSplitAssignmentWithGeneration::empty()
         };
 
-        println!("a3333");
-
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
         };
@@ -570,8 +562,6 @@ impl GlobalStreamManager {
             }
         };
 
-        println!("a4444");
-
         let command = Command::CreateStreamingJob {
             info,
             job_type,
@@ -581,8 +571,6 @@ impl GlobalStreamManager {
         self.barrier_scheduler
             .run_command(streaming_job.database_id().into(), command)
             .await?;
-
-        println!("a5555");
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
 
@@ -826,8 +814,6 @@ impl GlobalStreamManager {
             }
         }
 
-        println!("x1");
-
         let job_id = TableId::new(job_id);
 
         let worker_nodes = self
@@ -838,7 +824,6 @@ impl GlobalStreamManager {
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
         let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
-        println!("x2");
 
         let commands = self
             .scale_controller
@@ -846,20 +831,14 @@ impl GlobalStreamManager {
             .await?;
 
         if !deferred {
-            println!("before run command");
-
             let _source_pause_guard = self.source_manager.pause_tick().await;
 
             for (database_id, command) in commands {
-                println!("run command for database_id: {:?}", database_id);
-
                 self.barrier_scheduler
                     .run_command(database_id, command)
                     .await?;
             }
         }
-
-        println!("after run command");
 
         Ok(())
     }

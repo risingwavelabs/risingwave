@@ -235,33 +235,22 @@ async fn test_active_online() -> Result<()> {
         ])
         .await?;
 
-    let x = session
-        .run("select * from rw_streaming_parallelism")
-        .await?;
-    println!("parallel xxx {}", x);
-
     let all_worker_slots = table_mat_fragment.all_worker_count();
 
     let used_worker_slots = table_mat_fragment.used_worker_count();
-
-    println!("all worker {:#?}", all_worker_slots);
 
     assert_eq!(all_worker_slots, used_worker_slots);
 
     assert_eq!(all_worker_slots.len(), config.compute_nodes - 1);
 
-    println!("before restart node");
     cluster
         .simple_restart_nodes(vec!["compute-2".to_owned()])
         .await;
 
-    println!("after restart node");
     sleep(Duration::from_secs(
         MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
     ))
     .await;
-
-    println!("after sleep");
 
     let table_mat_fragment = cluster
         .locate_one_fragment(vec![

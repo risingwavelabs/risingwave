@@ -118,7 +118,6 @@ impl GlobalBarrierWorkerContextImpl {
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>> {
-        println!("worker nodes {:#?}", worker_nodes);
         let database_id = database_id.map(|database_id| database_id.database_id as _);
 
         let source_manager_ref = self.source_manager.clone();
@@ -357,7 +356,7 @@ impl GlobalBarrierWorkerContextImpl {
 
                     let background_streaming_jobs = self.list_background_jobs().await?;
 
-                    println!(
+                    tracing::info!(
                         "background streaming jobs: {:?} total {}",
                         background_streaming_jobs,
                         background_streaming_jobs.len()
@@ -609,12 +608,6 @@ impl GlobalBarrierWorkerContextImpl {
             .inspect_err(|err| {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
-
-        println!(
-            "db_id {} all info {:#?}",
-            database_id,
-            all_info.keys().copied().collect::<Vec<_>>()
-        );
 
         let mut info = all_info
             .get(&database_id)

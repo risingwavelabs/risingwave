@@ -94,7 +94,6 @@
 //
 //     let query = "alter table t set parallelism = 3";
 //
-//     println!("query {}", query);
 //
 //     cluster.run(query).await?;
 //
