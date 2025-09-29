@@ -250,11 +250,14 @@ impl CatalogController {
                 ..
             } = actor;
 
-            let splits = actor_splits.get(actor_id).map(|splits| {
-                ConnectorSplits::from(&PbConnectorSplits {
-                    splits: splits.iter().map(ConnectorSplit::from).collect(),
+            let splits = actor_splits
+                .get(actor_id)
+                .map(|splits| {
+                    ConnectorSplits::from(&PbConnectorSplits {
+                        splits: splits.iter().map(ConnectorSplit::from).collect(),
+                    })
                 })
-            });
+                .unwrap_or_default();
             let status = actor_status.get(actor_id).cloned().ok_or_else(|| {
                 anyhow::anyhow!(
                     "actor {} in fragment {} has no actor_status",
@@ -412,9 +415,7 @@ impl CatalogController {
                 },
             );
 
-            if let Some(splits) = splits {
-                pb_actor_splits.insert(actor_id as _, splits.to_protobuf());
-            }
+            pb_actor_splits.insert(actor_id as _, splits.to_protobuf());
 
             pb_actors.push(StreamActor {
                 actor_id: actor_id as _,
@@ -667,7 +668,9 @@ impl CatalogController {
                             fragment_id: fm.fragment_id,
                             status: ActorStatus::Running, // Placeholder, actual status should be fetched from DB if needed
                             worker_id: actor_info.worker_id as _,
-                            splits: None, // Placeholder, actual splits should be fetched from DB if needed
+                            splits:    ConnectorSplits::from(&PbConnectorSplits {
+                                splits: actor_info.splits.iter().map(ConnectorSplit::from).collect(),
+                            }),
                             vnode_bitmap: actor_info.vnode_bitmap.as_ref().map(|bitmap| {
                                 VnodeBitmap::from(&bitmap.to_protobuf())
                             }),
@@ -1089,15 +1092,23 @@ impl CatalogController {
                                 actor_id: *actor_id as _,
                                 fragment_id: fragment.fragment_id as _,
                                 status: ActorStatus::Running,
-                                splits: None, // Placeholder, actual expr_context should be fetched from DB if needed
-                                worker_id: actor_info.worker_id,
-                                vnode_bitmap: actor_info.vnode_bitmap.as_ref().map(|bitmap| {
-                                    VnodeBitmap::from(&bitmap.to_protobuf())
+                                splits: ConnectorSplits::from(&PbConnectorSplits {
+                                    splits: actor_info
+                                        .splits
+                                        .iter()
+                                        .map(ConnectorSplit::from)
+                                        .collect(),
                                 }),
+                                worker_id: actor_info.worker_id,
+                                vnode_bitmap: actor_info
+                                    .vnode_bitmap
+                                    .as_ref()
+                                    .map(|bitmap| VnodeBitmap::from(&bitmap.to_protobuf())),
                                 expr_context_2: (&PbExprContext {
                                     time_zone: job.timezone.clone().unwrap_or("".to_owned()),
                                     strict_mode: false,
-                                }).into()
+                                })
+                                    .into(),
                             })
                             .collect();
 

@@ -68,7 +68,7 @@ pub struct ActorModel {
     pub actor_id: ActorId,
     pub fragment_id: FragmentId,
     pub status: ActorStatus,
-    pub splits: Option<ConnectorSplits>,
+    pub splits: ConnectorSplits,
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<VnodeBitmap>,
     pub expr_context_2: ExprContext,
