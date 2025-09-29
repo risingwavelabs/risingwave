@@ -1419,8 +1419,7 @@ impl ToStream for LogicalAgg {
         let input = if self.group_key().is_empty() {
             self.input()
         } else {
-            self
-                .input()
+            self.input()
                 .try_better_locality(&self.group_key().to_vec())
                 .unwrap_or_else(|| self.input())
         };
