@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::pin::pin;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
+use futures::future::select;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
@@ -129,7 +131,7 @@ impl DdlServiceImpl {
         let metadata_manager = self.metadata_manager.clone();
         let ddl_controller = self.ddl_controller.clone();
 
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             async fn migrate_inner(
                 env: &MetaSrvEnv,
@@ -153,8 +155,8 @@ impl DdlServiceImpl {
                     if workers.is_empty() {
                         return Err(anyhow::anyhow!("no active frontend nodes found").into());
                     }
-                    let worker = workers.choose(&mut thread_rng()).unwrap().clone();
-                    env.frontend_client_pool().get(&worker).await?
+                    let worker = workers.choose(&mut thread_rng()).unwrap();
+                    env.frontend_client_pool().get(worker).await?
                 };
 
                 for table in tables {
@@ -182,37 +184,25 @@ impl DdlServiceImpl {
                 Ok(())
             }
 
-            let mut attempt = 0;
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("shutting down migrate table fragments task");
-                        break;
-                    },
-                    res = migrate_inner(&env, &metadata_manager, &ddl_controller) => {
-                        match res {
-                            Ok(_) => break,
-                            Err(e) => {
-                                attempt += 1;
-                                tracing::error!(
-                                    "failed to migrate legacy table fragments: {}, attempt {}, retrying in 5 secs",
-                                    e.as_report(),
-                                    attempt
-                                );
-                                tokio::select! {
-                                    biased;
-                                    _ = &mut shutdown_rx => {
-                                        tracing::info!("shutting down migrate table fragments task");
-                                        break;
-                                    },
-                                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
-                                }
-                            }
+            let migrate_future = async move {
+                let mut attempt = 0;
+                loop {
+                    match migrate_inner(&env, &metadata_manager, &ddl_controller).await {
+                        Ok(_) => break,
+                        Err(e) => {
+                            attempt += 1;
+                            tracing::error!(
+                                "failed to migrate legacy table fragments: {}, attempt {}, retrying in 5 secs",
+                                e.as_report(),
+                                attempt
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         }
                     }
                 }
-            }
+            };
+
+            select(pin!(migrate_future), shutdown_rx).await;
         });
 
         (join_handle, shutdown_tx)
