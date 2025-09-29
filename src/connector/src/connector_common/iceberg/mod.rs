@@ -43,6 +43,14 @@ use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
+// ADLS Gen2 configuration constants
+pub const ADLSGEN2_ACCOUNT_NAME: &str = "adlsgen2.account_name";
+pub const ADLSGEN2_ACCOUNT_KEY: &str = "adlsgen2.account_key";
+pub const ADLSGEN2_CLIENT_ID: &str = "adlsgen2.client_id";
+pub const ADLSGEN2_CLIENT_SECRET: &str = "adlsgen2.client_secret";
+pub const ADLSGEN2_TENANT_ID: &str = "adlsgen2.tenant_id";
+pub const ADLSGEN2_ENDPOINT: &str = "adlsgen2.endpoint";
+
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 pub struct IcebergCommon {
@@ -68,6 +76,19 @@ pub struct IcebergCommon {
     pub azblob_account_key: Option<String>,
     #[serde(rename = "azblob.endpoint_url")]
     pub azblob_endpoint_url: Option<String>,
+
+    #[serde(rename = "adlsgen2.account_name")]
+    pub adlsgen2_account_name: Option<String>,
+    #[serde(rename = "adlsgen2.account_key")]
+    pub adlsgen2_account_key: Option<String>,
+    #[serde(rename = "adlsgen2.client_id")]
+    pub adlsgen2_client_id: Option<String>,
+    #[serde(rename = "adlsgen2.client_secret")]
+    pub adlsgen2_client_secret: Option<String>,
+    #[serde(rename = "adlsgen2.tenant_id")]
+    pub adlsgen2_tenant_id: Option<String>,
+    #[serde(rename = "adlsgen2.endpoint")]
+    pub adlsgen2_endpoint: Option<String>,
 
     /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
@@ -156,6 +177,8 @@ impl EnforceSecret for IcebergCommon {
         "catalog.credential",
         "catalog.token",
         "catalog.oauth2_server_uri",
+        "adlsgen2.account_key",
+        "adlsgen2.client_secret",
     };
 }
 
@@ -245,6 +268,35 @@ impl IcebergCommon {
 
                 if catalog_type != "rest" && catalog_type != "rest_rust" {
                     bail!("azblob unsupported in {} catalog", &catalog_type);
+                }
+            }
+
+            // ADLS Gen2 configuration
+            if self.adlsgen2_account_name.is_some() || self.adlsgen2_account_key.is_some() ||
+               self.adlsgen2_client_id.is_some() || self.adlsgen2_client_secret.is_some() ||
+               self.adlsgen2_tenant_id.is_some() || self.adlsgen2_endpoint.is_some() {
+                
+                if let Some(account_name) = &self.adlsgen2_account_name {
+                    iceberg_configs.insert(ADLSGEN2_ACCOUNT_NAME.to_owned(), account_name.clone());
+                }
+                if let Some(account_key) = &self.adlsgen2_account_key {
+                    iceberg_configs.insert(ADLSGEN2_ACCOUNT_KEY.to_owned(), account_key.clone());
+                }
+                if let Some(client_id) = &self.adlsgen2_client_id {
+                    iceberg_configs.insert(ADLSGEN2_CLIENT_ID.to_owned(), client_id.clone());
+                }
+                if let Some(client_secret) = &self.adlsgen2_client_secret {
+                    iceberg_configs.insert(ADLSGEN2_CLIENT_SECRET.to_owned(), client_secret.clone());
+                }
+                if let Some(tenant_id) = &self.adlsgen2_tenant_id {
+                    iceberg_configs.insert(ADLSGEN2_TENANT_ID.to_owned(), tenant_id.clone());
+                }
+                if let Some(endpoint) = &self.adlsgen2_endpoint {
+                    iceberg_configs.insert(ADLSGEN2_ENDPOINT.to_owned(), endpoint.clone());
+                }
+
+                if catalog_type != "rest" && catalog_type != "rest_rust" {
+                    bail!("adlsgen2 unsupported in {} catalog", &catalog_type);
                 }
             }
 
