@@ -720,6 +720,9 @@ impl CatalogController {
     }
 
     async fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
+        if tables.is_empty() {
+            return;
+        }
         let objects = tables
             .into_iter()
             .map(|t| PbObject {
