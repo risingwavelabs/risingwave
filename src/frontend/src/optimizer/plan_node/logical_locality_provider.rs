@@ -44,6 +44,7 @@ pub struct LogicalLocalityProvider {
 
 impl LogicalLocalityProvider {
     pub fn new(input: PlanRef, locality_columns: Vec<usize>) -> Self {
+        assert!(!locality_columns.is_empty());
         let core = generic::LocalityProvider::new(input, locality_columns);
         let base = PlanBase::new_logical_with_core(&core);
         LogicalLocalityProvider { base, core }
