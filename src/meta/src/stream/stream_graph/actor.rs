@@ -961,6 +961,8 @@ impl ActorGraphBuilder {
                             .map(|m: &HashMap<ActorAlignmentId, Bitmap>| &m[&alignment_id])
                             .cloned();
 
+                        println!("actor_id {:?}, fragment {:?}", actor_id, fragment_id);
+
                         state
                             .inner
                             .add_actor((fragment_id, actor_id), alignment_id, vnode_bitmap);
@@ -974,14 +976,14 @@ impl ActorGraphBuilder {
             EitherFragment::Existing(existing_fragment) => existing_fragment
                 .actors
                 .iter()
-                .map(|a| {
-                    let actor_id = GlobalActorId::new(a.actor_id);
+                .map(|(actor_id, actor_info)| {
+                    let actor_id = GlobalActorId::new(*actor_id);
                     let alignment_id = match &distribution {
                         Distribution::Singleton(worker_id) => {
                             ActorAlignmentId::new_single(*worker_id as u32)
                         }
                         Distribution::Hash(mapping) => mapping
-                            .get_matched(a.vnode_bitmap.as_ref().unwrap())
+                            .get_matched(actor_info.vnode_bitmap.as_ref().unwrap())
                             .unwrap(),
                     };
 
