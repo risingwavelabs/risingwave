@@ -655,6 +655,8 @@ pub async fn execute_datafusion_plan(
     let physical_plan = state.create_physical_plan(&plan).await.unwrap();
     let record_batches = collect(physical_plan, state.task_ctx()).await.unwrap();
 
+    let converter: IcebergArrowConvert = IcebergArrowConvert {};
+
     let rw_fields: Vec<_> = plan
         .schema()
         .fields()
@@ -662,13 +664,12 @@ pub async fn execute_datafusion_plan(
         .map(|arrow_field| {
             risingwave_common::catalog::Field::new(
                 arrow_field.name(),
-                convert_arrow_type_to_rw_type(arrow_field.data_type()),
+                converter.type_from_field(arrow_field).unwrap(),
             )
         })
         .collect();
     let rw_schema = Schema::new(rw_fields.clone());
 
-    let converter = IcebergArrowConvert {};
     let datachunks: Vec<DataChunk> = record_batches
         .iter()
         .map(|rb| converter.chunk_from_record_batch(rb).unwrap())
@@ -707,128 +708,4 @@ pub async fn execute_datafusion_plan(
         .row_cnt_format_opt(Some(first_field_format))
         .values(row_stream, pg_descs)
         .into())
-}
-
-/// Convert `DataFusion` Arrow `DataType` to RisingWave `DataType`
-fn convert_arrow_type_to_rw_type(arrow_type: &datafusion::arrow::datatypes::DataType) -> DataType {
-    use datafusion::arrow::datatypes::DataType as ArrowDataType;
-
-    match arrow_type {
-        ArrowDataType::Null => DataType::Varchar, // No direct equivalent, default to Varchar
-        ArrowDataType::Boolean => DataType::Boolean,
-        ArrowDataType::Int8 => DataType::Int16, // No Int8 in RisingWave, use Int16
-        ArrowDataType::Int16 => DataType::Int16,
-        ArrowDataType::Int32 => DataType::Int32,
-        ArrowDataType::Int64 => DataType::Int64,
-        ArrowDataType::UInt8 => DataType::Int16, // No UInt8 in RisingWave, use Int16
-        ArrowDataType::UInt16 => DataType::Int32, // No UInt16 in RisingWave, use Int32
-        ArrowDataType::UInt32 => DataType::Int64, // No UInt32 in RisingWave, use Int64
-        ArrowDataType::UInt64 => DataType::Decimal, // No UInt64 in RisingWave, use Decimal
-        ArrowDataType::Float16 => DataType::Float32, // No Float16 in RisingWave, use Float32
-        ArrowDataType::Float32 => DataType::Float32,
-        ArrowDataType::Float64 => DataType::Float64,
-        ArrowDataType::Utf8 => DataType::Varchar,
-        ArrowDataType::LargeUtf8 => DataType::Varchar,
-        ArrowDataType::Utf8View => DataType::Varchar,
-        ArrowDataType::Date32 => DataType::Date,
-        ArrowDataType::Date64 => DataType::Timestamp, // Date64 includes time, map to Timestamp
-        ArrowDataType::Time32(_) => DataType::Time,
-        ArrowDataType::Time64(_) => DataType::Time,
-        ArrowDataType::Duration(_) => DataType::Interval,
-        ArrowDataType::Interval(_) => DataType::Interval,
-        ArrowDataType::Binary => DataType::Bytea,
-        ArrowDataType::FixedSizeBinary(_) => DataType::Bytea,
-        ArrowDataType::LargeBinary => DataType::Bytea,
-        ArrowDataType::BinaryView => DataType::Bytea,
-        ArrowDataType::Timestamp(unit, tz) => {
-            match unit {
-                datafusion::arrow::datatypes::TimeUnit::Microsecond => {
-                    if tz.is_some() {
-                        DataType::Timestamptz
-                    } else {
-                        DataType::Timestamp
-                    }
-                }
-                _ => DataType::Timestamp, // Default to timestamp for other units
-            }
-        }
-        ArrowDataType::Decimal128(_, _) => DataType::Decimal,
-        ArrowDataType::Decimal256(_, _) => DataType::Decimal,
-        ArrowDataType::List(field) => {
-            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
-            DataType::List(Box::new(inner_type))
-        }
-        ArrowDataType::ListView(field) => {
-            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
-            DataType::List(Box::new(inner_type))
-        }
-        ArrowDataType::LargeList(field) => {
-            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
-            DataType::List(Box::new(inner_type))
-        }
-        ArrowDataType::FixedSizeList(field, _) => {
-            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
-            DataType::List(Box::new(inner_type))
-        }
-        ArrowDataType::LargeListView(field) => {
-            let inner_type = convert_arrow_type_to_rw_type(field.data_type());
-            DataType::List(Box::new(inner_type))
-        }
-        ArrowDataType::Struct(fields) => {
-            let struct_fields = fields.iter().map(|f| {
-                (
-                    f.name().clone(),
-                    convert_arrow_type_to_rw_type(f.data_type()),
-                )
-            });
-            DataType::Struct(risingwave_common::types::StructType::new(struct_fields))
-        }
-        ArrowDataType::Union(fields, _) => {
-            let struct_fields = fields.iter().map(|(_, f)| {
-                (
-                    f.name().clone(),
-                    convert_arrow_type_to_rw_type(f.data_type()),
-                )
-            });
-            DataType::Struct(risingwave_common::types::StructType::new(struct_fields))
-        }
-        ArrowDataType::Dictionary(key_type, value_type) => DataType::Map(MapType::from_kv(
-            convert_arrow_type_to_rw_type(key_type),
-            convert_arrow_type_to_rw_type(value_type),
-        )),
-        ArrowDataType::Map(field, _) => {
-            let value_type = convert_arrow_type_to_rw_type(field.data_type());
-            // The value_type should be struct
-            if let DataType::Struct(struct_type) = value_type {
-                if struct_type.len() != 2
-                    || struct_type.iter().next().unwrap().0 != "key"
-                    || struct_type.iter().nth(1).unwrap().0 != "value"
-                {
-                    tracing::warn!(
-                        "Invalid map struct type: {:?}, defaulting to Varchar",
-                        struct_type
-                    );
-                    return DataType::Varchar;
-                }
-                let key_type = struct_type.iter().next().unwrap().1.clone();
-                let value_type_inner = struct_type.iter().nth(1).unwrap().1.clone();
-                match MapType::check_key_type_valid(&key_type) {
-                    Ok(_) => DataType::Map(MapType::from_kv(key_type, value_type_inner)),
-                    Err(err) => {
-                        tracing::warn!("Invalid map key type: {}, defaulting to Varchar", err);
-                        DataType::Varchar
-                    }
-                }
-            } else {
-                tracing::warn!(
-                    "Invalid map value type: {:?}, defaulting to Varchar",
-                    value_type
-                );
-                DataType::Varchar
-            }
-        }
-        ArrowDataType::RunEndEncoded(_, values_field) => {
-            convert_arrow_type_to_rw_type(values_field.data_type())
-        }
-    }
 }
