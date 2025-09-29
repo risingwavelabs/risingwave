@@ -276,8 +276,7 @@ pub struct ChangelogRowIdGenerator {
 
 impl ChangelogRowIdGenerator {
     /// Create a new `ChangelogRowIdGenerator` with given vnode count.
-    pub fn new(vnodes: Bitmap) -> Self {
-        let vnode_count = vnodes.count_ones();
+    pub fn new(vnodes: Bitmap, vnode_count: usize) -> Self {
         let vnode_bit = bit_for_vnode(vnode_count);
         let mut generator = Self {
             timestamp_mgr: TimestampManager::new(),
