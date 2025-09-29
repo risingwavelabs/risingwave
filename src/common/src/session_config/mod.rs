@@ -423,7 +423,7 @@ pub struct SessionConfig {
     enable_index_selection: bool,
 
     /// Enable locality backfill for streaming queries. Defaults to false.
-    #[parameter(default = true)]
+    #[parameter(default = false)]
     enable_locality_backfill: bool,
 }
 
