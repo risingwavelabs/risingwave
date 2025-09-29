@@ -200,6 +200,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "plan_common.AdditionalColumn.column_type",
             "#[derive(Eq, Hash)]",
         )
+        .type_attribute("plan_common.AdditionalColumnPulsarMessageIdData", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumnNormal", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumnKey", "#[derive(Eq, Hash)]")
         .type_attribute(
