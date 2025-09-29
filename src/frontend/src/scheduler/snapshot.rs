@@ -96,7 +96,7 @@ impl ReadSnapshot {
                 ),
                 NodeBody::VectorIndexNearest(vector_index_read) => (
                     &mut vector_index_read.query_epoch,
-                    vector_index_read.table_id,
+                    vector_index_read.reader_desc.as_ref().unwrap().table_id,
                 ),
                 _ => {
                     return;

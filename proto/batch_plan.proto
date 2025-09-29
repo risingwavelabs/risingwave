@@ -405,17 +405,8 @@ message SortOverWindowNode {
 message MaxOneRowNode {}
 
 message VectorIndexNearestNode {
-  // The table_id of the vector index to search.
-  uint32 table_id = 2;
-  // The columns of the vector index info.
-  repeated plan_common.ColumnDesc info_column_desc = 3;
-  uint32 vector_column_idx = 4;
-  // The number of nearest neighbors to return.
-  uint32 top_n = 5;
-  // The distance metric to use for the search.
-  common.DistanceType distance_type = 6;
-  // The ef_search used to query hnsw index
-  uint32 hnsw_ef_search = 7;
+  plan_common.VectorIndexReaderDesc reader_desc = 1;
+  uint32 vector_column_idx = 2;
   common.BatchQueryEpoch query_epoch = 8;
 }
 
