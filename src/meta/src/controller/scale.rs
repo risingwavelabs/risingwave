@@ -298,6 +298,8 @@ where
             .exactly_one()
             .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
 
+        println!("entry job {}", job_id);
+
         let job = jobs
             .get(&job_id)
             .unwrap_or_else(|| panic!("streaming job {job_id} not found"));
@@ -358,42 +360,67 @@ where
 
         let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
 
-        let (fragment_splits, shared_source_id) = if let Some(entry_fragment) =
-            entry_fragments.first()
-            && let Some(source_id) = fragment_source_ids.get(&entry_fragment.fragment_id)
-        {
+        // println!("entry frags {:#?}", entry_fragments.iter().map(|x| x.fragment_id).collect_vec());
+
+        for x in &entry_fragments {
+            println!("entry frag id {}", x.fragment_id);
+            println!("entry frag job id {}", x.job_id);
             println!(
-                "fragment {} source_id {}",
-                entry_fragment.fragment_id, source_id
+                "entry type mask {:?}",
+                FragmentTypeMask::from(x.fragment_type_mask)
             );
-            assert_eq!(entry_fragments.len(), 1);
+        }
 
-            let entry_fragment = entry_fragments.iter().exactly_one().unwrap();
-            let entry_fragment_id = entry_fragment.fragment_id;
+        println!("frag source id {:#?}", fragment_source_ids);
 
-            let empty_actor_splits = actors
-                .iter()
-                .map(|actor_id| (*actor_id as u32, vec![]))
-                .collect();
+        let source_entry_fragment = entry_fragments.iter().find(|f| {
+            let mask = FragmentTypeMask::from(f.fragment_type_mask);
+            if mask.contains(FragmentTypeFlag::Source) {
+                assert!(!mask.contains(FragmentTypeFlag::SourceScan))
+            }
+            mask.contains(FragmentTypeFlag::Source) && !mask.contains(FragmentTypeFlag::Dml)
+        });
 
-            let splits = source_splits
-                .get(source_id)
-                .map(|(_, splits)| splits.clone())
+        let (fragment_splits, shared_source_id) = match source_entry_fragment {
+            Some(entry_fragment) => {
+                let source_id =
+                    fragment_source_ids
+                        .get(&entry_fragment.fragment_id)
+                        .unwrap_or_else(|| panic!("missing source id in source fragment {}",
+                            entry_fragment.fragment_id));
+
+                println!(
+                    "fragment {} source_id {}",
+                    entry_fragment.fragment_id, source_id
+                );
+                println!("fragment source id{:?}", fragment_source_ids);
+                println!("entry fragment {:?}", entry_fragment);
+
+                let entry_fragment_id = entry_fragment.fragment_id;
+
+                let empty_actor_splits = actors
+                    .iter()
+                    .map(|actor_id| (*actor_id as u32, vec![]))
+                    .collect();
+
+                let splits = source_splits
+                    .get(source_id)
+                    .map(|(_, splits)| splits.clone())
+                    .unwrap_or_default();
+
+                let splits = splits.into_iter().map(|s| (s.id(), s)).collect();
+
+                let fragment_splits = crate::stream::source_manager::reassign_splits(
+                    entry_fragment_id as u32,
+                    empty_actor_splits,
+                    &splits,
+                    // pre-allocate splits is the first time getting splits, and it does not have scale-in scene
+                    std::default::Default::default(),
+                )
                 .unwrap_or_default();
-
-            let splits = splits.into_iter().map(|s| (s.id(), s)).collect();
-
-            let fragment_splits = crate::stream::source_manager::reassign_splits(
-                entry_fragment_id as u32,
-                empty_actor_splits,
-                &splits,
-                // pre-allocate splits is the first time getting splits, and it does not have scale-in scene
-                std::default::Default::default(),
-            )
-            .unwrap_or_default();
-            (fragment_splits, Some(*source_id))
-        } else {
-            (HashMap::new(), None)
+                (fragment_splits, Some(*source_id))
+            }
+            None => (HashMap::new(), None),
         };
 
         println!("fragment splits {:#?}", fragment_splits);
@@ -431,6 +458,10 @@ where
                     };
 
                     let actor_id = actor_id_base + actor_idx as u32;
+
+                    println!("fragment source ids {:#?}", fragment_source_ids);
+                    println!("fragment id {}", fragment_id);
+                    println!("shared source id {:?}", shared_source_id);
 
                     let splits = if let Some(source_id) = fragment_source_ids.get(&fragment_id) {
                         assert_eq!(shared_source_id, Some(*source_id));
