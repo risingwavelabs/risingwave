@@ -376,6 +376,7 @@ pub enum Mutation {
     },
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
+        truncate_locality_fragment_ids: HashSet<FragmentId>,
     },
     RefreshStart {
         table_id: TableId,
@@ -546,7 +547,8 @@ impl Barrier {
     }
 
     pub fn should_start_fragment_backfill(&self, fragment_id: FragmentId) -> bool {
-        if let Some(Mutation::StartFragmentBackfill { fragment_ids }) = self.mutation.as_deref() {
+        if let Some(Mutation::StartFragmentBackfill { fragment_ids, .. }) = self.mutation.as_deref()
+        {
             fragment_ids.contains(&fragment_id)
         } else {
             false
@@ -940,11 +942,16 @@ impl Mutation {
                         .collect(),
                 })
             }
-            Mutation::StartFragmentBackfill { fragment_ids } => {
-                PbMutation::StartFragmentBackfill(StartFragmentBackfillMutation {
-                    fragment_ids: fragment_ids.iter().copied().collect(),
-                })
-            }
+            Mutation::StartFragmentBackfill {
+                fragment_ids,
+                truncate_locality_fragment_ids,
+            } => PbMutation::StartFragmentBackfill(StartFragmentBackfillMutation {
+                fragment_ids: fragment_ids.iter().copied().collect(),
+                truncate_locality_fragment_ids: truncate_locality_fragment_ids
+                    .iter()
+                    .copied()
+                    .collect(),
+            }),
             Mutation::RefreshStart {
                 table_id,
                 associated_source_id,
@@ -1127,6 +1134,11 @@ impl Mutation {
                 Mutation::StartFragmentBackfill {
                     fragment_ids: start_fragment_backfill
                         .fragment_ids
+                        .iter()
+                        .copied()
+                        .collect(),
+                    truncate_locality_fragment_ids: start_fragment_backfill
+                        .truncate_locality_fragment_ids
                         .iter()
                         .copied()
                         .collect(),

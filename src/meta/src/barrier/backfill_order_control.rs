@@ -195,4 +195,8 @@ impl BackfillOrderState {
         }
         newly_scheduled
     }
+
+    pub fn current_backfill_node_fragment_ids(&self) -> Vec<FragmentId> {
+        self.current_backfill_nodes.keys().copied().collect()
+    }
 }
