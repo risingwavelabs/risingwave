@@ -8145,9 +8145,9 @@ dependencies = [
 
 [[package]]
 name = "mongodb"
-version = "3.2.3"
+version = "3.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdf4261933e5113914caec01c4bb16a7502bdaa9cf80fd87191765e7d9ff16b2"
+checksum = "f6e3788f35159bbcf461227af84711950525343b64451fdd90de4e237a0b8a13"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
@@ -8177,7 +8177,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_with",
- "sha-1",
+ "sha1",
  "sha2",
  "socket2 0.5.9",
  "stringprep",
@@ -8194,9 +8194,9 @@ dependencies = [
 
 [[package]]
 name = "mongodb-internal-macros"
-version = "3.2.3"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "619176c99deef0d50be51ce3193e9efd6a56ab0f4e6a38d5fd614880d148c7ae"
+checksum = "63981427a0f26b89632fd2574280e069d09fb2912a3138da15de0174d11dd077"
 dependencies = [
  "macro_magic",
  "proc-macro2",
@@ -14034,17 +14034,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.101",
-]
-
-[[package]]
-name = "sha-1"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "028f48d513f9678cda28f6e4064755b3fbb2af6acd672f2c209b62323f7aea0f"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "digest",
 ]
 
 [[package]]
