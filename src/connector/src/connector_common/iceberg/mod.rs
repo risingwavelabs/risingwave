@@ -25,8 +25,8 @@ use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{Context, anyhow};
 use iceberg::io::{
-    AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, GCS_CREDENTIALS_JSON,
-    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
+    ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
+    GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use phf::{Set, phf_set};
@@ -42,14 +42,6 @@ use crate::connector_common::iceberg::storage_catalog::StorageCatalogConfig;
 use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
-
-// ADLS Gen2 configuration constants
-pub const ADLSGEN2_ACCOUNT_NAME: &str = "adlsgen2.account_name";
-pub const ADLSGEN2_ACCOUNT_KEY: &str = "adlsgen2.account_key";
-pub const ADLSGEN2_CLIENT_ID: &str = "adlsgen2.client_id";
-pub const ADLSGEN2_CLIENT_SECRET: &str = "adlsgen2.client_secret";
-pub const ADLSGEN2_TENANT_ID: &str = "adlsgen2.tenant_id";
-pub const ADLSGEN2_ENDPOINT: &str = "adlsgen2.endpoint";
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
@@ -81,12 +73,6 @@ pub struct IcebergCommon {
     pub adlsgen2_account_name: Option<String>,
     #[serde(rename = "adlsgen2.account_key")]
     pub adlsgen2_account_key: Option<String>,
-    #[serde(rename = "adlsgen2.client_id")]
-    pub adlsgen2_client_id: Option<String>,
-    #[serde(rename = "adlsgen2.client_secret")]
-    pub adlsgen2_client_secret: Option<String>,
-    #[serde(rename = "adlsgen2.tenant_id")]
-    pub adlsgen2_tenant_id: Option<String>,
     #[serde(rename = "adlsgen2.endpoint")]
     pub adlsgen2_endpoint: Option<String>,
 
@@ -271,30 +257,12 @@ impl IcebergCommon {
                 }
             }
 
-            // ADLS Gen2 configuration
-            if self.adlsgen2_account_name.is_some() || self.adlsgen2_account_key.is_some() ||
-               self.adlsgen2_client_id.is_some() || self.adlsgen2_client_secret.is_some() ||
-               self.adlsgen2_tenant_id.is_some() || self.adlsgen2_endpoint.is_some() {
-                
-                if let Some(account_name) = &self.adlsgen2_account_name {
-                    iceberg_configs.insert(ADLSGEN2_ACCOUNT_NAME.to_owned(), account_name.clone());
-                }
-                if let Some(account_key) = &self.adlsgen2_account_key {
-                    iceberg_configs.insert(ADLSGEN2_ACCOUNT_KEY.to_owned(), account_key.clone());
-                }
-                if let Some(client_id) = &self.adlsgen2_client_id {
-                    iceberg_configs.insert(ADLSGEN2_CLIENT_ID.to_owned(), client_id.clone());
-                }
-                if let Some(client_secret) = &self.adlsgen2_client_secret {
-                    iceberg_configs.insert(ADLSGEN2_CLIENT_SECRET.to_owned(), client_secret.clone());
-                }
-                if let Some(tenant_id) = &self.adlsgen2_tenant_id {
-                    iceberg_configs.insert(ADLSGEN2_TENANT_ID.to_owned(), tenant_id.clone());
-                }
-                if let Some(endpoint) = &self.adlsgen2_endpoint {
-                    iceberg_configs.insert(ADLSGEN2_ENDPOINT.to_owned(), endpoint.clone());
-                }
-
+            if let (Some(account_name), Some(account_key)) = (
+                self.adlsgen2_account_name.as_ref(),
+                self.adlsgen2_account_key.as_ref(),
+            ) {
+                iceberg_configs.insert(ADLS_ACCOUNT_NAME.to_owned(), account_name.clone());
+                iceberg_configs.insert(ADLS_ACCOUNT_KEY.to_owned(), account_key.clone());
                 if catalog_type != "rest" && catalog_type != "rest_rust" {
                     bail!("adlsgen2 unsupported in {} catalog", &catalog_type);
                 }
