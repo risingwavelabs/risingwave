@@ -276,8 +276,7 @@ pub struct ChangelogRowIdGenerator {
 
 impl ChangelogRowIdGenerator {
     /// Create a new `ChangelogRowIdGenerator` with given vnode count.
-    pub fn new(vnodes: Bitmap) -> Self {
-        let vnode_count = vnodes.count_ones();
+    pub fn new(vnodes: Bitmap, vnode_count: usize) -> Self {
         let vnode_bit = bit_for_vnode(vnode_count);
         let mut generator = Self {
             timestamp_mgr: TimestampManager::new(),
@@ -302,7 +301,7 @@ impl ChangelogRowIdGenerator {
     }
 
     fn next_changelog_row_id_in_current_timestamp(&mut self, vnode: &VirtualNode) -> Option<RowId> {
-        if !self.vnodes.is_set(vnode.to_index()) {
+        if !self.vnodes.is_set(vnode.to_index()) && *vnode != VirtualNode::ZERO {
             panic!("vnode {:?} not in generator", vnode);
         }
         let current_sequence = *self.vnodes_sequence.get(vnode).unwrap_or(&1);
