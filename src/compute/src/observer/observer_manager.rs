@@ -44,8 +44,8 @@ impl ObserverState for ComputeObserverNode {
                     Operation::Update => {
                         LocalSecretManager::global().update_secret(s.id, s.value);
                     }
-                    _ => {
-                        panic!("error type notification");
+                    operation => {
+                        panic!("invalid notification operation: {operation:?}");
                     }
                 },
                 Info::ComputeNodeTotalCpuCount(count) => {
@@ -58,8 +58,8 @@ impl ObserverState for ComputeObserverNode {
                     // TODO: invalidate a single batch client on any connection issue.
                     self.batch_client_pool.invalidate_all();
                 }
-                _ => {
-                    panic!("error type notification");
+                info => {
+                    panic!("invalid notification info: {info}");
                 }
             }
         };

@@ -25,6 +25,7 @@
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
 
+use std::fmt;
 use std::str::FromStr;
 
 use event_recovery::RecoveryEvent;
@@ -35,6 +36,8 @@ use thiserror::Error;
 
 use crate::common::WorkerType;
 use crate::meta::event_log::event_recovery;
+use crate::meta::object::PbObjectInfo;
+use crate::meta::subscribe_response::PbInfo as NotificationInfo;
 use crate::stream_plan::PbStreamScanType;
 
 #[rustfmt::skip]
@@ -668,6 +671,50 @@ impl expr::UserDefinedFunctionMetadata {
             // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
             self.identifier.as_deref()
         }
+    }
+}
+
+impl fmt::Display for NotificationInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            NotificationInfo::Database(_) => "Database",
+            NotificationInfo::Schema(_) => "Schema",
+            NotificationInfo::Function(_) => "Function",
+            NotificationInfo::User(_) => "User",
+            NotificationInfo::SessionParam(_) => "SessionParam",
+            NotificationInfo::Node(_) => "Node",
+            NotificationInfo::HummockVersionDeltas(_) => "HummockVersionDeltas",
+            NotificationInfo::Snapshot(_) => "Snapshot",
+            NotificationInfo::MetaBackupManifestId(_) => "MetaBackupManifestId",
+            NotificationInfo::SystemParams(_) => "SystemParams",
+            NotificationInfo::HummockWriteLimits(_) => "HummockWriteLimits",
+            NotificationInfo::ObjectGroup(_) => "ObjectGroup",
+            NotificationInfo::Connection(_) => "Connection",
+            NotificationInfo::HummockStats(_) => "HummockStats",
+            NotificationInfo::Recovery(_) => "Recovery",
+            NotificationInfo::StreamingWorkerSlotMapping(_) => "StreamingWorkerSlotMapping",
+            NotificationInfo::ServingWorkerSlotMappings(_) => "ServingWorkerSlotMappings",
+            NotificationInfo::Secret(_) => "Secret",
+            NotificationInfo::ComputeNodeTotalCpuCount(_) => "ComputeNodeTotalCpuCount",
+        })
+    }
+}
+
+impl fmt::Display for PbObjectInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            PbObjectInfo::Table(_) => "Table",
+            PbObjectInfo::Source(_) => "Source",
+            PbObjectInfo::Sink(_) => "Sink",
+            PbObjectInfo::View(_) => "View",
+            PbObjectInfo::Index(_) => "Index",
+            PbObjectInfo::Database(_) => "Database",
+            PbObjectInfo::Schema(_) => "Schema",
+            PbObjectInfo::Connection(_) => "Connection",
+            PbObjectInfo::Function(_) => "Function",
+            PbObjectInfo::Subscription(_) => "Subscription",
+            PbObjectInfo::Secret(_) => "Secret",
+        })
     }
 }
 
