@@ -22,7 +22,7 @@ use risingwave_common::catalog;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
-use risingwave_connector::source::{SplitImpl, SplitMetaData};
+use risingwave_connector::source::{SplitImpl, SplitMetaData, fill_adaptive_split};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
     Database, Fragment, FragmentRelation, Sink, Source, SourceSplits, StreamingJob, Table,
@@ -365,17 +365,21 @@ where
 
                 let entry_fragment_id = entry_fragment.fragment_id;
 
-                let empty_actor_splits = actors
+                let empty_actor_splits: HashMap<_, _> = actors
                     .iter()
                     .map(|actor_id| (*actor_id as u32, vec![]))
                     .collect();
 
-                let splits = source_splits
-                    .get(source_id)
-                    .map(|(_, splits)| splits.clone())
-                    .unwrap_or_default();
+                let (props, splits) = source_splits.get(source_id).cloned().unwrap_or_default();
 
-                let splits = splits.into_iter().map(|s| (s.id(), s)).collect();
+                let mut splits: BTreeMap<_, _> = splits.into_iter().map(|s| (s.id(), s)).collect();
+
+                if props.enable_adaptive_splits {
+                    debug_assert!(props.enable_drop_split);
+                    debug_assert!(splits.len() == 1);
+                    let actor_in_use = empty_actor_splits.keys().cloned().collect();
+                    splits = fill_adaptive_split(splits.values().next().unwrap(), &actor_in_use)?;
+                }
 
                 let fragment_splits = crate::stream::source_manager::reassign_splits(
                     entry_fragment_id as u32,

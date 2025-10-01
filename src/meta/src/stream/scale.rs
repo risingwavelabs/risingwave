@@ -475,6 +475,7 @@ impl ScaleController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let props = self.source_manager.list_sources_special_props().await;
         let id_gen = self.env.id_gen_manager();
 
         let RenderedGraph {
@@ -486,7 +487,7 @@ impl ScaleController {
             jobs,
             workers,
             adaptive_parallelism_strategy,
-            Default::default(),
+            props,
         )
         .await?;
 
