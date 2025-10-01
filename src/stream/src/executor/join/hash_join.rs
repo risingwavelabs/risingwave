@@ -34,6 +34,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::KeyedRow;
 use thiserror_ext::AsReport;
 
 use super::row::{CachedJoinRow, DegreeType};
@@ -295,10 +296,7 @@ pub(crate) async fn into_stream<'a, K: HashKey, S: StateStore>(
             .as_ref()
             .project(pk_indices)
             .memcmp_serialize(pk_serializer);
-        let join_row = JoinRow::new(
-            encoded_row.into_owned_row(),
-            degrees.as_ref().map_or(0, |d| d[i]),
-        );
+        let join_row = JoinRow::new(encoded_row, degrees.as_ref().map_or(0, |d| d[i]));
         yield (encoded_pk, join_row);
     }
 }
@@ -688,6 +686,9 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
                 for (row, degree_row) in
                     stream::iter(rows.into_iter().zip_eq_fast(degree_rows.into_iter()))
                 {
+                    let row: KeyedRow<_> = row;
+                    let degree_row: KeyedRow<_> = degree_row;
+
                     let pk1 = row.key();
                     let pk2 = degree_row.key();
                     debug_assert_eq!(
@@ -725,7 +726,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
 
             #[for_await]
             for entry in table_iter {
-                let row = entry?;
+                let row: KeyedRow<_> = entry?;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)
