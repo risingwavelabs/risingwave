@@ -354,11 +354,9 @@ async fn fetch_degrees<K: HashKey, S: StateStore>(
 pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
     order_key_indices: &[usize],
     degree_state: &mut TableInner<S>,
-    matched_row: &mut JoinRow<OwnedRow>,
+    matched_row: &mut JoinRow<impl Row>,
 ) {
-    let old_degree_row = matched_row
-        .row
-        .as_ref()
+    let old_degree_row = (&matched_row.row)
         .project(order_key_indices)
         .chain(once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
     if INCREMENT {
@@ -367,9 +365,7 @@ pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
         // DECREMENT
         matched_row.degree -= 1;
     }
-    let new_degree_row = matched_row
-        .row
-        .as_ref()
+    let new_degree_row = (&matched_row.row)
         .project(order_key_indices)
         .chain(once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
     degree_state.table.update(old_degree_row, new_degree_row);
@@ -1087,7 +1083,7 @@ impl<E: JoinEncoding> JoinEntryState<E> {
         &self,
         pk: &PkType,
         data_types: &[DataType],
-    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>> {
+    ) -> Option<StreamExecutorResult<JoinRow<E::DecodedRow>>> {
         self.cached
             .get(pk)
             .map(|encoded| encoded.decode(data_types))
@@ -1104,7 +1100,7 @@ impl<E: JoinEncoding> JoinEntryState<E> {
     ) -> impl Iterator<
         Item = (
             &'a mut E::EncodedRow,
-            StreamExecutorResult<JoinRow<OwnedRow>>,
+            StreamExecutorResult<JoinRow<E::DecodedRow>>,
         ),
     > + 'a {
         self.cached.values_mut().map(|encoded| {
@@ -1122,7 +1118,7 @@ impl<E: JoinEncoding> JoinEntryState<E> {
         &'a self,
         range: R,
         data_types: &'a [DataType],
-    ) -> impl Iterator<Item = StreamExecutorResult<JoinRow<OwnedRow>>> + 'a
+    ) -> impl Iterator<Item = StreamExecutorResult<JoinRow<E::DecodedRow>>> + 'a
     where
         R: RangeBounds<InequalKeyType> + 'a,
     {
@@ -1138,7 +1134,7 @@ impl<E: JoinEncoding> JoinEntryState<E> {
         &'a self,
         bound: Bound<&InequalKeyType>,
         data_types: &'a [DataType],
-    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>> {
+    ) -> Option<StreamExecutorResult<JoinRow<E::DecodedRow>>> {
         if let Some((_, pk_set)) = self.inequality_index.upper_bound(bound) {
             if let Some(pk) = pk_set.first_key_sorted() {
                 self.get_by_indexed_pk(pk, data_types)
@@ -1154,7 +1150,7 @@ impl<E: JoinEncoding> JoinEntryState<E> {
         &self,
         pk: &PkType,
         data_types: &[DataType],
-    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>>
+    ) -> Option<StreamExecutorResult<JoinRow<E::DecodedRow>>>
 where {
         if let Some(value) = self.cached.get(pk) {
             Some(value.decode(data_types))
@@ -1171,7 +1167,7 @@ where {
         &'a self,
         bound: Bound<&InequalKeyType>,
         data_types: &'a [DataType],
-    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>> {
+    ) -> Option<StreamExecutorResult<JoinRow<E::DecodedRow>>> {
         if let Some((_, pk_set)) = self.inequality_index.lower_bound(bound) {
             if let Some(pk) = pk_set.first_key_sorted() {
                 self.get_by_indexed_pk(pk, data_types)
@@ -1187,7 +1183,7 @@ where {
         &'a self,
         inequality_key: &InequalKeyType,
         data_types: &'a [DataType],
-    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>> {
+    ) -> Option<StreamExecutorResult<JoinRow<E::DecodedRow>>> {
         if let Some(pk_set) = self.inequality_index.get(inequality_key) {
             if let Some(pk) = pk_set.first_key_sorted() {
                 self.get_by_indexed_pk(pk, data_types)
@@ -1208,6 +1204,7 @@ where {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::*;
+    use risingwave_common::types::ScalarRefImpl;
     use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
@@ -1260,8 +1257,8 @@ mod tests {
             .zip_eq_debug(col1.iter().zip_eq_debug(col2.iter()))
         {
             let matched_row = matched_row.unwrap();
-            assert_eq!(matched_row.row[0], Some(ScalarImpl::Int64(*d1)));
-            assert_eq!(matched_row.row[1], Some(ScalarImpl::Int64(*d2)));
+            assert_eq!(matched_row.row.datum_at(0), Some(ScalarRefImpl::Int64(*d1)));
+            assert_eq!(matched_row.row.datum_at(1), Some(ScalarRefImpl::Int64(*d2)));
             assert_eq!(matched_row.degree, 0);
         }
     }
