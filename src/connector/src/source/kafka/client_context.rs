@@ -167,42 +167,6 @@ impl KafkaContextCommon {
 
 pub type BoxConsumerContext = Box<dyn ConsumerContext>;
 
-/// Kafka consumer context used for private link, IAM auth, and metrics
-pub struct RwConsumerContext {
-    common: KafkaContextCommon,
-}
-
-impl RwConsumerContext {
-    pub fn new(common: KafkaContextCommon) -> Self {
-        Self { common }
-    }
-}
-
-impl ClientContext for RwConsumerContext {
-    /// this func serves as a callback when `poll` is completed.
-    fn stats(&self, statistics: Statistics) {
-        self.common.stats(statistics);
-    }
-
-    fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
-        self.common.rewrite_broker_addr(addr)
-    }
-
-    fn generate_oauth_token(
-        &self,
-        oauthbearer_config: Option<&str>,
-    ) -> Result<OAuthToken, Box<dyn std::error::Error>> {
-        self.common.generate_oauth_token(oauthbearer_config)
-    }
-
-    fn enable_refresh_oauth_token(&self) -> bool {
-        self.common.enable_refresh_oauth_token()
-    }
-}
-
-// required by the trait bound of BaseConsumer
-impl ConsumerContext for RwConsumerContext {}
-
 /// Kafka producer context used for private link, IAM auth, and metrics
 pub struct RwProducerContext {
     common: KafkaContextCommon,

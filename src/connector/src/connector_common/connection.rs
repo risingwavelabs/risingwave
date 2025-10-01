@@ -21,7 +21,7 @@ use opendal::services::{Azblob, Gcs, S3};
 use phf::{Set, phf_set};
 use rdkafka::ClientConfig;
 use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::env_var::env_var_is_true;
@@ -42,7 +42,6 @@ use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
 use crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
 use crate::source::build_connection;
-use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 
 pub const SCHEMA_REGISTRY_CONNECTION_TYPE: &str = "schema_registry";
 
@@ -117,28 +116,18 @@ pub fn read_kafka_log_level() -> Option<RDKafkaLogLevel> {
 }
 
 impl KafkaConnection {
-    async fn build_client(&self) -> ConnectorResult<BaseConsumer<RwConsumerContext>> {
+    async fn build_client(&self) -> ConnectorResult<BaseConsumer<DefaultConsumerContext>> {
         let mut config = ClientConfig::new();
         let bootstrap_servers = &self.inner.brokers;
-        let broker_rewrite_map = self.kafka_private_link_common.broker_rewrite_map.clone();
         config.set("bootstrap.servers", bootstrap_servers);
         self.inner.set_security_properties(&mut config);
 
         // dup with Kafka Enumerator
-        let ctx_common = KafkaContextCommon::new(
-            broker_rewrite_map,
-            None,
-            None,
-            self.aws_auth_props.clone(),
-            self.inner.is_aws_msk_iam(),
-        )
-        .await?;
-        let client_ctx = RwConsumerContext::new(ctx_common);
-
         if let Some(log_level) = read_kafka_log_level() {
             config.set_log_level(log_level);
         }
-        let client: BaseConsumer<RwConsumerContext> =
+        let client_ctx = DefaultConsumerContext {};
+        let client: BaseConsumer<DefaultConsumerContext> =
             config.create_with_context(client_ctx).await?;
         if self.inner.is_aws_msk_iam() {
             #[cfg(not(madsim))]

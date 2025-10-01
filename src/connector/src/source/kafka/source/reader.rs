@@ -21,7 +21,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -31,16 +31,14 @@ use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
-use crate::source::kafka::{
-    KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
-};
+use crate::source::kafka::{KAFKA_ISOLATION_LEVEL, KafkaProperties, KafkaSplit};
 use crate::source::{
     BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl,
     SplitMetaData, SplitReader, into_chunk_stream,
 };
 
 pub struct KafkaSplitReader {
-    consumer: StreamConsumer<RwConsumerContext>,
+    consumer: StreamConsumer<DefaultConsumerContext>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     backfill_info: HashMap<SplitId, BackfillInfo>,
     splits: Vec<KafkaSplit>,
@@ -63,10 +61,11 @@ impl SplitReader for KafkaSplitReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
+        tracing::info!("creating kafka consumer with props: {:?}", properties);
+
         let mut config = ClientConfig::new();
 
         let bootstrap_servers = &properties.connection.brokers;
-        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
@@ -79,27 +78,13 @@ impl SplitReader for KafkaSplitReader {
 
         config.set("group.id", properties.group_id(source_ctx.fragment_id));
 
-        let ctx_common = KafkaContextCommon::new(
-            broker_rewrite_map,
-            Some(format!(
-                "fragment-{}-source-{}-actor-{}",
-                source_ctx.fragment_id, source_ctx.source_id, source_ctx.actor_id
-            )),
-            // thread consumer will keep polling in the background, we don't need to call `poll`
-            // explicitly
-            Some(source_ctx.metrics.rdkafka_native_metric.clone()),
-            properties.aws_auth_props,
-            properties.connection.is_aws_msk_iam(),
-        )
-        .await?;
-
-        let client_ctx = RwConsumerContext::new(ctx_common);
-
         if let Some(log_level) = read_kafka_log_level() {
             config.set_log_level(log_level);
         }
-        let consumer: StreamConsumer<RwConsumerContext> = config
-            .create_with_context(client_ctx)
+
+        let default_consumer_context = DefaultConsumerContext {};
+        let consumer: StreamConsumer<DefaultConsumerContext> = config
+            .create_with_context(default_consumer_context)
             .await
             .context("failed to create kafka consumer")?;
 

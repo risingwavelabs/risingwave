@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use rdkafka::admin::{AdminClient, AdminOptions};
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
@@ -33,13 +33,10 @@ use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::SourceEnumeratorContextRef;
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
-use crate::source::kafka::{
-    KAFKA_ISOLATION_LEVEL, KafkaConnectionProps, KafkaContextCommon, KafkaProperties,
-    RwConsumerContext,
-};
+use crate::source::kafka::{KAFKA_ISOLATION_LEVEL, KafkaConnectionProps, KafkaProperties};
 
-type KafkaConsumer = BaseConsumer<RwConsumerContext>;
-type KafkaAdmin = AdminClient<RwConsumerContext>;
+type KafkaConsumer = BaseConsumer<DefaultConsumerContext>;
+type KafkaAdmin = AdminClient<DefaultConsumerContext>;
 
 /// Consumer client is shared, and the cache doesn't manage the lifecycle, so we store `Weak` and no eviction.
 pub static SHARED_KAFKA_CONSUMER: LazyLock<MokaCache<KafkaConnectionProps, Weak<KafkaConsumer>>> =
@@ -114,6 +111,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         properties: KafkaProperties,
         context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<KafkaSplitEnumerator> {
+        tracing::info!("creating kafka enumerator with props: {:?}", properties);
         let mut config = rdkafka::ClientConfig::new();
         let common_props = &properties.common;
 
@@ -221,15 +219,7 @@ async fn build_kafka_client(
     config: &ClientConfig,
     properties: &KafkaProperties,
 ) -> ConnectorResult<Arc<KafkaConsumer>> {
-    let ctx_common = KafkaContextCommon::new(
-        properties.privatelink_common.broker_rewrite_map.clone(),
-        None,
-        None,
-        properties.aws_auth_props.clone(),
-        properties.connection.is_aws_msk_iam(),
-    )
-    .await?;
-    let client_ctx = RwConsumerContext::new(ctx_common);
+    let client_ctx = DefaultConsumerContext {};
     let client: KafkaConsumer = config.create_with_context(client_ctx).await?;
 
     // Note that before any SASL/OAUTHBEARER broker connection can succeed the application must call
@@ -247,17 +237,9 @@ async fn build_kafka_client(
 }
 async fn build_kafka_admin(
     config: &ClientConfig,
-    properties: &KafkaProperties,
+    _properties: &KafkaProperties,
 ) -> ConnectorResult<KafkaAdmin> {
-    let ctx_common = KafkaContextCommon::new(
-        properties.privatelink_common.broker_rewrite_map.clone(),
-        None,
-        None,
-        properties.aws_auth_props.clone(),
-        properties.connection.is_aws_msk_iam(),
-    )
-    .await?;
-    let client_ctx = RwConsumerContext::new(ctx_common);
+    let client_ctx = DefaultConsumerContext {};
     let client: KafkaAdmin = config.create_with_context(client_ctx).await?;
     // AdminClient calls start_poll_thread on creation, so the additional poll seems not needed. (And currently no API for this.)
     Ok(client)
