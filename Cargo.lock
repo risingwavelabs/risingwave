@@ -812,8 +812,8 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "xz2",
- "zstd 0.13.2",
- "zstd-safe 7.2.4",
+ "zstd 0.13.3",
+ "zstd-safe 7.2.1",
 ]
 
 [[package]]
@@ -1891,24 +1891,6 @@ dependencies = [
  "shlex",
  "syn 2.0.101",
  "which",
-]
-
-[[package]]
-name = "bindgen"
-version = "0.71.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
-dependencies = [
- "bitflags 2.9.0",
- "cexpr",
- "clang-sys",
- "itertools 0.13.0",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 2.1.0",
- "shlex",
- "syn 2.0.101",
 ]
 
 [[package]]
@@ -3353,7 +3335,7 @@ dependencies = [
  "url",
  "uuid",
  "xz2",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -3408,7 +3390,7 @@ dependencies = [
  "url",
  "uuid",
  "xz2",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -3586,7 +3568,7 @@ dependencies = [
  "tokio-util",
  "url",
  "xz2",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -5647,7 +5629,7 @@ dependencies = [
  "tokio",
  "tracing",
  "twox-hash 2.1.0",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -6789,7 +6771,7 @@ dependencies = [
  "typed-builder 0.20.1",
  "url",
  "uuid",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -8309,7 +8291,7 @@ checksum = "8a60cb978c0a1d654edcc1460f8d6092dacf21346ed6017d81fb76a23ef5a8de"
 dependencies = [
  "base64 0.21.7",
  "bigdecimal 0.4.8",
- "bindgen 0.71.1",
+ "bindgen 0.72.1",
  "bitflags 2.9.0",
  "bitvec",
  "btoi",
@@ -8338,7 +8320,7 @@ dependencies = [
  "thiserror 1.0.63",
  "time",
  "uuid",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -9308,7 +9290,7 @@ dependencies = [
  "thrift",
  "tokio",
  "twox-hash 1.6.3",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -9344,7 +9326,7 @@ dependencies = [
  "thrift",
  "tokio",
  "twox-hash 2.1.0",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -12056,7 +12038,7 @@ dependencies = [
  "tonic",
  "tracing",
  "workspace-hack",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -12855,7 +12837,7 @@ dependencies = [
  "workspace-hack",
  "xorf",
  "xxhash-rust",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -16548,7 +16530,7 @@ dependencies = [
  "sha2",
  "toml",
  "windows-sys 0.59.0",
- "zstd 0.13.2",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -17633,11 +17615,11 @@ dependencies = [
 
 [[package]]
 name = "zstd"
-version = "0.13.2"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcf2b778a664581e31e389454a7072dab1647606d44f7feea22cd5abb9c9f3f9"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
 dependencies = [
- "zstd-safe 7.2.4",
+ "zstd-safe 7.2.1",
 ]
 
 [[package]]
@@ -17652,9 +17634,9 @@ dependencies = [
 
 [[package]]
 name = "zstd-safe"
-version = "7.2.4"
+version = "7.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
+checksum = "54a3ab4db68cea366acc5c897c7b4d4d1b8994a9cd6e6f841f8964566a419059"
 dependencies = [
  "zstd-sys",
 ]
