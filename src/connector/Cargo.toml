@@ -75,7 +75,7 @@ itertools = { workspace = true }
 jni = { workspace = true }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
-mongodb = "3.2.3"
+mongodb = "3.2.5"
 mysql_async = { workspace = true }
 mysql_common = { version = "0.32", default-features = false, features = [
     "chrono",
