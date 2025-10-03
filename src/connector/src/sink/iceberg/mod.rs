@@ -26,7 +26,7 @@ use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
 use iceberg::spec::{
-    DataFile, MAIN_BRANCH, SerializedDataFile, Transform, UnboundPartitionField,
+    DataFile, MAIN_BRANCH, Operation, SerializedDataFile, Transform, UnboundPartitionField,
     UnboundPartitionSpec,
 };
 use iceberg::table::Table;
@@ -110,6 +110,7 @@ pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_ag
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
     "snapshot_expiration_clear_expired_meta_data";
+pub const MAX_SNAPSHOTS_NUM: &str = "max_snapshots_num_before_compaction";
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -224,6 +225,13 @@ pub struct IcebergConfig {
     )]
     #[with_option(allow_alter_on_fly)]
     pub snapshot_expiration_clear_expired_meta_data: bool,
+
+    /// The maximum number of snapshots allowed since the last rewrite operation
+    /// If set, sink will check snapshot count and wait if exceeded
+    #[serde(rename = "max_snapshots_num_before_compaction", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub max_snapshots_num_before_compaction: Option<usize>,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -597,6 +605,15 @@ impl Sink for IcebergSink {
             }
         }
 
+        if let Some(max_snapshots) = iceberg_config.max_snapshots_num_before_compaction
+            && max_snapshots < 1
+        {
+            bail!(
+                "`max_snapshots_num_before_compaction` must be greater than 0, got: {}",
+                max_snapshots
+            );
+        }
+
         Ok(())
     }
 
@@ -686,7 +703,7 @@ enum IcebergWriterDispatch {
             >,
         >,
     },
-    NonpartitionAppendOnly {
+    NonPartitionAppendOnly {
         writer: Option<Box<dyn IcebergWriter>>,
         writer_builder: MonitoredGeneralWriterBuilder<
             DataFileWriterBuilder<
@@ -736,7 +753,7 @@ impl IcebergWriterDispatch {
     pub fn get_writer(&mut self) -> Option<&mut Box<dyn IcebergWriter>> {
         match self {
             IcebergWriterDispatch::PartitionAppendOnly { writer, .. }
-            | IcebergWriterDispatch::NonpartitionAppendOnly { writer, .. }
+            | IcebergWriterDispatch::NonPartitionAppendOnly { writer, .. }
             | IcebergWriterDispatch::PartitionUpsert { writer, .. }
             | IcebergWriterDispatch::NonpartitionUpsert { writer, .. } => writer.as_mut(),
         }
@@ -836,7 +853,7 @@ impl IcebergSinkWriter {
                     _write_latency: write_latency,
                     write_bytes,
                 },
-                writer: IcebergWriterDispatch::NonpartitionAppendOnly {
+                writer: IcebergWriterDispatch::NonPartitionAppendOnly {
                     writer: inner_writer,
                     writer_builder,
                 },
@@ -1155,7 +1172,7 @@ impl SinkWriter for IcebergSinkWriter {
                     ));
                 }
             }
-            IcebergWriterDispatch::NonpartitionAppendOnly {
+            IcebergWriterDispatch::NonPartitionAppendOnly {
                 writer,
                 writer_builder,
             } => {
@@ -1228,7 +1245,7 @@ impl SinkWriter for IcebergSinkWriter {
         let write_batch_size = chunk.estimated_heap_size();
         let batch = match &self.writer {
             IcebergWriterDispatch::PartitionAppendOnly { .. }
-            | IcebergWriterDispatch::NonpartitionAppendOnly { .. } => {
+            | IcebergWriterDispatch::NonPartitionAppendOnly { .. } => {
                 // separate out insert chunk
                 let filters =
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
@@ -1304,7 +1321,7 @@ impl SinkWriter for IcebergSinkWriter {
                 }
                 close_result
             }
-            IcebergWriterDispatch::NonpartitionAppendOnly {
+            IcebergWriterDispatch::NonPartitionAppendOnly {
                 writer,
                 writer_builder,
             } => {
@@ -1747,6 +1764,9 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             )));
         }
 
+        // Check snapshot limit before proceeding with commit
+        self.wait_for_snapshot_limit().await?;
+
         if self.is_exactly_once {
             assert!(self.committed_epoch_subscriber.is_some());
             match self.committed_epoch_subscriber.clone() {
@@ -1954,12 +1974,14 @@ impl IcebergSinkCommitter {
 
             delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch).await?;
         }
+
         if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
             && self.config.enable_compaction
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: SinkId::new(self.sink_id),
                     compaction_interval: self.config.compaction_interval_sec(),
+                    force_compaction: false,
                 })
                 .is_err()
         {
@@ -1986,6 +2008,80 @@ impl IcebergSinkCommitter {
         } else {
             Ok(false)
         }
+    }
+
+    /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
+    /// Returns the number of snapshots since the last rewrite/overwrite
+    fn count_snapshots_since_rewrite(&self) -> usize {
+        let mut snapshots: Vec<_> = self.table.metadata().snapshots().collect();
+        snapshots.sort_by_key(|b| std::cmp::Reverse(b.timestamp_ms()));
+
+        // Iterate through snapshots in reverse order (newest first) to find the last rewrite/overwrite
+        let mut count = 0;
+        for snapshot in snapshots {
+            // Check if this snapshot represents a rewrite or overwrite operation
+            let summary = snapshot.summary();
+            match &summary.operation {
+                Operation::Replace => {
+                    // Found a rewrite/overwrite operation, stop counting
+                    break;
+                }
+
+                _ => {
+                    // Increment count for each snapshot that is not a rewrite/overwrite
+                    count += 1;
+                }
+            }
+        }
+
+        count
+    }
+
+    /// Wait until snapshot count since last rewrite is below the limit
+    async fn wait_for_snapshot_limit(&mut self) -> Result<()> {
+        if !self.config.enable_compaction {
+            return Ok(());
+        }
+
+        if let Some(max_snapshots) = self.config.max_snapshots_num_before_compaction {
+            loop {
+                let current_count = self.count_snapshots_since_rewrite();
+
+                if current_count < max_snapshots {
+                    tracing::info!(
+                        "Snapshot count check passed: {} < {}",
+                        current_count,
+                        max_snapshots
+                    );
+                    break;
+                }
+
+                tracing::info!(
+                    "Snapshot count {} exceeds limit {}, waiting...",
+                    current_count,
+                    max_snapshots
+                );
+
+                if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
+                    && iceberg_compact_stat_sender
+                        .send(IcebergSinkCompactionUpdate {
+                            sink_id: SinkId::new(self.sink_id),
+                            compaction_interval: self.config.compaction_interval_sec(),
+                            force_compaction: true,
+                        })
+                        .is_err()
+                {
+                    tracing::warn!("failed to send iceberg compaction stats");
+                }
+
+                // Wait for 30 seconds before checking again
+                tokio::time::sleep(Duration::from_secs(30)).await;
+
+                // Reload table to get latest snapshots
+                self.table = self.config.load_table().await?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -2182,9 +2278,9 @@ mod test {
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
     use crate::sink::iceberg::{
         COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-        ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
-        SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+        ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig, MAX_SNAPSHOTS_NUM,
+        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
+        SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     };
 
     pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
@@ -2434,7 +2530,8 @@ mod test {
             snapshot_expiration_max_age_millis: None,
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
-            snapshot_expiration_clear_expired_meta_data: true
+            snapshot_expiration_clear_expired_meta_data: true,
+            max_snapshots_num_before_compaction: None,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
@@ -2582,5 +2679,6 @@ mod test {
             SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
             "snapshot_expiration_clear_expired_meta_data"
         );
+        assert_eq!(MAX_SNAPSHOTS_NUM, "max_snapshots_num_before_compaction");
     }
 }

@@ -395,6 +395,16 @@ impl Binder {
                 self.ensure_table_function_allowed()?;
                 return Ok(TableFunction::new_internal_source_backfill_progress().into());
             }
+            // `internal_get_channel_delta_stats` table function
+            if func_name.eq("internal_get_channel_delta_stats") {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+
+                return Ok(TableFunction::new_internal_get_channel_delta_stats(args).into());
+            }
             // UDTF
             if let Some(ref udf) = udf
                 && udf.kind.is_table()

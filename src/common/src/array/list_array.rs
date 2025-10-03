@@ -32,8 +32,8 @@ use super::{
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
-    DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl, ToDatumRef, ToText,
-    hash_datum,
+    DataType, Datum, DatumRef, DefaultOrd, ListType, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl,
+    ToDatumRef, ToText, hash_datum,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -322,7 +322,7 @@ impl FromIterator<ListValue> for ListArray {
         let mut iter = iter.into_iter();
         let first = iter.next().expect("empty iterator");
         let mut builder =
-            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(first.data_type()));
+            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(first.elem_type()));
         builder.append(Some(first.as_scalar_ref()));
         for v in iter {
             builder.append(Some(v.as_scalar_ref()));
@@ -355,21 +355,23 @@ impl ListValue {
         }
     }
 
+    /// Convert this list into an [`Array`] of the element type.
     pub fn into_array(self) -> ArrayImpl {
         *self.values
     }
 
-    pub fn empty(datatype: &DataType) -> Self {
-        Self::new(datatype.create_array_builder(0).finish())
+    /// Creates a new empty `ListValue` with the given element type.
+    pub fn empty(elem_type: &DataType) -> Self {
+        Self::new(elem_type.create_array_builder(0).finish())
     }
 
-    /// Creates a new `ListValue` from an iterator of `Datum`.
+    /// Creates a new `ListValue` from an iterator of elements with the given element type.
     pub fn from_datum_iter<T: ToDatumRef>(
-        elem_datatype: &DataType,
+        elem_type: &DataType,
         iter: impl IntoIterator<Item = T>,
     ) -> Self {
         let iter = iter.into_iter();
-        let mut builder = elem_datatype.create_array_builder(iter.size_hint().0);
+        let mut builder = elem_type.create_array_builder(iter.size_hint().0);
         for datum in iter {
             builder.append(datum);
         }
@@ -401,21 +403,22 @@ impl ListValue {
     }
 
     /// Returns the data type of the elements in the list.
-    pub fn data_type(&self) -> DataType {
+    pub fn elem_type(&self) -> DataType {
         self.values.data_type()
     }
 
-    // TODO(list): pass `ListType`
     pub fn memcmp_deserialize(
-        item_datatype: &DataType,
+        list_type: &ListType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
+        let elem_type = list_type.elem();
+
         let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
-        let mut builder = item_datatype.create_array_builder(0);
+        let mut builder = elem_type.create_array_builder(0);
         while inner_deserializer.has_remaining() {
             builder.append(memcmp_encoding::deserialize_datum_in_composite(
-                item_datatype,
+                elem_type,
                 &mut inner_deserializer,
             )?)
         }
@@ -459,45 +462,42 @@ impl Ord for ListValue {
     }
 }
 
+// Construction helpers:
+
+// [Some(1), None].collect()
 impl<T: PrimitiveArrayItemType> FromIterator<Option<T>> for ListValue {
     fn from_iter<I: IntoIterator<Item = Option<T>>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<PrimitiveArray<T>>().into())
     }
 }
-
+// [1, 2].collect()
 impl<T: PrimitiveArrayItemType> FromIterator<T> for ListValue {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<PrimitiveArray<T>>().into())
     }
 }
-
+// [true, false].collect()
 impl FromIterator<bool> for ListValue {
     fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<BoolArray>().into())
     }
 }
-
+// [Some("hello"), None].collect()
 impl<'a> FromIterator<Option<&'a str>> for ListValue {
     fn from_iter<I: IntoIterator<Item = Option<&'a str>>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<Utf8Array>().into())
     }
 }
-
+// ["hello", "world"].collect()
 impl<'a> FromIterator<&'a str> for ListValue {
     fn from_iter<I: IntoIterator<Item = &'a str>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<Utf8Array>().into())
     }
 }
-
+// nested: [ListValue::from_iter([1,2,3]), ListValue::from_iter([4,5])].collect()
 impl FromIterator<ListValue> for ListValue {
     fn from_iter<I: IntoIterator<Item = ListValue>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<ListArray>().into())
-    }
-}
-
-impl From<ListValue> for ArrayImpl {
-    fn from(value: ListValue) -> Self {
-        *value.values
     }
 }
 
@@ -521,7 +521,7 @@ impl<'a> ListRef<'a> {
     }
 
     /// Returns the data type of the elements in the list.
-    pub fn data_type(&self) -> DataType {
+    pub fn elem_type(&self) -> DataType {
         self.array.data_type()
     }
 
@@ -572,14 +572,6 @@ impl<'a> ListRef<'a> {
     /// estimate the serialized size with value encoding
     pub fn estimate_serialize_size_inner(self) -> usize {
         self.iter().map(estimate_serialize_datum_size).sum()
-    }
-
-    pub fn to_owned(self) -> ListValue {
-        let mut builder = self.array.create_builder(self.len());
-        for datum_ref in self.iter() {
-            builder.append(datum_ref);
-        }
-        ListValue::new(builder.finish())
     }
 
     pub fn as_primitive_slice<T: PrimitiveArrayItemType>(self) -> Option<&'a [T]> {
@@ -701,24 +693,38 @@ impl ToText for ListRef<'_> {
     }
 }
 
-impl<'a> From<&'a ListValue> for ListRef<'a> {
-    fn from(value: &'a ListValue) -> Self {
+/// Implement `Scalar` for `ListValue`.
+impl Scalar for ListValue {
+    type ScalarRefType<'a> = ListRef<'a>;
+
+    fn as_scalar_ref(&self) -> ListRef<'_> {
         ListRef {
-            array: &value.values,
+            array: &self.values,
             start: 0,
-            end: value.len() as u32,
+            end: self.len() as u32,
         }
     }
 }
 
-impl From<ListRef<'_>> for ListValue {
-    fn from(value: ListRef<'_>) -> Self {
-        value.to_owned()
+/// Implement `Scalar` for `ListValue`.
+impl<'a> ScalarRef<'a> for ListRef<'a> {
+    type ScalarType = ListValue;
+
+    fn to_owned_scalar(&self) -> ListValue {
+        let mut builder = self.array.create_builder(self.len());
+        for datum_ref in self.iter() {
+            builder.append(datum_ref);
+        }
+        ListValue::new(builder.finish())
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash_scalar_inner(state)
     }
 }
 
 impl ListValue {
-    /// Construct an array from literal string.
+    /// Construct an array from literal string and the data type of the list.
     pub fn from_str(input: &str, data_type: &DataType) -> Result<Self, String> {
         struct Parser<'a> {
             input: &'a str,
@@ -747,14 +753,14 @@ impl ListValue {
                 }
                 self.skip_whitespace();
                 if self.try_consume('}') {
-                    return Ok(ListValue::empty(self.data_type.as_list_element_type()));
+                    return Ok(ListValue::empty(self.data_type.as_list_elem()));
                 }
                 let mut builder =
-                    ArrayBuilderImpl::with_type(0, self.data_type.as_list_element_type().clone());
+                    ArrayBuilderImpl::with_type(0, self.data_type.as_list_elem().clone());
                 loop {
                     let mut parser = Self {
                         input: self.input,
-                        data_type: self.data_type.as_list_element_type(),
+                        data_type: self.data_type.as_list_elem(),
                     };
                     builder.append(parser.parse()?);
                     self.input = parser.input;
@@ -1107,7 +1113,8 @@ mod tests {
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         deserializer.set_reverse(true);
         assert_eq!(
-            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&ListType::new(DataType::Varchar), &mut deserializer)
+                .unwrap(),
             value
         );
 
@@ -1120,7 +1127,8 @@ mod tests {
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&ListType::new(DataType::Varchar), &mut deserializer)
+                .unwrap(),
             value
         );
     }

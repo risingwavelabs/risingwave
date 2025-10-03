@@ -39,12 +39,9 @@ use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
 pub async fn get_new_table_definition_for_cdc_table(
-    session: &Arc<SessionImpl>,
-    table_name: ObjectName,
+    original_catalog: Arc<TableCatalog>,
     new_columns: &[ColumnCatalog],
-) -> Result<(Statement, Arc<TableCatalog>)> {
-    let (original_catalog, _) = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
-
+) -> Result<Statement> {
     assert_eq!(
         original_catalog.row_id_index, None,
         "primary key of cdc table must be user defined"
@@ -78,7 +75,7 @@ pub async fn get_new_table_definition_for_cdc_table(
         &original_catalog.pk_column_names(),
     )?;
 
-    Ok((new_definition, original_catalog))
+    Ok(new_definition)
 }
 
 pub async fn get_replace_table_plan(

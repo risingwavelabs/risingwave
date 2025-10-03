@@ -17,10 +17,10 @@ use std::sync::Arc;
 
 use apache_avro::schema::{Name, RecordSchema, Schema as AvroSchema};
 use apache_avro::types::{Record, Value};
-use risingwave_common::array::VECTOR_ITEM_TYPE;
+use risingwave_common::array::VECTOR_AS_LIST_TYPE;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
+use risingwave_common::types::{DataType, DatumRef, ListType, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_connector_codec::decoder::utils::rust_decimal_to_scaled_bigint;
 use thiserror_ext::AsReport;
@@ -219,8 +219,7 @@ trait MaybeData: std::fmt::Debug {
     /// Switch to `RecordSchema` after #12562
     fn on_struct(self, st: &StructType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
-    // TODO(list): pass `ListType`
-    fn on_list(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
+    fn on_list(self, lt: &ListType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
     fn on_map(
         self,
@@ -243,8 +242,8 @@ impl MaybeData for () {
         validate_fields(st.iter(), avro, refs)
     }
 
-    fn on_list(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
-        on_field(elem, (), avro, refs)
+    fn on_list(self, lt: &ListType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
+        on_field(lt.elem(), (), avro, refs)
     }
 
     fn on_map(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
@@ -275,14 +274,14 @@ impl MaybeData for DatumRef<'_> {
         Ok(record.into())
     }
 
-    fn on_list(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
+    fn on_list(self, lt: &ListType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
         let d = match self {
             Some(s) => s.into_list(),
             None => return Ok(Value::Null),
         };
         let vs = d
             .iter()
-            .map(|d| on_field(elem, d, avro, refs))
+            .map(|d| on_field(lt.elem(), d, avro, refs))
             .try_collect()?;
         Ok(Value::Array(vs))
     }
@@ -448,6 +447,25 @@ fn on_field<D: MaybeData>(
         },
         DataType::Varchar => match inner {
             AvroSchema::String => maybe.on_base(|s| Ok(Value::String(s.into_utf8().into())))?,
+
+            // Add enum support
+            AvroSchema::Enum(enum_schema) => maybe.on_base(|s| {
+                let str_value = s.into_utf8();
+
+                if let Some(position) = enum_schema
+                    .symbols
+                    .iter()
+                    .position(|symbol| symbol == str_value)
+                {
+                    Ok(Value::Enum(position as u32, str_value.to_owned()))
+                } else {
+                    Err(FieldEncodeError::new(format!(
+                        "Value '{}' is not a valid enum symbol. Valid symbols are: {:?}",
+                        str_value, enum_schema.symbols
+                    )))
+                }
+            })?,
+
             _ => return no_match_err(),
         },
         DataType::Bytea => match inner {
@@ -479,7 +497,7 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         DataType::List(lt) => match inner {
-            AvroSchema::Array(avro_elem) => maybe.on_list(lt.elem(), avro_elem, refs)?,
+            AvroSchema::Array(avro_elem) => maybe.on_list(lt, avro_elem, refs)?,
             _ => return no_match_err(),
         },
         DataType::Map(m) => {
@@ -586,7 +604,7 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         DataType::Vector(_) => match inner {
-            AvroSchema::Array(avro_elem) => maybe.on_list(&VECTOR_ITEM_TYPE, avro_elem, refs)?,
+            AvroSchema::Array(avro_elem) => maybe.on_list(&VECTOR_AS_LIST_TYPE, avro_elem, refs)?,
             _ => return no_match_err(),
         },
         // Group D: unsupported
@@ -973,6 +991,28 @@ mod tests {
                     ]),
                 ),
             ]),
+        );
+
+        // NEW: Varchar to Enum tests
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("RED".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(0, "RED".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("BLUE".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(2, "BLUE".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("ACTIVE".into())),
+            r#"{"type": "enum", "name": "Status", "symbols": ["ACTIVE", "INACTIVE"]}"#,
+            Value::Enum(0, "ACTIVE".to_owned()),
         );
 
         // Test complex JSON with nested structures - using serde_json::Value comparison

@@ -121,8 +121,8 @@ impl DispatchOutputMapping {
 
 mod type_mapping {
     use risingwave_common::types::{
-        DataType, DatumCow, DatumRef, ListValue, MapValue, ScalarImpl, StructValue, ToOwnedDatum,
-        data_types,
+        DataType, DatumCow, DatumRef, ListValue, MapValue, ScalarImpl, ScalarRef as _, StructValue,
+        ToOwnedDatum, data_types,
     };
     use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -182,7 +182,7 @@ mod type_mapping {
                 }
                 let values = ListValue::new(value_builder.finish());
 
-                let map = MapValue::try_from_kv(keys.to_owned(), values).unwrap();
+                let map = MapValue::try_from_kv(keys.to_owned_scalar(), values).unwrap();
 
                 DatumCow::Owned(Some(ScalarImpl::Map(map)))
             }

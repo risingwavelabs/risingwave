@@ -371,6 +371,10 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
+                    self.metadata_manager
+                        .catalog_controller
+                        .cleanup_dropped_tables()
+                        .await;
 
                     let mut active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
@@ -437,7 +441,14 @@ impl GlobalBarrierWorkerContextImpl {
                             })?
                     };
 
-                    if self.scheduled_barriers.pre_apply_drop_cancel(None) {
+                    let dropped_table_ids = self.scheduled_barriers.pre_apply_drop_cancel(None);
+                    if !dropped_table_ids.is_empty() {
+                        self.metadata_manager
+                            .catalog_controller
+                            .complete_dropped_tables(
+                                dropped_table_ids.into_iter().map(|id| id.table_id as _),
+                            )
+                            .await;
                         info = self.resolve_graph_info(None).await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
@@ -597,9 +608,13 @@ impl GlobalBarrierWorkerContextImpl {
         tracing::info!(?database_id, "recovered background job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-        let _ = self
+        let dropped_table_ids = self
             .scheduled_barriers
             .pre_apply_drop_cancel(Some(database_id));
+        self.metadata_manager
+            .catalog_controller
+            .complete_dropped_tables(dropped_table_ids.into_iter().map(|id| id.table_id as _))
+            .await;
 
         let mut info = self
             .resolve_graph_info(Some(database_id))

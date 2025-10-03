@@ -546,30 +546,35 @@ impl DataType {
         }
     }
 
-    /// Returns the inner element's type of a list type.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the type is not a list type.
-    // TODO(list): `as_list -> &ListType`
-    pub fn as_list_element_type(&self) -> &DataType {
+    pub fn as_list(&self) -> &ListType {
         match self {
-            DataType::List(t) => t.elem(),
+            DataType::List(t) => t,
             t => panic!("expect list type, got {t}"),
         }
     }
 
-    // TODO(list): `into_list -> ListType`
-    pub fn into_list_element_type(self) -> DataType {
+    pub fn into_list(self) -> ListType {
         match self {
-            DataType::List(t) => t.into_elem(),
+            DataType::List(t) => t,
             t => panic!("expect list type, got {t}"),
         }
+    }
+
+    /// Returns the inner element's type if `self` is a list type.
+    /// Equivalent to `self.as_list().elem()`.
+    pub fn as_list_elem(&self) -> &DataType {
+        self.as_list().elem()
+    }
+
+    /// Returns the inner element's type if `self` is a list type.
+    /// Equivalent to `self.into_list().into_elem()`.
+    pub fn into_list_elem(self) -> DataType {
+        self.into_list().into_elem()
     }
 
     /// Return a new type that removes the outer list, and get the innermost element type.
     ///
-    /// Use [`DataType::as_list_element_type`] if you only want the element type of a list.
+    /// Use [`DataType::as_list_elem`] if you only want the element type of a list.
     ///
     /// ```
     /// use risingwave_common::types::DataType::*;
@@ -1248,7 +1253,7 @@ impl ScalarImpl {
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
-            Ty::List(t) => ListValue::memcmp_deserialize(t.elem(), de)?.to_scalar_value(),
+            Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
             Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
             Ty::Vector(dimension) => {
                 VectorVal::memcmp_deserialize(*dimension, de)?.to_scalar_value()

@@ -316,6 +316,16 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Barrier Interval",
+                    "Barrier interval of each database in milliseconds",
+                    [
+                        panels.target(
+                            f"{metric('meta_barrier_interval_by_database')}",
+                            "barrier_interval {{database_id}}"
+                        ),
+                    ],
+                ),
             ],
         )
     ]
