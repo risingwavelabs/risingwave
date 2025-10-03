@@ -27,7 +27,7 @@ use crate::util::row_serde::OrderedRowSerde;
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
-pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
+pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq + Send + Sync {
     /// Returns the [`DatumRef`] at the given `index`.
     fn datum_at(&self, index: usize) -> DatumRef<'_>;
 
