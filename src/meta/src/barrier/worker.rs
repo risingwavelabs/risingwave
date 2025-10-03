@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::replace;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
@@ -98,6 +98,30 @@ pub(super) struct GlobalBarrierWorker<C> {
 }
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
+    /// Generate a pseudo-random barrier interval Duration in [500ms, 10s],
+    /// changing value every minute based on UNIX minutes.
+    fn random_barrier_interval_duration() -> StdDuration {
+        // Seed from current minute to ensure a stable value during the minute
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| StdDuration::from_secs(0));
+        let minutes = (now.as_secs() / 60) as u64;
+
+        // Xorshift64* PRNG on the minute seed for decent mixing without deps
+        let mut x = minutes ^ 0x9E37_79B9_7F4A_7C15u64;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        let x = x.wrapping_mul(0x2545F4914F6CDD1Du64);
+
+        // Map to [500ms, 10_000ms]
+        const MIN_MS: u64 = 500;
+        const MAX_MS: u64 = 10_000;
+        let range = MAX_MS - MIN_MS + 1;
+        let offset = (x % range) as u64;
+        StdDuration::from_millis(MIN_MS + offset)
+    }
+
     pub(super) async fn new_inner(
         env: MetaSrvEnv,
         sink_manager: SinkCoordinatorManager,
@@ -265,6 +289,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             .notification_manager()
             .insert_local_sender(local_notification_tx);
 
+        // Tick every minute to randomize the system barrier interval in [500ms, 10s].
+        let mut minute_randomizer = tokio::time::interval(StdDuration::from_secs(60));
+        minute_randomizer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         // Start the event loop.
         loop {
             tokio::select! {
@@ -337,6 +365,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             self.system_enable_per_database_isolation = p.per_database_isolation();
                         }
                     }
+                }
+                // Periodically randomize the system barrier interval once per minute.
+                _ = minute_randomizer.tick() => {
+                    let duration = Self::random_barrier_interval_duration();
+                    self.periodic_barriers.set_sys_barrier_interval(duration);
+                    info!(?duration, "randomized system barrier interval");
                 }
                 complete_result = self
                     .completing_task
