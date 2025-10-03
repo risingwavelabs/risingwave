@@ -125,6 +125,7 @@ impl ExternalStorageTable {
                     schema_name: self.schema_name.to_owned(),
                     table_name: self.table_name.to_owned(),
                 },
+                self.table_id.table_id,
             )
             .await
     }
