@@ -18,6 +18,7 @@ use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_sqlparser::ast;
+use risingwave_sqlparser::ast::REDACT_SQL_OPTION_KEYWORDS;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
 
@@ -118,6 +119,12 @@ impl SourceCatalog {
     pub fn create_sql_purified(&self) -> String {
         self.create_sql_ast_purified()
             .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
+            .unwrap_or_else(|_| self.create_sql())
+    }
+
+    pub fn create_sql_purified_redacted(&self) -> String {
+        self.create_sql_ast_purified()
+            .map(|stmt| stmt.to_redacted_string(REDACT_SQL_OPTION_KEYWORDS.get()))
             .unwrap_or_else(|_| self.create_sql())
     }
 
