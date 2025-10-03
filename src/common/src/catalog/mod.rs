@@ -637,7 +637,8 @@ macro_rules! for_all_fragment_type_flags {
                 CrossDbSnapshotBackfillStreamScan,
                 StreamCdcScan,
                 VectorIndexWrite,
-                UpstreamSinkUnion
+                UpstreamSinkUnion,
+                LocalityProvider
             },
             {},
             0
@@ -891,6 +892,11 @@ mod tests {
                     UpstreamSinkUnion,
                     65536,
                     "UPSTREAM_SINK_UNION",
+                ),
+                (
+                    LocalityProvider,
+                    131072,
+                    "LOCALITY_PROVIDER",
                 ),
             ]
         "#]]

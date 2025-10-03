@@ -1416,10 +1416,14 @@ impl ToStream for LogicalAgg {
         use super::stream::prelude::*;
 
         let eowc = ctx.emit_on_window_close();
-        let input = self
-            .input()
-            .try_better_locality(&self.group_key().to_vec())
-            .unwrap_or_else(|| self.input());
+        let input = if self.group_key().is_empty() {
+            self.input()
+        } else {
+            self.input()
+                .try_better_locality(&self.group_key().to_vec())
+                .unwrap_or_else(|| self.input())
+        };
+
         let stream_input = input.to_stream(ctx)?;
 
         // Use Dedup operator, if possible.
