@@ -162,22 +162,13 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
     /// Check whether we should pause on bootstrap from the system parameter and reset it.
     async fn take_pause_on_bootstrap(&mut self) -> MetaResult<bool> {
-        let paused = self
-            .env
-            .system_params_reader()
-            .await
-            .pause_on_next_bootstrap();
+        // Hardcoded to always pause on bootstrap
+        let paused = true;
         if paused {
             warn!(
-                "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
-                 It will now be reset to `false`. \
-                 To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
-                PAUSE_ON_NEXT_BOOTSTRAP_KEY
+                "The cluster will bootstrap with all data sources paused (hardcoded). \
+                 To resume the data sources, use `risectl meta resume`.",
             );
-            self.env
-                .system_params_manager_impl_ref()
-                .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                .await?;
         }
         Ok(paused)
     }
