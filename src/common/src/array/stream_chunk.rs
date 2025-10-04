@@ -363,11 +363,6 @@ impl StreamChunk {
             data: self.data.with_visibility(vis),
         }
     }
-
-    // Compute the required permits of this chunk for rate limiting.
-    pub fn compute_rate_limit_chunk_permits(&self) -> u64 {
-        self.capacity() as _
-    }
 }
 
 impl Deref for StreamChunk {

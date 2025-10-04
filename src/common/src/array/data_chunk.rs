@@ -146,6 +146,11 @@ impl DataChunk {
         self.visibility.count_ones()
     }
 
+    // Compute the required permits of this chunk for rate limiting.
+    pub fn rate_limit_permits(&self) -> u64 {
+        self.cardinality() as _
+    }
+
     // TODO(rc): shall we rename this to `size`?
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
