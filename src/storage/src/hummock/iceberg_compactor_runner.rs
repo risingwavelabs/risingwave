@@ -214,7 +214,8 @@ impl IcebergCompactorRunner {
             let compaction_plan = planner
                 .plan_compaction_with_branch(&table, compaction_type, &branch)
                 .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?
+                .ok_or_else(|| HummockError::compaction_executor("Not find compaction plan"))?;
 
             let statistics = self.analyze_task_statistics(&compaction_plan);
 

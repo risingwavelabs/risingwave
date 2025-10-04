@@ -130,10 +130,10 @@ profile:
         compactor-mode: "dedicated-iceberg"
         port: 6661
         exporter-port: 1261
-      - use: prometheus
-      - use: grafana
-      - use: kafka
-        persist-data: true
+      # - use: prometheus
+      # - use: grafana
+      # - use: kafka
+      #   persist-data: true
       - use: lakekeeper
         port: 8181
 
