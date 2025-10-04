@@ -22,14 +22,14 @@ use risingwave_common::catalog;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
-use risingwave_connector::source::{SplitImpl, SplitMetaData, fill_adaptive_split};
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
-    Database, Fragment, FragmentRelation, Sink, Source, SourceSplits, StreamingJob, Table,
+    Database, Fragment, FragmentRelation, FragmentSplits, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
     DatabaseId, DispatcherType, FragmentId, ObjectId, SourceId, StreamingParallelism, TableId,
-    WorkerId, database, fragment, fragment_relation, object, sink, source, source_splits,
+    WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink, source,
     streaming_job, table,
 };
 use risingwave_meta_model_migration::Condition;
@@ -188,7 +188,7 @@ pub async fn render_jobs<C>(
     job_ids: HashSet<ObjectId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-    source_properties: HashMap<SourceId, SourceWorkerProperties>,
+    _source_properties: HashMap<SourceId, SourceWorkerProperties>,
 ) -> MetaResult<RenderedGraph>
 where
     C: ConnectionTrait,
@@ -236,8 +236,8 @@ where
         .map(|fragment| (fragment.fragment_id, fragment))
         .collect();
 
-    let (fragment_source_ids, source_splits) =
-        resolve_source_fragments(txn, source_properties, &fragment_map).await?;
+    let (fragment_source_ids, fragment_splits) =
+        resolve_source_fragments(txn, &fragment_map).await?;
 
     let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
         .select_only()
@@ -370,16 +370,14 @@ where
                     .map(|actor_id| (*actor_id as u32, vec![]))
                     .collect();
 
-                let (props, splits) = source_splits.get(source_id).cloned().unwrap_or_default();
+                let splits = fragment_splits
+                    .get(&entry_fragment_id)
+                    .cloned()
+                    .unwrap_or_default();
 
-                let mut splits: BTreeMap<_, _> = splits.into_iter().map(|s| (s.id(), s)).collect();
+                let splits: BTreeMap<_, _> = splits.into_iter().map(|s| (s.id(), s)).collect();
 
-                if props.enable_adaptive_splits {
-                    debug_assert!(props.enable_drop_split);
-                    debug_assert!(splits.len() == 1);
-                    let actor_in_use = empty_actor_splits.keys().cloned().collect();
-                    splits = fill_adaptive_split(splits.values().next().unwrap(), &actor_in_use)?;
-                }
+                println!("xxk source_id {} prev splits {:?}", source_id, splits);
 
                 let fragment_splits = crate::stream::source_manager::reassign_splits(
                     entry_fragment_id as u32,
@@ -434,6 +432,11 @@ where
                         vec![]
                     };
 
+                    println!(
+                        "xxk fragment {} actor {} splits {:?}",
+                        fragment_id, actor_id, splits
+                    );
+
                     (
                         actor_id,
                         InflightActorInfo {
@@ -483,11 +486,10 @@ where
 
 async fn resolve_source_fragments<C>(
     txn: &C,
-    mut source_properties: HashMap<SourceId, SourceWorkerProperties>,
     fragment_map: &HashMap<FragmentId, fragment::Model>,
 ) -> MetaResult<(
     HashMap<FragmentId, SourceId>,
-    HashMap<SourceId, (SourceWorkerProperties, Vec<SplitImpl>)>,
+    HashMap<FragmentId, Vec<SplitImpl>>,
 )>
 where
     C: ConnectionTrait,
@@ -523,36 +525,60 @@ where
         })
         .collect();
 
-    let source_ids = source_fragment_ids.keys().cloned().collect_vec();
+    let fragment_ids = fragment_source_ids.keys().copied().collect_vec();
 
-    let sources: Vec<_> = SourceSplits::find()
-        .filter(source_splits::Column::SourceId.is_in(source_ids))
+    let fragment_splits: Vec<_> = FragmentSplits::find()
+        .filter(fragment_splits::Column::FragmentId.is_in(fragment_ids))
         .all(txn)
         .await?;
 
-    let source_splits: HashMap<_, _> = sources
+    let fragment_splits: HashMap<_, _> = fragment_splits
         .into_iter()
         .flat_map(|model| {
             model.splits.map(|splits| {
                 (
-                    model.source_id,
-                    (
-                        source_properties
-                            .remove(&model.source_id)
-                            .unwrap_or_default(),
-                        splits
-                            .to_protobuf()
-                            .splits
-                            .iter()
-                            .flat_map(SplitImpl::try_from)
-                            .collect(),
-                    ),
+                    model.fragment_id,
+                    splits
+                        .to_protobuf()
+                        .splits
+                        .iter()
+                        .flat_map(SplitImpl::try_from)
+                        .collect_vec(),
                 )
             })
         })
         .collect();
 
-    Ok((fragment_source_ids, source_splits))
+    // let source_ids = source_fragment_ids.keys().cloned().collect_vec();
+
+    // let sources: Vec<_> = SourceSplits::find()
+    //     .filter(source_splits::Column::SourceId.is_in(source_ids))
+    //     .all(txn)
+    //     .await?;
+
+    // let source_splits: HashMap<_, _> = sources
+    //     .into_iter()
+    //     .flat_map(|model| {
+    //         model.splits.map(|splits| {
+    //             (
+    //                 model.source_id,
+    //                 (
+    //                     source_properties
+    //                         .remove(&model.source_id)
+    //                         .unwrap_or_default(),
+    //                     splits
+    //                         .to_protobuf()
+    //                         .splits
+    //                         .iter()
+    //                         .flat_map(SplitImpl::try_from)
+    //                         .collect(),
+    //                 ),
+    //             )
+    //         })
+    //     })
+    //     .collect();
+
+    Ok((fragment_source_ids, fragment_splits))
 }
 
 // Helper struct to make the function signature cleaner and to properly bundle the required data.

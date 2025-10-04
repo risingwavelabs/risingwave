@@ -109,7 +109,7 @@ impl SourceManager {
                     debug_assert!(discovered_splits.len() == 1);
                     discovered_splits = fill_adaptive_split(
                         discovered_splits.values().next().unwrap(),
-                        &empty_actor_splits.keys().cloned().collect(),
+                        empty_actor_splits.len(),
                     )?;
                 }
 
@@ -336,8 +336,10 @@ impl SourceManagerCore {
                 if handle.enable_adaptive_splits {
                     debug_assert!(handle.enable_drop_split);
                     debug_assert!(discovered_splits.len() == 1);
-                    discovered_splits =
-                        fill_adaptive_split(discovered_splits.values().next().unwrap(), &actors)?;
+                    discovered_splits = fill_adaptive_split(
+                        discovered_splits.values().next().unwrap(),
+                        actors.len(),
+                    )?;
                 }
 
                 let prev_actor_splits = {
@@ -366,6 +368,10 @@ impl SourceManagerCore {
                         enable_adaptive: handle.enable_adaptive_splits,
                     },
                 ) {
+                    println!(
+                        "xxk fragment {}, assignment {:?}",
+                        fragment_id, new_assignment
+                    );
                     split_assignment.insert(fragment_id, new_assignment);
                 }
             }
