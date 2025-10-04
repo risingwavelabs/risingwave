@@ -54,6 +54,18 @@ impl StreamReaderBuilder {
             let (schema_change_tx, mut schema_change_rx) =
                 mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
             let meta_client = self.actor_ctx.meta_client.clone();
+
+            // Extract schema change failure policy before moving into async closure
+            let schema_change_failure_policy = match &self.source_desc.source.config {
+                risingwave_connector::source::ConnectorProperties::MysqlCdc(props) => {
+                    props.schema_change_failure_policy.clone()
+                }
+                risingwave_connector::source::ConnectorProperties::PostgresCdc(props) => {
+                    props.schema_change_failure_policy.clone()
+                }
+                _ => risingwave_connector::source::cdc::SchemaChangeFailurePolicy::default(),
+            };
+
             // spawn a task to handle schema change event from source parser
             let _join_handle = tokio::task::spawn(async move {
                 while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
@@ -74,11 +86,20 @@ impl StreamReaderBuilder {
                                 finish_tx.send(()).unwrap();
                             }
                             Err(e) => {
-                                tracing::error!(
-                                    target: "auto_schema_change",
-                                    error = %e.as_report(), "schema change error");
-
-                                finish_tx.send(()).unwrap();
+                                match schema_change_failure_policy {
+                                    risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Block => {
+                                        tracing::error!(
+                                            target: "auto_schema_change",
+                                            error = %e.as_report(), "schema change error, blocking source");
+                                        drop(finish_tx);
+                                    }
+                                    risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Skip => {
+                                        tracing::warn!(
+                                            target: "auto_schema_change",
+                                            error = %e.as_report(), "schema change error, skipping due to `schema_change_failure_policy` is set to Skip.");
+                                        finish_tx.send(()).unwrap();
+                                    }
+                                }
                             }
                         }
                     }
@@ -140,6 +161,17 @@ impl StreamReaderBuilder {
 
         let (schema_change_tx, on_cdc_auto_schema_change_failure) = self.setup_auto_schema_change();
 
+        // Extract schema change failure policy from connector config
+        let schema_change_failure_policy = match &self.source_desc.source.config {
+            risingwave_connector::source::ConnectorProperties::MysqlCdc(props) => {
+                props.schema_change_failure_policy.clone()
+            }
+            risingwave_connector::source::ConnectorProperties::PostgresCdc(props) => {
+                props.schema_change_failure_policy.clone()
+            }
+            _ => risingwave_connector::source::cdc::SchemaChangeFailurePolicy::default(),
+        };
+
         let source_ctx = SourceContext::new_with_auto_schema_change_callback(
             self.actor_ctx.id,
             self.source_id,
@@ -153,6 +185,7 @@ impl StreamReaderBuilder {
             self.source_desc.source.config.clone(),
             schema_change_tx,
             on_cdc_auto_schema_change_failure,
+            schema_change_failure_policy,
         );
 
         (column_ids, source_ctx)

@@ -53,6 +53,7 @@ impl DebeziumProps {
             .get(DEBEZIUM_IGNORE_KEY)
             .map(|v| v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+
         Self { ignore_key }
     }
 }
