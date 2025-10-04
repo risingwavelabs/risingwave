@@ -15,7 +15,7 @@
 use anyhow::Result;
 use risingwave_common::bail;
 use risingwave_sqlparser::ast::{
-    CreateSinkStatement, Ident, SetVariableValue, SetVariableValueSingle, Statement, Value,
+    Ident, SetVariableValue, SetVariableValueSingle, Statement, Value,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -44,12 +44,8 @@ pub fn extract_sql_command(sql: &str) -> Result<crate::slt::SqlCmd> {
         Statement::CreateTable { query, .. } => SqlCmd::Create {
             is_create_table_as: query.is_some(),
         },
-        Statement::CreateSink {
-            stmt: CreateSinkStatement {
-                into_table_name, ..
-            },
-        } => SqlCmd::CreateSink {
-            is_sink_into_table: into_table_name.is_some(),
+        Statement::CreateSink { .. } => SqlCmd::Create {
+            is_create_table_as: false,
         },
         Statement::SetVariable {
             variable, value, ..
