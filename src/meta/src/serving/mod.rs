@@ -151,7 +151,6 @@ async fn fetch_serving_infos(
     let parallelisms = metadata_manager
         .catalog_controller
         .running_fragment_parallelisms(None)
-        .await
         .expect("fail to fetch running parallelisms");
     let serving_compute_nodes = metadata_manager
         .cluster_controller
