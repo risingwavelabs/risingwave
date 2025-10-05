@@ -243,6 +243,11 @@ impl CommandContext {
                     .metadata_manager
                     .update_source_splits(source_splits)
                     .await?;
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(assignment)
+                    .await?;
             }
 
             Command::DropStreamingJobs {
@@ -361,11 +366,28 @@ impl CommandContext {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(&info.init_split_assignment)
+                    .await?;
             }
             Command::RescheduleFragment { reschedules, .. } => {
                 barrier_manager_context
                     .scale_controller
                     .post_apply_reschedule(reschedules)
+                    .await?;
+
+                let fragment_splits = reschedules
+                    .iter()
+                    .map(|(fragment_id, reschedule)| {
+                        (*fragment_id, reschedule.actor_splits.clone())
+                    })
+                    .collect();
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(&fragment_splits)
                     .await?;
             }
 
@@ -376,6 +398,7 @@ impl CommandContext {
                     upstream_fragment_downstreams,
                     to_drop_state_table_ids,
                     auto_refresh_schema_sinks,
+                    init_split_assignment,
                     ..
                 },
             ) => {
@@ -416,6 +439,11 @@ impl CommandContext {
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
+                    .await?;
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(init_split_assignment)
                     .await?;
             }
 

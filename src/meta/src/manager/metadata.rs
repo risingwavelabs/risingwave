@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId, fragment};
@@ -779,6 +780,26 @@ impl MetadataManager {
     ) -> MetaResult<()> {
         self.catalog_controller
             .update_source_splits(source_splits)
+            .await
+    }
+
+    #[await_tree::instrument]
+    pub async fn update_fragment_splits(
+        &self,
+        split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        let fragment_splits = split_assignment
+            .iter()
+            .map(|(fragment_id, splits)| {
+                (
+                    *fragment_id as _,
+                    splits.values().flatten().cloned().collect_vec(),
+                )
+            })
+            .collect();
+
+        self.catalog_controller
+            .update_fragment_splits(&fragment_splits)
             .await
     }
 
