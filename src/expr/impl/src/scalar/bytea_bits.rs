@@ -57,6 +57,14 @@ pub fn set_bit(bytes: &[u8], n: i64, value: i32) -> Result<Box<[u8]>> {
             reason: format!("index {} out of valid range, 0..{}", n, max_sz - 1).into(),
         });
     }
+
+    if value != 0 && value != 1 {
+        return Err(ExprError::InvalidParam {
+            name: "set_bit",
+            reason: format!("value {} is invalid,new bit must be 0 or 1", value).into(),
+        });
+    }
+
     let mut buf = bytes.to_vec();
     let index = (n / 8) as usize;
     let bit_pos = (n % 8) as u8;
@@ -66,7 +74,7 @@ pub fn set_bit(bytes: &[u8], n: i64, value: i32) -> Result<Box<[u8]>> {
     } else {
         buf[index] &= !(1 << bit_pos);
     }
-    Ok(buf.iter().copied().collect())
+    Ok(buf.into_boxed_slice())
 }
 
 /// Extracts n'th byte from binary string.
@@ -112,7 +120,7 @@ pub fn set_byte(bytes: &[u8], n: i32, value: i32) -> Result<Box<[u8]>> {
     }
     let mut buf = bytes.to_vec();
     buf[n as usize] = value as u8;
-    Ok(buf.iter().copied().collect())
+    Ok(buf.into_boxed_slice())
 }
 
 /// Returns the number of bits set in the binary string
