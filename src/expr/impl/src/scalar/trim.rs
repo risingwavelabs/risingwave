@@ -88,7 +88,11 @@ fn trim_bound(bytes: &[u8], bytesremoved: &[u8]) -> (usize, usize) {
 /// ```
 #[function("trim(bytea, bytea) -> bytea")]
 pub fn trim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
-    let (start, end) = trim_bound(bytes, bytesremoved);
+    let (mut start, mut end) = trim_bound(bytes, bytesremoved);
+    
+    if start == bytes.len() && end == 0 {
+        (start, end) = (0, 0);
+    }
     bytes[start..end].iter().copied().collect()
 }
 

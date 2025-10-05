@@ -127,3 +127,40 @@ query T
 select rtrim('\x1234567890'::bytea, '\x9012'::bytea);
 ----
 \x12345678
+
+query T
+SELECT btrim(NULL::bytea, E'\\001');
+----
+NULL
+
+query T
+SELECT btrim('1'::bytea, '1'::bytea);
+----
+\x
+
+query T
+SELECT ltrim('1'::bytea, '1'::bytea);
+----
+\x
+
+query T
+SELECT rtrim('1'::bytea, '1'::bytea);
+----
+\x
+
+
+query T
+SELECT btrim(''::bytea, '1'::bytea);
+----
+\x
+
+query T
+SELECT ltrim(''::bytea, '1'::bytea);
+----
+\x
+
+
+query T
+SELECT rtrim(''::bytea, '1'::bytea);
+----
+\x
