@@ -186,6 +186,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArrayContains
             | Type::ArrayContained
             | Type::ArrayFlatten
+            | Type::ArrayIntersect
             | Type::HexToInt256
             | Type::JsonbConcat
             | Type::JsonbAccess

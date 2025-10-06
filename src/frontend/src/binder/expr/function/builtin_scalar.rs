@@ -342,6 +342,7 @@ impl Binder {
                     }
                     Ok(FunctionCall::new_unchecked(ExprType::ArrayFlatten, vec![input], return_type).into())
                 })),
+                ("array_intersect", raw_call(ExprType::ArrayIntersect)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
                 (
                     "array_ndims",

@@ -274,6 +274,7 @@ impl Strong {
             | ExprType::ArrayContains
             | ExprType::ArrayContained
             | ExprType::ArrayFlatten
+            | ExprType::ArrayIntersect
             | ExprType::HexToInt256
             | ExprType::JsonbAccess
             | ExprType::JsonbAccessStr
