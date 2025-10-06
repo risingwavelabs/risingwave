@@ -23,7 +23,7 @@ use futures::future;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeMask};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::ActorMapping;
 use risingwave_meta_model::{
     ObjectId, StreamingParallelism, WorkerId, fragment, fragment_relation,
@@ -88,6 +88,7 @@ use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Transactio
 
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::compose_dispatchers;
+use crate::stream::cdc::assign_cdc_table_snapshot_splits_impl;
 
 pub type ScaleControllerRef = Arc<ScaleController>;
 
@@ -194,7 +195,8 @@ impl ScaleController {
     //     Ok(actors)
     // }
 
-    pub fn diff_fragment(
+    // todo, async is only used for cdc table snapshot assignment
+    pub async fn diff_fragment(
         &self,
         prev_fragment_info: &SharedFragmentInfo,
         curr_actors: &HashMap<ActorId, InflightActorInfo>,
@@ -309,6 +311,23 @@ impl ScaleController {
             .map(|(&actor_id, info)| (actor_id, info.splits.clone()))
             .collect();
 
+        let mut cdc_table_id = None;
+        let cdc_table_snapshot_split_assignment = if prev_fragment_info
+            .fragment_type_mask
+            .contains(FragmentTypeFlag::StreamCdcScan)
+        {
+            cdc_table_id = Some(prev_fragment_info.job_id as _);
+            assign_cdc_table_snapshot_splits_impl(
+                prev_fragment_info.job_id as u32,
+                curr_actors.keys().copied().collect(),
+                self.env.meta_store_ref(),
+                None,
+            )
+            .await?
+        } else {
+            HashMap::default()
+        };
+
         let reschedule = Reschedule {
             added_actors,
             removed_actors,
@@ -318,8 +337,8 @@ impl ScaleController {
             downstream_fragment_ids,
             newly_created_actors,
             actor_splits,
-            cdc_table_snapshot_split_assignment: Default::default(),
-            cdc_table_id: None,
+            cdc_table_snapshot_split_assignment,
+            cdc_table_id,
         };
 
         Ok(reschedule)

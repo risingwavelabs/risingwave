@@ -43,6 +43,7 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::id::{IdCategory, IdGeneratorManagerRef};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor};
+use crate::stream::cdc::assign_cdc_table_snapshot_splits_impl;
 use crate::stream::{AssignerBuilder, SourceWorkerProperties};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
