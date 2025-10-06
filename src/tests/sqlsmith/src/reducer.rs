@@ -28,7 +28,7 @@ use tokio_postgres::Client;
 use crate::parse_sql;
 use crate::sqlreduce::Strategy;
 use crate::sqlreduce::checker::Checker;
-use crate::sqlreduce::reducer::Reducer;
+use crate::sqlreduce::reducer::{Reducer, ReductionMode};
 use crate::utils::{create_file, read_file_contents, write_to_file};
 
 type Result<A> = anyhow::Result<A>;
@@ -38,6 +38,7 @@ pub async fn shrink_file(
     input_file_path: &str,
     output_file_path: &str,
     strategy: Strategy,
+    mode: ReductionMode,
     client: Client,
     restore_cmd: &str,
 ) -> Result<()> {
@@ -48,7 +49,7 @@ pub async fn shrink_file(
     let reduced_sql = shrink_statements(&file_contents)?;
 
     // shrink the reduced sql
-    let reduced_sql = shrink(&reduced_sql, strategy, client, restore_cmd).await?;
+    let reduced_sql = shrink_with_mode(&reduced_sql, strategy, mode, client, restore_cmd).await?;
 
     // write reduced sql
     let mut file = create_file(output_file_path).unwrap();
@@ -107,16 +108,18 @@ fn shrink_statements(sql: &str) -> Result<String> {
     Ok(sql)
 }
 
-async fn shrink(
+/// Shrink function with explicit reduction mode specification
+async fn shrink_with_mode(
     sql: &str,
     strategy: Strategy,
+    mode: ReductionMode,
     client: Client,
     restore_cmd: &str,
 ) -> Result<String> {
     let sql_statements = parse_sql(sql);
     let proceeding_stmts = sql_statements.split_last().unwrap().1.to_vec();
     let checker = Checker::new(client, proceeding_stmts, restore_cmd.to_owned());
-    let mut reducer = Reducer::new(checker, strategy);
+    let mut reducer = Reducer::new_with_mode(checker, strategy, mode);
 
     let reduced_sql = reducer.reduce(sql).await?;
 
