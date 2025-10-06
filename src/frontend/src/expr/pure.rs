@@ -184,6 +184,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArrayReplace
             | Type::ArrayPosition
             | Type::ArrayContains
+            | Type::ArrayOverlap
             | Type::ArrayContained
             | Type::ArrayFlatten
             | Type::ArrayIntersect

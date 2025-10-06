@@ -137,6 +137,23 @@ impl Binder {
                     }
                 }
             }
+            BinaryOperator::Custom(name) if name == "&&" => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayOverlap,
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} && {}",
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
             BinaryOperator::Custom(name) if name == "||" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());

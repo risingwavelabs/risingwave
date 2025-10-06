@@ -81,6 +81,7 @@ impl std::fmt::Debug for FunctionCall {
                 ExprType::BitwiseOr => debug_binary_op(f, "|", &self.inputs),
                 ExprType::BitwiseXor => debug_binary_op(f, "#", &self.inputs),
                 ExprType::ArrayContains => debug_binary_op(f, "@>", &self.inputs),
+                ExprType::ArrayOverlap => debug_binary_op(f, "&&", &self.inputs),
                 ExprType::ArrayContained => debug_binary_op(f, "<@", &self.inputs),
                 _ => {
                     let func_name = format!("{:?}", self.func_type);
@@ -378,6 +379,9 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             }
             ExprType::ArrayContains => {
                 explain_verbose_binary_op(f, "@>", &that.inputs, self.input_schema)
+            }
+            ExprType::ArrayOverlap => {
+                explain_verbose_binary_op(f, "&&", &that.inputs, self.input_schema)
             }
             ExprType::ArrayContained => {
                 explain_verbose_binary_op(f, "<@", &that.inputs, self.input_schema)

@@ -71,7 +71,51 @@ fn array_intersect(left: ListRef<'_>, right: ListRef<'_>) -> ListValue {
         }
     }
 
-    ListValue::from_datum_iter(&left.elem_type(), result.into_iter())
+    ListValue::from_datum_iter(&left.elem_type(), result)
+}
+
+/// Returns true if two arrays have any elements in common (overlap operator).
+/// This is equivalent to PostgreSQL's `&&` operator for arrays.
+///
+/// ```sql
+/// array1 && array2 → boolean
+/// ```
+///
+/// Examples:
+///
+/// ```slt
+/// query T
+/// select array[1,2,3] && array[2,3,4];
+/// ----
+/// t
+///
+/// query T
+/// select array[1,2,3] && array[4,5,6];
+/// ----
+/// f
+///
+/// query T
+/// select array[1,2,NULL] && array[NULL,4,5];
+/// ----
+/// t
+///
+/// query T
+/// select null::int[] && array[1,2,3];
+/// ----
+/// NULL
+/// ```
+
+#[function("array_overlap(anyarray, anyarray) -> boolean")]
+fn array_overlap(left: ListRef<'_>, right: ListRef<'_>) -> bool {
+    let right_set: HashSet<_> = right.iter().collect();
+
+    for item in left.iter() {
+        if right_set.contains(&item) {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -122,5 +166,33 @@ mod tests {
             array_intersect(left.as_scalar_ref(), right.as_scalar_ref()),
             expected
         );
+    }
+
+    #[test]
+    fn test_array_overlap_true() {
+        let left = ListValue::from_iter([1, 2, 3]);
+        let right = ListValue::from_iter([2, 3, 4]);
+        assert!(array_overlap(left.as_scalar_ref(), right.as_scalar_ref()));
+    }
+
+    #[test]
+    fn test_array_overlap_false() {
+        let left = ListValue::from_iter([1, 2, 3]);
+        let right = ListValue::from_iter([4, 5, 6]);
+        assert!(!array_overlap(left.as_scalar_ref(), right.as_scalar_ref()));
+    }
+
+    #[test]
+    fn test_array_overlap_with_nulls() {
+        let left = ListValue::from_iter([Some(1), None, Some(2)]);
+        let right = ListValue::from_iter([None, Some(3), Some(4)]);
+        assert!(array_overlap(left.as_scalar_ref(), right.as_scalar_ref()));
+    }
+
+    #[test]
+    fn test_array_overlap_empty() {
+        let left = ListValue::from_iter(std::iter::empty::<i32>());
+        let right = ListValue::from_iter([1, 2, 3]);
+        assert!(!array_overlap(left.as_scalar_ref(), right.as_scalar_ref()));
     }
 }
