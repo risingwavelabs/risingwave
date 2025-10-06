@@ -27,7 +27,7 @@ use tokio_postgres::Client;
 
 use crate::parse_sql;
 use crate::sqlreduce::checker::Checker;
-use crate::sqlreduce::reducer::Reducer;
+use crate::sqlreduce::reducer::{Reducer, ReductionMode};
 use crate::utils::{create_file, read_file_contents, write_to_file};
 
 type Result<A> = anyhow::Result<A>;
