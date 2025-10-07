@@ -296,7 +296,7 @@ fn pgp_sym_decrypt_internal(
             &mut self,
             _pkesks: &[PKESK],
             skesks: &[SKESK],
-            _sym_algo: Option<openpgp::types::SymmetricAlgorithm>,
+            sym_algo: Option<openpgp::types::SymmetricAlgorithm>,
             mut decrypt: D,
         ) -> openpgp::Result<Option<openpgp::Fingerprint>>
         where
@@ -304,22 +304,16 @@ fn pgp_sym_decrypt_internal(
         {
             use openpgp::crypto::Password;
             
-            // Try password-based decryption
-            skesks
-                .iter()
-                .find_map(|skesk| {
-                    skesk
-                        .decrypt(&Password::from(self.password.as_str()))
-                        .ok()
-                        .and_then(|(algo, session_key)| {
-                            if decrypt(algo, &session_key) {
-                                Some(None)
-                            } else {
-                                None
-                            }
-                        })
-                })
-                .ok_or_else(|| anyhow::anyhow!("Decryption failed").into())
+            // Try password-based decryption with each SKESK packet
+            for skesk in skesks {
+                if let Ok((algo, session_key)) = skesk.decrypt(&Password::from(self.password.as_str())) {
+                    if decrypt(algo, &session_key) {
+                        return Ok(None);
+                    }
+                }
+            }
+            
+            Err(anyhow::anyhow!("Decryption failed").into())
         }
     }
     
@@ -469,40 +463,35 @@ fn pgp_pub_decrypt_internal(
             let policy = &StandardPolicy::new();
             
             // Try decrypting with each key
-            let result = pkesks
-                .iter()
-                .find_map(|pkesk| {
-                    self.cert
-                        .keys()
-                        .unencrypted_secret()
-                        .with_policy(policy, None)
-                        .supported()
-                        .for_transport_encryption()
-                        .find_map(|ka| {
-                            let mut keypair = if let Some(pwd) = &self.password {
-                                ka.key()
-                                    .clone()
-                                    .decrypt_secret(&Password::from(pwd.as_str()))
-                                    .ok()?
-                                    .into_keypair()
-                                    .ok()?
+            for pkesk in pkesks {
+                for ka in self.cert.keys().unencrypted_secret().with_policy(policy, None).supported().for_transport_encryption() {
+                    let mut keypair = if let Some(pwd) = &self.password {
+                        if let Ok(decrypted) = ka.key().clone().decrypt_secret(&Password::from(pwd.as_str())) {
+                            if let Ok(kp) = decrypted.into_keypair() {
+                                kp
                             } else {
-                                ka.key().clone().into_keypair().ok()?
-                            };
-                            
-                            pkesk
-                                .decrypt(&mut keypair, None)
-                                .and_then(|(algo, session_key)| {
-                                    if decrypt(algo, &session_key) {
-                                        Some(ka.fingerprint())
-                                    } else {
-                                        None
-                                    }
-                                })
-                        })
-                });
+                                continue;
+                            }
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        if let Ok(kp) = ka.key().clone().into_keypair() {
+                            kp
+                        } else {
+                            continue;
+                        }
+                    };
+                    
+                    if let Some((algo, session_key)) = pkesk.decrypt(&mut keypair, sym_algo) {
+                        if decrypt(algo, &session_key) {
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
             
-            result.map(Some).ok_or_else(|| anyhow::anyhow!("Decryption failed").into())
+            Err(anyhow::anyhow!("Decryption failed").into())
         }
     }
     
@@ -589,5 +578,43 @@ mod test {
 
         let mode_4 = "cbc";
         assert!(CipherConfig::parse_cipher_config(key, mode_4).is_err());
+    }
+
+    #[test]
+    fn test_pgp_sym_encrypt_decrypt() {
+        let data = b"hello world";
+        let password = "secret";
+
+        let encrypted = pgp_sym_encrypt(data, password).unwrap();
+        // Print encrypted data for debugging
+        println!("Encrypted data length: {}", encrypted.len());
+        println!("Encrypted data (first 100 bytes): {:?}", std::str::from_utf8(&encrypted[..std::cmp::min(100, encrypted.len())]));
+        
+        let decrypted = pgp_sym_decrypt(&encrypted, password).unwrap();
+        
+        assert_eq!(&*decrypted, data);
+    }
+
+    #[test]
+    fn test_pgp_sym_encrypt_decrypt_empty() {
+        let data = b"";
+        let password = "password";
+
+        let encrypted = pgp_sym_encrypt(data, password).unwrap();
+        let decrypted = pgp_sym_decrypt(&encrypted, password).unwrap();
+        
+        assert_eq!(&*decrypted, data);
+    }
+
+    #[test]
+    fn test_pgp_sym_decrypt_wrong_password() {
+        let data = b"test data";
+        let password = "correct_password";
+        let wrong_password = "wrong_password";
+
+        let encrypted = pgp_sym_encrypt(data, password).unwrap();
+        let result = pgp_sym_decrypt(&encrypted, wrong_password);
+        
+        assert!(result.is_err());
     }
 }
