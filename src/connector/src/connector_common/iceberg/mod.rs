@@ -172,8 +172,9 @@ impl IcebergCommon {
     }
 
     pub fn headers(&self) -> ConnectorResult<HashMap<String, String>> {
+        let mut headers = HashMap::new();
+        headers.insert("User-Agent".to_owned(), "RisingWave".to_owned());
         if let Some(header) = &self.header {
-            let mut headers = HashMap::new();
             for pair in header.split(';') {
                 let mut parts = pair.split('=');
                 if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
