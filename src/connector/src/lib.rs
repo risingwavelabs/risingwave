@@ -149,6 +149,24 @@ where
     }
 }
 
+pub(crate) fn deserialize_optional_duration_from_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let duration = parse_std(&s).map_err(|_| de::Error::invalid_value(
+            de::Unexpected::Str(&s),
+            &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
+        ))?;
+        Ok(Some(duration))
+    } else {
+        Ok(None)
+    }
+}
+
 pub(crate) fn deserialize_duration_from_string<'de, D>(
     deserializer: D,
 ) -> Result<Duration, D::Error>
