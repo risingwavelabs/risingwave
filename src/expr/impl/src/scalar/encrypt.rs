@@ -13,12 +13,21 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::io::Write;
 use std::sync::LazyLock;
 
 use openssl::error::ErrorStack;
 use openssl::symm::{Cipher, Crypter, Mode as CipherMode};
 use regex::Regex;
 use risingwave_expr::{ExprError, Result, function};
+use sequoia_openpgp as openpgp;
+use sequoia_openpgp::armor;
+use sequoia_openpgp::cert::Cert;
+use sequoia_openpgp::crypto::SessionKey;
+use sequoia_openpgp::packet::prelude::*;
+use sequoia_openpgp::parse::{Parse, stream::*};
+use sequoia_openpgp::policy::StandardPolicy;
+use sequoia_openpgp::serialize::stream::{*, Encryptor2};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Algorithm {
@@ -186,6 +195,329 @@ struct CryptographyError {
     pub stage: CryptographyStage,
     #[source]
     pub reason: openssl::error::ErrorStack,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum PgpError {
+    #[error("PGP error: {0}")]
+    Anyhow(#[from] anyhow::Error),
+    #[error("Invalid key format: {0}")]
+    InvalidKey(String),
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+}
+
+/// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
+/// pgp_sym_encrypt(data text, psw text) returns bytea
+/// pgp_sym_encrypt_bytea(data bytea, psw text) returns bytea
+#[function("pgp_sym_encrypt(bytea, varchar) -> bytea")]
+fn pgp_sym_encrypt(data: &[u8], password: &str) -> Result<Box<[u8]>, PgpError> {
+    pgp_sym_encrypt_internal(data, password, None)
+}
+
+#[function("pgp_sym_encrypt(bytea, varchar, varchar) -> bytea")]
+fn pgp_sym_encrypt_with_options(
+    data: &[u8],
+    password: &str,
+    options: &str,
+) -> Result<Box<[u8]>, PgpError> {
+    pgp_sym_encrypt_internal(data, password, Some(options))
+}
+
+fn pgp_sym_encrypt_internal(
+    data: &[u8],
+    password: &str,
+    _options: Option<&str>,
+) -> Result<Box<[u8]>, PgpError> {
+    use openpgp::crypto::Password;
+    use openpgp::types::SymmetricAlgorithm;
+
+    let mut sink = Vec::new();
+    
+    // Create armored writer
+    let message = armor::Writer::new(&mut sink, armor::Kind::Message)?;
+    
+    // Encrypt with password using SKESK (Symmetric-Key Encrypted Session Key)
+    let message = Encryptor2::with_passwords(
+        Message::new(message),
+        vec![Password::from(password)],
+    )
+    .symmetric_algo(SymmetricAlgorithm::AES128)
+    .build()?;
+    
+    // Write literal data packet
+    let mut message = LiteralWriter::new(message).build()?;
+    message.write_all(data)?;
+    message.finalize()?;
+    
+    Ok(sink.into_boxed_slice())
+}
+
+/// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
+/// pgp_sym_decrypt(msg bytea, psw text) returns text
+/// pgp_sym_decrypt_bytea(msg bytea, psw text) returns bytea
+#[function("pgp_sym_decrypt(bytea, varchar) -> bytea")]
+fn pgp_sym_decrypt(msg: &[u8], password: &str) -> Result<Box<[u8]>, PgpError> {
+    pgp_sym_decrypt_internal(msg, password, None)
+}
+
+#[function("pgp_sym_decrypt(bytea, varchar, varchar) -> bytea")]
+fn pgp_sym_decrypt_with_options(
+    msg: &[u8],
+    password: &str,
+    options: &str,
+) -> Result<Box<[u8]>, PgpError> {
+    pgp_sym_decrypt_internal(msg, password, Some(options))
+}
+
+fn pgp_sym_decrypt_internal(
+    msg: &[u8],
+    password: &str,
+    _options: Option<&str>,
+) -> Result<Box<[u8]>, PgpError> {
+    let policy = &StandardPolicy::new();
+    
+    struct Helper {
+        password: String,
+    }
+    
+    impl VerificationHelper for Helper {
+        fn get_certs(&mut self, _ids: &[openpgp::KeyHandle]) -> openpgp::Result<Vec<Cert>> {
+            Ok(Vec::new())
+        }
+        
+        fn check(&mut self, _structure: MessageStructure<'_>) -> openpgp::Result<()> {
+            Ok(())
+        }
+    }
+    
+    impl DecryptionHelper for Helper {
+        fn decrypt<D>(
+            &mut self,
+            _pkesks: &[PKESK],
+            skesks: &[SKESK],
+            _sym_algo: Option<openpgp::types::SymmetricAlgorithm>,
+            mut decrypt: D,
+        ) -> openpgp::Result<Option<openpgp::Fingerprint>>
+        where
+            D: FnMut(openpgp::types::SymmetricAlgorithm, &SessionKey) -> bool,
+        {
+            use openpgp::crypto::Password;
+            
+            // Try password-based decryption
+            skesks
+                .iter()
+                .find_map(|skesk| {
+                    skesk
+                        .decrypt(&Password::from(self.password.as_str()))
+                        .ok()
+                        .and_then(|(algo, session_key)| {
+                            if decrypt(algo, &session_key) {
+                                Some(None)
+                            } else {
+                                None
+                            }
+                        })
+                })
+                .ok_or_else(|| anyhow::anyhow!("Decryption failed").into())
+        }
+    }
+    
+    let helper = Helper {
+        password: password.to_string(),
+    };
+    
+    let mut decryptor = DecryptorBuilder::from_bytes(msg)?
+        .with_policy(policy, None, helper)?;
+    
+    let mut plaintext = Vec::new();
+    std::io::copy(&mut decryptor, &mut plaintext)?;
+    
+    Ok(plaintext.into_boxed_slice())
+}
+
+/// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
+/// pgp_pub_encrypt(data text, key bytea) returns bytea
+/// pgp_pub_encrypt_bytea(data bytea, key bytea) returns bytea
+#[function("pgp_pub_encrypt(bytea, bytea) -> bytea")]
+fn pgp_pub_encrypt(data: &[u8], key: &[u8]) -> Result<Box<[u8]>, PgpError> {
+    pgp_pub_encrypt_internal(data, key, None)
+}
+
+#[function("pgp_pub_encrypt(bytea, bytea, varchar) -> bytea")]
+fn pgp_pub_encrypt_with_options(
+    data: &[u8],
+    key: &[u8],
+    options: &str,
+) -> Result<Box<[u8]>, PgpError> {
+    pgp_pub_encrypt_internal(data, key, Some(options))
+}
+
+fn pgp_pub_encrypt_internal(
+    data: &[u8],
+    key: &[u8],
+    _options: Option<&str>,
+) -> Result<Box<[u8]>, PgpError> {
+    use openpgp::types::SymmetricAlgorithm;
+    
+    let policy = &StandardPolicy::new();
+    
+    // Parse the certificate (public key)
+    let cert = Cert::from_bytes(key)?;
+    
+    // Get encryption-capable keys
+    let recipients = cert
+        .keys()
+        .with_policy(policy, None)
+        .supported()
+        .alive()
+        .revoked(false)
+        .for_transport_encryption()
+        .map(|ka| ka.key())
+        .collect::<Vec<_>>();
+    
+    if recipients.is_empty() {
+        return Err(PgpError::InvalidKey(
+            "No valid encryption keys found".to_string(),
+        ));
+    }
+    
+    let mut sink = Vec::new();
+    
+    // Create armored writer
+    let message = armor::Writer::new(&mut sink, armor::Kind::Message)?;
+    
+    // Encrypt with public key
+    let message = Encryptor2::for_recipients(Message::new(message), recipients)
+        .symmetric_algo(SymmetricAlgorithm::AES128)
+        .build()?;
+    
+    // Write literal data packet
+    let mut message = LiteralWriter::new(message).build()?;
+    message.write_all(data)?;
+    message.finalize()?;
+    
+    Ok(sink.into_boxed_slice())
+}
+
+/// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
+/// pgp_pub_decrypt(msg bytea, key bytea) returns text
+/// pgp_pub_decrypt_bytea(msg bytea, key bytea) returns bytea
+#[function("pgp_pub_decrypt(bytea, bytea) -> bytea")]
+fn pgp_pub_decrypt(msg: &[u8], key: &[u8]) -> Result<Box<[u8]>, PgpError> {
+    pgp_pub_decrypt_internal(msg, key, None, None)
+}
+
+#[function("pgp_pub_decrypt(bytea, bytea, varchar) -> bytea")]
+fn pgp_pub_decrypt_with_password(
+    msg: &[u8],
+    key: &[u8],
+    password: &str,
+) -> Result<Box<[u8]>, PgpError> {
+    pgp_pub_decrypt_internal(msg, key, Some(password), None)
+}
+
+#[function("pgp_pub_decrypt(bytea, bytea, varchar, varchar) -> bytea")]
+fn pgp_pub_decrypt_with_options(
+    msg: &[u8],
+    key: &[u8],
+    password: &str,
+    options: &str,
+) -> Result<Box<[u8]>, PgpError> {
+    pgp_pub_decrypt_internal(msg, key, Some(password), Some(options))
+}
+
+fn pgp_pub_decrypt_internal(
+    msg: &[u8],
+    key: &[u8],
+    password: Option<&str>,
+    _options: Option<&str>,
+) -> Result<Box<[u8]>, PgpError> {
+    let policy = &StandardPolicy::new();
+    
+    // Parse the certificate (secret key)
+    let cert = Cert::from_bytes(key)?;
+    
+    struct Helper {
+        cert: Cert,
+        password: Option<String>,
+    }
+    
+    impl VerificationHelper for Helper {
+        fn get_certs(&mut self, _ids: &[openpgp::KeyHandle]) -> openpgp::Result<Vec<Cert>> {
+            Ok(vec![self.cert.clone()])
+        }
+        
+        fn check(&mut self, _structure: MessageStructure<'_>) -> openpgp::Result<()> {
+            Ok(())
+        }
+    }
+    
+    impl DecryptionHelper for Helper {
+        fn decrypt<D>(
+            &mut self,
+            pkesks: &[PKESK],
+            _skesks: &[SKESK],
+            _sym_algo: Option<openpgp::types::SymmetricAlgorithm>,
+            mut decrypt: D,
+        ) -> openpgp::Result<Option<openpgp::Fingerprint>>
+        where
+            D: FnMut(openpgp::types::SymmetricAlgorithm, &SessionKey) -> bool,
+        {
+            use openpgp::crypto::Password;
+            
+            let policy = &StandardPolicy::new();
+            
+            // Try decrypting with each key
+            let result = pkesks
+                .iter()
+                .find_map(|pkesk| {
+                    self.cert
+                        .keys()
+                        .unencrypted_secret()
+                        .with_policy(policy, None)
+                        .supported()
+                        .for_transport_encryption()
+                        .find_map(|ka| {
+                            let mut keypair = if let Some(pwd) = &self.password {
+                                ka.key()
+                                    .clone()
+                                    .decrypt_secret(&Password::from(pwd.as_str()))
+                                    .ok()?
+                                    .into_keypair()
+                                    .ok()?
+                            } else {
+                                ka.key().clone().into_keypair().ok()?
+                            };
+                            
+                            pkesk
+                                .decrypt(&mut keypair, None)
+                                .and_then(|(algo, session_key)| {
+                                    if decrypt(algo, &session_key) {
+                                        Some(ka.fingerprint())
+                                    } else {
+                                        None
+                                    }
+                                })
+                        })
+                });
+            
+            result.map(Some).ok_or_else(|| anyhow::anyhow!("Decryption failed").into())
+        }
+    }
+    
+    let helper = Helper {
+        cert,
+        password: password.map(|s| s.to_string()),
+    };
+    
+    let mut decryptor = DecryptorBuilder::from_bytes(msg)?
+        .with_policy(policy, None, helper)?;
+    
+    let mut plaintext = Vec::new();
+    std::io::copy(&mut decryptor, &mut plaintext)?;
+    
+    Ok(plaintext.into_boxed_slice())
 }
 
 #[cfg(test)]

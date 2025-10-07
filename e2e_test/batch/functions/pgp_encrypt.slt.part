@@ -1,0 +1,25 @@
+# PGP encryption/decryption functions tests
+# Based on PostgreSQL pgcrypto tests
+
+# Test pgp_sym_encrypt and pgp_sym_decrypt with simple data
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('hello world'::bytea, 'secret'), 'secret');
+----
+\x68656c6c6f20776f726c64
+
+# Test with empty string
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt(''::bytea, 'password'), 'password');
+----
+\x
+
+# Test with binary data
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('\x0001020304'::bytea, 'mypass'), 'mypass');
+----
+\x0001020304
+
+# Test wrong password should fail
+statement error
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('data'::bytea, 'pass1'), 'pass2');
+

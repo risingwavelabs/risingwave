@@ -47,6 +47,7 @@ num-traits = "0.2"
 openssl = "0.10.72"
 rand = { workspace = true }
 regex = { workspace = true }
+sequoia-openpgp = { version = "1.21", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_expr = { workspace = true }
