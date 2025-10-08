@@ -186,7 +186,6 @@ impl AstNode {
                 (Expr::Case { else_result, .. }, "else_result") => {
                     else_result.as_ref().map(|e| AstNode::Expr(*e.clone()))
                 }
-                // 关键：添加对EXISTS和Subquery的支持
                 (Expr::Exists(subquery), "subquery") => Some(AstNode::Query(subquery.clone())),
                 (Expr::Subquery(subquery), "subquery") => Some(AstNode::Query(subquery.clone())),
                 (Expr::Function(_func), "name") => None, // ObjectName is complex
@@ -917,7 +916,6 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
                     paths.push(else_path);
                 }
             }
-            // 关键：添加对EXISTS和Subquery的路径枚举
             Expr::Exists(_) => {
                 explore_child_path(node, "subquery", &current_path, &mut paths);
             }
