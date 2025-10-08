@@ -32,6 +32,61 @@ AzblobProperties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+BatchBigQueryProperties:
+  fields:
+  - name: common
+    field_type: BigQueryCommon
+    required: true
+  - name: aws.region
+    field_type: String
+    required: false
+    alias:
+    - region
+    - s3.region
+  - name: aws.endpoint_url
+    field_type: String
+    required: false
+    alias:
+    - endpoint_url
+    - endpoint
+    - s3.endpoint
+  - name: aws.credentials.access_key_id
+    field_type: String
+    required: false
+    alias:
+    - access_key
+    - s3.access.key
+  - name: aws.credentials.secret_access_key
+    field_type: String
+    required: false
+    alias:
+    - secret_key
+    - s3.secret.key
+  - name: aws.credentials.session_token
+    field_type: String
+    required: false
+    alias:
+    - session_token
+  - name: aws.credentials.role.arn
+    field_type: String
+    comments: IAM role
+    required: false
+    alias:
+    - arn
+  - name: aws.credentials.role.external_id
+    field_type: String
+    comments: external ID in IAM role trust policy
+    required: false
+    alias:
+    - external_id
+  - name: aws.profile
+    field_type: String
+    required: false
+    alias:
+    - profile
+  - name: aws.msk.signer_timeout_sec
+    field_type: u64
+    required: false
 BatchPosixFsProperties:
   fields:
   - name: batch_posix_fs.root

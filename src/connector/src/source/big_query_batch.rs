@@ -13,15 +13,19 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use async_trait::async_trait;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use gcp_bigquery_client::Client;
+use gcp_bigquery_client::model::get_query_results_parameters::GetQueryResultsParameters;
 use gcp_bigquery_client::model::query_request::QueryRequest;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::JsonbVal;
+use risingwave_common::util::iter_util::ZipEqFast;
 use serde::{Deserialize, Serialize};
 use with_options::WithOptions;
 
@@ -32,12 +36,14 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig, SpecificParserConf
 use crate::sink::big_query::BigQueryCommon;
 use crate::source::batch::BatchSourceSplit;
 use crate::source::{
-    BoxSourceChunkStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceMessage,
-    SourceMeta, SourceProperties, SplitEnumerator, SplitId, SplitMetaData, SplitReader,
-    UnknownFields,
+    BoxSourceChunkStream, BoxSourceMessageStream, Column, SourceContextRef,
+    SourceEnumeratorContextRef, SourceMessage, SourceMeta, SourceProperties, SplitEnumerator,
+    SplitId, SplitMetaData, SplitReader, UnknownFields,
 };
 
 pub const BATCH_BIGQUERY_CONNECTOR: &str = "batch_bigquery";
+
+const BATCH_BIGQUERY_CONNECTOR_PAGE_SIZE: i32 = 1000;
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct BatchBigQueryProperties {
@@ -200,6 +206,100 @@ impl SplitReader for BatchBigQueryReader {
     }
 }
 
+#[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
+async fn build_bigquery_stream(
+    client: Client,
+    project: String,
+    split_id: Arc<str>,
+    mut query: QueryRequest,
+) {
+    let _query_str = query.query.clone();
+    // get metadata only in the call
+    query.max_results = Some(0);
+
+    // get schema and create job
+    let result_set = client.job().query(&project, query).await?;
+
+    let Some(job_ref) = result_set.query_response().job_reference.clone() else {
+        return Err(crate::error::ConnectorError::from(anyhow::anyhow!(
+            "Failed to get job reference"
+        )));
+    };
+    let Some(job_id) = job_ref.job_id else {
+        return Err(crate::error::ConnectorError::from(anyhow::anyhow!(
+            "Failed to get job id"
+        )));
+    };
+
+    let fields = {
+        if let Some(schema) = result_set.query_response().schema.clone()
+            && let Some(fields) = schema.fields
+        {
+            fields
+        } else {
+            return Err(crate::error::ConnectorError::from(anyhow::anyhow!(
+                "Failed to get result schema from BigQuery"
+            )));
+        }
+    };
+
+    drop(result_set);
+
+    let mut offset: u64 = 0;
+
+    let mut page_token: Option<String> = None;
+    let mut get_query_results_params = GetQueryResultsParameters {
+        max_results: Some(BATCH_BIGQUERY_CONNECTOR_PAGE_SIZE),
+        ..Default::default()
+    };
+
+    'page_loop: loop {
+        get_query_results_params.page_token = page_token.take();
+        let result_rows_page = client
+            .job()
+            .get_query_results(&project, &job_id, get_query_results_params.clone())
+            .await?;
+        page_token = result_rows_page.page_token.clone();
+
+        let mut source_message_batch: Vec<SourceMessage>;
+        if let Some(rows) = result_rows_page.rows {
+            source_message_batch = Vec::with_capacity(rows.len());
+            for row in rows {
+                let mut json_obj = serde_json::Map::new();
+                if let Some(columns) = row.columns {
+                    assert_eq!(columns.len(), fields.len());
+                    columns
+                        .into_iter()
+                        .zip_eq_fast(fields.iter())
+                        .for_each(|(column, field)| {
+                            json_obj.insert(
+                                field.name.clone(),
+                                column.value.unwrap_or(serde_json::Value::Null),
+                            );
+                        })
+                } else {
+                    unreachable!();
+                }
+
+                source_message_batch.push(SourceMessage {
+                    key: None,
+                    payload: Some(serde_json::to_vec(&json_obj).unwrap()),
+                    offset: offset.to_string(),
+                    split_id: split_id.clone(),
+                    meta: SourceMeta::Empty,
+                });
+                offset += 1;
+            }
+
+            yield source_message_batch;
+        }
+
+        if page_token.is_none() {
+            break 'page_loop;
+        }
+    }
+}
+
 impl BatchBigQueryReader {
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_stream_inner(self) {
@@ -207,74 +307,27 @@ impl BatchBigQueryReader {
             let client = self.build_client().await?;
 
             let query_request = QueryRequest::new(split.query.clone());
-            let mut result_set = client
-                .job()
-                .query(&self.properties.common.project, query_request)
-                .await
-                .with_context(|| format!("Failed to execute BigQuery query: {}", split.query))?;
-            let mut row_count = 0;
-            while result_set.next_row() {
-                // Convert BigQuery row to JSON
-                let mut row_json = serde_json::Map::new();
+            let source_message_stream: BoxSourceMessageStream = build_bigquery_stream(
+                client,
+                self.properties.common.project.clone(),
+                split.id(),
+                query_request,
+            )
+            .boxed();
 
-                // Get all column names from the schema
-                let query_response = result_set.query_response();
-                if let Some(schema) = &query_response.schema
-                    && let Some(fields) = &schema.fields
-                {
-                    for field in fields {
-                        let value = match result_set.get_json_value_by_name(&field.name) {
-                            Ok(Some(val)) => val,
-                            Ok(None) => serde_json::Value::Null,
-                            Err(e) => {
-                                return Err(anyhow!(
-                                    "Failed to get BigQuery column value for '{}': {}",
-                                    field.name,
-                                    e
-                                )
-                                .into());
-                            }
-                        };
-                        row_json.insert(field.name.clone(), value);
-                    }
-                }
+            // The bigquery source is FORMAT NONE ENCODE NONE.
+            // Here we just create a json parser to convert json value to chunk.
+            let mut parser_config = self.parser_config.clone();
+            parser_config.specific = SpecificParserConfig::DEFAULT_PLAIN_JSON;
+            // Parse the content
+            let parser =
+                ByteStreamSourceParserImpl::create(parser_config, self.source_ctx.clone()).await?;
+            let chunk_stream = parser.parse_stream(source_message_stream);
 
-                let json_string = serde_json::to_string(&row_json)
-                    .with_context(|| "Failed to serialize BigQuery row to JSON")?;
-
-                // Create a message for each row
-                let message = SourceMessage {
-                    key: None,
-                    payload: Some(json_string.into_bytes()),
-                    offset: row_count.to_string(),
-                    split_id: split.id(),
-                    meta: SourceMeta::Empty,
-                };
-
-                // The bigquery source is FORMAT NONE ENCODE NONE.
-                // Here we just create a json parser to convert json value to chunk.
-                let mut parser_config = self.parser_config.clone();
-                parser_config.specific = SpecificParserConfig::DEFAULT_PLAIN_JSON;
-                // Parse the content
-                let parser =
-                    ByteStreamSourceParserImpl::create(parser_config, self.source_ctx.clone())
-                        .await?;
-                let chunk_stream = parser
-                    .parse_stream(Box::pin(futures::stream::once(async { Ok(vec![message]) })));
-
-                #[for_await]
-                for chunk in chunk_stream {
-                    yield chunk?;
-                }
-
-                row_count += 1;
+            #[for_await]
+            for chunk in chunk_stream {
+                yield chunk?;
             }
-
-            tracing::info!(
-                "BatchBigQuery finished reading {} rows from query: {}",
-                row_count,
-                split.query
-            );
         }
     }
 
