@@ -71,8 +71,8 @@ impl Checker {
         self.replay_setup().await;
         let new_result = run_query(&mut self.client, new, &self.restore_cmd).await;
 
-        tracing::info!("old_result: {:?}", old_result);
-        tracing::info!("new_result: {:?}", new_result);
+        tracing::debug!("old_result: {:?}", old_result);
+        tracing::debug!("new_result: {:?}", new_result);
 
         old_result == new_result
     }
@@ -107,7 +107,7 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
         Ok(_) => (true, String::new()),
         Err(e) => {
             if e.is_closed() {
-                tracing::error!("Frontend panic detected, restoring with `{restore_cmd}`...");
+                tracing::error!("Frontend panic detected, restoring with `{restore_cmd}`");
 
                 let status = Command::new("sh").arg("-c").arg(restore_cmd).status();
                 match status {
@@ -151,14 +151,14 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
                     }
                 }
             } else if e.as_db_error().is_some() {
-                tracing::error!("Compute panic detected, waiting for recovery...");
+                tracing::error!("Compute panic detected, waiting for recovery");
                 if let Err(err) = wait_for_recovery(client).await {
                     tracing::error!("RW failed to recover after compute panic: {:?}", err);
                 } else {
                     tracing::info!("RW recovery complete (compute case)");
                 }
             } else {
-                tracing::error!("Other panics detected...");
+                tracing::error!("Other panics detected");
             }
 
             (false, e.to_string())

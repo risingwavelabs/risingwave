@@ -21,21 +21,306 @@ use std::fmt;
 
 use risingwave_sqlparser::ast::*;
 
+/// Represents all possible AST field names that can be navigated.
+/// This provides compile-time safety for field access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AstField {
+    // Statement fields
+    Query,
+    Name,
+    Columns,
+
+    // Query fields
+    Body,
+    With,
+    OrderBy,
+    Limit,
+    Offset,
+
+    // Select fields
+    Projection,
+    Selection,
+    From,
+    GroupBy,
+    Having,
+    Distinct,
+
+    // Expression fields
+    Left,
+    Right,
+    Operand,
+    ElseResult,
+    Subquery,
+    Inner,
+    Expr,
+    Low,
+    High,
+
+    // TableWithJoins fields
+    Relation,
+    Joins,
+
+    // Join fields
+    JoinOperator,
+
+    // SelectItem fields
+    Alias,
+
+    // OrderByExpr fields
+    Asc,
+    NullsFirst,
+
+    // With clause fields
+    CteTable,
+    Recursive,
+
+    // CTE fields
+    CteInner,
+
+    // TableFactor fields
+    Lateral,
+}
+
+impl AstField {
+    /// Convert `AstField` to string for compatibility
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            // Statement fields
+            AstField::Query => "query",
+            AstField::Name => "name",
+            AstField::Columns => "columns",
+
+            // Query fields
+            AstField::Body => "body",
+            AstField::With => "with",
+            AstField::OrderBy => "order_by",
+            AstField::Limit => "limit",
+            AstField::Offset => "offset",
+
+            // Select fields
+            AstField::Projection => "projection",
+            AstField::Selection => "selection",
+            AstField::From => "from",
+            AstField::GroupBy => "group_by",
+            AstField::Having => "having",
+            AstField::Distinct => "distinct",
+
+            // Expression fields
+            AstField::Left => "left",
+            AstField::Right => "right",
+            AstField::Operand => "operand",
+            AstField::ElseResult => "else_result",
+            AstField::Subquery => "subquery",
+            AstField::Inner => "inner",
+            AstField::Expr => "expr",
+            AstField::Low => "low",
+            AstField::High => "high",
+
+            // TableWithJoins fields
+            AstField::Relation => "relation",
+            AstField::Joins => "joins",
+
+            // Join fields
+            AstField::JoinOperator => "join_operator",
+
+            // SelectItem fields
+            AstField::Alias => "alias",
+
+            // OrderByExpr fields
+            AstField::Asc => "asc",
+            AstField::NullsFirst => "nulls_first",
+
+            // With clause fields
+            AstField::CteTable => "cte_tables",
+            AstField::Recursive => "recursive",
+
+            // CTE fields
+            AstField::CteInner => "cte_inner",
+
+            // TableFactor fields
+            AstField::Lateral => "lateral",
+        }
+    }
+
+    /// Create `AstField` from string for backward compatibility
+    pub fn from_string(s: &str) -> Option<Self> {
+        match s {
+            // Statement fields
+            "query" => Some(AstField::Query),
+            "name" => Some(AstField::Name),
+            "columns" => Some(AstField::Columns),
+
+            // Query fields
+            "body" => Some(AstField::Body),
+            "with" => Some(AstField::With),
+            "order_by" => Some(AstField::OrderBy),
+            "limit" => Some(AstField::Limit),
+            "offset" => Some(AstField::Offset),
+
+            // Select fields
+            "projection" => Some(AstField::Projection),
+            "selection" => Some(AstField::Selection),
+            "from" => Some(AstField::From),
+            "group_by" => Some(AstField::GroupBy),
+            "having" => Some(AstField::Having),
+            "distinct" => Some(AstField::Distinct),
+
+            // Expression fields
+            "left" => Some(AstField::Left),
+            "right" => Some(AstField::Right),
+            "operand" => Some(AstField::Operand),
+            "else_result" => Some(AstField::ElseResult),
+            "subquery" => Some(AstField::Subquery),
+            "inner" => Some(AstField::Inner),
+            "expr" => Some(AstField::Expr),
+            "low" => Some(AstField::Low),
+            "high" => Some(AstField::High),
+
+            // TableWithJoins fields
+            "relation" => Some(AstField::Relation),
+            "joins" => Some(AstField::Joins),
+
+            // Join fields
+            "join_operator" => Some(AstField::JoinOperator),
+
+            // SelectItem fields
+            "alias" => Some(AstField::Alias),
+
+            // OrderByExpr fields
+            "asc" => Some(AstField::Asc),
+            "nulls_first" => Some(AstField::NullsFirst),
+
+            // With clause fields
+            "cte_tables" => Some(AstField::CteTable),
+            "recursive" => Some(AstField::Recursive),
+
+            // CTE fields
+            "cte_inner" => Some(AstField::CteInner),
+
+            // TableFactor fields
+            "lateral" => Some(AstField::Lateral),
+
+            _ => None,
+        }
+    }
+}
+
 /// Represents a path component in an AST navigation path.
 /// Components that make up a path through the AST.
 /// Enables precise navigation to any AST node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathComponent {
-    /// Field access by name (e.g., "selection", "projection")
-    Field(String),
+    /// Field access by AST field enum (type-safe)
+    Field(AstField),
     /// Array/Vec index access
     Index(usize),
+}
+
+impl PathComponent {
+    /// Create a Field `PathComponent` from `AstField` enum (preferred)
+    pub fn field(field: AstField) -> Self {
+        PathComponent::Field(field)
+    }
+
+    /// Create a Field `PathComponent` from string (for backward compatibility)
+    pub fn field_from_str(field_name: &str) -> Option<Self> {
+        AstField::from_string(field_name).map(PathComponent::Field)
+    }
+
+    /// Get the field name as string for compatibility
+    pub fn field_name(&self) -> Option<&'static str> {
+        match self {
+            PathComponent::Field(field) => Some(field.as_str()),
+            PathComponent::Index(_) => None,
+        }
+    }
+
+    /// Get the `AstField` enum if this is a field
+    pub fn as_ast_field(&self) -> Option<&AstField> {
+        match self {
+            PathComponent::Field(field) => Some(field),
+            PathComponent::Index(_) => None,
+        }
+    }
+
+    // Convenience constructors for common fields
+    pub fn query() -> Self {
+        Self::field(AstField::Query)
+    }
+
+    pub fn body() -> Self {
+        Self::field(AstField::Body)
+    }
+
+    pub fn selection() -> Self {
+        Self::field(AstField::Selection)
+    }
+
+    pub fn projection() -> Self {
+        Self::field(AstField::Projection)
+    }
+
+    pub fn from_clause() -> Self {
+        Self::field(AstField::From)
+    }
+
+    pub fn group_by() -> Self {
+        Self::field(AstField::GroupBy)
+    }
+
+    pub fn having() -> Self {
+        Self::field(AstField::Having)
+    }
+
+    pub fn with_clause() -> Self {
+        Self::field(AstField::With)
+    }
+
+    pub fn order_by() -> Self {
+        Self::field(AstField::OrderBy)
+    }
+
+    pub fn left() -> Self {
+        Self::field(AstField::Left)
+    }
+
+    pub fn right() -> Self {
+        Self::field(AstField::Right)
+    }
+
+    pub fn operand() -> Self {
+        Self::field(AstField::Operand)
+    }
+
+    pub fn else_result() -> Self {
+        Self::field(AstField::ElseResult)
+    }
+
+    pub fn relation() -> Self {
+        Self::field(AstField::Relation)
+    }
+
+    pub fn joins() -> Self {
+        Self::field(AstField::Joins)
+    }
+
+    pub fn subquery() -> Self {
+        Self::field(AstField::Subquery)
+    }
+
+    pub fn cte_tables() -> Self {
+        Self::field(AstField::CteTable)
+    }
+
+    pub fn cte_inner() -> Self {
+        Self::field(AstField::CteInner)
+    }
 }
 
 impl fmt::Display for PathComponent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PathComponent::Field(name) => write!(f, ".{}", name),
+            PathComponent::Field(field) => write!(f, ".{}", field.as_str()),
             PathComponent::Index(idx) => write!(f, "[{}]", idx),
         }
     }
@@ -81,7 +366,7 @@ impl AstNode {
         match (self, component) {
             // Statement navigation
             (AstNode::Statement(Statement::Query(query)), PathComponent::Field(field))
-                if field == "query" =>
+                if *field == AstField::Query =>
             {
                 Some(AstNode::Query(query.clone()))
             }
@@ -89,7 +374,7 @@ impl AstNode {
             (
                 AstNode::Statement(Statement::CreateView { query, .. }),
                 PathComponent::Field(field),
-            ) if field == "query" => Some(AstNode::Query(query.clone())),
+            ) if *field == AstField::Query => Some(AstNode::Query(query.clone())),
 
             // More CreateView field access
             (
@@ -99,15 +384,15 @@ impl AstNode {
                     ..
                 }),
                 PathComponent::Field(field),
-            ) => match field.as_str() {
-                "name" => None,    // ObjectName is complex, skip for now
-                "columns" => None, // Column list is complex, skip for now
+            ) => match field {
+                AstField::Name => None,    // ObjectName is complex, skip for now
+                AstField::Columns => None, // Column list is complex, skip for now
                 _ => None,
             },
 
             // Query navigation - enhanced
-            (AstNode::Query(query), PathComponent::Field(field)) => match field.as_str() {
-                "body" => match &query.body {
+            (AstNode::Query(query), PathComponent::Field(field)) => match field {
+                AstField::Body => match &query.body {
                     SetExpr::Select(select) => Some(AstNode::Select(select.clone())),
                     SetExpr::Query(subquery) => Some(AstNode::Query(subquery.clone())),
                     SetExpr::SetOperation { left, .. } => {
@@ -120,45 +405,45 @@ impl AstNode {
                     }
                     _ => None,
                 },
-                "with" => query.with.as_ref().map(|w| AstNode::With(w.clone())),
-                "order_by" => {
+                AstField::With => query.with.as_ref().map(|w| AstNode::With(w.clone())),
+                AstField::OrderBy => {
                     if query.order_by.is_empty() {
                         None
                     } else {
                         Some(AstNode::OrderByList(query.order_by.clone()))
                     }
                 }
-                "limit" => query.limit.as_ref().map(|e| AstNode::Expr(e.clone())),
-                "offset" => None, // offset is Option<String>, not navigable as expression
+                AstField::Limit => query.limit.as_ref().map(|e| AstNode::Expr(e.clone())),
+                AstField::Offset => None, // offset is Option<String>, not navigable as expression
                 _ => None,
             },
 
             // Select navigation - enhanced
-            (AstNode::Select(select), PathComponent::Field(field)) => match field.as_str() {
-                "projection" => {
+            (AstNode::Select(select), PathComponent::Field(field)) => match field {
+                AstField::Projection => {
                     if select.projection.is_empty() {
                         None
                     } else {
                         Some(AstNode::SelectItemList(select.projection.clone()))
                     }
                 }
-                "selection" => select.selection.as_ref().map(|e| AstNode::Expr(e.clone())),
-                "from" => {
+                AstField::Selection => select.selection.as_ref().map(|e| AstNode::Expr(e.clone())),
+                AstField::From => {
                     if select.from.is_empty() {
                         None
                     } else {
                         Some(AstNode::TableList(select.from.clone()))
                     }
                 }
-                "group_by" => {
+                AstField::GroupBy => {
                     if select.group_by.is_empty() {
                         None
                     } else {
                         Some(AstNode::ExprList(select.group_by.clone()))
                     }
                 }
-                "having" => select.having.as_ref().map(|e| AstNode::Expr(e.clone())),
-                "distinct" => None, // Distinct is an enum, handle separately if needed
+                AstField::Having => select.having.as_ref().map(|e| AstNode::Expr(e.clone())),
+                AstField::Distinct => None, // Distinct is an enum, handle separately if needed
                 _ => None,
             },
 
@@ -177,23 +462,29 @@ impl AstNode {
                 .map(|order| AstNode::OrderByExpr(order.clone())),
 
             // Expression navigation (for pullup operations) - enhanced
-            (AstNode::Expr(expr), PathComponent::Field(field)) => match (expr, field.as_str()) {
-                (Expr::BinaryOp { left, .. }, "left") => Some(AstNode::Expr(*left.clone())),
-                (Expr::BinaryOp { right, .. }, "right") => Some(AstNode::Expr(*right.clone())),
-                (Expr::Case { operand, .. }, "operand") => {
+            (AstNode::Expr(expr), PathComponent::Field(field)) => match (expr, field) {
+                (Expr::BinaryOp { left, .. }, AstField::Left) => Some(AstNode::Expr(*left.clone())),
+                (Expr::BinaryOp { right, .. }, AstField::Right) => {
+                    Some(AstNode::Expr(*right.clone()))
+                }
+                (Expr::Case { operand, .. }, AstField::Operand) => {
                     operand.as_ref().map(|e| AstNode::Expr(*e.clone()))
                 }
-                (Expr::Case { else_result, .. }, "else_result") => {
+                (Expr::Case { else_result, .. }, AstField::ElseResult) => {
                     else_result.as_ref().map(|e| AstNode::Expr(*e.clone()))
                 }
-                (Expr::Exists(subquery), "subquery") => Some(AstNode::Query(subquery.clone())),
-                (Expr::Subquery(subquery), "subquery") => Some(AstNode::Query(subquery.clone())),
-                (Expr::Function(_func), "name") => None, // ObjectName is complex
-                (Expr::Nested(inner), "inner") => Some(AstNode::Expr(*inner.clone())),
-                (Expr::UnaryOp { expr, .. }, "expr") => Some(AstNode::Expr(*expr.clone())),
-                (Expr::Cast { expr, .. }, "expr") => Some(AstNode::Expr(*expr.clone())),
-                (Expr::IsNull(expr), "expr") => Some(AstNode::Expr(*expr.clone())),
-                (Expr::IsNotNull(expr), "expr") => Some(AstNode::Expr(*expr.clone())),
+                (Expr::Exists(subquery), AstField::Subquery) => {
+                    Some(AstNode::Query(subquery.clone()))
+                }
+                (Expr::Subquery(subquery), AstField::Subquery) => {
+                    Some(AstNode::Query(subquery.clone()))
+                }
+                (Expr::Function(_func), AstField::Name) => None, // ObjectName is complex
+                (Expr::Nested(inner), AstField::Inner) => Some(AstNode::Expr(*inner.clone())),
+                (Expr::UnaryOp { expr, .. }, AstField::Expr) => Some(AstNode::Expr(*expr.clone())),
+                (Expr::Cast { expr, .. }, AstField::Expr) => Some(AstNode::Expr(*expr.clone())),
+                (Expr::IsNull(expr), AstField::Expr) => Some(AstNode::Expr(*expr.clone())),
+                (Expr::IsNotNull(expr), AstField::Expr) => Some(AstNode::Expr(*expr.clone())),
                 (
                     Expr::Between {
                         expr,
@@ -201,40 +492,39 @@ impl AstNode {
                         high: _,
                         ..
                     },
-                    "expr",
+                    AstField::Expr,
                 ) => Some(AstNode::Expr(*expr.clone())),
-                (Expr::Between { low, .. }, "low") => Some(AstNode::Expr(*low.clone())),
-                (Expr::Between { high, .. }, "high") => Some(AstNode::Expr(*high.clone())),
+                (Expr::Between { low, .. }, AstField::Low) => Some(AstNode::Expr(*low.clone())),
+                (Expr::Between { high, .. }, AstField::High) => Some(AstNode::Expr(*high.clone())),
                 _ => None,
             },
 
             // TableWithJoins navigation
-            (AstNode::TableWithJoins(table_with_joins), PathComponent::Field(field)) => {
-                match field.as_str() {
-                    "relation" => Some(AstNode::TableFactor(table_with_joins.relation.clone())),
-                    "joins" => {
-                        if !table_with_joins.joins.is_empty() {
-                            Some(AstNode::JoinList(table_with_joins.joins.clone()))
-                        } else {
-                            None
-                        }
+            (AstNode::TableWithJoins(table_with_joins), PathComponent::Field(field)) => match field
+            {
+                AstField::Relation => Some(AstNode::TableFactor(table_with_joins.relation.clone())),
+                AstField::Joins => {
+                    if !table_with_joins.joins.is_empty() {
+                        Some(AstNode::JoinList(table_with_joins.joins.clone()))
+                    } else {
+                        None
                     }
-                    _ => None,
                 }
-            }
+                _ => None,
+            },
 
             // Join navigation
-            (AstNode::Join(join), PathComponent::Field(field)) => match field.as_str() {
-                "relation" => Some(AstNode::TableFactor(join.relation.clone())),
-                "join_operator" => None, // JoinOperator is simple enum, skip navigation
+            (AstNode::Join(join), PathComponent::Field(field)) => match field {
+                AstField::Relation => Some(AstNode::TableFactor(join.relation.clone())),
+                AstField::JoinOperator => None, // JoinOperator is simple enum, skip navigation
                 _ => None,
             },
 
             // TableFactor navigation
             (AstNode::TableFactor(table_factor), PathComponent::Field(field)) => {
-                match (table_factor, field.as_str()) {
+                match (table_factor, field) {
                     (TableFactor::Table { .. }, _) => None, // Table references are terminal
-                    (TableFactor::Derived { subquery, .. }, "subquery") => {
+                    (TableFactor::Derived { subquery, .. }, AstField::Subquery) => {
                         Some(AstNode::Query(subquery.clone()))
                     }
                     (TableFactor::TableFunction { .. }, _) => None, // Function calls are complex
@@ -249,9 +539,11 @@ impl AstNode {
 
             // SelectItem navigation
             (AstNode::SelectItem(select_item), PathComponent::Field(field)) => {
-                match (select_item, field.as_str()) {
-                    (SelectItem::UnnamedExpr(expr), "expr") => Some(AstNode::Expr(expr.clone())),
-                    (SelectItem::ExprWithAlias { expr, .. }, "expr") => {
+                match (select_item, field) {
+                    (SelectItem::UnnamedExpr(expr), AstField::Expr) => {
+                        Some(AstNode::Expr(expr.clone()))
+                    }
+                    (SelectItem::ExprWithAlias { expr, .. }, AstField::Expr) => {
                         Some(AstNode::Expr(expr.clone()))
                     }
                     (SelectItem::QualifiedWildcard(..), _) => None,
@@ -261,23 +553,23 @@ impl AstNode {
             }
 
             // OrderByExpr navigation
-            (AstNode::OrderByExpr(order_by), PathComponent::Field(field)) => match field.as_str() {
-                "expr" => Some(AstNode::Expr(order_by.expr.clone())),
-                "asc" => None,         // Boolean, not navigable
-                "nulls_first" => None, // Option<bool>, not navigable
+            (AstNode::OrderByExpr(order_by), PathComponent::Field(field)) => match field {
+                AstField::Expr => Some(AstNode::Expr(order_by.expr.clone())),
+                AstField::Asc => None,        // Boolean, not navigable
+                AstField::NullsFirst => None, // Option<bool>, not navigable
                 _ => None,
             },
 
             // With clause navigation
-            (AstNode::With(with_clause), PathComponent::Field(field)) => match field.as_str() {
-                "cte_tables" => {
+            (AstNode::With(with_clause), PathComponent::Field(field)) => match field {
+                AstField::CteTable => {
                     if with_clause.cte_tables.is_empty() {
                         None
                     } else {
                         Some(AstNode::CteList(with_clause.cte_tables.clone()))
                     }
                 }
-                "recursive" => None, // Boolean, not navigable
+                AstField::Recursive => None, // Boolean, not navigable
                 _ => None,
             },
 
@@ -291,9 +583,9 @@ impl AstNode {
             }
 
             // CTE navigation
-            (AstNode::Cte(cte), PathComponent::Field(field)) => match field.as_str() {
-                "alias" => None, // TableAlias is complex, skip for now
-                "cte_inner" => match &cte.cte_inner {
+            (AstNode::Cte(cte), PathComponent::Field(field)) => match field {
+                AstField::Alias => None, // TableAlias is complex, skip for now
+                AstField::CteInner => match &cte.cte_inner {
                     CteInner::Query(query) => Some(AstNode::Query(query.clone())),
                     CteInner::ChangeLog(_) => None, // ObjectName is complex, skip for now
                 },
@@ -329,8 +621,8 @@ impl AstNode {
                     ..
                 }),
                 PathComponent::Field(field),
-            ) => match field.as_str() {
-                "query" => {
+            ) => match field {
+                AstField::Query => {
                     if let Some(AstNode::Query(new_query)) = new_child {
                         let new_stmt = Statement::CreateView {
                             or_replace: false,
@@ -353,8 +645,8 @@ impl AstNode {
             // Query field modifications
             (AstNode::Query(query), PathComponent::Field(field)) => {
                 let mut new_query = (**query).clone();
-                match field.as_str() {
-                    "body" => {
+                match field {
+                    AstField::Body => {
                         if let Some(AstNode::Select(select)) = new_child {
                             new_query.body = SetExpr::Select(select);
                             Some(AstNode::Query(Box::new(new_query)))
@@ -362,7 +654,7 @@ impl AstNode {
                             None
                         }
                     }
-                    "order_by" => {
+                    AstField::OrderBy => {
                         if let Some(AstNode::OrderByList(orders)) = new_child {
                             new_query.order_by = orders;
                         } else {
@@ -370,14 +662,14 @@ impl AstNode {
                         }
                         Some(AstNode::Query(Box::new(new_query)))
                     }
-                    "limit" => {
+                    AstField::Limit => {
                         new_query.limit = new_child.and_then(|n| match n {
                             AstNode::Expr(e) => Some(e),
                             _ => None,
                         });
                         Some(AstNode::Query(Box::new(new_query)))
                     }
-                    "with" => {
+                    AstField::With => {
                         new_query.with = new_child.and_then(|n| match n {
                             AstNode::With(w) => Some(w),
                             _ => None,
@@ -391,30 +683,30 @@ impl AstNode {
             // Select field modifications
             (AstNode::Select(select), PathComponent::Field(field)) => {
                 let mut new_select = (**select).clone();
-                match field.as_str() {
-                    "selection" => {
+                match field {
+                    AstField::Selection => {
                         new_select.selection = new_child.and_then(|n| match n {
                             AstNode::Expr(e) => Some(e),
                             _ => None,
                         });
                     }
-                    "having" => {
+                    AstField::Having => {
                         new_select.having = new_child.and_then(|n| match n {
                             AstNode::Expr(e) => Some(e),
                             _ => None,
                         });
                     }
-                    "projection" => {
+                    AstField::Projection => {
                         if let Some(AstNode::SelectItemList(items)) = new_child {
                             new_select.projection = items;
                         }
                     }
-                    "from" => {
+                    AstField::From => {
                         if let Some(AstNode::TableList(tables)) = new_child {
                             new_select.from = tables;
                         }
                     }
-                    "group_by" => {
+                    AstField::GroupBy => {
                         if let Some(AstNode::ExprList(exprs)) = new_child {
                             new_select.group_by = exprs;
                         }
@@ -469,8 +761,8 @@ impl AstNode {
 
             // TableWithJoins modifications
             (AstNode::TableWithJoins(table_with_joins), PathComponent::Field(field)) => {
-                match field.as_str() {
-                    "relation" => {
+                match field {
+                    AstField::Relation => {
                         if let Some(AstNode::TableFactor(new_relation)) = new_child {
                             Some(AstNode::TableWithJoins(TableWithJoins {
                                 relation: new_relation,
@@ -480,7 +772,7 @@ impl AstNode {
                             None
                         }
                     }
-                    "joins" => {
+                    AstField::Joins => {
                         if let Some(AstNode::JoinList(new_joins)) = new_child {
                             Some(AstNode::TableWithJoins(TableWithJoins {
                                 relation: table_with_joins.relation.clone(),
@@ -499,8 +791,8 @@ impl AstNode {
             }
 
             // Join modifications
-            (AstNode::Join(join), PathComponent::Field(field)) => match field.as_str() {
-                "relation" => {
+            (AstNode::Join(join), PathComponent::Field(field)) => match field {
+                AstField::Relation => {
                     if let Some(AstNode::TableFactor(new_relation)) = new_child {
                         Some(AstNode::Join(Join {
                             relation: new_relation,
@@ -515,8 +807,8 @@ impl AstNode {
 
             // TableFactor modifications
             (AstNode::TableFactor(table_factor), PathComponent::Field(field)) => {
-                match (table_factor, field.as_str()) {
-                    (TableFactor::Derived { lateral, alias, .. }, "subquery") => {
+                match (table_factor, field) {
+                    (TableFactor::Derived { lateral, alias, .. }, AstField::Subquery) => {
                         if let Some(AstNode::Query(new_subquery)) = new_child {
                             Some(AstNode::TableFactor(TableFactor::Derived {
                                 lateral: *lateral,
@@ -561,8 +853,8 @@ impl AstNode {
             }
 
             // Expression field modifications
-            (AstNode::Expr(expr), PathComponent::Field(field)) => match (expr, field.as_str()) {
-                (Expr::BinaryOp { left: _, op, right }, "left") => {
+            (AstNode::Expr(expr), PathComponent::Field(field)) => match (expr, field) {
+                (Expr::BinaryOp { left: _, op, right }, AstField::Left) => {
                     if let Some(AstNode::Expr(new_left)) = new_child {
                         Some(AstNode::Expr(Expr::BinaryOp {
                             left: Box::new(new_left),
@@ -573,7 +865,7 @@ impl AstNode {
                         None
                     }
                 }
-                (Expr::BinaryOp { left, op, right: _ }, "right") => {
+                (Expr::BinaryOp { left, op, right: _ }, AstField::Right) => {
                     if let Some(AstNode::Expr(new_right)) = new_child {
                         Some(AstNode::Expr(Expr::BinaryOp {
                             left: left.clone(),
@@ -584,7 +876,7 @@ impl AstNode {
                         None
                     }
                 }
-                (Expr::Nested(_), "inner") => {
+                (Expr::Nested(_), AstField::Inner) => {
                     if let Some(AstNode::Expr(new_inner)) = new_child {
                         Some(AstNode::Expr(Expr::Nested(Box::new(new_inner))))
                     } else {
@@ -596,15 +888,15 @@ impl AstNode {
 
             // SelectItem field modifications
             (AstNode::SelectItem(select_item), PathComponent::Field(field)) => {
-                match (select_item, field.as_str()) {
-                    (SelectItem::UnnamedExpr(_), "expr") => {
+                match (select_item, field) {
+                    (SelectItem::UnnamedExpr(_), AstField::Expr) => {
                         if let Some(AstNode::Expr(new_expr)) = new_child {
                             Some(AstNode::SelectItem(SelectItem::UnnamedExpr(new_expr)))
                         } else {
                             None
                         }
                     }
-                    (SelectItem::ExprWithAlias { alias, .. }, "expr") => {
+                    (SelectItem::ExprWithAlias { alias, .. }, AstField::Expr) => {
                         if let Some(AstNode::Expr(new_expr)) = new_child {
                             Some(AstNode::SelectItem(SelectItem::ExprWithAlias {
                                 expr: new_expr,
@@ -619,8 +911,8 @@ impl AstNode {
             }
 
             // OrderByExpr field modifications
-            (AstNode::OrderByExpr(order_by), PathComponent::Field(field)) => match field.as_str() {
-                "expr" => {
+            (AstNode::OrderByExpr(order_by), PathComponent::Field(field)) => match field {
+                AstField::Expr => {
                     if let Some(AstNode::Expr(new_expr)) = new_child {
                         Some(AstNode::OrderByExpr(OrderByExpr {
                             expr: new_expr,
@@ -635,8 +927,8 @@ impl AstNode {
             },
 
             // With clause modifications
-            (AstNode::With(with_clause), PathComponent::Field(field)) => match field.as_str() {
-                "cte_tables" => {
+            (AstNode::With(with_clause), PathComponent::Field(field)) => match field {
+                AstField::CteTable => {
                     if let Some(AstNode::CteList(new_ctes)) = new_child {
                         let mut new_with = with_clause.clone();
                         new_with.cte_tables = new_ctes;
@@ -664,8 +956,8 @@ impl AstNode {
             }
 
             // CTE modifications
-            (AstNode::Cte(cte), PathComponent::Field(field)) => match field.as_str() {
-                "cte_inner" => {
+            (AstNode::Cte(cte), PathComponent::Field(field)) => match field {
+                AstField::CteInner => {
                     if let Some(AstNode::Query(new_query)) = new_child {
                         let mut new_cte = cte.clone();
                         new_cte.cte_inner = CteInner::Query(new_query);
@@ -742,18 +1034,16 @@ pub fn set_node_at_path(
 }
 
 /// Helper function to get a child node and recurse if it exists.
-fn explore_child_path(
+/// Helper function using type-safe field access
+fn explore_child_field(
     node: &AstNode,
-    field_name: &str,
+    field: AstField,
     current_path: &AstPath,
     paths: &mut Vec<AstPath>,
 ) {
-    let child_path = [
-        current_path.clone(),
-        vec![PathComponent::Field(field_name.to_owned())],
-    ]
-    .concat();
-    let relative_path = vec![PathComponent::Field(field_name.to_owned())];
+    let field_component = PathComponent::field(field);
+    let child_path = [current_path.clone(), vec![field_component.clone()]].concat();
+    let relative_path = vec![field_component];
 
     if let Some(child_node) = get_node_at_path(node, &relative_path) {
         paths.extend(enumerate_reduction_paths(&child_node, child_path));
@@ -773,41 +1063,32 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
 
     match node {
         AstNode::Statement(Statement::Query(_)) => {
-            explore_child_path(node, "query", &current_path, &mut paths);
+            explore_child_field(node, AstField::Query, &current_path, &mut paths);
         }
 
         AstNode::Statement(Statement::CreateView { .. }) => {
-            explore_child_path(node, "query", &current_path, &mut paths);
+            explore_child_field(node, AstField::Query, &current_path, &mut paths);
         }
 
         AstNode::Query(_query) => {
-            explore_child_path(node, "body", &current_path, &mut paths);
-            explore_child_path(node, "with", &current_path, &mut paths);
-            explore_child_path(node, "order_by", &current_path, &mut paths);
+            explore_child_field(node, AstField::Body, &current_path, &mut paths);
+            explore_child_field(node, AstField::With, &current_path, &mut paths);
+            explore_child_field(node, AstField::OrderBy, &current_path, &mut paths);
         }
 
         AstNode::Select(_) => {
-            explore_child_path(node, "projection", &current_path, &mut paths);
-            explore_child_path(node, "from", &current_path, &mut paths);
-            explore_child_path(node, "group_by", &current_path, &mut paths);
+            explore_child_field(node, AstField::Projection, &current_path, &mut paths);
+            explore_child_field(node, AstField::From, &current_path, &mut paths);
+            explore_child_field(node, AstField::GroupBy, &current_path, &mut paths);
 
             // For optional fields, just add the path if they exist
-            let selection_path = [
-                current_path.clone(),
-                vec![PathComponent::Field("selection".to_owned())],
-            ]
-            .concat();
-            if get_node_at_path(node, &vec![PathComponent::Field("selection".to_owned())]).is_some()
-            {
+            let selection_path = [current_path.clone(), vec![PathComponent::selection()]].concat();
+            if get_node_at_path(node, &vec![PathComponent::selection()]).is_some() {
                 paths.push(selection_path);
             }
 
-            let having_path = [
-                current_path.clone(),
-                vec![PathComponent::Field("having".to_owned())],
-            ]
-            .concat();
-            if get_node_at_path(node, &vec![PathComponent::Field("having".to_owned())]).is_some() {
+            let having_path = [current_path.clone(), vec![PathComponent::having()]].concat();
+            if get_node_at_path(node, &vec![PathComponent::having()]).is_some() {
                 paths.push(having_path);
             }
         }
@@ -844,19 +1125,19 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
 
         // TableWithJoins path enumeration - key for JOIN reduction
         AstNode::TableWithJoins(_) => {
-            explore_child_path(node, "relation", &current_path, &mut paths);
-            explore_child_path(node, "joins", &current_path, &mut paths);
+            explore_child_field(node, AstField::Relation, &current_path, &mut paths);
+            explore_child_field(node, AstField::Joins, &current_path, &mut paths);
         }
 
         // Join path enumeration
         AstNode::Join(_) => {
-            explore_child_path(node, "relation", &current_path, &mut paths);
+            explore_child_field(node, AstField::Relation, &current_path, &mut paths);
         }
 
         // TableFactor path enumeration
         AstNode::TableFactor(_) => {
             // For Derived tables (subqueries), explore the subquery
-            explore_child_path(node, "subquery", &current_path, &mut paths);
+            explore_child_field(node, AstField::Subquery, &current_path, &mut paths);
         }
 
         // JoinList path enumeration
@@ -881,16 +1162,8 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
         // For expressions, look for pullup opportunities
         AstNode::Expr(expr) => match expr {
             Expr::BinaryOp { .. } => {
-                let left_path = [
-                    current_path.clone(),
-                    vec![PathComponent::Field("left".to_owned())],
-                ]
-                .concat();
-                let right_path = [
-                    current_path.clone(),
-                    vec![PathComponent::Field("right".to_owned())],
-                ]
-                .concat();
+                let left_path = [current_path.clone(), vec![PathComponent::left()]].concat();
+                let right_path = [current_path.clone(), vec![PathComponent::right()]].concat();
                 paths.push(left_path);
                 paths.push(right_path);
             }
@@ -900,34 +1173,28 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
                 ..
             } => {
                 if operand.is_some() {
-                    let operand_path = [
-                        current_path.clone(),
-                        vec![PathComponent::Field("operand".to_owned())],
-                    ]
-                    .concat();
+                    let operand_path =
+                        [current_path.clone(), vec![PathComponent::operand()]].concat();
                     paths.push(operand_path);
                 }
                 if else_result.is_some() {
-                    let else_path = [
-                        current_path.clone(),
-                        vec![PathComponent::Field("else_result".to_owned())],
-                    ]
-                    .concat();
+                    let else_path =
+                        [current_path.clone(), vec![PathComponent::else_result()]].concat();
                     paths.push(else_path);
                 }
             }
             Expr::Exists(_) => {
-                explore_child_path(node, "subquery", &current_path, &mut paths);
+                explore_child_field(node, AstField::Subquery, &current_path, &mut paths);
             }
             Expr::Subquery(_) => {
-                explore_child_path(node, "subquery", &current_path, &mut paths);
+                explore_child_field(node, AstField::Subquery, &current_path, &mut paths);
             }
             _ => {}
         },
 
         // WITH clause enumeration
         AstNode::With(_) => {
-            explore_child_path(node, "cte_tables", &current_path, &mut paths);
+            explore_child_field(node, AstField::CteTable, &current_path, &mut paths);
         }
 
         // CTE list enumeration
@@ -945,7 +1212,7 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
 
         // CTE enumeration
         AstNode::Cte(_) => {
-            explore_child_path(node, "cte_inner", &current_path, &mut paths);
+            explore_child_field(node, AstField::CteInner, &current_path, &mut paths);
         }
 
         _ => {}

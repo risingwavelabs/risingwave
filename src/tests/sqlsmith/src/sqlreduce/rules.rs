@@ -349,7 +349,7 @@ pub fn generate_reduction_candidates(
             let node_type = ReductionRules::get_node_type(&node);
             let path_str = crate::sqlreduce::path::display_ast_path(path);
 
-            tracing::debug!("  Path {}: {} ({})", path_idx, path_str, node_type);
+            tracing::debug!("Path {}: {} ({})", path_idx, path_str, node_type);
 
             // Handle list/tuple removals (most important for reduction)
             match &node {
@@ -452,7 +452,7 @@ pub fn generate_reduction_candidates(
                     );
                 }
             } else {
-                tracing::debug!("    No rules found for node type: {}", node_type);
+                tracing::debug!("No rules found for node type: {}", node_type);
             }
         }
     }
@@ -500,7 +500,10 @@ pub fn apply_reduction_operation(
             // Remove an attribute (set to None)
             let attr_path = [
                 candidate.path.clone(),
-                vec![PathComponent::Field(attr.clone())],
+                vec![
+                    PathComponent::field_from_str(attr)
+                        .unwrap_or_else(|| panic!("Invalid field name: {}", attr)),
+                ],
             ]
             .concat();
             tracing::debug!(
@@ -508,16 +511,6 @@ pub fn apply_reduction_operation(
                 attr,
                 display_ast_path(&attr_path)
             );
-
-            // Check if the attribute exists first
-            if get_node_at_path(root, &attr_path).is_none() {
-                tracing::debug!(
-                    "apply_reduction_operation: Attribute '{}' does not exist at path {}",
-                    attr,
-                    display_ast_path(&attr_path)
-                );
-                return None;
-            }
 
             let result = set_node_at_path(root, &attr_path, None);
             if result.is_none() {
@@ -538,7 +531,10 @@ pub fn apply_reduction_operation(
             // Pull up a subnode to replace the current node
             let attr_path = [
                 candidate.path.clone(),
-                vec![PathComponent::Field(attr.clone())],
+                vec![
+                    PathComponent::field_from_str(attr)
+                        .unwrap_or_else(|| panic!("Invalid field name: {}", attr)),
+                ],
             ]
             .concat();
             if let Some(subnode) = get_node_at_path(root, &attr_path) {
@@ -552,7 +548,10 @@ pub fn apply_reduction_operation(
             // Replace current node with a subtree
             let attr_path = [
                 candidate.path.clone(),
-                vec![PathComponent::Field(attr.clone())],
+                vec![
+                    PathComponent::field_from_str(attr)
+                        .unwrap_or_else(|| panic!("Invalid field name: {}", attr)),
+                ],
             ]
             .concat();
             tracing::debug!(

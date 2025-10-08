@@ -133,7 +133,7 @@ impl Transform for WhereRemove {
                 select.selection = None;
             }
         }
-        tracing::info!("where_remove ast: {:?}", ast);
+        tracing::debug!("where_remove applied to ast: {:?}", ast);
         ast.clone()
     }
 }
