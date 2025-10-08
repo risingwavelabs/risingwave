@@ -12068,6 +12068,8 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "datafusion 45.0.0",
+ "datafusion-common 45.0.0",
  "downcast-rs 2.0.1",
  "dyn-clone",
  "easy-ext",
