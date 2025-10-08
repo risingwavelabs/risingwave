@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use gcp_bigquery_client::Client;
-use gcp_bigquery_client::model::get_query_results_parameters::GetQueryResultsParameters;
+use gcp_bigquery_client::model::job_configuration_query::JobConfigurationQuery;
 use gcp_bigquery_client::model::query_request::QueryRequest;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
@@ -213,7 +213,7 @@ async fn build_bigquery_stream(
     split_id: Arc<str>,
     mut query: QueryRequest,
 ) {
-    let _query_str = query.query.clone();
+    let query_str = query.query.clone();
     // get metadata only in the call
     query.max_results = Some(0);
 
@@ -223,11 +223,6 @@ async fn build_bigquery_stream(
     let Some(job_ref) = result_set.query_response().job_reference.clone() else {
         return Err(crate::error::ConnectorError::from(anyhow::anyhow!(
             "Failed to get job reference"
-        )));
-    };
-    let Some(job_id) = job_ref.job_id else {
-        return Err(crate::error::ConnectorError::from(anyhow::anyhow!(
-            "Failed to get job id"
         )));
     };
 
@@ -247,57 +242,51 @@ async fn build_bigquery_stream(
 
     let mut offset: u64 = 0;
 
-    let mut page_token: Option<String> = None;
-    let mut get_query_results_params = GetQueryResultsParameters {
-        max_results: Some(BATCH_BIGQUERY_CONNECTOR_PAGE_SIZE),
+    let query_all_params = JobConfigurationQuery {
+        query: query_str,
         ..Default::default()
     };
+    let stream = client.job().query_all(
+        &project,
+        query_all_params,
+        Some(BATCH_BIGQUERY_CONNECTOR_PAGE_SIZE),
+    );
 
-    'page_loop: loop {
-        get_query_results_params.page_token = page_token.take();
-        let result_rows_page = client
-            .job()
-            .get_query_results(&project, &job_id, get_query_results_params.clone())
-            .await?;
-        page_token = result_rows_page.page_token.clone();
-
-        let mut source_message_batch: Vec<SourceMessage>;
-        if let Some(rows) = result_rows_page.rows {
-            source_message_batch = Vec::with_capacity(rows.len());
-            for row in rows {
-                let mut json_obj = serde_json::Map::new();
-                if let Some(columns) = row.columns {
-                    assert_eq!(columns.len(), fields.len());
-                    columns
-                        .into_iter()
-                        .zip_eq_fast(fields.iter())
-                        .for_each(|(column, field)| {
-                            json_obj.insert(
-                                field.name.clone(),
-                                column.value.unwrap_or(serde_json::Value::Null),
-                            );
-                        })
-                } else {
-                    unreachable!();
-                }
-
-                source_message_batch.push(SourceMessage {
-                    key: None,
-                    payload: Some(serde_json::to_vec(&json_obj).unwrap()),
-                    offset: offset.to_string(),
-                    split_id: split_id.clone(),
-                    meta: SourceMeta::Empty,
-                });
-                offset += 1;
+    #[for_await]
+    for row_batch in stream {
+        let row_batch = row_batch?;
+        let mut source_message_batch = Vec::with_capacity(row_batch.len());
+        for row in row_batch {
+            let mut json_obj = serde_json::Map::new();
+            if let Some(columns) = row.columns {
+                assert_eq!(columns.len(), fields.len());
+                columns
+                    .into_iter()
+                    .zip_eq_fast(fields.iter())
+                    .for_each(|(column, field)| {
+                        json_obj.insert(
+                            field.name.clone(),
+                            column.value.unwrap_or(serde_json::Value::Null),
+                        );
+                    })
+            } else {
+                unreachable!();
             }
 
-            yield source_message_batch;
+            source_message_batch.push(SourceMessage {
+                key: None,
+                payload: Some(serde_json::to_vec(&json_obj).unwrap()),
+                offset: offset.to_string(),
+                split_id: split_id.clone(),
+                meta: SourceMeta::Empty,
+            });
+            offset += 1;
         }
 
-        if page_token.is_none() {
-            break 'page_loop;
-        }
+        yield source_message_batch;
     }
+
+    tracing::info!("Finished fetching all rows from BigQuery");
 }
 
 impl BatchBigQueryReader {
