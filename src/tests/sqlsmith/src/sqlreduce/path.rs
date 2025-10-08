@@ -1027,7 +1027,7 @@ mod tests {
         }
 
         // Should have paths for the SELECT statement inside the MV
-        assert!(paths.len() > 0);
+        assert!(!paths.is_empty());
 
         // Should be able to get some node
         assert!(get_node_at_path(&ast_node, &paths[0]).is_some());

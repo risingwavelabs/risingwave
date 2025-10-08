@@ -465,58 +465,6 @@ pub fn generate_reduction_candidates(
     candidates
 }
 
-#[cfg(test)]
-mod tests {
-    use risingwave_sqlparser::parser::Parser;
-
-    use super::*;
-    use crate::sqlreduce::path::{enumerate_reduction_paths, statement_to_ast_node};
-
-    #[test]
-    fn test_reduction_candidates() {
-        let sql = "SELECT a, b, c FROM t1, t2;";
-        let parsed = Parser::parse_sql(sql).expect("Failed to parse SQL");
-        let stmt = &parsed[0];
-        let ast_node = statement_to_ast_node(stmt);
-
-        let paths = enumerate_reduction_paths(&ast_node, vec![]);
-        let rules = ReductionRules::default();
-        let candidates = generate_reduction_candidates(&ast_node, &rules, &paths);
-
-        // Should generate multiple candidates for removing SELECT items, FROM tables, etc.
-        assert!(candidates.len() > 0);
-        println!(
-            "Generated {} candidates for complex query",
-            candidates.len()
-        );
-    }
-
-    #[test]
-    fn test_list_element_removal() {
-        let sql = "SELECT a, b, c FROM t;";
-        let parsed = Parser::parse_sql(sql).expect("Failed to parse SQL");
-        let stmt = &parsed[0];
-        let ast_node = statement_to_ast_node(stmt);
-
-        let paths = enumerate_reduction_paths(&ast_node, vec![]);
-        let rules = ReductionRules::default();
-        let candidates = generate_reduction_candidates(&ast_node, &rules, &paths);
-
-        // Find candidates that remove SELECT list elements
-        let list_removals: Vec<_> = candidates
-            .iter()
-            .filter(|c| matches!(c.operation, ReductionOperation::RemoveListElement(_)))
-            .collect();
-
-        // Should find 3 list removal candidates (for a, b, c)
-        assert!(list_removals.len() == 3);
-        println!(
-            "✓ Found {} list element removal candidates as expected",
-            list_removals.len()
-        );
-    }
-}
-
 /// Apply a reduction operation to an AST node.
 /// Returns the new AST root if the operation was successful.
 pub fn apply_reduction_operation(
@@ -675,5 +623,57 @@ pub fn apply_reduction_operation(
                 _ => None,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::parser::Parser;
+
+    use super::*;
+    use crate::sqlreduce::path::{enumerate_reduction_paths, statement_to_ast_node};
+
+    #[test]
+    fn test_reduction_candidates() {
+        let sql = "SELECT a, b, c FROM t1, t2;";
+        let parsed = Parser::parse_sql(sql).expect("Failed to parse SQL");
+        let stmt = &parsed[0];
+        let ast_node = statement_to_ast_node(stmt);
+
+        let paths = enumerate_reduction_paths(&ast_node, vec![]);
+        let rules = ReductionRules::default();
+        let candidates = generate_reduction_candidates(&ast_node, &rules, &paths);
+
+        // Should generate multiple candidates for removing SELECT items, FROM tables, etc.
+        assert!(!candidates.is_empty());
+        println!(
+            "Generated {} candidates for complex query",
+            candidates.len()
+        );
+    }
+
+    #[test]
+    fn test_list_element_removal() {
+        let sql = "SELECT a, b, c FROM t;";
+        let parsed = Parser::parse_sql(sql).expect("Failed to parse SQL");
+        let stmt = &parsed[0];
+        let ast_node = statement_to_ast_node(stmt);
+
+        let paths = enumerate_reduction_paths(&ast_node, vec![]);
+        let rules = ReductionRules::default();
+        let candidates = generate_reduction_candidates(&ast_node, &rules, &paths);
+
+        // Find candidates that remove SELECT list elements
+        let list_removals: Vec<_> = candidates
+            .iter()
+            .filter(|c| matches!(c.operation, ReductionOperation::RemoveListElement(_)))
+            .collect();
+
+        // Should find 3 list removal candidates (for a, b, c)
+        assert!(list_removals.len() == 3);
+        println!(
+            "✓ Found {} list element removal candidates as expected",
+            list_removals.len()
+        );
     }
 }
