@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! SQL reduction framework for RisingWave.
+//! SQL reduction framework for `RisingWave`.
 //!
 //! This module provides two approaches for reducing SQL queries:
-//! 1. PassBased reduction: Traditional approach using multiple reduction passes
-//! 2. PathBased reduction: Advanced approach using systematic path enumeration
+//! 1. `PassBased` reduction: Traditional approach using multiple reduction passes
+//! 2. `PathBased` reduction: Advanced approach using systematic path enumeration
 //!
-//! The PathBased approach uses path enumeration and rules-based transformations
+//! The `PathBased` approach uses path enumeration and rules-based transformations
 //! to systematically reduce SQL queries with better coverage and control.
 
 use std::collections::HashSet;
@@ -257,7 +257,7 @@ impl Reducer {
         let mut candidate_index = 0;
 
         // Track the original query
-        seen_queries.insert(sql.to_string());
+        seen_queries.insert(sql.to_owned());
 
         tracing::info!(
             "Starting path-based reduction with initial SQL length: {}",
@@ -288,7 +288,7 @@ impl Reducer {
                     candidate
                 );
 
-                if let Some(new_ast) = apply_reduction_operation(&ast_node, &candidate) {
+                if let Some(new_ast) = apply_reduction_operation(&ast_node, candidate) {
                     if let Some(new_stmt) = ast_node_to_statement(&new_ast) {
                         let new_sql = new_stmt.to_string();
                         let new_len = new_sql.len();
@@ -311,7 +311,7 @@ impl Reducer {
                                 ast_node_to_statement(&ast_node)
                                     .map(|s| s.to_string())
                                     .unwrap_or_else(
-                                        || "<failed to convert AST to statement>".to_string()
+                                        || "<failed to convert AST to statement>".to_owned()
                                     ),
                                 new_sql
                             );
@@ -376,7 +376,7 @@ impl Reducer {
 
         let final_sql = ast_node_to_statement(&ast_node)
             .map(|s| s.to_string())
-            .unwrap_or_else(|| sql.to_string());
+            .unwrap_or_else(|| sql.to_owned());
 
         tracing::info!(
             "Path-based reduction complete. Processed {} total candidates across {} iterations",

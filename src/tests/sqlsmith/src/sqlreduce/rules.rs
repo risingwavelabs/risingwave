@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::*;
 use crate::sqlreduce::path::{AstNode, AstPath, PathComponent};
 
 /// Defines what actions can be performed on an AST node during reduction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ReductionRule {
     /// Whether to try replacing this node with NULL/None
     pub try_null: bool,
@@ -36,18 +36,6 @@ pub struct ReductionRule {
     pub pullup: Vec<String>,
     /// Attributes whose subtrees can replace this entire node
     pub replace: Vec<String>,
-}
-
-impl Default for ReductionRule {
-    fn default() -> Self {
-        Self {
-            try_null: false,
-            descend: vec![],
-            remove: vec![],
-            pullup: vec![],
-            replace: vec![],
-        }
-    }
 }
 
 /// Repository of reduction rules for different AST node types.
@@ -62,22 +50,22 @@ impl Default for ReductionRules {
 
         // SelectStmt rules (most important for SQL reduction)
         rules.insert(
-            "Select".to_string(),
+            "Select".to_owned(),
             ReductionRule {
                 try_null: false,
                 descend: vec![
-                    "projection".to_string(),
-                    "from".to_string(),
-                    "selection".to_string(),
-                    "group_by".to_string(),
-                    "having".to_string(),
+                    "projection".to_owned(),
+                    "from".to_owned(),
+                    "selection".to_owned(),
+                    "group_by".to_owned(),
+                    "having".to_owned(),
                 ],
                 remove: vec![
-                    "selection".to_string(),
-                    "having".to_string(),
-                    "projection".to_string(),
-                    "from".to_string(),
-                    "group_by".to_string(),
+                    "selection".to_owned(),
+                    "having".to_owned(),
+                    "projection".to_owned(),
+                    "from".to_owned(),
+                    "group_by".to_owned(),
                 ],
                 pullup: vec![],
                 replace: vec![],
@@ -86,26 +74,22 @@ impl Default for ReductionRules {
 
         // Query rules
         rules.insert(
-            "Query".to_string(),
+            "Query".to_owned(),
             ReductionRule {
                 try_null: false,
-                descend: vec![
-                    "body".to_string(),
-                    "with".to_string(),
-                    "order_by".to_string(),
-                ],
-                remove: vec!["with".to_string(), "order_by".to_string()],
+                descend: vec!["body".to_owned(), "with".to_owned(), "order_by".to_owned()],
+                remove: vec!["with".to_owned(), "order_by".to_owned()],
                 pullup: vec![],
-                replace: vec!["body".to_string()],
+                replace: vec!["body".to_owned()],
             },
         );
 
         // WITH clause rules
         rules.insert(
-            "With".to_string(),
+            "With".to_owned(),
             ReductionRule {
                 try_null: true,
-                descend: vec!["cte_tables".to_string()],
+                descend: vec!["cte_tables".to_owned()],
                 remove: vec![],
                 pullup: vec![],
                 replace: vec![],
@@ -114,7 +98,7 @@ impl Default for ReductionRules {
 
         // CTE list rules
         rules.insert(
-            "CteList".to_string(),
+            "CteList".to_owned(),
             ReductionRule {
                 try_null: false,
                 descend: vec![], // Individual CTEs accessed via index
@@ -126,66 +110,66 @@ impl Default for ReductionRules {
 
         // CTE rules
         rules.insert(
-            "Cte".to_string(),
+            "Cte".to_owned(),
             ReductionRule {
                 try_null: false,
-                descend: vec!["cte_inner".to_string()],
+                descend: vec!["cte_inner".to_owned()],
                 remove: vec![],
-                pullup: vec!["cte_inner".to_string()],
+                pullup: vec!["cte_inner".to_owned()],
                 replace: vec![],
             },
         );
 
         // Expression rules - focus on pullup for simplification
         rules.insert(
-            "BinaryOp".to_string(),
+            "BinaryOp".to_owned(),
             ReductionRule {
                 try_null: true,
                 descend: vec![],
                 remove: vec![],
-                pullup: vec!["left".to_string(), "right".to_string()],
+                pullup: vec!["left".to_owned(), "right".to_owned()],
                 replace: vec![],
             },
         );
 
         rules.insert(
-            "Case".to_string(),
+            "Case".to_owned(),
             ReductionRule {
                 try_null: true,
                 descend: vec![],
                 remove: vec![],
-                pullup: vec!["operand".to_string(), "else_result".to_string()],
+                pullup: vec!["operand".to_owned(), "else_result".to_owned()],
                 replace: vec![],
             },
         );
 
         // Function call rules
         rules.insert(
-            "Function".to_string(),
+            "Function".to_owned(),
             ReductionRule {
                 try_null: true,
-                descend: vec!["args".to_string()],
-                remove: vec!["args".to_string()],
-                pullup: vec!["args".to_string()],
+                descend: vec!["args".to_owned()],
+                remove: vec!["args".to_owned()],
+                pullup: vec!["args".to_owned()],
                 replace: vec![],
             },
         );
 
         // Subquery rules
         rules.insert(
-            "Subquery".to_string(),
+            "Subquery".to_owned(),
             ReductionRule {
                 try_null: true,
                 descend: vec![],
                 remove: vec![],
                 pullup: vec![],
-                replace: vec!["query".to_string()],
+                replace: vec!["query".to_owned()],
             },
         );
 
         // Constant rules
         rules.insert(
-            "Value".to_string(),
+            "Value".to_owned(),
             ReductionRule {
                 try_null: true,
                 descend: vec![],
@@ -197,7 +181,7 @@ impl Default for ReductionRules {
 
         // List reduction rules for SQL collections
         rules.insert(
-            "SelectItemList".to_string(),
+            "SelectItemList".to_owned(),
             ReductionRule {
                 try_null: false,
                 descend: vec![],
@@ -208,7 +192,18 @@ impl Default for ReductionRules {
         );
 
         rules.insert(
-            "ExprList".to_string(),
+            "ExprList".to_owned(),
+            ReductionRule {
+                try_null: true,
+                descend: vec![],
+                remove: vec![],
+                pullup: vec![],
+                replace: vec![],
+            },
+        );
+
+        rules.insert(
+            "TableList".to_owned(),
             ReductionRule {
                 try_null: false,
                 descend: vec![],
@@ -219,18 +214,7 @@ impl Default for ReductionRules {
         );
 
         rules.insert(
-            "TableList".to_string(),
-            ReductionRule {
-                try_null: false,
-                descend: vec![],
-                remove: vec![],
-                pullup: vec![],
-                replace: vec![],
-            },
-        );
-
-        rules.insert(
-            "OrderByList".to_string(),
+            "OrderByList".to_owned(),
             ReductionRule {
                 try_null: false,
                 descend: vec![],
@@ -242,40 +226,40 @@ impl Default for ReductionRules {
 
         // JOIN-related rules for better JOIN handling
         rules.insert(
-            "TableWithJoins".to_string(),
+            "TableWithJoins".to_owned(),
             ReductionRule {
                 try_null: false,
-                descend: vec!["relation".to_string(), "joins".to_string()],
-                remove: vec!["joins".to_string()],
-                pullup: vec!["relation".to_string()],
-                replace: vec!["relation".to_string()],
+                descend: vec!["relation".to_owned(), "joins".to_owned()],
+                remove: vec!["joins".to_owned()],
+                pullup: vec!["relation".to_owned()],
+                replace: vec!["relation".to_owned()],
             },
         );
 
         rules.insert(
-            "Join".to_string(),
+            "Join".to_owned(),
             ReductionRule {
                 try_null: true,
-                descend: vec!["relation".to_string()],
+                descend: vec!["relation".to_owned()],
                 remove: vec![],
-                pullup: vec!["relation".to_string()],
-                replace: vec!["relation".to_string()],
+                pullup: vec!["relation".to_owned()],
+                replace: vec!["relation".to_owned()],
             },
         );
 
         rules.insert(
-            "TableFactor".to_string(),
+            "TableFactor".to_owned(),
             ReductionRule {
                 try_null: true, // Allow trying NULL for derived tables
-                descend: vec!["subquery".to_string()],
-                remove: vec!["subquery".to_string()], // Allow removing subquery entirely
-                pullup: vec!["subquery".to_string()],
-                replace: vec!["subquery".to_string()],
+                descend: vec!["subquery".to_owned()],
+                remove: vec!["subquery".to_owned()], // Allow removing subquery entirely
+                pullup: vec!["subquery".to_owned()],
+                replace: vec!["subquery".to_owned()],
             },
         );
 
         rules.insert(
-            "JoinList".to_string(),
+            "JoinList".to_owned(),
             ReductionRule {
                 try_null: true, // Allow trying NULL for join lists
                 descend: vec![],
@@ -298,31 +282,31 @@ impl ReductionRules {
     /// Get the node type string for an AST node.
     pub fn get_node_type(node: &AstNode) -> String {
         match node {
-            AstNode::Statement(_) => "Statement".to_string(),
-            AstNode::Query(_) => "Query".to_string(),
-            AstNode::Select(_) => "Select".to_string(),
+            AstNode::Statement(_) => "Statement".to_owned(),
+            AstNode::Query(_) => "Query".to_owned(),
+            AstNode::Select(_) => "Select".to_owned(),
             AstNode::Expr(expr) => match expr {
-                Expr::BinaryOp { .. } => "BinaryOp".to_string(),
-                Expr::Case { .. } => "Case".to_string(),
-                Expr::Function { .. } => "Function".to_string(),
-                Expr::Subquery(_) => "Subquery".to_string(),
-                Expr::Value(_) => "Value".to_string(),
-                _ => "Expr".to_string(),
+                Expr::BinaryOp { .. } => "BinaryOp".to_owned(),
+                Expr::Case { .. } => "Case".to_owned(),
+                Expr::Function { .. } => "Function".to_owned(),
+                Expr::Subquery(_) => "Subquery".to_owned(),
+                Expr::Value(_) => "Value".to_owned(),
+                _ => "Expr".to_owned(),
             },
-            AstNode::SelectItem(_) => "SelectItem".to_string(),
-            AstNode::TableWithJoins(_) => "TableWithJoins".to_string(),
-            AstNode::Join(_) => "Join".to_string(),
-            AstNode::TableFactor(_) => "TableFactor".to_string(),
-            AstNode::OrderByExpr(_) => "OrderByExpr".to_string(),
-            AstNode::With(_) => "With".to_string(),
-            AstNode::Cte(_) => "Cte".to_string(),
-            AstNode::ExprList(_) => "ExprList".to_string(),
-            AstNode::SelectItemList(_) => "SelectItemList".to_string(),
-            AstNode::TableList(_) => "TableList".to_string(),
-            AstNode::JoinList(_) => "JoinList".to_string(),
-            AstNode::OrderByList(_) => "OrderByList".to_string(),
-            AstNode::CteList(_) => "CteList".to_string(),
-            AstNode::Option(_) => "Option".to_string(),
+            AstNode::SelectItem(_) => "SelectItem".to_owned(),
+            AstNode::TableWithJoins(_) => "TableWithJoins".to_owned(),
+            AstNode::Join(_) => "Join".to_owned(),
+            AstNode::TableFactor(_) => "TableFactor".to_owned(),
+            AstNode::OrderByExpr(_) => "OrderByExpr".to_owned(),
+            AstNode::With(_) => "With".to_owned(),
+            AstNode::Cte(_) => "Cte".to_owned(),
+            AstNode::ExprList(_) => "ExprList".to_owned(),
+            AstNode::SelectItemList(_) => "SelectItemList".to_owned(),
+            AstNode::TableList(_) => "TableList".to_owned(),
+            AstNode::JoinList(_) => "JoinList".to_owned(),
+            AstNode::OrderByList(_) => "OrderByList".to_owned(),
+            AstNode::CteList(_) => "CteList".to_owned(),
+            AstNode::Option(_) => "Option".to_owned(),
         }
     }
 }

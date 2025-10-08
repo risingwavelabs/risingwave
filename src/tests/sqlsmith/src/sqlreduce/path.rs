@@ -314,7 +314,7 @@ impl AstNode {
     }
 
     /// Set a child node using a path component.
-    /// Returns a new AstNode with the modification applied.
+    /// Returns a new `AstNode` with the modification applied.
     pub fn set_child(
         &self,
         component: &PathComponent,
@@ -751,10 +751,10 @@ fn explore_child_path(
 ) {
     let child_path = [
         current_path.clone(),
-        vec![PathComponent::Field(field_name.to_string())],
+        vec![PathComponent::Field(field_name.to_owned())],
     ]
     .concat();
-    let relative_path = vec![PathComponent::Field(field_name.to_string())];
+    let relative_path = vec![PathComponent::Field(field_name.to_owned())];
 
     if let Some(child_node) = get_node_at_path(node, &relative_path) {
         paths.extend(enumerate_reduction_paths(&child_node, child_path));
@@ -795,21 +795,20 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
             // For optional fields, just add the path if they exist
             let selection_path = [
                 current_path.clone(),
-                vec![PathComponent::Field("selection".to_string())],
+                vec![PathComponent::Field("selection".to_owned())],
             ]
             .concat();
-            if get_node_at_path(node, &vec![PathComponent::Field("selection".to_string())])
-                .is_some()
+            if get_node_at_path(node, &vec![PathComponent::Field("selection".to_owned())]).is_some()
             {
                 paths.push(selection_path);
             }
 
             let having_path = [
                 current_path.clone(),
-                vec![PathComponent::Field("having".to_string())],
+                vec![PathComponent::Field("having".to_owned())],
             ]
             .concat();
-            if get_node_at_path(node, &vec![PathComponent::Field("having".to_string())]).is_some() {
+            if get_node_at_path(node, &vec![PathComponent::Field("having".to_owned())]).is_some() {
                 paths.push(having_path);
             }
         }
@@ -885,12 +884,12 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
             Expr::BinaryOp { .. } => {
                 let left_path = [
                     current_path.clone(),
-                    vec![PathComponent::Field("left".to_string())],
+                    vec![PathComponent::Field("left".to_owned())],
                 ]
                 .concat();
                 let right_path = [
                     current_path.clone(),
-                    vec![PathComponent::Field("right".to_string())],
+                    vec![PathComponent::Field("right".to_owned())],
                 ]
                 .concat();
                 paths.push(left_path);
@@ -904,7 +903,7 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
                 if operand.is_some() {
                     let operand_path = [
                         current_path.clone(),
-                        vec![PathComponent::Field("operand".to_string())],
+                        vec![PathComponent::Field("operand".to_owned())],
                     ]
                     .concat();
                     paths.push(operand_path);
@@ -912,7 +911,7 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
                 if else_result.is_some() {
                     let else_path = [
                         current_path.clone(),
-                        vec![PathComponent::Field("else_result".to_string())],
+                        vec![PathComponent::Field("else_result".to_owned())],
                     ]
                     .concat();
                     paths.push(else_path);
@@ -957,12 +956,12 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
     paths
 }
 
-/// Convert a Statement to an AstNode for path-based operations.
+/// Convert a Statement to an `AstNode` for path-based operations.
 pub fn statement_to_ast_node(stmt: &Statement) -> AstNode {
     AstNode::Statement(stmt.clone())
 }
 
-/// Extract a Statement from an AstNode.
+/// Extract a Statement from an `AstNode`.
 pub fn ast_node_to_statement(node: &AstNode) -> Option<Statement> {
     match node {
         AstNode::Statement(stmt) => Some(stmt.clone()),
