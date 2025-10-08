@@ -56,7 +56,7 @@ SELECT set_bit('\x1234567890'::bytea, 34, 1);
 ----
 \x1234567894
 
-statement error value 10 is invalid,new bit must be 0 or 1
+statement error value 10 is invalid, new bit must be 0 or 1
 SELECT set_bit('\x1234567890'::bytea, 34, 10);
 
 
@@ -92,6 +92,18 @@ SELECT set_byte('\x1234567890'::bytea, 4, 45);
 
 statement error index 7 out of valid range, 0..4
 SELECT set_byte('\x1234567890'::bytea, 7, 23);
+
+
+query T
+SELECT set_byte('\x1234567890'::bytea, 4, 300);
+----
+\x123456782c
+
+
+query T
+SELECT set_byte('\x1234567890'::bytea, 4, -300);
+----
+\x12345678d4
 
 
 query T

@@ -61,7 +61,7 @@ pub fn set_bit(bytes: &[u8], n: i64, value: i32) -> Result<Box<[u8]>> {
     if value != 0 && value != 1 {
         return Err(ExprError::InvalidParam {
             name: "set_bit",
-            reason: format!("value {} is invalid,new bit must be 0 or 1", value).into(),
+            reason: format!("value {} is invalid, new bit must be 0 or 1", value).into(),
         });
     }
 
