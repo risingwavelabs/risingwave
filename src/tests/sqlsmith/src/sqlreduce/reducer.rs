@@ -280,84 +280,80 @@ impl Reducer {
 
             // Enumerate all paths in the current AST
             let paths = enumerate_reduction_paths(&ast_node, vec![]);
-            tracing::info!("  Found {} reduction paths in AST", paths.len());
+            tracing::debug!("Found {} reduction paths in AST", paths.len());
 
             // Generate reduction candidates
             let candidates = generate_reduction_candidates(&ast_node, &self.rules, &paths);
-            tracing::info!("  Generated {} reduction candidates", candidates.len());
+            tracing::debug!("Generated {} reduction candidates", candidates.len());
 
             // Try applying each candidate
             for (i, candidate) in candidates.iter().enumerate() {
                 candidate_index += 1;
-                tracing::info!(
-                    "  Trying candidate {} of {} (global #{}): {:?}",
+                tracing::debug!(
+                    "Trying candidate {} of {} (global #{}): {:?}",
                     i + 1,
                     candidates.len(),
                     candidate_index,
                     candidate
                 );
 
-                if let Some(new_ast) = apply_reduction_operation(&ast_node, candidate) {
-                    if let Some(new_stmt) = ast_node_to_statement(&new_ast) {
-                        let new_sql = new_stmt.to_string();
-                        let new_len = new_sql.len();
+                let Some(new_ast) = apply_reduction_operation(&ast_node, candidate) else {
+                    tracing::debug!("Failed to apply reduction operation");
+                    continue;
+                };
 
-                        tracing::info!(
-                            "    Generated candidate SQL with length: {} (reduction: {})",
-                            new_len,
-                            sql_len as i32 - new_len as i32
-                        );
+                let Some(new_stmt) = ast_node_to_statement(&new_ast) else {
+                    tracing::debug!("Failed to convert reduced AST back to statement");
+                    continue;
+                };
 
-                        // Only consider if it's actually smaller and we haven't seen it
-                        if new_len < sql_len {
-                            if seen_queries.contains(&new_sql) {
-                                tracing::info!("    Candidate already seen, skipping");
-                                continue;
-                            }
+                let new_sql = new_stmt.to_string();
+                let new_len = new_sql.len();
 
-                            tracing::info!(
-                                "    SQL changes from:\n{}\n    to:\n{}",
-                                ast_node_to_statement(&ast_node)
-                                    .map(|s| s.to_string())
-                                    .unwrap_or_else(
-                                        || "<failed to convert AST to statement>".to_owned()
-                                    ),
-                                new_sql
-                            );
+                tracing::debug!(
+                    "Generated candidate SQL with length: {} (reduction: {})",
+                    new_len,
+                    sql_len as i32 - new_len as i32
+                );
 
-                            seen_queries.insert(new_sql.clone());
-
-                            // Check if the failure is preserved
-                            tracing::info!("    Checking if failure is preserved...");
-                            if self.checker.is_failure_preserved(sql, &new_sql).await {
-                                tracing::info!(
-                                    "    ✓ Valid reduction found! SQL len {} → {}",
-                                    sql_len,
-                                    new_len
-                                );
-                                tracing::info!(
-                                    "    Applying candidate and continuing to next iteration"
-                                );
-                                ast_node = new_ast;
-                                sql_len = new_len;
-                                found_reduction = true;
-                                break;
-                            } else {
-                                tracing::info!("    ✗ Reduction not valid; failure not preserved");
-                            }
-                        } else {
-                            tracing::info!(
-                                "    Candidate not smaller ({} >= {}), skipping",
-                                new_len,
-                                sql_len
-                            );
-                        }
-                    } else {
-                        tracing::info!("    Failed to convert reduced AST back to statement");
-                    }
-                } else {
-                    tracing::info!("    Failed to apply reduction operation");
+                // Only consider if it's actually smaller and we haven't seen it
+                if new_len >= sql_len {
+                    tracing::debug!(
+                        "Candidate not smaller ({} >= {}), skipping",
+                        new_len,
+                        sql_len
+                    );
+                    continue;
                 }
+
+                if seen_queries.contains(&new_sql) {
+                    tracing::debug!("Candidate already seen, skipping");
+                    continue;
+                }
+
+                tracing::debug!(
+                    "SQL changes from:\n{}\nto:\n{}",
+                    ast_node_to_statement(&ast_node)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "<failed to convert AST to statement>".to_owned()),
+                    new_sql
+                );
+
+                seen_queries.insert(new_sql.clone());
+
+                // Check if the failure is preserved
+                tracing::debug!("Checking if failure is preserved");
+                if !self.checker.is_failure_preserved(sql, &new_sql).await {
+                    tracing::debug!("Reduction not valid; failure not preserved");
+                    continue;
+                }
+
+                tracing::info!("✓ Valid reduction found! SQL len {} → {}", sql_len, new_len);
+                tracing::info!("Applying candidate and continuing to next iteration");
+                ast_node = new_ast;
+                sql_len = new_len;
+                found_reduction = true;
+                break;
             }
 
             if !found_reduction {
@@ -376,7 +372,7 @@ impl Reducer {
                 );
                 break;
             } else {
-                tracing::info!(
+                tracing::debug!(
                     "Path-based iteration {} complete: found valid reduction, continuing",
                     iteration
                 );
