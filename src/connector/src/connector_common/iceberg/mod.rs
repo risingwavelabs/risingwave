@@ -183,10 +183,8 @@ impl IcebergCommon {
                     bail!("Invalid header format: {}", pair);
                 }
             }
-            Ok(headers)
-        } else {
-            Ok(HashMap::new())
         }
+        Ok(headers)
     }
 
     pub fn enable_config_load(&self) -> bool {
