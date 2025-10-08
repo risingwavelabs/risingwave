@@ -19,6 +19,12 @@ SELECT pgp_sym_decrypt(pgp_sym_encrypt('\x0001020304'::bytea, 'mypass'), 'mypass
 ----
 \x0001020304
 
+# Test with longer text
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('The quick brown fox jumps over the lazy dog'::bytea, 'mypassword123'), 'mypassword123');
+----
+\x54686520717569636b2062726f776e20666f78206a756d7073206f76657220746865206c617a7920646f67
+
 # Test wrong password should fail
 statement error
 SELECT pgp_sym_decrypt(pgp_sym_encrypt('data'::bytea, 'pass1'), 'pass2');
