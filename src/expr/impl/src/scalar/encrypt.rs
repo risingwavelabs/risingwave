@@ -21,7 +21,6 @@ use openssl::symm::{Cipher, Crypter, Mode as CipherMode};
 use regex::Regex;
 use risingwave_expr::{ExprError, Result, function};
 use sequoia_openpgp as openpgp;
-use sequoia_openpgp::armor;
 use sequoia_openpgp::cert::Cert;
 use sequoia_openpgp::crypto::SessionKey;
 use sequoia_openpgp::packet::prelude::*;
@@ -235,11 +234,8 @@ fn pgp_sym_encrypt_internal(
 
     let mut sink = Vec::new();
 
-    // Create armored writer
-    let message = armor::Writer::new(&mut sink, armor::Kind::Message)?;
-
     // Encrypt with password using SKESK (Symmetric-Key Encrypted Session Key)
-    let message = Encryptor2::with_passwords(Message::new(message), vec![Password::from(password)])
+    let message = Encryptor2::with_passwords(Message::new(&mut sink), vec![Password::from(password)])
         .symmetric_algo(SymmetricAlgorithm::AES128)
         .build()?;
 
@@ -294,7 +290,7 @@ fn pgp_sym_decrypt_internal(
             &mut self,
             _pkesks: &[PKESK],
             skesks: &[SKESK],
-            sym_algo: Option<openpgp::types::SymmetricAlgorithm>,
+            _sym_algo: Option<openpgp::types::SymmetricAlgorithm>,
             mut decrypt: D,
         ) -> openpgp::Result<Option<openpgp::Fingerprint>>
         where
@@ -377,11 +373,8 @@ fn pgp_pub_encrypt_internal(
 
     let mut sink = Vec::new();
 
-    // Create armored writer
-    let message = armor::Writer::new(&mut sink, armor::Kind::Message)?;
-
     // Encrypt with public key
-    let message = Encryptor2::for_recipients(Message::new(message), recipients)
+    let message = Encryptor2::for_recipients(Message::new(&mut sink), recipients)
         .symmetric_algo(SymmetricAlgorithm::AES128)
         .build()?;
 
@@ -451,7 +444,7 @@ fn pgp_pub_decrypt_internal(
             &mut self,
             pkesks: &[PKESK],
             _skesks: &[SKESK],
-            _sym_algo: Option<openpgp::types::SymmetricAlgorithm>,
+            sym_algo: Option<openpgp::types::SymmetricAlgorithm>,
             mut decrypt: D,
         ) -> openpgp::Result<Option<openpgp::Fingerprint>>
         where
