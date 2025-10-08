@@ -25,9 +25,10 @@ use sequoia_openpgp::armor;
 use sequoia_openpgp::cert::Cert;
 use sequoia_openpgp::crypto::SessionKey;
 use sequoia_openpgp::packet::prelude::*;
-use sequoia_openpgp::parse::{Parse, stream::*};
+use sequoia_openpgp::parse::Parse;
+use sequoia_openpgp::parse::stream::*;
 use sequoia_openpgp::policy::StandardPolicy;
-use sequoia_openpgp::serialize::stream::{*, Encryptor2};
+use sequoia_openpgp::serialize::stream::{Encryptor2, *};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Algorithm {
@@ -233,23 +234,20 @@ fn pgp_sym_encrypt_internal(
     use openpgp::types::SymmetricAlgorithm;
 
     let mut sink = Vec::new();
-    
+
     // Create armored writer
     let message = armor::Writer::new(&mut sink, armor::Kind::Message)?;
-    
+
     // Encrypt with password using SKESK (Symmetric-Key Encrypted Session Key)
-    let message = Encryptor2::with_passwords(
-        Message::new(message),
-        vec![Password::from(password)],
-    )
-    .symmetric_algo(SymmetricAlgorithm::AES128)
-    .build()?;
-    
+    let message = Encryptor2::with_passwords(Message::new(message), vec![Password::from(password)])
+        .symmetric_algo(SymmetricAlgorithm::AES128)
+        .build()?;
+
     // Write literal data packet
     let mut message = LiteralWriter::new(message).build()?;
     message.write_all(data)?;
     message.finalize()?;
-    
+
     Ok(sink.into_boxed_slice())
 }
 
@@ -276,21 +274,21 @@ fn pgp_sym_decrypt_internal(
     _options: Option<&str>,
 ) -> Result<Box<[u8]>, PgpError> {
     let policy = &StandardPolicy::new();
-    
+
     struct Helper {
         password: String,
     }
-    
+
     impl VerificationHelper for Helper {
         fn get_certs(&mut self, _ids: &[openpgp::KeyHandle]) -> openpgp::Result<Vec<Cert>> {
             Ok(Vec::new())
         }
-        
+
         fn check(&mut self, _structure: MessageStructure<'_>) -> openpgp::Result<()> {
             Ok(())
         }
     }
-    
+
     impl DecryptionHelper for Helper {
         fn decrypt<D>(
             &mut self,
@@ -303,30 +301,31 @@ fn pgp_sym_decrypt_internal(
             D: FnMut(openpgp::types::SymmetricAlgorithm, &SessionKey) -> bool,
         {
             use openpgp::crypto::Password;
-            
+
             // Try password-based decryption with each SKESK packet
             for skesk in skesks {
-                if let Ok((algo, session_key)) = skesk.decrypt(&Password::from(self.password.as_str())) {
+                if let Ok((algo, session_key)) =
+                    skesk.decrypt(&Password::from(self.password.as_str()))
+                {
                     if decrypt(algo, &session_key) {
                         return Ok(None);
                     }
                 }
             }
-            
+
             Err(anyhow::anyhow!("Decryption failed").into())
         }
     }
-    
+
     let helper = Helper {
         password: password.to_string(),
     };
-    
-    let mut decryptor = DecryptorBuilder::from_bytes(msg)?
-        .with_policy(policy, None, helper)?;
-    
+
+    let mut decryptor = DecryptorBuilder::from_bytes(msg)?.with_policy(policy, None, helper)?;
+
     let mut plaintext = Vec::new();
     std::io::copy(&mut decryptor, &mut plaintext)?;
-    
+
     Ok(plaintext.into_boxed_slice())
 }
 
@@ -353,12 +352,12 @@ fn pgp_pub_encrypt_internal(
     _options: Option<&str>,
 ) -> Result<Box<[u8]>, PgpError> {
     use openpgp::types::SymmetricAlgorithm;
-    
+
     let policy = &StandardPolicy::new();
-    
+
     // Parse the certificate (public key)
     let cert = Cert::from_bytes(key)?;
-    
+
     // Get encryption-capable keys
     let recipients = cert
         .keys()
@@ -369,28 +368,28 @@ fn pgp_pub_encrypt_internal(
         .for_transport_encryption()
         .map(|ka| ka.key())
         .collect::<Vec<_>>();
-    
+
     if recipients.is_empty() {
         return Err(PgpError::InvalidKey(
             "No valid encryption keys found".to_string(),
         ));
     }
-    
+
     let mut sink = Vec::new();
-    
+
     // Create armored writer
     let message = armor::Writer::new(&mut sink, armor::Kind::Message)?;
-    
+
     // Encrypt with public key
     let message = Encryptor2::for_recipients(Message::new(message), recipients)
         .symmetric_algo(SymmetricAlgorithm::AES128)
         .build()?;
-    
+
     // Write literal data packet
     let mut message = LiteralWriter::new(message).build()?;
     message.write_all(data)?;
     message.finalize()?;
-    
+
     Ok(sink.into_boxed_slice())
 }
 
@@ -428,25 +427,25 @@ fn pgp_pub_decrypt_internal(
     _options: Option<&str>,
 ) -> Result<Box<[u8]>, PgpError> {
     let policy = &StandardPolicy::new();
-    
+
     // Parse the certificate (secret key)
     let cert = Cert::from_bytes(key)?;
-    
+
     struct Helper {
         cert: Cert,
         password: Option<String>,
     }
-    
+
     impl VerificationHelper for Helper {
         fn get_certs(&mut self, _ids: &[openpgp::KeyHandle]) -> openpgp::Result<Vec<Cert>> {
             Ok(vec![self.cert.clone()])
         }
-        
+
         fn check(&mut self, _structure: MessageStructure<'_>) -> openpgp::Result<()> {
             Ok(())
         }
     }
-    
+
     impl DecryptionHelper for Helper {
         fn decrypt<D>(
             &mut self,
@@ -459,14 +458,25 @@ fn pgp_pub_decrypt_internal(
             D: FnMut(openpgp::types::SymmetricAlgorithm, &SessionKey) -> bool,
         {
             use openpgp::crypto::Password;
-            
+
             let policy = &StandardPolicy::new();
-            
+
             // Try decrypting with each key
             for pkesk in pkesks {
-                for ka in self.cert.keys().unencrypted_secret().with_policy(policy, None).supported().for_transport_encryption() {
+                for ka in self
+                    .cert
+                    .keys()
+                    .unencrypted_secret()
+                    .with_policy(policy, None)
+                    .supported()
+                    .for_transport_encryption()
+                {
                     let mut keypair = if let Some(pwd) = &self.password {
-                        if let Ok(decrypted) = ka.key().clone().decrypt_secret(&Password::from(pwd.as_str())) {
+                        if let Ok(decrypted) = ka
+                            .key()
+                            .clone()
+                            .decrypt_secret(&Password::from(pwd.as_str()))
+                        {
                             if let Ok(kp) = decrypted.into_keypair() {
                                 kp
                             } else {
@@ -482,7 +492,7 @@ fn pgp_pub_decrypt_internal(
                             continue;
                         }
                     };
-                    
+
                     if let Some((algo, session_key)) = pkesk.decrypt(&mut keypair, sym_algo) {
                         if decrypt(algo, &session_key) {
                             return Ok(None);
@@ -490,22 +500,21 @@ fn pgp_pub_decrypt_internal(
                     }
                 }
             }
-            
+
             Err(anyhow::anyhow!("Decryption failed").into())
         }
     }
-    
+
     let helper = Helper {
         cert,
         password: password.map(|s| s.to_string()),
     };
-    
-    let mut decryptor = DecryptorBuilder::from_bytes(msg)?
-        .with_policy(policy, None, helper)?;
-    
+
+    let mut decryptor = DecryptorBuilder::from_bytes(msg)?.with_policy(policy, None, helper)?;
+
     let mut plaintext = Vec::new();
     std::io::copy(&mut decryptor, &mut plaintext)?;
-    
+
     Ok(plaintext.into_boxed_slice())
 }
 
@@ -588,10 +597,13 @@ mod test {
         let encrypted = pgp_sym_encrypt(data, password).unwrap();
         // Print encrypted data for debugging
         println!("Encrypted data length: {}", encrypted.len());
-        println!("Encrypted data (first 100 bytes): {:?}", std::str::from_utf8(&encrypted[..std::cmp::min(100, encrypted.len())]));
-        
+        println!(
+            "Encrypted data (first 100 bytes): {:?}",
+            std::str::from_utf8(&encrypted[..std::cmp::min(100, encrypted.len())])
+        );
+
         let decrypted = pgp_sym_decrypt(&encrypted, password).unwrap();
-        
+
         assert_eq!(&*decrypted, data);
     }
 
@@ -602,7 +614,7 @@ mod test {
 
         let encrypted = pgp_sym_encrypt(data, password).unwrap();
         let decrypted = pgp_sym_decrypt(&encrypted, password).unwrap();
-        
+
         assert_eq!(&*decrypted, data);
     }
 
@@ -614,7 +626,7 @@ mod test {
 
         let encrypted = pgp_sym_encrypt(data, password).unwrap();
         let result = pgp_sym_decrypt(&encrypted, wrong_password);
-        
+
         assert!(result.is_err());
     }
 }

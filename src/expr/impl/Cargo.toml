@@ -47,7 +47,6 @@ num-traits = "0.2"
 openssl = "0.10.72"
 rand = { workspace = true }
 regex = { workspace = true }
-sequoia-openpgp = { version = "1.21", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_expr = { workspace = true }
@@ -55,6 +54,7 @@ risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 self_cell = "1.2.0"
+sequoia-openpgp = { version = "1.21", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto"] }
 serde = { workspace = true }
 serde_json = "1"
 sha1 = "0.10"
