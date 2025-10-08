@@ -266,7 +266,7 @@ impl Reducer {
         let mut candidate_index = 0;
 
         // Track the original query
-        seen_queries.insert(sql.to_string());
+        seen_queries.insert(sql.to_owned());
 
         tracing::info!(
             "Starting path-based reduction with initial SQL length: {}",
@@ -297,7 +297,7 @@ impl Reducer {
                     candidate
                 );
 
-                if let Some(new_ast) = apply_reduction_operation(&ast_node, &candidate) {
+                if let Some(new_ast) = apply_reduction_operation(&ast_node, candidate) {
                     if let Some(new_stmt) = ast_node_to_statement(&new_ast) {
                         let new_sql = new_stmt.to_string();
                         let new_len = new_sql.len();
@@ -320,7 +320,7 @@ impl Reducer {
                                 ast_node_to_statement(&ast_node)
                                     .map(|s| s.to_string())
                                     .unwrap_or_else(
-                                        || "<failed to convert AST to statement>".to_string()
+                                        || "<failed to convert AST to statement>".to_owned()
                                     ),
                                 new_sql
                             );
@@ -385,7 +385,7 @@ impl Reducer {
 
         let final_sql = ast_node_to_statement(&ast_node)
             .map(|s| s.to_string())
-            .unwrap_or_else(|| sql.to_string());
+            .unwrap_or_else(|| sql.to_owned());
 
         tracing::info!(
             "Path-based reduction complete. Processed {} total candidates across {} iterations",
