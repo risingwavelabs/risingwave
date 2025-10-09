@@ -2336,7 +2336,7 @@ fn bind_webhook_info(
         column_name: columns_defs[0].name.real_value(),
         secret_name,
     };
-    let mut binder = Binder::new_for_ddl_with_secure_compare(session, secure_compare_context);
+    let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
     let expr = binder.bind_expr(&signature_expr)?;
 
     // validate expr, ensuring it is SECURE_COMPARE()
