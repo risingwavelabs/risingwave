@@ -322,6 +322,7 @@ services:
     entrypoint: |
       /bin/sh -c '
       set -e
+      echo "127.0.0.1 minio-0" | sudo tee -a /etc/hosts
       mkdir -p "/data/hummock001"
       /usr/bin/docker-entrypoint.sh "$0" "$@"
       '
