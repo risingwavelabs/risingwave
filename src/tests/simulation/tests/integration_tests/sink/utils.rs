@@ -366,17 +366,18 @@ impl AsyncTruncateSinkWriter for AsyncTruncateTestWriter {
             let id = row.datum_at(0).unwrap().into_int32();
             let name = row.datum_at(1).unwrap().into_utf8().to_string();
             let store = self.store.clone();
-            let err_rate = self.err_rate.clone();
+            let ack_err = SimulationTestSink::random_err(&self.err_rate);
             add_future
                 .add_future_may_await(
                     async move {
-                        if SimulationTestSink::random_err(&err_rate) {
-                            println!("write with err");
-                            store.inc_err();
-                            return Err(SinkError::Internal(anyhow::anyhow!("fail to write")));
-                        }
                         if thread_rng().random_bool(0.5) {
-                            sleep(Duration::from_millis(30)).await;
+                            let micro = (thread_rng().random::<u32>() as f64 * 30.0
+                                / (u32::MAX as f64)) as _;
+                            sleep(Duration::from_micros(micro)).await;
+                        } else if ack_err {
+                            println!("ack with err");
+                            store.inc_err();
+                            return Err(SinkError::Internal(anyhow::anyhow!("fail to ack")));
                         }
                         store.insert(id, name);
                         Ok(())
@@ -427,12 +428,11 @@ macro_rules! for_all_sink_types {
             CoordinatedSink,
             AsyncTruncate,
         }
-    }
+    };
 }
 
 impl SimulationTestSink {
     pub fn register_new(test_type: TestSinkType) -> Self {
-        let todo = 0;
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
         let err_rate = Arc::new(AtomicU32::new(0));
         let store = TestSinkStore::new();
