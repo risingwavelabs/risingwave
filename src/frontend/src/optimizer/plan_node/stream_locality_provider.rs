@@ -149,10 +149,8 @@ impl StreamLocalityProvider {
             catalog_builder.add_order_column(*locality_col_idx, OrderType::ascending());
         }
         // add streaming key of the input as the rest of the primary key
-        if let Some(stream_key) = input.stream_key() {
-            for &key_col_idx in stream_key {
-                catalog_builder.add_order_column(key_col_idx, OrderType::ascending());
-            }
+        for &key_col_idx in input.expect_stream_key() {
+            catalog_builder.add_order_column(key_col_idx, OrderType::ascending());
         }
 
         catalog_builder.set_value_indices((0..input_schema.len()).collect());
@@ -184,11 +182,9 @@ impl StreamLocalityProvider {
         }
 
         // Add stream key columns as part of primary key (excluding those already added as locality columns)
-        if let Some(stream_key) = input.stream_key() {
-            for &key_col_idx in stream_key {
-                let field = &input_schema.fields[key_col_idx];
-                catalog_builder.add_column(field);
-            }
+        for &key_col_idx in input.expect_stream_key() {
+            let field = &input_schema.fields[key_col_idx];
+            catalog_builder.add_column(field);
         }
 
         // Add backfill_finished column
