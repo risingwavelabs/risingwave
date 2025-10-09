@@ -36,15 +36,6 @@ impl MergeExecutorBuilder {
     ) -> StreamResult<MergeExecutorInput> {
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
-        let x = actor_context
-            .initial_upstream_actors
-            .get(&node.upstream_fragment_id);
-
-        // println!(
-        // //     "self {} {} upstream {}, actors {:#?}",
-        // //     actor_context.id, actor_context.fragment_id, upstream_fragment_id, x
-        // // );
-
         let inputs: Vec<_> = try_join_all(
             actor_context
                 .initial_upstream_actors
@@ -77,14 +68,7 @@ impl MergeExecutorBuilder {
         };
 
         let upstreams = if always_single_input {
-            MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap_or_else(
-                |_| {
-                    panic!(
-                        "self {} {} upstream {}, actors {:#?}",
-                        actor_context.id, actor_context.fragment_id, upstream_fragment_id, x
-                    )
-                },
-            ))
+            MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap())
         } else {
             MergeExecutorUpstream::Merge(MergeExecutor::new_select_receiver(
                 inputs,
