@@ -20,6 +20,7 @@ use risingwave_meta::controller::catalog::Catalog;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
+use risingwave_pb::common::worker_node::Resource;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
@@ -208,16 +209,17 @@ impl NotificationServiceImpl {
         Ok((tables, notification_version))
     }
 
-    async fn get_compute_node_total_cpu_count(&self) -> usize {
+    /// Get the total resource of the cluster.
+    async fn get_cluster_resource(&self) -> Resource {
         self.metadata_manager
             .cluster_controller
-            .compute_node_total_cpu_count()
+            .cluster_resource()
             .await
     }
 
     async fn compactor_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (tables, catalog_version) = self.get_tables_snapshot().await?;
-        let compute_node_total_cpu_count = self.get_compute_node_total_cpu_count().await;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             tables,
@@ -225,7 +227,7 @@ impl NotificationServiceImpl {
                 catalog_version,
                 ..Default::default()
             }),
-            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
@@ -276,7 +278,7 @@ impl NotificationServiceImpl {
                 .context("failed to encode session params")?,
         });
 
-        let compute_node_total_cpu_count = self.get_compute_node_total_cpu_count().await;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             databases,
@@ -301,7 +303,7 @@ impl NotificationServiceImpl {
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,
             session_params,
-            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
@@ -314,7 +316,7 @@ impl NotificationServiceImpl {
             .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
-        let compute_node_total_cpu_count = self.get_compute_node_total_cpu_count().await;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             tables,
@@ -329,14 +331,14 @@ impl NotificationServiceImpl {
             hummock_write_limits: Some(WriteLimits {
                 write_limits: hummock_write_limits,
             }),
-            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
 
     async fn compute_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (secrets, catalog_version) = self.get_decrypted_secret_snapshot().await?;
-        let compute_node_total_cpu_count = self.get_compute_node_total_cpu_count().await;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             secrets,
@@ -344,7 +346,7 @@ impl NotificationServiceImpl {
                 catalog_version,
                 ..Default::default()
             }),
-            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }

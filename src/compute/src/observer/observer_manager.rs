@@ -48,8 +48,8 @@ impl ObserverState for ComputeObserverNode {
                         panic!("error type notification");
                     }
                 },
-                Info::ComputeNodeTotalCpuCount(count) => {
-                    LicenseManager::get().update_cpu_core_count(count as _);
+                Info::ClusterResource(count) => {
+                    LicenseManager::get().update_cluster_resource(count as _);
                 }
                 Info::Recovery(_) => {
                     // Reset batch client pool on recovery is always unnecessary
@@ -70,7 +70,7 @@ impl ObserverState for ComputeObserverNode {
             unreachable!();
         };
         LocalSecretManager::global().init_secrets(snapshot.secrets);
-        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
+        LicenseManager::get().update_cluster_resource(snapshot.cluster_resource.unwrap());
     }
 }
 
