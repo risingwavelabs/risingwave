@@ -616,7 +616,6 @@ impl ClusterControllerInner {
         let mut per_host = HashMap::new();
 
         for info in self.worker_extra_info.values() {
-            dbg!(&info);
             let r = per_host
                 .entry(info.resource.hostname.as_str())
                 .or_insert_with(ClusterResource::default);
