@@ -31,13 +31,14 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, Fragment as FragmentModel, FragmentRelation, Sink, SourceSplits, StreamingJob,
+    Actor, Fragment as FragmentModel, FragmentRelation, FragmentSplits, Sink, SourceSplits,
+    StreamingJob,
 };
 use risingwave_meta_model::{
     ActorId, ConnectorSplits, DatabaseId, DispatcherType, ExprContext, FragmentId, I32Array,
     JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
-    VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, object, sink, source,
-    source_splits, streaming_job, table,
+    VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, fragment_splits, object,
+    sink, source, source_splits, streaming_job, table,
 };
 use risingwave_meta_model_migration::{Alias, ExprTrait, OnConflict, SelectStatement, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
@@ -1881,6 +1882,41 @@ impl CatalogController {
             .on_conflict(
                 OnConflict::column(source_splits::Column::SourceId)
                     .update_column(source_splits::Column::Splits)
+                    .to_owned(),
+            )
+            .exec(&txn)
+            .await?;
+
+        txn.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn update_fragment_splits(
+        &self,
+        fragment_splits: &HashMap<FragmentId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        if fragment_splits.is_empty() {
+            return Ok(());
+        }
+
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let models: Vec<fragment_splits::ActiveModel> = fragment_splits
+            .iter()
+            .map(|(fragment_id, splits)| fragment_splits::ActiveModel {
+                fragment_id: Set(*fragment_id as _),
+                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
+                    splits: splits.iter().map(Into::into).collect_vec(),
+                }))),
+            })
+            .collect();
+
+        FragmentSplits::insert_many(models)
+            .on_conflict(
+                OnConflict::column(fragment_splits::Column::FragmentId)
+                    .update_column(fragment_splits::Column::Splits)
                     .to_owned(),
             )
             .exec(&txn)
