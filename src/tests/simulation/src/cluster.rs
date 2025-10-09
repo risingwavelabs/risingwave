@@ -339,6 +339,7 @@ default_parallelism = {default_parallelism}
         }
     }
 
+    /// Returns the total number of cores for streaming compute nodes.
     pub fn total_streaming_cores(&self) -> u32 {
         (self.compute_nodes * self.compute_node_cores) as u32
     }

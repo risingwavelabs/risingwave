@@ -114,8 +114,8 @@ impl ObserverState for FrontendObserverNode {
             Info::Recovery(_) => {
                 self.compute_client_pool.invalidate_all();
             }
-            Info::ClusterResource(count) => {
-                LicenseManager::get().update_cluster_resource(count as _);
+            Info::ClusterResource(resource) => {
+                LicenseManager::get().update_cluster_resource(resource);
             }
         }
     }

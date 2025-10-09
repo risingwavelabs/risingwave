@@ -16,7 +16,7 @@ use std::num::NonZeroU64;
 use std::sync::{LazyLock, RwLock};
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use risingwave_pb::common::worker_node::Resource;
+use risingwave_pb::common::ClusterResource;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -155,7 +155,7 @@ pub enum LicenseError {
 
 struct Inner {
     license: Result<License, LicenseError>,
-    cached_cluster_resource: Resource,
+    cached_cluster_resource: ClusterResource,
 }
 
 /// The singleton license manager.
@@ -174,8 +174,7 @@ impl LicenseManager {
         Self {
             inner: RwLock::new(Inner {
                 license: Ok(License::default()),
-                cached_cluster_resource: Resource {
-                    rw_version: "".to_owned(), // unused
+                cached_cluster_resource: ClusterResource {
                     total_cpu_cores: 0,
                     total_memory_bytes: 0,
                 },
@@ -222,7 +221,7 @@ impl LicenseManager {
     }
 
     /// Update the cached cluster resource.
-    pub fn update_cluster_resource(&self, resource: Resource) {
+    pub fn update_cluster_resource(&self, resource: ClusterResource) {
         let mut inner = self.inner.write().unwrap();
         inner.cached_cluster_resource = resource;
     }

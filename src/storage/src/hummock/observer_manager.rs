@@ -90,8 +90,8 @@ impl ObserverState for HummockObserverNode {
                     .update_write_limits(write_limits.write_limits);
             }
 
-            Info::ClusterResource(count) => {
-                LicenseManager::get().update_cluster_resource(count as _);
+            Info::ClusterResource(resource) => {
+                LicenseManager::get().update_cluster_resource(resource);
             }
 
             _ => {

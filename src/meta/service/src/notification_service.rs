@@ -20,9 +20,8 @@ use risingwave_meta::controller::catalog::Catalog;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
-use risingwave_pb::common::worker_node::Resource;
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_pb::common::{ClusterResource, WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -210,7 +209,7 @@ impl NotificationServiceImpl {
     }
 
     /// Get the total resource of the cluster.
-    async fn get_cluster_resource(&self) -> Resource {
+    async fn get_cluster_resource(&self) -> ClusterResource {
         self.metadata_manager
             .cluster_controller
             .cluster_resource()

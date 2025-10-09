@@ -48,8 +48,8 @@ impl ObserverState for ComputeObserverNode {
                         panic!("error type notification");
                     }
                 },
-                Info::ClusterResource(count) => {
-                    LicenseManager::get().update_cluster_resource(count as _);
+                Info::ClusterResource(resource) => {
+                    LicenseManager::get().update_cluster_resource(resource);
                 }
                 Info::Recovery(_) => {
                     // Reset batch client pool on recovery is always unnecessary

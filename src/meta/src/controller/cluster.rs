@@ -23,6 +23,7 @@ use risingwave_common::RW_VERSION;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
+use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_license::LicenseManager;
@@ -30,9 +31,11 @@ use risingwave_meta_model::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model::worker::{WorkerStatus, WorkerType};
 use risingwave_meta_model::{TransactionId, WorkerId, worker, worker_property};
 use risingwave_pb::common::worker_node::{
-    PbProperty, PbProperty as AddNodeProperty, PbResource, PbState, Resource,
+    PbProperty, PbProperty as AddNodeProperty, PbResource, PbState,
 };
-use risingwave_pb::common::{HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode};
+use risingwave_pb::common::{
+    ClusterResource, HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode,
+};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use sea_orm::ActiveValue::Set;
@@ -119,7 +122,7 @@ impl ClusterController {
     }
 
     /// Get the total resource of the cluster.
-    pub async fn cluster_resource(&self) -> Resource {
+    pub async fn cluster_resource(&self) -> ClusterResource {
         self.inner.read().await.cluster_resource()
     }
 
@@ -162,9 +165,7 @@ impl ClusterController {
             )
             .await?;
 
-        if r#type == PbWorkerType::ComputeNode {
-            self.update_cluster_resource_for_license().await?;
-        }
+        self.update_cluster_resource_for_license().await?;
 
         Ok(worker_id)
     }
@@ -448,14 +449,13 @@ impl StreamingClusterInfo {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct WorkerExtraInfo {
     // Volatile values updated by meta node as follows.
     //
     // Unix timestamp that the worker will expire at.
     expire_at: Option<u64>,
     started_at: Option<u64>,
-    host: String,
     resource: PbResource,
 }
 
@@ -499,6 +499,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
             rw_version: RW_VERSION.to_owned(),
             total_memory_bytes: system_memory_available_bytes() as _,
             total_cpu_cores: total_cpu_available() as _,
+            hostname: hostname(),
         }),
         started_at,
     }
@@ -610,24 +611,24 @@ impl ClusterControllerInner {
     }
 
     /// Get the total resource of the cluster.
-    fn cluster_resource(&self) -> Resource {
-        // For each host, we only consider the maximum resource, in case a host has multiple nodes.
+    fn cluster_resource(&self) -> ClusterResource {
+        // For each hostname, we only consider the maximum resource, in case a host has multiple nodes.
         let mut per_host = HashMap::new();
 
         for info in self.worker_extra_info.values() {
+            dbg!(&info);
             let r = per_host
-                .entry(info.host.clone())
-                .or_insert_with(Resource::default);
+                .entry(info.resource.hostname.as_str())
+                .or_insert_with(ClusterResource::default);
 
             r.total_cpu_cores = max(r.total_cpu_cores, info.resource.total_cpu_cores);
             r.total_memory_bytes = max(r.total_memory_bytes, info.resource.total_memory_bytes);
         }
 
-        // For different hosts, we sum up the resources.
+        // For different hostnames, we sum up the resources.
         per_host
             .into_values()
-            .reduce(|a, b| Resource {
-                rw_version: "".to_owned(), // unused
+            .reduce(|a, b| ClusterResource {
                 total_cpu_cores: a.total_cpu_cores + b.total_cpu_cores,
                 total_memory_bytes: a.total_memory_bytes + b.total_memory_bytes,
             })
@@ -776,7 +777,6 @@ impl ClusterControllerInner {
         let extra_info = WorkerExtraInfo {
             started_at: Some(timestamp_now_sec()),
             expire_at: None,
-            host: host_address.host,
             resource,
         };
         self.worker_extra_info.insert(worker_id, extra_info);

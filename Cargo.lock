@@ -13440,6 +13440,7 @@ name = "rw_resource_util"
 version = "0.0.0"
 dependencies = [
  "fs-err",
+ "hostname",
  "sysinfo",
  "tempfile",
  "thiserror-ext",
