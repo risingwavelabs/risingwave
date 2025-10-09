@@ -59,8 +59,8 @@ impl ObserverState for CompactorObserverNode {
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
-            Info::ClusterResource(count) => {
-                LicenseManager::get().update_cluster_resource(count as _);
+            Info::ClusterResource(resource) => {
+                LicenseManager::get().update_cluster_resource(resource);
             }
             _ => {
                 panic!("error type notification");

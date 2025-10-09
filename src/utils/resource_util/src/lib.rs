@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// Returns the hostname of the current machine, or an empty string if failed,
+/// which rarely happens.
+pub fn hostname() -> String {
+    hostname::get()
+        .unwrap_or_default()
+        .into_string()
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum CgroupVersion {
     V1,
