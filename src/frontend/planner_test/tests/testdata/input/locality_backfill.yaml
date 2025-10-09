@@ -11,3 +11,9 @@
     select count(*) from t1 join t2 on t1.a = t2.a group by t1.b;
   expected_outputs:
     - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t (a int, b int, c int, primary key (b, a));
+    select count(*) from t group by a, b;
+  expected_outputs:
+    - stream_plan
