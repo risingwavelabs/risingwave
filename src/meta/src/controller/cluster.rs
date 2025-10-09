@@ -457,7 +457,6 @@ pub struct WorkerExtraInfo {
     started_at: Option<u64>,
     host: String,
     resource: PbResource,
-    r#type: PbWorkerType,
 }
 
 impl WorkerExtraInfo {
@@ -615,11 +614,7 @@ impl ClusterControllerInner {
         // For each host, we only consider the maximum resource, in case a host has multiple nodes.
         let mut per_host = HashMap::new();
 
-        for info in self
-            .worker_extra_info
-            .values()
-            .filter(|info| info.r#type == PbWorkerType::ComputeNode)
-        {
+        for info in self.worker_extra_info.values() {
             let r = per_host
                 .entry(info.host.clone())
                 .or_insert_with(Resource::default);
@@ -783,7 +778,6 @@ impl ClusterControllerInner {
             expire_at: None,
             host: host_address.host,
             resource,
-            r#type,
         };
         self.worker_extra_info.insert(worker_id, extra_info);
 
