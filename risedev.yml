@@ -24,7 +24,7 @@ profile:
     #   ENABLE_PRETTY_LOG: "true"
     steps:
       # If you want to use the local s3 storage, enable the following line
-      # - use: minio
+      - use: minio
 
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
@@ -130,10 +130,10 @@ profile:
         compactor-mode: "dedicated-iceberg"
         port: 6661
         exporter-port: 1261
-      # - use: prometheus
-      # - use: grafana
-      # - use: kafka
-      #   persist-data: true
+      - use: prometheus
+      - use: grafana
+      - use: kafka
+        persist-data: true
       - use: lakekeeper
         port: 8181
 
