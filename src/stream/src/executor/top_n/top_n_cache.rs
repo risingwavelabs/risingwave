@@ -150,7 +150,7 @@ pub trait TopNCacheTrait {
     ///
     /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
     /// used to generate messages to be sent to downstream operators.
-    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging);
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging);
 
     /// Delete input row from the cache.
     ///
@@ -165,7 +165,7 @@ pub trait TopNCacheTrait {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
+        row: impl Row,
         staging: &mut TopNStaging,
     ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 }
@@ -290,7 +290,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
 }
 
 impl TopNCacheTrait for TopNCache<false> {
-    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
@@ -374,7 +374,7 @@ impl TopNCacheTrait for TopNCache<false> {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
+        row: impl Row,
         staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
@@ -482,7 +482,7 @@ impl TopNCacheTrait for TopNCache<false> {
 }
 
 impl TopNCacheTrait for TopNCache<true> {
-    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
@@ -587,7 +587,7 @@ impl TopNCacheTrait for TopNCache<true> {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
+        row: impl Row,
         staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
