@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp;
-use std::cmp::Ordering;
+use std::cmp::{self, Ordering, max};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Add;
 use std::sync::Arc;
@@ -31,7 +30,7 @@ use risingwave_meta_model::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model::worker::{WorkerStatus, WorkerType};
 use risingwave_meta_model::{TransactionId, WorkerId, worker, worker_property};
 use risingwave_pb::common::worker_node::{
-    PbProperty, PbProperty as AddNodeProperty, PbResource, PbState,
+    PbProperty, PbProperty as AddNodeProperty, PbResource, PbState, Resource,
 };
 use risingwave_pb::common::{HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -119,19 +118,21 @@ impl ClusterController {
         self.inner.read().await.count_worker_by_type().await
     }
 
-    pub async fn compute_node_total_cpu_count(&self) -> usize {
-        self.inner.read().await.compute_node_total_cpu_count()
+    /// Get the total resource of the cluster.
+    pub async fn cluster_resource(&self) -> Resource {
+        self.inner.read().await.cluster_resource()
     }
 
-    async fn update_compute_node_total_cpu_count(&self) -> MetaResult<()> {
-        let total_cpu_cores = self.compute_node_total_cpu_count().await;
+    /// Get the total resource of the cluster, then update license manager and notify all other nodes.
+    async fn update_cluster_resource_for_license(&self) -> MetaResult<()> {
+        let resource = self.cluster_resource().await;
 
         // Update local license manager.
-        LicenseManager::get().update_cpu_core_count(total_cpu_cores);
+        LicenseManager::get().update_cluster_resource(resource.clone());
         // Notify all other nodes.
         self.env.notification_manager().notify_all_without_version(
             Operation::Update, // unused
-            Info::ComputeNodeTotalCpuCount(total_cpu_cores as _),
+            Info::ClusterResource(resource),
         );
 
         Ok(())
@@ -162,7 +163,7 @@ impl ClusterController {
             .await?;
 
         if r#type == PbWorkerType::ComputeNode {
-            self.update_compute_node_total_cpu_count().await?;
+            self.update_cluster_resource_for_license().await?;
         }
 
         Ok(worker_id)
@@ -198,7 +199,7 @@ impl ClusterController {
                 .notify_frontend(Operation::Delete, Info::Node(worker.clone()))
                 .await;
             if worker.r#type() == PbWorkerType::ComputeNode {
-                self.update_compute_node_total_cpu_count().await?;
+                self.update_cluster_resource_for_license().await?;
             }
         }
 
@@ -454,6 +455,7 @@ pub struct WorkerExtraInfo {
     // Unix timestamp that the worker will expire at.
     expire_at: Option<u64>,
     started_at: Option<u64>,
+    host: String,
     resource: PbResource,
     r#type: PbWorkerType,
 }
@@ -608,12 +610,33 @@ impl ClusterControllerInner {
         }
     }
 
-    fn compute_node_total_cpu_count(&self) -> usize {
-        self.worker_extra_info
+    /// Get the total resource of the cluster.
+    fn cluster_resource(&self) -> Resource {
+        // For each host, we only consider the maximum resource, in case a host has multiple nodes.
+        let mut per_host = HashMap::new();
+
+        for info in self
+            .worker_extra_info
             .values()
             .filter(|info| info.r#type == PbWorkerType::ComputeNode)
-            .map(|info| info.resource.total_cpu_cores as usize)
-            .sum()
+        {
+            let r = per_host
+                .entry(info.host.clone())
+                .or_insert_with(Resource::default);
+
+            r.total_cpu_cores = max(r.total_cpu_cores, info.resource.total_cpu_cores);
+            r.total_memory_bytes = max(r.total_memory_bytes, info.resource.total_memory_bytes);
+        }
+
+        // For different hosts, we sum up the resources.
+        per_host
+            .into_values()
+            .reduce(|a, b| Resource {
+                rw_version: "".to_owned(), // unused
+                total_cpu_cores: a.total_cpu_cores + b.total_cpu_cores,
+                total_memory_bytes: a.total_memory_bytes + b.total_memory_bytes,
+            })
+            .unwrap_or_default()
     }
 
     pub async fn add_worker(
@@ -724,7 +747,7 @@ impl ClusterControllerInner {
         let worker = worker::ActiveModel {
             worker_id: Default::default(),
             worker_type: Set(r#type.into()),
-            host: Set(host_address.host),
+            host: Set(host_address.host.clone()),
             port: Set(host_address.port),
             status: Set(WorkerStatus::Starting),
             transaction_id: Set(txn_id),
@@ -758,6 +781,7 @@ impl ClusterControllerInner {
         let extra_info = WorkerExtraInfo {
             started_at: Some(timestamp_now_sec()),
             expire_at: None,
+            host: host_address.host,
             resource,
             r#type,
         };

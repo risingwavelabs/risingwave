@@ -17,14 +17,19 @@
 #[cfg(test)]
 mod tests {
     use expect_test::expect;
+    use risingwave_pb::common::worker_node::Resource;
     use thiserror_ext::AsReport as _;
 
     use crate::{Feature, LicenseKey, LicenseManager, TEST_ALL_LICENSE_KEY_CONTENT};
 
-    fn do_test(key: &str, cpu_core_count: usize, expect: expect_test::Expect) {
+    fn do_test(key: &str, cpu_core_count: u64, expect: expect_test::Expect) {
         let manager = LicenseManager::new();
         manager.refresh(LicenseKey(key));
-        manager.update_cpu_core_count(cpu_core_count);
+        manager.update_cluster_resource(Resource {
+            rw_version: "".to_owned(), // unused
+            total_cpu_cores: cpu_core_count,
+            total_memory_bytes: 0, // unused currently
+        });
 
         match Feature::TestDummy.check_available_with(&manager) {
             Ok(_) => expect.assert_eq("ok"),
