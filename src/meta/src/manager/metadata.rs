@@ -404,15 +404,14 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn running_fragment_parallelisms(
+    pub fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
         Ok(self
             .catalog_controller
-            .running_fragment_parallelisms(id_filter)
-            .await?
+            .running_fragment_parallelisms(id_filter)?
             .into_iter()
             .map(|(k, v)| (k as FragmentId, v))
             .collect())
@@ -637,8 +636,8 @@ impl MetadataManager {
         Ok(actor_maps)
     }
 
-    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
-        let actor_cnt = self.catalog_controller.worker_actor_count().await?;
+    pub fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        let actor_cnt = self.catalog_controller.worker_actor_count()?;
         Ok(actor_cnt
             .into_iter()
             .map(|(id, cnt)| (id as WorkerId, cnt))
