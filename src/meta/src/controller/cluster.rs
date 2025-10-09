@@ -131,7 +131,7 @@ impl ClusterController {
         let resource = self.cluster_resource().await;
 
         // Update local license manager.
-        LicenseManager::get().update_cluster_resource(resource.clone());
+        LicenseManager::get().update_cluster_resource(resource);
         // Notify all other nodes.
         self.env.notification_manager().notify_all_without_version(
             Operation::Update, // unused
