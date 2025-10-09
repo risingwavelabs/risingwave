@@ -22,9 +22,11 @@ use std::sync::Arc;
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
+use crate::Explain;
 use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
+use crate::optimizer::LogicalPlanRef;
 use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, PlanNodeId};
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
@@ -202,20 +204,8 @@ impl OptimizerContext {
         self.explain_options.trace
     }
 
-    pub fn is_explain_backfill(&self) -> bool {
-        self.explain_options.backfill
-    }
-
-    pub fn explain_type(&self) -> ExplainType {
-        self.explain_options.explain_type.clone()
-    }
-
-    pub fn explain_format(&self) -> ExplainFormat {
-        self.explain_options.explain_format.clone()
-    }
-
-    pub fn is_explain_logical(&self) -> bool {
-        self.explain_type() == ExplainType::Logical
+    fn is_explain_logical(&self) -> bool {
+        self.explain_options.explain_type == ExplainType::Logical
     }
 
     pub fn trace(&self, str: impl Into<String>) {
@@ -234,8 +224,21 @@ impl OptimizerContext {
         self.session_ctx().notice_to_user(str);
     }
 
-    pub fn store_logical(&self, str: impl Into<String>) {
-        *self.logical_explain.borrow_mut() = Some(str.into())
+    fn explain_plan_impl(&self, plan: &impl Explain) -> String {
+        match self.explain_options.explain_format {
+            ExplainFormat::Text => plan.explain_to_string(),
+            ExplainFormat::Json => plan.explain_to_json(),
+            ExplainFormat::Xml => plan.explain_to_xml(),
+            ExplainFormat::Yaml => plan.explain_to_yaml(),
+            ExplainFormat::Dot => plan.explain_to_dot(),
+        }
+    }
+
+    pub fn may_store_explain_logical(&self, plan: &LogicalPlanRef) {
+        if self.is_explain_logical() {
+            let str = self.explain_plan_impl(plan);
+            *self.logical_explain.borrow_mut() = Some(str);
+        }
     }
 
     pub fn take_logical(&self) -> Option<String> {

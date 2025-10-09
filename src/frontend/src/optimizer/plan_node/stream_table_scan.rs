@@ -21,7 +21,7 @@ use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
@@ -59,6 +59,13 @@ impl StreamTableScan {
         stream_scan_type: StreamScanType,
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
+
+        let mut stream_scan_type = stream_scan_type;
+        if core.cross_database() {
+            assert_ne!(stream_scan_type, StreamScanType::UpstreamOnly);
+            // Force rewrite scan type to cross-db scan
+            stream_scan_type = StreamScanType::CrossDbSnapshotBackfill;
+        }
 
         let distribution = {
             match core.distribution_key() {
@@ -397,7 +404,7 @@ impl StreamTableScan {
                     fields: snapshot_schema,
                     stream_key: vec![], // not used
                     input: vec![],
-                    append_only: true,
+                    stream_kind: PbStreamKind::AppendOnly as i32,
                 },
             ]
         };
@@ -423,7 +430,7 @@ impl StreamTableScan {
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
-            append_only: self.append_only(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
         })
     }
 }

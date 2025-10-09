@@ -61,7 +61,7 @@ fn array_replace(
     elem_to: Option<ScalarRefImpl<'_>>,
 ) -> ListValue {
     ListValue::from_datum_iter(
-        &array.data_type(),
+        &array.elem_type(),
         array.iter().map(|val| match val == elem_from {
             true => elem_to,
             false => val,

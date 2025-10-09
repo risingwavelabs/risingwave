@@ -22,8 +22,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use serde::Deserialize;
-use serde_derive::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::serde_as;
 use thiserror_ext::AsReport;
@@ -216,7 +215,9 @@ impl DorisSink {
             risingwave_common::types::DataType::Map(_) => {
                 Err(SinkError::Doris("MAP is not supported for Doris sink.".to_owned()))
             }
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => {
+                Err(SinkError::Doris("VECTOR is not supported for Doris sink.".to_owned()))
+            },
         }
     }
 }

@@ -31,6 +31,7 @@ use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatab
 use thiserror_ext::AsReport;
 use tracing::{debug, warn};
 
+use crate::barrier::cdc_progress::CdcTableBackfillTrackerRef;
 use crate::barrier::checkpoint::creating_job::{CompleteJobType, CreatingStreamingJobControl};
 use crate::barrier::checkpoint::recovery::{
     DatabaseRecoveringState, DatabaseStatusAction, EnterInitializing, EnterRunning,
@@ -57,11 +58,14 @@ pub(crate) struct CheckpointControl {
     pub(crate) env: MetaSrvEnv,
     pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
     pub(super) hummock_version_stats: HummockVersionStats,
+    /// The max barrier nums in flight
+    pub(crate) in_flight_barrier_nums: usize,
 }
 
 impl CheckpointControl {
     pub fn new(env: MetaSrvEnv) -> Self {
         Self {
+            in_flight_barrier_nums: env.opts.in_flight_barrier_nums,
             env,
             databases: Default::default(),
             hummock_version_stats: Default::default(),
@@ -78,6 +82,7 @@ impl CheckpointControl {
         env.shared_actor_infos()
             .retain_databases(databases.keys().chain(&failed_databases).cloned());
         Self {
+            in_flight_barrier_nums: env.opts.in_flight_barrier_nums,
             env,
             databases: databases
                 .into_iter()
@@ -142,15 +147,6 @@ impl CheckpointControl {
                 Ok(())
             }
         }
-    }
-
-    pub(crate) fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        self.databases.values().all(|database| {
-            database
-                .running_state()
-                .map(|database| database.can_inject_barrier(in_flight_barrier_nums))
-                .unwrap_or(true)
-        })
     }
 
     pub(crate) fn recovering_databases(&self) -> impl Iterator<Item = DatabaseId> + '_ {
@@ -230,6 +226,7 @@ impl CheckpointControl {
                         let new_database = DatabaseCheckpointControl::new(
                             database_id,
                             self.env.shared_actor_infos().clone(),
+                            self.env.cdc_table_backfill_tracker(),
                         );
                         control_stream_manager.add_partial_graph(database_id, None);
                         entry
@@ -273,6 +270,10 @@ impl CheckpointControl {
                 // Skip new barrier for database which is not running.
                 return Ok(());
             };
+            if !database.can_inject_barrier(self.in_flight_barrier_nums) {
+                // Skip new barrier with no explicit command when the database should pause inject additional barrier
+                return Ok(());
+            }
             database.handle_new_barrier(
                 None,
                 checkpoint,
@@ -540,12 +541,17 @@ pub(crate) struct DatabaseCheckpointControl {
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
 
     create_mview_tracker: CreateMviewProgressTracker,
+    cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
 
     metrics: DatabaseCheckpointControlMetrics,
 }
 
 impl DatabaseCheckpointControl {
-    fn new(database_id: DatabaseId, shared_actor_infos: SharedActorInfos) -> Self {
+    fn new(
+        database_id: DatabaseId,
+        shared_actor_infos: SharedActorInfos,
+        cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
+    ) -> Self {
         Self {
             database_id,
             state: BarrierWorkerState::new(database_id, shared_actor_infos),
@@ -554,6 +560,7 @@ impl DatabaseCheckpointControl {
             committed_epoch: None,
             creating_streaming_job_controls: Default::default(),
             create_mview_tracker: Default::default(),
+            cdc_table_backfill_tracker,
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
@@ -564,6 +571,7 @@ impl DatabaseCheckpointControl {
         state: BarrierWorkerState,
         committed_epoch: u64,
         creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
+        cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
     ) -> Self {
         Self {
             database_id,
@@ -573,6 +581,7 @@ impl DatabaseCheckpointControl {
             committed_epoch: Some(committed_epoch),
             creating_streaming_job_controls,
             create_mview_tracker,
+            cdc_table_backfill_tracker,
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
@@ -835,6 +844,20 @@ impl DatabaseCheckpointControl {
                     task.load_finished_source_ids
                         .extend(load_finished_source_ids);
                 }
+                // Process refresh_finished_table_ids for all barrier types (checkpoint and non-checkpoint)
+                let refresh_finished_table_ids: Vec<_> = node
+                    .state
+                    .resps
+                    .iter()
+                    .flat_map(|resp| &resp.refresh_finished_tables)
+                    .cloned()
+                    .collect();
+                if !refresh_finished_table_ids.is_empty() {
+                    // Add refresh_finished_table_ids to the task for processing
+                    let task = task.get_or_insert_default();
+                    task.refresh_finished_table_ids
+                        .extend(refresh_finished_table_ids);
+                }
 
                 let mut finished_jobs = self.create_mview_tracker.apply_collected_command(
                     node.command_ctx.command.as_ref(),
@@ -842,6 +865,9 @@ impl DatabaseCheckpointControl {
                     &node.state.resps,
                     hummock_version_stats,
                 );
+                let finished_cdc_backfill = self
+                    .cdc_table_backfill_tracker
+                    .apply_collected_command(&node.state.resps);
                 if !node.command_ctx.barrier_info.kind.is_checkpoint() {
                     assert!(finished_jobs.is_empty());
                     node.notifiers.into_iter().for_each(|notifier| {
@@ -873,6 +899,8 @@ impl DatabaseCheckpointControl {
                 );
                 self.completing_barrier = Some(node.command_ctx.barrier_info.prev_epoch());
                 task.finished_jobs.extend(finished_jobs);
+                task.finished_cdc_table_backfill
+                    .extend(finished_cdc_backfill);
                 task.notifiers.extend(node.notifiers);
                 task.epoch_infos
                     .try_insert(
@@ -972,18 +1000,18 @@ impl DatabaseCheckpointControl {
             (None, vec![])
         };
 
-        for table_to_cancel in command
+        for job_to_cancel in command
             .as_ref()
-            .map(Command::tables_to_drop)
+            .map(Command::jobs_to_drop)
             .into_iter()
             .flatten()
         {
             if self
                 .creating_streaming_job_controls
-                .contains_key(&table_to_cancel)
+                .contains_key(&job_to_cancel)
             {
                 warn!(
-                    table_id = table_to_cancel.table_id,
+                    job_id = job_to_cancel.table_id,
                     "ignore cancel command on creating streaming job"
                 );
                 for notifier in notifiers {

@@ -37,7 +37,7 @@ all-connectors = ["risingwave_connector/all-sinks", "risingwave_connector/all-so
 [dependencies]
 clap = { workspace = true }
 console = "0.15"
-const-str = "0.6"
+const-str = "0.7"
 home = "0.5"
 risingwave_batch_executors = { workspace = true }
 risingwave_cmd = { workspace = true }
@@ -49,6 +49,7 @@ risingwave_connector = { workspace = true }
 risingwave_ctl = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
+risingwave_jni_core = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
 shell-words = "1.1.0"

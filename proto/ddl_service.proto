@@ -88,8 +88,8 @@ message AlterSourceResponse {
 message CreateSinkRequest {
   catalog.Sink sink = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
-  // It is used to provide a replace plan for the downstream table in `create sink into table` requests.
-  optional ReplaceJobPlan affected_table_change = 3;
+  reserved 3;
+  reserved "affected_table_change";
   // The list of object IDs that this sink depends on.
   repeated uint32 dependencies = 4;
   bool if_not_exists = 5;
@@ -103,7 +103,8 @@ message CreateSinkResponse {
 message DropSinkRequest {
   uint32 sink_id = 1;
   bool cascade = 2;
-  optional ReplaceJobPlan affected_table_change = 3;
+  reserved 3;
+  reserved "affected_table_change";
 }
 
 message DropSinkResponse {
@@ -337,6 +338,7 @@ message CreateFunctionResponse {
 
 message DropFunctionRequest {
   uint32 function_id = 1;
+  bool cascade = 2;
 }
 
 message DropFunctionResponse {
@@ -587,6 +589,14 @@ message CompactIcebergTableResponse {
   uint64 task_id = 2;
 }
 
+message ExpireIcebergTableSnapshotsRequest {
+  uint32 sink_id = 1;
+}
+
+message ExpireIcebergTableSnapshotsResponse {
+  common.Status status = 1;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -631,5 +641,6 @@ service DdlService {
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
   rpc CompactIcebergTable(CompactIcebergTableRequest) returns (CompactIcebergTableResponse);
+  rpc ExpireIcebergTableSnapshots(ExpireIcebergTableSnapshotsRequest) returns (ExpireIcebergTableSnapshotsResponse);
   rpc AlterCdcTableBackfillParallelism(AlterCdcTableBackfillParallelismRequest) returns (AlterCdcTableBackfillParallelismResponse);
 }

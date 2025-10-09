@@ -191,6 +191,10 @@ pub mod default {
             10
         }
 
+        pub fn stream_topn_cache_min_capacity() -> usize {
+            10
+        }
+
         pub fn stream_chunk_size() -> usize {
             256
         }
@@ -350,6 +354,10 @@ pub mod default {
         pub fn streaming_hash_join_entry_state_max_rows() -> usize {
             // NOTE(kwannoel): This is just an arbitrary number.
             30000
+        }
+
+        pub fn streaming_now_progress_ratio() -> Option<f32> {
+            None
         }
 
         pub fn enable_explain_analyze_stats() -> bool {

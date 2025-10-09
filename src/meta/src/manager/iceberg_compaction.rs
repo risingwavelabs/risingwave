@@ -124,16 +124,30 @@ impl IcebergCompactionHandle {
         task_id: u64,
     ) -> MetaResult<()> {
         use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
-        let prost_sink_catalog: PbSink = self
+        let mut sinks = self
             .metadata_manager
             .catalog_controller
             .get_sink_by_ids(vec![self.sink_id.sink_id as i32])
-            .await?
-            .remove(0);
+            .await?;
+        if sinks.is_empty() {
+            // The sink may be deleted, just return Ok.
+            tracing::warn!("Sink not found: {}", self.sink_id.sink_id);
+            return Ok(());
+        }
+        let prost_sink_catalog: PbSink = sinks.remove(0);
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
         let task_type: TaskType = match param.sink_type {
-            SinkType::AppendOnly | SinkType::ForceAppendOnly => TaskType::SmallDataFileCompaction,
+            SinkType::AppendOnly | SinkType::ForceAppendOnly => {
+                if risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .is_ok()
+                {
+                    TaskType::SmallDataFileCompaction
+                } else {
+                    TaskType::FullCompaction
+                }
+            }
 
             _ => TaskType::FullCompaction,
         };
@@ -244,7 +258,14 @@ impl IcebergCompactionManager {
         let IcebergSinkCompactionUpdate {
             sink_id,
             compaction_interval,
+            force_compaction,
         } = msg;
+
+        let compaction_interval = if force_compaction {
+            0
+        } else {
+            compaction_interval
+        };
 
         // if the compaction interval is changed, we need to reset the commit info when the compaction task is sent of initialized
         let commit_info = guard.iceberg_commits.entry(sink_id).or_insert(CommitInfo {
@@ -527,10 +548,9 @@ impl IcebergCompactionManager {
         Ok(())
     }
 
-    async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
-        const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000;
+    pub async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
+        const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000; // 24 hours
         let now = chrono::Utc::now().timestamp_millis();
-        let expired_older_than = now - MAX_SNAPSHOT_AGE_MS_DEFAULT;
 
         let iceberg_config = self.load_iceberg_config(sink_id).await?;
         if !iceberg_config.enable_snapshot_expiration {
@@ -547,40 +567,63 @@ impl IcebergCompactionManager {
         let mut snapshots = metadata.snapshots().collect_vec();
         snapshots.sort_by_key(|s| s.timestamp_ms());
 
-        if snapshots.is_empty() || snapshots.first().unwrap().timestamp_ms() > expired_older_than {
+        let default_snapshot_expiration_timestamp_ms = now - MAX_SNAPSHOT_AGE_MS_DEFAULT;
+
+        let snapshot_expiration_timestamp_ms =
+            match iceberg_config.snapshot_expiration_timestamp_ms(now) {
+                Some(timestamp) => timestamp,
+                None => default_snapshot_expiration_timestamp_ms,
+            };
+
+        if snapshots.is_empty()
+            || snapshots.first().unwrap().timestamp_ms() > snapshot_expiration_timestamp_ms
+        {
             // avoid commit empty table updates
             return Ok(());
         }
 
         tracing::info!(
-            "Catalog {} table {} sink-id {} has {} snapshots try trigger expiration",
-            iceberg_config.catalog_name(),
-            iceberg_config.full_table_name()?,
-            sink_id.sink_id,
-            snapshots.len(),
+            catalog_name = iceberg_config.catalog_name(),
+            table_name = iceberg_config.full_table_name()?.to_string(),
+            sink_id = sink_id.sink_id,
+            snapshots_len = snapshots.len(),
+            snapshot_expiration_timestamp_ms = snapshot_expiration_timestamp_ms,
+            snapshot_expiration_retain_last = ?iceberg_config.snapshot_expiration_retain_last,
+            clear_expired_files = ?iceberg_config.snapshot_expiration_clear_expired_files,
+            clear_expired_meta_data = ?iceberg_config.snapshot_expiration_clear_expired_meta_data,
+            "try trigger snapshots expiration",
         );
 
         let tx = Transaction::new(&table);
 
-        // TODO: use config
-        let expired_snapshots = tx
-            .expire_snapshot()
-            .clear_expired_files(true)
-            .clear_expired_meta_data(true);
+        let mut expired_snapshots = tx.expire_snapshot();
+
+        expired_snapshots = expired_snapshots.expire_older_than(snapshot_expiration_timestamp_ms);
+
+        if let Some(retain_last) = iceberg_config.snapshot_expiration_retain_last {
+            expired_snapshots = expired_snapshots.retain_last(retain_last);
+        }
+
+        expired_snapshots = expired_snapshots
+            .clear_expired_files(iceberg_config.snapshot_expiration_clear_expired_files);
+
+        expired_snapshots = expired_snapshots
+            .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
 
         let tx = expired_snapshots
             .apply()
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
+
         tx.commit(catalog.as_ref())
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
 
         tracing::info!(
-            "Expired snapshots for iceberg catalog {} table {} sink-id {}",
-            iceberg_config.catalog_name(),
-            iceberg_config.full_table_name()?,
-            sink_id.sink_id,
+            catalog_name = iceberg_config.catalog_name(),
+            table_name = iceberg_config.full_table_name()?.to_string(),
+            sink_id = sink_id.sink_id,
+            "Expired snapshots for iceberg table",
         );
 
         Ok(())

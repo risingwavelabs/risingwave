@@ -59,6 +59,7 @@ pub(super) enum CompletingTask {
 pub(super) struct CompleteBarrierTask {
     pub(super) commit_info: CommitEpochInfo,
     pub(super) finished_jobs: Vec<TrackingJob>,
+    pub(super) finished_cdc_table_backfill: Vec<TableId>,
     pub(super) notifiers: Vec<Notifier>,
     /// `database_id` -> (Some((`command_ctx`, `enqueue_time`)), vec!((`creating_job_id`, `epoch`)))
     #[expect(clippy::type_complexity)]
@@ -71,6 +72,8 @@ pub(super) struct CompleteBarrierTask {
     >,
     /// Source IDs that have finished loading data and need `LoadFinish` commands
     pub(super) load_finished_source_ids: Vec<u32>,
+    /// Table IDs that have finished materialize refresh and need completion signaling
+    pub(super) refresh_finished_table_ids: Vec<u32>,
 }
 
 impl CompleteBarrierTask {
@@ -113,6 +116,13 @@ impl CompleteBarrierTask {
                     .await?;
             }
 
+            // Handle refresh finished table IDs for materialized view refresh completion
+            if !self.refresh_finished_table_ids.is_empty() {
+                context
+                    .handle_refresh_finished_table_ids(self.refresh_finished_table_ids.clone())
+                    .await?;
+            }
+
             for command_ctx in self
                 .epoch_infos
                 .values()
@@ -142,6 +152,12 @@ impl CompleteBarrierTask {
                 self.finished_jobs
                     .into_iter()
                     .map(|finished_job| context.finish_creating_job(finished_job)),
+            )
+            .await?;
+            try_join_all(
+                self.finished_cdc_table_backfill
+                    .into_iter()
+                    .map(|job_id| context.finish_cdc_table_backfill(job_id)),
             )
             .await?;
             for (database_id, (command, _)) in self.epoch_infos {

@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::collections::vec_deque::VecDeque;
-use std::ops::Bound::Included;
+use std::collections::{Bound, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -54,6 +53,7 @@ use crate::hummock::utils::{
     filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap,
     search_sst_idx,
 };
+use crate::hummock::vector::file::FileVectorStore;
 use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
@@ -69,6 +69,7 @@ use crate::monitor::{
 use crate::store::{
     OnNearestItemFn, ReadLogOptions, ReadOptions, Vector, VectorNearestOptions, gen_min_epoch,
 };
+use crate::vector::hnsw::nearest;
 use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 
 pub type CommittedVersion = PinnedVersion;
@@ -190,7 +191,7 @@ impl StagingVersion {
                     && range_overlap(
                         &(left, right),
                         &imm.start_table_key(),
-                        Included(&imm.end_table_key()),
+                        Bound::Included(&imm.end_table_key()),
                     )
             });
 
@@ -916,6 +917,28 @@ impl HummockVersionReader {
         local_stats: &mut StoreLocalStatistic,
         factory: &mut F,
     ) -> StorageResult<()> {
+        {
+            fn bound_inner<T>(bound: &Bound<T>) -> Option<&T> {
+                match bound {
+                    Bound::Included(bound) | Bound::Excluded(bound) => Some(bound),
+                    Bound::Unbounded => None,
+                }
+            }
+            let (left, right) = &table_key_range;
+            if let (Some(left), Some(right)) = (bound_inner(left), bound_inner(right))
+                && right < left
+            {
+                if cfg!(debug_assertions) {
+                    panic!("invalid iter key range: {table_id} {left:?} {right:?}")
+                } else {
+                    return Err(HummockError::other(format!(
+                        "invalid iter key range: {table_id} {left:?} {right:?}"
+                    ))
+                    .into());
+                }
+            }
+        }
+
         local_stats.staging_imm_iter_count = imms.len() as u64;
         for imm in imms {
             factory.add_batch_iter(imm);
@@ -1210,6 +1233,26 @@ impl HummockVersionReader {
                     }
                 }
                 Ok(builder.finish())
+            }
+            VectorIndexImpl::HnswFlat(hnsw_flat) => {
+                let Some(graph_file) = &hnsw_flat.graph_file else {
+                    return Ok(vec![]);
+                };
+
+                let graph = self.sstable_store.get_hnsw_graph(graph_file).await?;
+
+                let vector_store =
+                    FileVectorStore::new_for_reader(hnsw_flat, self.sstable_store.clone());
+                let (items, _stats) = nearest::<O, M>(
+                    &vector_store,
+                    &*graph,
+                    target.to_ref(),
+                    on_nearest_item_fn,
+                    options.hnsw_ef_search,
+                    options.top_n,
+                )
+                .await?;
+                Ok(items)
             }
         }
     }

@@ -60,6 +60,7 @@ mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_table_drop_connector;
+pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
@@ -117,7 +118,9 @@ pub mod vacuum;
 pub mod variable;
 mod wait;
 
-pub use alter_table_column::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
+pub use alter_table_column::{
+    fetch_table_catalog_for_alter, get_new_table_definition_for_cdc_table, get_replace_table_plan,
+};
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
@@ -382,7 +385,7 @@ pub async fn handle(
             source_watermarks,
             append_only,
             on_conflict,
-            with_version_column,
+            with_version_columns,
             cdc_table_info,
             include_column_options,
             webhook_info,
@@ -403,7 +406,10 @@ pub async fn handle(
                     columns,
                     append_only,
                     on_conflict,
-                    with_version_column.map(|x| x.real_value()),
+                    with_version_columns
+                        .iter()
+                        .map(|col| col.real_value())
+                        .collect(),
                     engine,
                 )
                 .await;
@@ -420,7 +426,10 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 on_conflict,
-                with_version_column.map(|x| x.real_value()),
+                with_version_columns
+                    .iter()
+                    .map(|col| col.real_value())
+                    .collect(),
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
@@ -592,6 +601,15 @@ pub async fn handle(
         | Statement::Insert { .. }
         | Statement::Delete { .. }
         | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
+        Statement::Copy {
+            entity: CopyEntity::Query(query),
+            target: CopyTarget::Stdout,
+        } => {
+            let response =
+                query::handle_query(handler_args, Statement::Query(query), vec![Format::Text])
+                    .await?;
+            Ok(response.into_copy_query_to_stdout())
+        }
         Statement::CreateView {
             materialized,
             if_not_exists,
@@ -652,11 +670,13 @@ pub async fn handle(
         Statement::CreateIndex {
             name,
             table_name,
+            method,
             columns,
             include,
             distributed_by,
             unique,
             if_not_exists,
+            with_properties: _,
         } => {
             if unique {
                 bail_not_implemented!("create unique index");
@@ -667,6 +687,7 @@ pub async fn handle(
                 if_not_exists,
                 name,
                 table_name,
+                method,
                 columns.to_vec(),
                 include,
                 distributed_by,
@@ -864,13 +885,7 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::AlterConnectorProps { alter_props } => {
-                // If exists a associated source, it should be of the same name.
-                crate::handler::alter_source_props::handle_alter_table_connector_props(
-                    handler_args,
-                    name,
-                    alter_props,
-                )
-                .await
+                alter_table_props::handle_alter_table_props(handler_args, name, alter_props).await
             }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }
@@ -1286,7 +1301,9 @@ pub async fn handle(
         Statement::Deallocate { name, prepare } => {
             prepared_statement::handle_deallocate(name, prepare).await
         }
-        Statement::Vacuum { object_name } => vacuum::handle_vacuum(handler_args, object_name).await,
+        Statement::Vacuum { object_name, full } => {
+            vacuum::handle_vacuum(handler_args, object_name, full).await
+        }
         Statement::Refresh { table_name } => {
             refresh::handle_refresh(handler_args, table_name).await
         }

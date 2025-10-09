@@ -123,7 +123,7 @@ query TT
 select distribution_type,flags from rw_fragments order by fragment_id;
 ----
 SINGLE {SOURCE}
-HASH {MVIEW}
+HASH {MVIEW,UPSTREAM_SINK_UNION}
 SINGLE {STREAM_SCAN}
 SINGLE {CDC_FILTER}
 HASH {SOURCE,DML}
@@ -377,6 +377,67 @@ create source pg_source with (
 
 statement ok
 show create source pg_source;
+
+# postgres streaming test
+system ok
+psql -c "
+CREATE SCHEMA parallelized_cdc;
+CREATE TABLE parallelized_cdc.parallelized_cdc_backfill_test (id INT PRIMARY KEY, name VARCHAR);
+insert into parallelized_cdc.parallelized_cdc_backfill_test values (1,11),(2,22),(3,33),(4,44),(5,55),(6,66),(7,77),(8,88),(9,99),(10,1010),(11,1111),(15,1515);
+"
+
+statement ok
+CREATE TABLE pg_parallelized_cdc_backfill_test_table_1 (
+    id INT PRIMARY KEY,
+    name VARCHAR
+)
+WITH (
+    backfill.num_rows_per_split='2',
+    backfill.parallelism='3',
+    backfill.as_even_splits='true'
+)
+FROM pg_source TABLE 'parallelized_cdc.parallelized_cdc_backfill_test';
+
+statement ok
+CREATE TABLE pg_parallelized_cdc_backfill_test_table_2 (
+    id INT PRIMARY KEY,
+    name VARCHAR
+)
+WITH (
+    backfill.num_rows_per_split='2',
+    backfill.parallelism='3',
+    backfill.as_even_splits='false'
+)
+FROM pg_source TABLE 'parallelized_cdc.parallelized_cdc_backfill_test';
+
+sleep 5s
+
+query I
+SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
+----
+12
+
+query II
+SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
+----
+12
+
+system ok
+psql -c "
+insert into parallelized_cdc.parallelized_cdc_backfill_test values (20,22),(30,33),(40,44),(50,55),(60,66),(70,77),(80,88),(90,99),(100,1010),(110,1111),(120,1212);
+"
+
+sleep 5s
+
+query I
+SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
+----
+23
+
+query II
+SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
+----
+23
 
 # test postgres backfill data types
 statement ok

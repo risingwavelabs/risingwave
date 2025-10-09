@@ -88,7 +88,6 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use super::SourceChange;
 use crate::controller::id::IdCategory;
 use crate::controller::utils::filter_workers_by_resource_group;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_impl;
@@ -467,7 +466,6 @@ impl ScaleController {
                     actor_id,
                     fragment_id,
                     status: _,
-                    splits: _,
                     worker_id,
                     vnode_bitmap,
                     expr_context,
@@ -1186,13 +1184,13 @@ impl ScaleController {
                 let curr_actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
 
                 let actor_splits = self
-                    .source_manager
+                    .env
+                    .shared_actor_infos()
                     .migrate_splits_for_source_actors(
                         *fragment_id,
                         &prev_actor_ids,
                         &curr_actor_ids,
-                    )
-                    .await?;
+                    )?;
 
                 tracing::debug!(
                     "source actor splits: {:?}, fragment_id: {}",
@@ -1354,10 +1352,12 @@ impl ScaleController {
                 .cloned()
                 .unwrap_or_default();
 
+            let mut cdc_table_id = None;
             let cdc_table_snapshot_split_assignment = if fragment
                 .fragment_type_mask
                 .contains(FragmentTypeFlag::StreamCdcScan)
             {
+                cdc_table_id = Some(fragment.job_id);
                 assign_cdc_table_snapshot_splits_impl(
                     fragment.job_id,
                     fragment_actors_after_reschedule
@@ -1367,6 +1367,7 @@ impl ScaleController {
                         .copied()
                         .collect(),
                     self.env.meta_store_ref(),
+                    None,
                 )
                 .await?
             } else {
@@ -1385,6 +1386,7 @@ impl ScaleController {
                     actor_splits,
                     newly_created_actors: Default::default(),
                     cdc_table_snapshot_split_assignment,
+                    cdc_table_id,
                 },
             );
         }
@@ -1647,27 +1649,6 @@ impl ScaleController {
                         }),
                     );
             }
-        }
-
-        let mut stream_source_actor_splits = HashMap::new();
-        let mut stream_source_dropped_actors = HashSet::new();
-
-        // todo: handle adaptive splits
-        for (fragment_id, reschedule) in reschedules {
-            if !reschedule.actor_splits.is_empty() {
-                stream_source_actor_splits
-                    .insert(*fragment_id as FragmentId, reschedule.actor_splits.clone());
-                stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
-            }
-        }
-
-        if !stream_source_actor_splits.is_empty() {
-            self.source_manager
-                .apply_source_change(SourceChange::Reschedule {
-                    split_assignment: stream_source_actor_splits,
-                    dropped_actors: stream_source_dropped_actors,
-                })
-                .await;
         }
 
         Ok(())

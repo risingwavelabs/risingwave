@@ -15,6 +15,8 @@
 // THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 // UPDATE WITH: ./risedev generate-with-options
 
+#![rustfmt::skip]
+
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use crate::error::ConnectorError;
@@ -165,6 +167,11 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "enable_compaction".to_owned(),
             "compaction_interval_sec".to_owned(),
             "enable_snapshot_expiration".to_owned(),
+            "snapshot_expiration_max_age_millis".to_owned(),
+            "snapshot_expiration_retain_last".to_owned(),
+            "snapshot_expiration_clear_expired_files".to_owned(),
+            "snapshot_expiration_clear_expired_meta_data".to_owned(),
+            "max_snapshots_num_before_compaction".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig
@@ -194,6 +201,13 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.message.timeout.ms".to_owned(),
             "properties.max.in.flight.requests.per.connection".to_owned(),
             "properties.request.required.acks".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // SnowflakeV2Config
+    map.try_insert(
+        std::any::type_name::<SnowflakeV2Config>().to_owned(),
+        [
+            "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // StarrocksConfig
@@ -319,4 +333,3 @@ pub fn check_sink_allow_alter_on_fly_fields(
     }
     Ok(())
 }
-

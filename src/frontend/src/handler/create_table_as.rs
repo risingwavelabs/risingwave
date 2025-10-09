@@ -38,7 +38,7 @@ pub async fn handle_create_as(
     column_defs: Vec<ColumnDef>,
     append_only: bool,
     on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
+    with_version_columns: Vec<String>,
     ast_engine: risingwave_sqlparser::ast::Engine,
 ) -> Result<RwPgResponse> {
     if column_defs.iter().any(|column| column.data_type.is_some()) {
@@ -66,7 +66,7 @@ pub async fn handle_create_as(
 
     // Generate catalog descs from query
     let mut columns: Vec<_> = {
-        let mut binder = Binder::new(&session);
+        let mut binder = Binder::new_for_batch(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
             // Create ColumnCatelog by Field
@@ -124,7 +124,7 @@ pub async fn handle_create_as(
                 definition: "".to_owned(),
                 append_only,
                 on_conflict: on_conflict.into(),
-                with_version_column,
+                with_version_columns,
                 webhook_info: None,
                 engine,
             },

@@ -76,7 +76,9 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
+use risingwave_pb::meta::alter_connector_props_request::{
+    AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
+};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -84,6 +86,7 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::hosted_iceberg_catalog_service_client::HostedIcebergCatalogServiceClient;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -137,7 +140,7 @@ pub struct MetaClient {
     worker_type: WorkerType,
     host_addr: HostAddr,
     inner: GrpcMetaClient,
-    meta_config: MetaConfig,
+    meta_config: Arc<MetaConfig>,
     cluster_id: String,
     shutting_down: Arc<AtomicBool>,
 }
@@ -263,7 +266,7 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         property: Property,
-        meta_config: &MetaConfig,
+        meta_config: Arc<MetaConfig>,
     ) -> (Self, SystemParamsReader) {
         let ret =
             Self::register_new_inner(addr_strategy, worker_type, addr, property, meta_config).await;
@@ -282,7 +285,7 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         property: Property,
-        meta_config: &MetaConfig,
+        meta_config: Arc<MetaConfig>,
     ) -> Result<(Self, SystemParamsReader)> {
         tracing::info!("register meta client using strategy: {}", addr_strategy);
 
@@ -338,7 +341,7 @@ impl MetaClient {
             worker_type,
             host_addr: addr.clone(),
             inner: grpc_meta_client,
-            meta_config: meta_config.to_owned(),
+            meta_config: meta_config.clone(),
             cluster_id: add_worker_resp.cluster_id,
             shutting_down: Arc::new(false.into()),
         };
@@ -473,14 +476,12 @@ impl MetaClient {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
-            affected_table_change,
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
         };
@@ -801,6 +802,12 @@ impl MetaClient {
         Ok(resp.task_id)
     }
 
+    pub async fn expire_iceberg_table_snapshots(&self, sink_id: u32) -> Result<()> {
+        let request = ExpireIcebergTableSnapshotsRequest { sink_id };
+        let _resp = self.inner.expire_iceberg_table_snapshots(request).await?;
+        Ok(())
+    }
+
     pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
@@ -817,17 +824,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_sink(
-        &self,
-        sink_id: u32,
-        cascade: bool,
-        affected_table_change: Option<ReplaceJobPlan>,
-    ) -> Result<WaitVersion> {
-        let request = DropSinkRequest {
-            sink_id,
-            cascade,
-            affected_table_change,
-        };
+    pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp
             .version
@@ -860,9 +858,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_function(&self, function_id: FunctionId) -> Result<WaitVersion> {
+    pub async fn drop_function(
+        &self,
+        function_id: FunctionId,
+        cascade: bool,
+    ) -> Result<WaitVersion> {
         let request = DropFunctionRequest {
             function_id: function_id.0,
+            cascade,
         };
         let resp = self.inner.drop_function(request).await?;
         Ok(resp
@@ -1414,6 +1417,31 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Sink as i32,
+            extra_options: None,
+        };
+        let _resp = self.inner.alter_connector_props(req).await?;
+        Ok(())
+    }
+
+    pub async fn alter_iceberg_table_props(
+        &self,
+        table_id: u32,
+        sink_id: u32,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        let req = AlterConnectorPropsRequest {
+            object_id: table_id,
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            connector_conn_ref,
+            object_type: AlterConnectorPropsObject::IcebergTable as i32,
+            extra_options: Some(ExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds {
+                sink_id: sink_id as i32,
+                source_id: source_id as i32,
+            })),
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1432,6 +1460,7 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Source as i32,
+            extra_options: None,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1673,6 +1702,28 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn add_cdc_auto_schema_change_fail_event(
+        &self,
+        table_id: u32,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) -> Result<()> {
+        let event = event_log::EventAutoSchemaChangeFail {
+            table_id,
+            table_name,
+            cdc_table_id,
+            upstream_ddl,
+            fail_info,
+        };
+        let req = AddEventLogRequest {
+            event: Some(add_event_log_request::Event::AutoSchemaChangeFail(event)),
+        };
+        self.inner.add_event_log(req).await?;
+        Ok(())
+    }
+
     pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
         let req = CancelCompactTaskRequest {
             task_id,
@@ -1718,6 +1769,12 @@ impl MetaClient {
         let request = ListRateLimitsRequest {};
         let resp = self.inner.list_rate_limits(request).await?;
         Ok(resp.rate_limits)
+    }
+
+    pub async fn list_cdc_progress(&self) -> Result<HashMap<u32, PbCdcProgress>> {
+        let request = ListCdcProgressRequest {};
+        let resp = self.inner.list_cdc_progress(request).await?;
+        Ok(resp.cdc_progress)
     }
 
     pub async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
@@ -2010,7 +2067,7 @@ struct MetaMemberManagement {
     core_ref: Arc<RwLock<GrpcMetaClientCore>>,
     members: Either<MetaMemberClient, MetaMemberGroup>,
     current_leader: http::Uri,
-    meta_config: MetaConfig,
+    meta_config: Arc<MetaConfig>,
 }
 
 impl MetaMemberManagement {
@@ -2137,7 +2194,7 @@ impl GrpcMetaClient {
         init_leader_addr: http::Uri,
         members: Either<MetaMemberClient, MetaMemberGroup>,
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
-        meta_config: MetaConfig,
+        meta_config: Arc<MetaConfig>,
     ) -> Result<()> {
         let core_ref: Arc<RwLock<GrpcMetaClientCore>> = self.core.clone();
         let current_leader = init_leader_addr;
@@ -2206,7 +2263,7 @@ impl GrpcMetaClient {
     }
 
     /// Connect to the meta server from `addrs`.
-    pub async fn new(strategy: &MetaAddressStrategy, config: MetaConfig) -> Result<Self> {
+    pub async fn new(strategy: &MetaAddressStrategy, config: Arc<MetaConfig>) -> Result<Self> {
         let (channel, addr) = match strategy {
             MetaAddressStrategy::LoadBalance(addr) => {
                 Self::try_build_rpc_channel(vec![addr.clone()]).await
@@ -2233,7 +2290,7 @@ impl GrpcMetaClient {
             }
         };
 
-        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config)?;
+        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config.clone())?;
 
         client.force_refresh_leader().await?;
 
@@ -2339,6 +2396,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
+            ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
@@ -2386,6 +2444,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
+            ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

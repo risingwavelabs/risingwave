@@ -118,7 +118,7 @@ impl BuildFragmentGraphState {
 
             // Take input's properties.
             stream_key: input.stream_key.clone(),
-            append_only: input.append_only,
+            stream_kind: input.stream_kind,
             fields: input.fields.clone(),
 
             input: vec![input],
@@ -476,6 +476,12 @@ fn build_fragment(
                     .add(FragmentTypeFlag::VectorIndexWrite);
             }
 
+            NodeBody::UpstreamSinkUnion(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::UpstreamSinkUnion);
+            }
+
             _ => {}
         };
 
@@ -559,7 +565,7 @@ fn build_fragment(
 
                                     // Take reference's properties.
                                     stream_key: ref_fragment_node.stream_key.clone(),
-                                    append_only: ref_fragment_node.append_only,
+                                    stream_kind: ref_fragment_node.stream_kind,
                                     fields: ref_fragment_node.fields.clone(),
                                 });
 

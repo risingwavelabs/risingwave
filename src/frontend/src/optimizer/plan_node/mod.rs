@@ -900,7 +900,7 @@ impl dyn StreamPlanNode {
                     .map(|x| *x as u32)
                     .collect(),
                 fields: self.schema().to_prost(),
-                append_only: self.plan_base().append_only(),
+                stream_kind: self.plan_base().stream_kind().to_protobuf() as i32,
             })
         })
     }
@@ -971,6 +971,7 @@ mod batch_delete;
 mod batch_exchange;
 mod batch_expand;
 mod batch_filter;
+mod batch_get_channel_delta_stats;
 mod batch_group_topn;
 mod batch_hash_agg;
 mod batch_hash_join;
@@ -1005,6 +1006,7 @@ mod logical_delete;
 mod logical_except;
 mod logical_expand;
 mod logical_filter;
+mod logical_get_channel_delta_stats;
 mod logical_hop_window;
 mod logical_insert;
 mod logical_intersect;
@@ -1076,11 +1078,15 @@ mod logical_file_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
 
+mod batch_vector_search;
 mod logical_mysql_query;
+mod logical_vector_search;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_union;
+mod stream_upstream_sink_union;
+mod stream_vector_index_write;
 pub mod utils;
 
 pub use batch_delete::BatchDelete;
@@ -1088,6 +1094,7 @@ pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
 pub use batch_file_scan::BatchFileScan;
 pub use batch_filter::BatchFilter;
+pub use batch_get_channel_delta_stats::BatchGetChannelDeltaStats;
 pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
@@ -1116,6 +1123,7 @@ pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
+pub use batch_vector_search::BatchVectorSearch;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
@@ -1127,6 +1135,7 @@ pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
 pub use logical_file_scan::LogicalFileScan;
 pub use logical_filter::LogicalFilter;
+pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
@@ -1152,6 +1161,7 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use logical_vector_search::LogicalVectorSearch;
 pub use stream_asof_join::StreamAsOfJoin;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_changelog::StreamChangeLog;
@@ -1191,7 +1201,9 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
+pub use stream_upstream_sink_union::StreamUpstreamSinkUnion;
 pub use stream_values::StreamValues;
+pub use stream_vector_index_write::StreamVectorIndexWrite;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
@@ -1255,6 +1267,8 @@ macro_rules! for_all_plan_nodes {
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
+            , { Logical, VectorSearch }
+            , { Logical, GetChannelDeltaStats }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1288,6 +1302,8 @@ macro_rules! for_all_plan_nodes {
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
+            , { Batch, GetChannelDeltaStats }
+            , { Batch, VectorSearch }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1328,6 +1344,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, AsOfJoin }
             , { Stream, SyncLogStore }
             , { Stream, MaterializedExprs }
+            , { Stream, VectorIndexWrite }
+            , { Stream, UpstreamSinkUnion }
             $(,$rest)*
         }
     };

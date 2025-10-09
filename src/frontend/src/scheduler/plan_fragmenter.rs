@@ -975,20 +975,19 @@ impl BatchPlanFragmenter {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
 
-        let mut table_scan_info = self.collect_stage_table_scan(root.clone())?;
+        let mut table_scan_info = None;
+        let mut source_info = None;
+        let mut file_scan_info = None;
+
         // For current implementation, we can guarantee that each stage has only one table
         // scan(except System table) or one source.
-        let source_info = if table_scan_info.is_none() {
-            Self::collect_stage_source(root.clone())?
-        } else {
-            None
-        };
-
-        let file_scan_info = if table_scan_info.is_none() && source_info.is_none() {
-            Self::collect_stage_file_scan(root.clone())?
-        } else {
-            None
-        };
+        if let Some(info) = self.collect_stage_table_scan(root.clone())? {
+            table_scan_info = Some(info);
+        } else if let Some(info) = Self::collect_stage_source(root.clone())? {
+            source_info = Some(info);
+        } else if let Some(info) = Self::collect_stage_file_scan(root.clone())? {
+            file_scan_info = Some(info);
+        }
 
         let mut has_lookup_join = false;
         let parallelism = match root.distribution() {

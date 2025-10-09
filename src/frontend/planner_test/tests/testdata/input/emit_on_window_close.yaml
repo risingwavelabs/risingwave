@@ -56,3 +56,20 @@
   expected_outputs:
     - eowc_stream_plan
     - stream_plan
+- sql: |
+    CREATE table s1 (
+    id VARCHAR,
+    timestamp TIMESTAMP,
+    WATERMARK FOR timestamp AS timestamp - INTERVAL '5' SECOND
+    ) append only;
+    SELECT
+        id,
+        window_start,
+        window_end,
+        MAX(timestamp) as ts
+    FROM HOP(s1, timestamp, INTERVAL '30 SECONDS', INTERVAL '2 MINUTES')
+    WHERE timestamp > NOW() - INTERVAL '7 hours'
+    GROUP BY id, window_start, window_end;
+  expected_outputs:
+    - eowc_stream_plan
+    - stream_plan

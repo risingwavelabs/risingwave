@@ -62,6 +62,7 @@ members = [
     "src/utils/futures_util",
     "src/utils/iter_util",
     "src/utils/local_stats_alloc",
+    "src/utils/openai_embedding_service",
     "src/utils/pgwire",
     "src/utils/resource_util",
     "src/utils/runtime",
@@ -78,7 +79,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "2.6.0-alpha"
+version = "2.7.0-alpha"
 edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -113,6 +114,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88
 ] }
 arc-swap = "1"
 arrow-udf-runtime = "0.8.0"
+async-openai = "0.29.0"
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = { version = "0.3.2-alpha.2", features = ["serde", "attributes"] }
 aws-config = { version = "1", default-features = false, features = [
@@ -152,12 +154,8 @@ criterion = { version = "0.5", features = ["async_futures"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
-# foyer = { version = "0.17.3", features = ["serde", "tracing", "nightly"] }
-foyer = { git = "http://github.com/foyer-rs/foyer", rev = "77eef58d1f231ee50cd601f9ad69c5e3db3415f9", features = [
-    "serde",
-    "tracing",
-    "nightly",
-] }
+faiss = { version = "0.12.2-alpha.0", features = ["static"] }
+foyer = { version = "0.20.0", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.8", default-features = false, features = ["std"] }
 hashbrown = { version = "0.15", features = [
@@ -184,7 +182,7 @@ mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
-opendal = "0.49"
+opendal = "0.53"
 opentelemetry = "0.29"
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
 opentelemetry-semantic-conventions = "0.16"
@@ -260,6 +258,7 @@ sea-orm = { version = "~1.1", features = [
     "with-uuid",
 ] }
 sea-orm-migration = "~1.1"
+serde = { version = "1", features = ["derive"] }
 smallvec = "1.15"
 sqlx = { version = "0.8.2", default-features = false, features = [
     "bigdecimal",
@@ -407,3 +406,10 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "3efe6d0065963db2a2b7f30dee69f647e28dec81" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.14.0-json-no-preserve_order" }
+
+# patch to make zstd version compatible:
+# desired v4.9.0+2.10.0 requires: zstd-sys >= 2.0.15
+# conflict: parquet@54 requires: zstd-sys <= 2.0.13
+# why this patch work with zstd-sys < 2.0.15?
+# in the last release v4.8.0+2.3.0, the zstd-sys requirement is 2.0.6 < 2.0.13, and the release does not contain zstd related changes
+rdkafka-sys = { git = "https://github.com/risingwavelabs/rust-rdkafka", package = "rdkafka-sys", branch = "downgrade-zstd" }

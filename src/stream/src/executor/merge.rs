@@ -16,8 +16,6 @@ use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::Context as _;
-use futures::future::try_join_all;
 use risingwave_common::array::StreamChunkBuilder;
 use risingwave_common::config::MetricLevel;
 use tokio::sync::mpsc;
@@ -25,9 +23,6 @@ use tokio::time::Instant;
 
 use super::exchange::input::BoxedActorInput;
 use super::*;
-use crate::executor::exchange::input::{
-    assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
-};
 use crate::executor::prelude::*;
 use crate::task::LocalBarrierManager;
 
@@ -172,11 +167,13 @@ impl MergeExecutor {
         local_barrier_manager: crate::task::LocalBarrierManager,
         schema: Schema,
         chunk_size: usize,
+        barrier_rx: Option<mpsc::UnboundedReceiver<Barrier>>,
     ) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::ActorInput;
 
-        let barrier_rx = local_barrier_manager.subscribe_barrier(actor_id);
+        let barrier_rx =
+            barrier_rx.unwrap_or_else(|| local_barrier_manager.subscribe_barrier(actor_id));
 
         let metrics = StreamingMetrics::unused();
         let actor_ctx = ActorContext::for_test(actor_id);
@@ -240,27 +237,37 @@ impl MergeExecutor {
         // Channels that're blocked by the barrier to align.
         let mut start_time = Instant::now();
         pin_mut!(select_all);
-        while let Some(msg) = select_all.next().await {
+
+        let mut barrier_buffer = DispatchBarrierBuffer::new(
+            self.barrier_rx,
+            actor_id,
+            self.upstream_fragment_id,
+            self.local_barrier_manager,
+            self.metrics.clone(),
+            self.fragment_id,
+        );
+
+        loop {
+            let msg = barrier_buffer.await_next_message(&mut select_all).await?;
             metrics
                 .actor_input_buffer_blocking_duration_ns
                 .inc_by(start_time.elapsed().as_nanos() as u64);
-            let msg: DispatcherMessage = msg?;
-            let mut msg: Message = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
 
-            match &mut msg {
-                Message::Watermark(_) => {
-                    // Do nothing.
-                }
-                Message::Chunk(chunk) => {
+            let msg = match msg {
+                DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
+                DispatcherMessage::Chunk(chunk) => {
                     metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
+                    Message::Chunk(chunk)
                 }
-                Message::Barrier(barrier) => {
+                DispatcherMessage::Barrier(barrier) => {
                     tracing::debug!(
                         target: "events::stream::barrier::path",
                         actor_id = actor_id,
                         "receiver receives barrier from path: {:?}",
                         barrier.passed_actors
                     );
+                    let (mut barrier, new_inputs) =
+                        barrier_buffer.pop_barrier_with_inputs(barrier).await?;
                     barrier.passed_actors.push(actor_id);
 
                     if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
@@ -289,35 +296,9 @@ impl MergeExecutor {
                         // `Watermark` of upstream may become stale after upstream scaling.
                         select_all.flush_buffered_watermarks();
 
-                        if !update.added_upstream_actors.is_empty() {
-                            // Create new upstreams receivers.
-                            let new_upstreams: Vec<_> = try_join_all(
-                                update.added_upstream_actors.iter().map(|upstream_actor| {
-                                    new_input(
-                                        &self.local_barrier_manager,
-                                        self.metrics.clone(),
-                                        self.actor_context.id,
-                                        self.fragment_id,
-                                        upstream_actor,
-                                        new_upstream_fragment_id,
-                                    )
-                                }),
-                            )
-                            .await
-                            .context("failed to create upstream receivers")?;
-
-                            // Poll the first barrier from the new upstreams. It must be the same as
-                            // the one we polled from original upstreams.
-                            let mut select_new = SelectReceivers::new(
-                                new_upstreams,
-                                None,
-                                select_all.merge_barrier_align_duration(),
-                            );
-                            let new_barrier = expect_first_barrier(&mut select_new).await?;
-                            assert_equal_dispatcher_barrier(barrier, &new_barrier);
-
+                        if let Some(new_upstreams) = new_inputs {
                             // Add the new upstreams to select.
-                            select_all.add_upstreams_from(select_new);
+                            select_all.add_upstreams_from(new_upstreams);
                         }
 
                         if !removed_upstream_actor_id.is_empty() {
@@ -333,12 +314,16 @@ impl MergeExecutor {
                         );
                     }
 
-                    if barrier.is_stop(actor_id) {
+                    let is_stop = barrier.is_stop(actor_id);
+                    let msg = Message::Barrier(barrier);
+                    if is_stop {
                         yield msg;
                         break;
                     }
+
+                    msg
                 }
-            }
+            };
 
             yield msg;
             start_time = Instant::now();
@@ -429,8 +414,8 @@ where
                 }
 
                 Poll::Ready(None) => {
-                    // See also the comments in `SelectReceivers::poll_next`.
-                    unreachable!("SelectReceivers should never return None");
+                    // See also the comments in `DynamicReceivers::poll_next`.
+                    unreachable!("Merge should always have upstream inputs");
                 }
             }
         }
@@ -596,7 +581,7 @@ mod tests {
             })
             .collect();
         let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch)
-            .with_mutation(Mutation::Stop(HashSet::default()));
+            .with_mutation(Mutation::Stop(StopMutation::default()));
         barrier_test_env.inject_barrier(&b2, [actor_id]);
         barrier_test_env.flush_all_events().await;
 
@@ -640,6 +625,7 @@ mod tests {
             barrier_test_env.local_barrier_manager.clone(),
             Schema::new(vec![]),
             100,
+            None,
         );
         let mut merger = merger.boxed().execute();
         for (idx, epoch) in epochs {
@@ -718,13 +704,8 @@ mod tests {
 
         let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
             UpdateMutation {
-                dispatchers: Default::default(),
                 merges: merge_updates,
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
+                ..Default::default()
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);

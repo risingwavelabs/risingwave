@@ -31,6 +31,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -137,11 +138,23 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 
+    async fn list_cdc_progress(&self) -> Result<HashMap<u32, PbCdcProgress>>;
+
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
     async fn alter_sink_props(
         &self,
         sink_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()>;
+
+    async fn alter_iceberg_table_props(
+        &self,
+        table_id: u32,
+        sink_id: u32,
+        source_id: u32,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -164,6 +177,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
 
     async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64>;
+
+    async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()>;
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
 }
@@ -350,6 +365,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_rate_limits().await
     }
 
+    async fn list_cdc_progress(&self) -> Result<HashMap<u32, PbCdcProgress>> {
+        self.0.list_cdc_progress().await
+    }
+
     async fn get_meta_store_endpoint(&self) -> Result<String> {
         self.0.get_meta_store_endpoint().await
     }
@@ -364,6 +383,27 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0
             .alter_sink_props(
                 sink_id,
+                changed_props,
+                changed_secret_refs,
+                connector_conn_ref,
+            )
+            .await
+    }
+
+    async fn alter_iceberg_table_props(
+        &self,
+        table_id: u32,
+        sink_id: u32,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        self.0
+            .alter_iceberg_table_props(
+                table_id,
+                sink_id,
+                source_id,
                 changed_props,
                 changed_secret_refs,
                 connector_conn_ref,
@@ -406,6 +446,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
         self.0.compact_iceberg_table(sink_id).await
+    }
+
+    async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()> {
+        self.0.expire_iceberg_table_snapshots(sink_id).await
     }
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {

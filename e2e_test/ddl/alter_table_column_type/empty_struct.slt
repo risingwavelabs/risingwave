@@ -1,0 +1,69 @@
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+create table t(v struct< >);
+
+statement ok
+insert into t values (row());
+
+query T
+select v from t;
+----
+()
+
+statement ok
+alter table t alter column v type struct<a int>;
+
+query T
+select v from t;
+----
+()
+
+statement ok
+insert into t values (row(1));
+
+query T rowsort
+select v from t;
+----
+()
+(1)
+
+statement ok
+create materialized view mv as select (v).a from t;
+
+query I rowsort
+select a from mv;
+----
+1
+NULL
+
+statement ok
+alter table t alter column v type struct<a int, b varchar>;
+
+query T rowsort
+select v from t;
+----
+(,)
+(1,)
+
+statement ok
+insert into t values (row(2, 'hello'));
+
+query T rowsort
+select v from t;
+----
+(,)
+(1,)
+(2,hello)
+
+query I rowsort
+select a from mv;
+----
+1
+2
+NULL
+
+
+statement ok
+drop table t cascade;

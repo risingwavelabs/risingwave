@@ -25,9 +25,8 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
-use serde::Serialize;
 use serde::ser::{SerializeSeq, SerializeStruct};
-use serde_derive::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tonic::async_trait;
@@ -496,7 +495,7 @@ impl ClickHouseSink {
                 "struct needs to be converted into a list".to_owned(),
             )),
             risingwave_common::types::DataType::List(list) => {
-                Self::check_and_correct_column_type(list.as_ref(), ck_column)?;
+                Self::check_and_correct_column_type(list.elem(), ck_column)?;
                 Ok(ck_column.r#type.contains("Array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
@@ -512,7 +511,9 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::ClickHouse(
                 "MAP is not supported for ClickHouse sink.".to_owned(),
             )),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::ClickHouse(
+                "VECTOR is not supported for ClickHouse sink.".to_owned(),
+            )),
         };
         if !is_match? {
             return Err(SinkError::ClickHouse(format!(
@@ -1042,7 +1043,11 @@ impl ClickHouseFieldWithNull {
                     "MAP is not supported for ClickHouse sink.".to_owned(),
                 ));
             }
-            ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            ScalarRefImpl::Vector(_) => {
+                return Err(SinkError::ClickHouse(
+                    "VECTOR is not supported for ClickHouse sink.".to_owned(),
+                ));
+            }
         };
         let data = if clickhouse_schema_feature.can_null {
             vec![ClickHouseFieldWithNull::WithSome(data)]
@@ -1118,7 +1123,7 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
                 } else {
                     vec.push((
                         format!("{}.{}", field.name, name),
-                        DataType::List(Box::new(data_type.clone())),
+                        DataType::list(data_type.clone()),
                     ))
                 }
             }

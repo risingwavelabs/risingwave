@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -26,6 +27,7 @@ use crate::expr::{
     assert_input_ref,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::StreamPlanRef;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
@@ -185,12 +187,17 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         Self::with_out_col_idx(input, out_fields.ones())
     }
 
+    pub fn out_col_idx_exprs<'a>(
+        input: &'a PlanRef,
+        out_fields: impl Iterator<Item = usize> + 'a,
+    ) -> impl Iterator<Item = ExprImpl> + 'a {
+        let input_schema = input.schema();
+        out_fields.map(move |index| InputRef::new(index, input_schema[index].data_type()).into())
+    }
+
     /// Creates a `Project` which select some columns from the input.
     pub fn with_out_col_idx(input: PlanRef, out_fields: impl Iterator<Item = usize>) -> Self {
-        let input_schema = input.schema();
-        let exprs = out_fields
-            .map(|index| InputRef::new(index, input_schema[index].data_type()).into())
-            .collect();
+        let exprs = Self::out_col_idx_exprs(&input, out_fields).collect();
         Self::new(exprs, input)
     }
 
@@ -302,8 +309,21 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
             })
             .collect::<Option<Vec<_>>>()
     }
+}
 
+impl Project<StreamPlanRef> {
+    /// Returns whether the `Project` is likely to produce noop updates. If so, the executor will
+    /// eliminate them to avoid emitting unnecessary changes.
     pub(crate) fn likely_produces_noop_updates(&self) -> bool {
+        // 1. `NOW()` is often truncated to a granularity such as day, week, or month, which
+        //    seldom changes. Eliminate noop updates can reduce unnecessary changes.
+        if self.input.as_stream_now().is_some() {
+            return true;
+        }
+
+        // 2. If the `Project` contains jsonb access, it's very likely that the query is extracting
+        //    some fields from a jsonb payload column. In this case, a change from the input jsonb
+        //    payload may not change the output of the `Project`.
         struct HasJsonbAccess {
             has: bool,
         }
@@ -393,5 +413,79 @@ impl fmt::Debug for AliasedExpr<'_> {
             Some(alias) => write!(f, "{:?} as {}", self.expr, alias),
             None => write!(f, "{:?}", self.expr),
         }
+    }
+}
+
+/// Given the index of required cols, return a vec of permutation index, so that after we sort the `required_cols`,
+/// and re-apply with a projection with the permutation index, we can restore the original `required_cols`.
+///
+/// For example, when the `required_cols` is `[5, 3, 10]`, the `sorted_required_cols` is `[3, 5, 10]`, and the permutation index is
+/// `[1, 0, 2]`, so that `[sorted_required_cols[1], sorted_required_cols[0], sorted_required_cols[2]]` equals the original `[5, 3, 10]`
+pub fn ensure_sorted_required_cols(
+    required_cols: &[usize],
+    schema: &Schema,
+) -> (Vec<ExprImpl>, Vec<usize>) {
+    let mut required_cols_with_output_idx = required_cols.iter().copied().enumerate().collect_vec();
+    required_cols_with_output_idx.sort_by_key(|(_, col_idx)| *col_idx);
+    let mut output_indices = vec![0; required_cols.len()];
+    let mut sorted_col_idx = Vec::with_capacity(required_cols.len());
+
+    for (sorted_input_idx, (output_idx, col_idx)) in
+        required_cols_with_output_idx.into_iter().enumerate()
+    {
+        sorted_col_idx.push(col_idx);
+        output_indices[output_idx] = sorted_input_idx;
+    }
+
+    (
+        output_indices
+            .into_iter()
+            .map(|sorted_input_idx| {
+                InputRef::new(
+                    sorted_input_idx,
+                    schema[sorted_col_idx[sorted_input_idx]].data_type(),
+                )
+                .into()
+            })
+            .collect(),
+        sorted_col_idx,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+
+    use itertools::Itertools;
+    use rand::prelude::SliceRandom;
+    use rand::rng;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::ensure_sorted_required_cols;
+
+    #[test]
+    fn test_ensure_sorted_required_cols() {
+        let input_len = 10;
+        let schema = Schema::new(
+            (0..input_len)
+                .map(|_| Field::unnamed(DataType::Int32))
+                .collect(),
+        );
+        let mut required_cols = (0..input_len)
+            .filter(|_| rand::random_bool(0.5))
+            .collect_vec();
+        let sorted_required_cols = required_cols.clone();
+        required_cols.shuffle(&mut rng());
+        let required_cols = required_cols;
+
+        let (output_exprs, sorted) = ensure_sorted_required_cols(&required_cols, &schema);
+        assert_eq!(sorted, sorted_required_cols);
+        assert_eq!(
+            output_exprs
+                .iter()
+                .map(|expr| sorted_required_cols[expr.as_input_ref().unwrap().index])
+                .collect_vec(),
+            required_cols
+        );
     }
 }

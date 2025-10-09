@@ -21,6 +21,7 @@ import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import RelationGraph, { boxHeight, boxWidth } from "../components/RelationGraph"
+import TimeControls from "../components/TimeControls"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
@@ -31,7 +32,10 @@ import {
   getRelations,
   relationIsStreamingJob,
 } from "../lib/api/streaming"
-import { createStreamingStatsRefresh } from "../lib/api/streamingStats"
+import {
+  TimeParams,
+  createStreamingStatsRefresh,
+} from "../lib/api/streamingStats"
 import { RelationPoint } from "../lib/layout"
 import { ChannelDeltaStats, RelationStats } from "../proto/gen/monitor_service"
 import { ChannelStatsSnapshot } from "./fragment_graph"
@@ -72,14 +76,6 @@ export default function StreamingGraph() {
   const { response: relationDeps } = useFetch(getRelationDependencies)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
   const { response: fragmentToRelationMap } = useFetch(getFragmentToRelationMap)
-  const [resetEmbeddedBackPressures, setResetEmbeddedBackPressures] =
-    useState<boolean>(false)
-
-  const toggleResetEmbeddedBackPressures = () => {
-    setResetEmbeddedBackPressures(
-      (resetEmbeddedBackPressures) => !resetEmbeddedBackPressures
-    )
-  }
 
   const toast = useErrorToast()
 
@@ -100,13 +96,11 @@ export default function StreamingGraph() {
     [key: number]: RelationStats
   }>()
 
+  // Time parameters state
+  const [timeParams, setTimeParams] = useState<TimeParams>()
+
   useEffect(() => {
     let initialSnapshot: ChannelStatsSnapshot | undefined
-
-    if (resetEmbeddedBackPressures) {
-      setChannelStats(undefined)
-      toggleResetEmbeddedBackPressures()
-    }
 
     const refresh = createStreamingStatsRefresh(
       {
@@ -115,7 +109,8 @@ export default function StreamingGraph() {
         toast,
       },
       initialSnapshot,
-      "relation"
+      "relation",
+      timeParams
     )
 
     refresh() // run once immediately
@@ -123,7 +118,7 @@ export default function StreamingGraph() {
     return () => {
       clearInterval(interval)
     }
-  }, [toast, resetEmbeddedBackPressures])
+  }, [toast, timeParams])
 
   // Convert fragment-level backpressure rate map to relation-level backpressure rate
   const relationChannelStats: Map<string, ChannelDeltaStats> | undefined =
@@ -131,22 +126,32 @@ export default function StreamingGraph() {
       if (!fragmentToRelationMap) {
         return new Map<string, ChannelDeltaStats>()
       }
-      let inMap = fragmentToRelationMap.inMap
-      let outMap = fragmentToRelationMap.outMap
+      let mapping = fragmentToRelationMap.fragmentToRelationMap
       if (channelStats) {
         let map = new Map<string, ChannelDeltaStats>()
         for (const [key, stats] of channelStats) {
           const [outputFragment, inputFragment] = key.split("_").map(Number)
-          if (outMap[outputFragment] && inMap[inputFragment]) {
-            const outputRelation = outMap[outputFragment]
-            const inputRelation = inMap[inputFragment]
-            let key = `${outputRelation}_${inputRelation}`
+          let input_relation = mapping[inputFragment]
+          let output_relation = mapping[outputFragment]
+          if (
+            input_relation &&
+            output_relation &&
+            input_relation !== output_relation
+          ) {
+            let key = `${output_relation}_${input_relation}`
             map.set(key, stats)
           }
         }
         return map
       }
     }, [channelStats, fragmentToRelationMap])
+
+  const handleTimeParamsChange = (timestamp?: number, offset?: number) => {
+    setTimeParams({
+      at: timestamp,
+      timeOffset: offset,
+    })
+  }
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -161,11 +166,8 @@ export default function StreamingGraph() {
           flexDirection="column"
         >
           <Box flex={1} overflowY="scroll">
-            <VStack width={SIDEBAR_WIDTH} align="start" spacing={1}>
-              <Button onClick={(_) => toggleResetEmbeddedBackPressures()}>
-                Reset Back Pressures
-              </Button>
-
+            <VStack width={SIDEBAR_WIDTH} align="start" spacing={3}>
+              <TimeControls onApply={handleTimeParamsChange} />
               <Text fontWeight="semibold" mb={3}>
                 Relations
               </Text>

@@ -15,7 +15,7 @@
 #![feature(let_chains)]
 #![feature(coroutines)]
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -34,9 +34,12 @@ use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::{
-    CdcTableType, DebeziumOffset, DebeziumSourceOffset, ExternalTableConfig, SchemaTableName,
+    DebeziumOffset, DebeziumSourceOffset, ExternalCdcTableType, ExternalTableConfig,
+    SchemaTableName,
 };
-use risingwave_connector::source::cdc::{CdcScanOptions, DebeziumCdcSplit};
+use risingwave_connector::source::cdc::{
+    CdcScanOptions, CdcTableSnapshotSplitAssignmentWithGeneration, DebeziumCdcSplit,
+};
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
@@ -79,6 +82,8 @@ impl MockOffsetGenExecutor {
                 file: Some("1.binlog".to_owned()),
                 pos: Some(start_offset as _),
                 lsn: None,
+                lsn_commit: None,
+                lsn_proc: None,
                 txid: None,
                 tx_usec: None,
                 change_lsn: None,
@@ -149,7 +154,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
 
     // mock upstream offset (start from "1.binlog, pos=0") for ingested chunks
     let mock_offset_executor = StreamExecutor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             Schema::new(vec![
                 Field::unnamed(DataType::Jsonb),   // payload
                 Field::unnamed(DataType::Varchar), // _rw_offset
@@ -178,7 +183,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         table_name,
         "mydb".to_owned(),
         config,
-        CdcTableType::Mock,
+        ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),
@@ -222,7 +227,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     ];
 
     let cdc_backfill = StreamExecutor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             table_schema.clone(),
             table_pk_indices,
             "CdcBackfillExecutor".to_owned(),
@@ -308,13 +313,8 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     );
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
             splits,
-            pause: false,
-            subscriptions_to_add: vec![],
-            backfill_nodes_to_pause: Default::default(),
-            actor_cdc_table_snapshot_splits: Default::default(),
+            ..Default::default()
         }));
 
     tx.send_barrier(init_barrier);
@@ -465,7 +465,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
     let (tx, source) = MockSource::channel();
     let source = source.into_executor(Schema::new(vec![]), vec![]);
     let cdc_source = StreamExecutor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             Schema::new(vec![
                 Field::unnamed(DataType::Jsonb),   // payload
                 Field::unnamed(DataType::Varchar), // _rw_offset
@@ -492,7 +492,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         table_name,
         "mydb".to_owned(),
         config,
-        CdcTableType::Mock,
+        ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),
@@ -528,7 +528,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
     ];
     let cdc_backfill = StreamExecutor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             table_schema.clone(),
             table_pk_indices,
             "ParallelizedCdcBackfillExecutor".to_owned(),
@@ -549,6 +549,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
                 ..Default::default()
             },
             BTreeMap::default(),
+            None,
         )
         .boxed(),
     );
@@ -632,7 +633,7 @@ async fn test_parallelized_cdc_backfill() {
         actor_id,
         vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None, None))],
     );
-    let actor_cdc_table_snapshot_splits = [(
+    let splits = [(
         actor_id,
         vec![CdcTableSnapshotSplitRaw {
             split_id: 1,
@@ -643,15 +644,15 @@ async fn test_parallelized_cdc_backfill() {
     )]
     .into_iter()
     .collect();
+    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration {
+        splits,
+        generation: 10,
+    };
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
             splits: source_splits,
-            pause: false,
-            subscriptions_to_add: vec![],
-            backfill_nodes_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits,
+            ..Default::default()
         }));
     tx.send_barrier(init_barrier);
     assert!(matches!(
@@ -808,7 +809,7 @@ async fn test_parallelized_cdc_backfill_reschedule() {
         actor_id,
         vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None, None))],
     );
-    let actor_cdc_table_snapshot_splits = [(
+    let splits = [(
         actor_id,
         vec![CdcTableSnapshotSplitRaw {
             split_id: 2,
@@ -819,15 +820,15 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     )]
     .into_iter()
     .collect();
+    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration {
+        splits,
+        generation: 10,
+    };
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
             splits: source_splits.clone(),
-            pause: false,
-            subscriptions_to_add: vec![],
-            backfill_nodes_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits,
+            ..Default::default()
         }));
     tx.send_barrier(init_barrier);
     assert!(matches!(
@@ -878,7 +879,7 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     tx.push_chunk(stream_chunk1);
 
     // Send reschedule barrier.
-    let actor_cdc_table_snapshot_splits = [(
+    let splits = [(
         actor_id,
         vec![
             CdcTableSnapshotSplitRaw {
@@ -899,16 +900,15 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     )]
     .into_iter()
     .collect();
+    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration {
+        splits,
+        generation: 10,
+    };
     curr_epoch.inc_epoch();
     let reschedule_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Update(UpdateMutation {
-            dispatchers: Default::default(),
-            merges: Default::default(),
-            vnode_bitmaps: Default::default(),
-            dropped_actors: Default::default(),
-            actor_splits: Default::default(),
-            actor_new_dispatchers: Default::default(),
             actor_cdc_table_snapshot_splits,
+            ..Default::default()
         }));
     tx.send_barrier(reschedule_barrier);
 

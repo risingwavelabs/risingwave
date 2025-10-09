@@ -13,17 +13,23 @@
 // limitations under the License.
 
 use std::mem::take;
-use std::slice;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::future::BoxFuture;
+use risingwave_common::array::{VectorItemType, VectorRef};
+use risingwave_common::vector::{decode_vector_payload, encode_vector_payload};
 use risingwave_hummock_sdk::HummockVectorFileId;
-use risingwave_hummock_sdk::vector_index::VectorFileInfo;
+use risingwave_hummock_sdk::vector_index::{HnswFlatIndex, VectorFileInfo};
 use risingwave_object_store::object::ObjectStreamingUploader;
 
-use crate::hummock::{HummockError, HummockResult, xxhash64_checksum, xxhash64_verify};
-use crate::vector::VectorRef;
+use crate::hummock::vector::writer::{VectorObjectIdManagerRef, new_vector_file_builder};
+use crate::hummock::vector::{EnumVectorAccessor, get_vector_block, search_vector};
+use crate::hummock::{
+    HummockError, HummockResult, SstableStoreRef, xxhash64_checksum, xxhash64_verify,
+};
+use crate::opts::StorageOpts;
+use crate::vector::hnsw::VectorStore;
 
 const VECTOR_FILE_VERSION: u32 = 1;
 const VECTOR_FILE_MAGIC_NUM: u32 = 0x3866cd92;
@@ -31,7 +37,7 @@ const VECTOR_FILE_MAGIC_NUM: u32 = 0x3866cd92;
 #[cfg_attr(test, derive(PartialEq, Debug))]
 pub struct VectorBlockInner {
     dimension: usize,
-    vector_payload: Vec<f32>,
+    vector_payload: Vec<VectorItemType>,
     info_payload: Vec<u8>,
     info_offset: Vec<u32>,
 }
@@ -44,7 +50,7 @@ impl VectorBlockInner {
     pub fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
         let start = idx * self.dimension;
         let end = start + self.dimension;
-        VectorRef::from_slice(&self.vector_payload[start..end])
+        VectorRef::from_slice_unchecked(&self.vector_payload[start..end])
     }
 
     pub fn info(&self, idx: usize) -> &[u8] {
@@ -83,6 +89,14 @@ impl VectorBlockBuilder {
             encoded_len: size_of::<u32>() // dimension
              + size_of::<u32>(), // vector count
         }
+    }
+
+    pub fn vec_ref(&self, idx: usize) -> VectorRef<'_> {
+        self.inner.vec_ref(idx)
+    }
+
+    pub fn info(&self, idx: usize) -> &[u8] {
+        self.inner.info(idx)
     }
 
     pub fn add(&mut self, vec: VectorRef<'_>, info: &[u8]) {
@@ -154,15 +168,7 @@ impl VectorBlock {
         assert_eq!(last_offset as usize, self.0.info_payload.len());
         buf.put_slice(&self.0.info_payload);
         assert_eq!(self.0.vector_payload.len(), self.0.dimension * vector_count);
-        let vector_payload_ptr = self.0.vector_payload.as_slice().as_ptr() as *const u8;
-        // safety: correctly set the size of vector_payload
-        let vector_payload_slice = unsafe {
-            slice::from_raw_parts(
-                vector_payload_ptr,
-                self.0.vector_payload.len() * size_of::<f32>(),
-            )
-        };
-        buf.put_slice(vector_payload_slice);
+        encode_vector_payload(&self.0.vector_payload, &mut buf);
     }
 
     fn decode_payload(mut buf: impl Buf) -> Self {
@@ -177,18 +183,8 @@ impl VectorBlock {
         let mut info_payload = vec![0; info_payload_len];
         buf.copy_to_slice(&mut info_payload);
         let vector_item_count = dimension * vector_count;
-        let mut vector_payload = Vec::with_capacity(vector_item_count);
+        let vector_payload = decode_vector_payload(vector_item_count, buf);
 
-        let vector_payload_ptr = vector_payload.spare_capacity_mut().as_mut_ptr() as *mut u8;
-        // safety: no data append to vector_payload, and correctly set the size of vector_payload
-        let vector_payload_slice = unsafe {
-            slice::from_raw_parts_mut(vector_payload_ptr, vector_item_count * size_of::<f32>())
-        };
-        buf.copy_to_slice(vector_payload_slice);
-        // safety: have written correct amount of data
-        unsafe {
-            vector_payload.set_len(vector_item_count);
-        }
         Self(Arc::new(VectorBlockInner {
             dimension,
             vector_payload,
@@ -234,6 +230,7 @@ impl<'a> IntoIterator for &'a VectorBlock {
     }
 }
 
+#[derive(Debug)]
 pub struct VectorBlockMeta {
     pub offset: usize,
     pub block_size: usize,
@@ -397,6 +394,18 @@ impl VectorFileBuilder {
         }
     }
 
+    pub fn get_vector(&self, idx: usize) -> EnumVectorAccessor<'_> {
+        if let Some((builder, start_vector_id)) = &self.building_block
+            && idx >= *start_vector_id
+        {
+            EnumVectorAccessor::Builder(builder, idx - start_vector_id)
+        } else {
+            let (block_idx, offset) =
+                search_vector(&self.block_metas, idx, |meta| meta.start_vector_id);
+            EnumVectorAccessor::BlockRef(&self.blocks[block_idx], offset)
+        }
+    }
+
     pub fn add(&mut self, vec: VectorRef<'_>, info: &[u8]) {
         let (builder, _) = self
             .building_block
@@ -480,6 +489,85 @@ impl VectorFileBuilder {
             }
         }
         Ok(())
+    }
+}
+
+pub(super) struct BuildingVectors {
+    flushed_next_vector_id: usize,
+    pub(super) file_builder: VectorFileBuilder,
+}
+
+pub(crate) struct FileVectorStore {
+    sstable_store: SstableStoreRef,
+
+    flushed_vector_files: Vec<VectorFileInfo>,
+    pub(super) building_vectors: Option<BuildingVectors>,
+}
+
+impl FileVectorStore {
+    pub(crate) fn new_for_reader(index: &HnswFlatIndex, sstable_store: SstableStoreRef) -> Self {
+        Self {
+            sstable_store,
+            flushed_vector_files: index.vector_store_info.vector_files.clone(),
+            building_vectors: None,
+        }
+    }
+
+    pub(crate) fn new_for_writer(
+        index: &HnswFlatIndex,
+        dimension: usize,
+        sstable_store: SstableStoreRef,
+        object_id_manager: VectorObjectIdManagerRef,
+        storage_opts: &StorageOpts,
+    ) -> Self {
+        let next_vector_id = index.vector_store_info.next_vector_id;
+        Self {
+            sstable_store: sstable_store.clone(),
+            flushed_vector_files: index.vector_store_info.vector_files.clone(),
+            building_vectors: Some(BuildingVectors {
+                flushed_next_vector_id: next_vector_id,
+                file_builder: new_vector_file_builder(
+                    dimension,
+                    next_vector_id,
+                    sstable_store,
+                    object_id_manager,
+                    storage_opts,
+                ),
+            }),
+        }
+    }
+
+    pub(super) async fn flush(&mut self) -> HummockResult<Option<VectorFileInfo>> {
+        let building_vectors = self.building_vectors.as_mut().expect("for write");
+        if let Some((vector_file, blocks, meta)) = building_vectors.file_builder.finish().await? {
+            self.sstable_store
+                .insert_vector_cache(vector_file.object_id, meta, blocks);
+            self.flushed_vector_files.push(vector_file.clone());
+            building_vectors.flushed_next_vector_id =
+                building_vectors.file_builder.next_vector_id();
+            Ok(Some(vector_file))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl VectorStore for FileVectorStore {
+    type Accessor<'a>
+        = EnumVectorAccessor<'a>
+    where
+        Self: 'a;
+
+    async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>> {
+        if let Some(building_vectors) = self.building_vectors.as_ref()
+            && idx >= building_vectors.flushed_next_vector_id
+        {
+            Ok(building_vectors.file_builder.get_vector(idx))
+        } else {
+            Ok(EnumVectorAccessor::BlockHolder(
+                get_vector_block(&self.sstable_store, &self.flushed_vector_files, idx).await?,
+            ))
+        }
     }
 }
 

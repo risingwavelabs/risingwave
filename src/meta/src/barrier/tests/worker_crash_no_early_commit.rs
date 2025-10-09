@@ -130,6 +130,17 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     ) -> MetaResult<()> {
         unimplemented!()
     }
+
+    async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+        unimplemented!()
+    }
+
+    async fn handle_refresh_finished_table_ids(
+        &self,
+        _refresh_finished_table_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        unimplemented!()
+    }
 }
 
 #[tokio::test]
@@ -212,6 +223,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                                     InflightActorInfo {
                                         worker_id: worker1.id as _,
                                         vnode_bitmap: None,
+                                        splits: vec![],
                                     },
                                 )]),
                                 state_table_ids: HashSet::from_iter([table1]),
@@ -228,6 +240,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                                     InflightActorInfo {
                                         worker_id: worker2.id as _,
                                         vnode_bitmap: None,
+                                        splits: vec![],
                                     },
                                 )]),
                                 state_table_ids: HashSet::from_iter([table2]),

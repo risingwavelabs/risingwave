@@ -741,11 +741,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
     async fn test_bson_v2_debezium_list() {
         let columns = vec![
             ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
-            ColumnDesc::named(
-                "hobbies",
-                ColumnId::new(1),
-                DataType::List(Box::new(DataType::Varchar)),
-            ),
+            ColumnDesc::named("hobbies", ColumnId::new(1), DataType::Varchar.list()),
         ];
 
         let columns = columns

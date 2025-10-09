@@ -24,7 +24,7 @@ use barrier_control::CreatingStreamingJobBarrierControl;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits;
+use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
 use risingwave_meta_model::{CreateType, WorkerId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -103,7 +103,11 @@ impl CreatingStreamingJobControl {
             )],
             version_stat,
         );
-        let fragment_infos: HashMap<_, _> = info.stream_job_fragments.new_fragment_info().collect();
+
+        let fragment_infos: HashMap<_, _> = info
+            .stream_job_fragments
+            .new_fragment_info(&info.init_split_assignment)
+            .collect();
 
         let actors_to_create =
             edges.collect_actors_to_create(info.stream_job_fragments.actors_to_create());
@@ -141,9 +145,12 @@ impl CreatingStreamingJobControl {
             pause: false,
             subscriptions_to_add: Default::default(),
             backfill_nodes_to_pause,
-            actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
-                info.cdc_table_snapshot_split_assignment.clone(),
-            ),
+            actor_cdc_table_snapshot_splits:
+                build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                    info.cdc_table_snapshot_split_assignment.clone(),
+                )
+                .into(),
+            new_upstream_sinks: Default::default(),
         });
 
         control_stream_manager.add_partial_graph(database_id, Some(job_id));

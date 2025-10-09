@@ -40,6 +40,10 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-jdbc-runner</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-jdbc</artifactId>
         </dependency>
         <dependency>

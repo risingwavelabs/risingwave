@@ -25,6 +25,7 @@ use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::Field;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{
@@ -190,7 +191,11 @@ enum CoordinationHandleManagerEvent {
     NewHandle,
     UpdateVnodeBitmap,
     Stop,
-    CommitRequest { epoch: u64, metadata: SinkMetadata },
+    CommitRequest {
+        epoch: u64,
+        metadata: SinkMetadata,
+        add_columns: Option<Vec<Field>>,
+    },
     AlignInitialEpoch(u64),
 }
 
@@ -227,6 +232,7 @@ impl CoordinationHandleManager {
                             CoordinationHandleManagerEvent::CommitRequest {
                                 epoch: request.epoch,
                                 metadata: request.metadata.ok_or_else(|| anyhow!("empty sink metadata"))?,
+                                add_columns: request.add_columns.map(|add_columns| add_columns.fields.into_iter().map(|field| Field::from_prost(&field)).collect()),
                             }
                         }
                         coordinate_request::Msg::AlignInitialEpochRequest(epoch) => {
@@ -439,12 +445,12 @@ impl CoordinatorWorker {
             .handle_manager
             .wait_init_handles(initial_log_store_rewind_start_epoch)
             .await?;
-        let mut pending_epochs: BTreeMap<u64, AligningRequests<SinkMetadata>> = BTreeMap::new();
+        let mut pending_epochs: BTreeMap<u64, AligningRequests<_>> = BTreeMap::new();
         let mut pending_new_handles = vec![];
         let mut prev_commit_epoch = None;
         loop {
             let (handle_id, event) = self.handle_manager.next_event().await?;
-            let (epoch, metadata) = match event {
+            let (epoch, commit_request) = match event {
                 CoordinationHandleManagerEvent::NewHandle => {
                     pending_new_handles.push(handle_id);
                     continue;
@@ -474,9 +480,11 @@ impl CoordinatorWorker {
                         .await?;
                     continue;
                 }
-                CoordinationHandleManagerEvent::CommitRequest { epoch, metadata } => {
-                    (epoch, metadata)
-                }
+                CoordinationHandleManagerEvent::CommitRequest {
+                    epoch,
+                    metadata,
+                    add_columns,
+                } => (epoch, (metadata, add_columns)),
                 CoordinationHandleManagerEvent::AlignInitialEpoch(_) => {
                     bail!("receive AlignInitialEpoch after initialization")
                 }
@@ -490,7 +498,7 @@ impl CoordinatorWorker {
             }
             pending_epochs.entry(epoch).or_default().add_new_request(
                 handle_id,
-                metadata,
+                commit_request,
                 self.handle_manager.vnode_bitmap(handle_id),
             )?;
             if pending_epochs
@@ -499,11 +507,25 @@ impl CoordinatorWorker {
                 .1
                 .aligned()
             {
-                let (epoch, requests) = pending_epochs.pop_first().expect("non-empty");
+                let (epoch, commit_requests) = pending_epochs.pop_first().expect("non-empty");
+                let mut metadatas = Vec::with_capacity(commit_requests.requests.len());
+                let mut requests = commit_requests.requests.into_iter();
+                let (first_metadata, first_add_columns) = requests.next().expect("non-empty");
+                metadatas.push(first_metadata);
+                for (metadata, add_columns) in requests {
+                    if first_add_columns != add_columns {
+                        return Err(anyhow!(
+                            "got different add columns {:?} to prev add columns {:?}",
+                            add_columns,
+                            first_add_columns
+                        ));
+                    }
+                    metadatas.push(metadata);
+                }
 
                 let start_time = Instant::now();
                 run_future_with_periodic_fn(
-                    coordinator.commit(epoch, requests.requests),
+                    coordinator.commit(epoch, metadatas, first_add_columns),
                     Duration::from_secs(5),
                     || {
                         warn!(
@@ -515,7 +537,8 @@ impl CoordinatorWorker {
                 )
                 .await
                 .map_err(|e| anyhow!(e))?;
-                self.handle_manager.ack_commit(epoch, requests.handle_ids)?;
+                self.handle_manager
+                    .ack_commit(epoch, commit_requests.handle_ids)?;
                 prev_commit_epoch = Some(epoch);
             }
         }

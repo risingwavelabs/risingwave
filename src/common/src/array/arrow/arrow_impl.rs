@@ -54,7 +54,7 @@ use super::arrow_schema::IntervalUnit;
 use super::{ArrowIntervalType, arrow_array, arrow_buffer, arrow_cast, arrow_schema};
 // Other import should always use the absolute path.
 use crate::array::*;
-use crate::types::{DataType as RwDataType, *};
+use crate::types::{DataType as RwDataType, Scalar, *};
 use crate::util::iter_util::ZipEqFast;
 
 /// Defines how to convert RisingWave arrays to Arrow arrays.
@@ -118,7 +118,7 @@ pub trait ToArrow {
             ArrayImpl::List(array) => self.list_to_arrow(data_type, array),
             ArrayImpl::Struct(array) => self.struct_to_arrow(data_type, array),
             ArrayImpl::Map(array) => self.map_to_arrow(data_type, array),
-            ArrayImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            ArrayImpl::Vector(inner) => self.vector_to_arrow(data_type, inner),
         }?;
         if arrow_array.data_type() != data_type {
             arrow_cast::cast(&arrow_array, data_type).map_err(ArrayError::to_arrow)
@@ -254,6 +254,31 @@ pub trait ToArrow {
     }
 
     #[inline]
+    fn vector_to_arrow(
+        &self,
+        data_type: &arrow_schema::DataType,
+        array: &VectorArray,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        let arrow_schema::DataType::List(field) = data_type else {
+            return Err(ArrayError::to_arrow("Invalid list type"));
+        };
+        if field.data_type() != &arrow_schema::DataType::Float32 {
+            return Err(ArrayError::to_arrow("Invalid list inner type for vector"));
+        }
+        let values = Arc::new(arrow_array::Float32Array::from(
+            array.as_raw_slice().to_vec(),
+        ));
+        let offsets = OffsetBuffer::new(array.offsets().iter().map(|&o| o as i32).collect());
+        let nulls = (!array.null_bitmap().all()).then(|| array.null_bitmap().into());
+        Ok(Arc::new(arrow_array::ListArray::new(
+            field.clone(),
+            offsets,
+            values,
+            nulls,
+        )))
+    }
+
+    #[inline]
     fn struct_to_arrow(
         &self,
         data_type: &arrow_schema::DataType,
@@ -329,9 +354,9 @@ pub trait ToArrow {
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
-            DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::List(list) => self.list_type_to_arrow(list)?,
+            DataType::Map(map) => self.map_type_to_arrow(map)?,
+            DataType::Vector(_) => self.vector_type_to_arrow()?,
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
     }
@@ -429,10 +454,10 @@ pub trait ToArrow {
     #[inline]
     fn list_type_to_arrow(
         &self,
-        elem_type: &DataType,
+        list_type: &ListType,
     ) -> Result<arrow_schema::DataType, ArrayError> {
         Ok(arrow_schema::DataType::List(Arc::new(
-            self.to_arrow_field("item", elem_type)?,
+            self.to_arrow_field("item", list_type.elem())?,
         )))
     }
 
@@ -466,6 +491,13 @@ pub trait ToArrow {
             )),
             sorted,
         ))
+    }
+
+    #[inline]
+    fn vector_type_to_arrow(&self) -> Result<arrow_schema::DataType, ArrayError> {
+        Ok(arrow_schema::DataType::List(Arc::new(
+            self.to_arrow_field("item", &VECTOR_ITEM_TYPE)?,
+        )))
     }
 }
 
@@ -533,7 +565,7 @@ pub trait FromArrow {
             Binary => DataType::Bytea,
             LargeUtf8 => self.from_large_utf8()?,
             LargeBinary => self.from_large_binary()?,
-            List(field) => DataType::List(Box::new(self.from_field(field)?)),
+            List(field) => DataType::list(self.from_field(field)?),
             Struct(fields) => DataType::Struct(self.from_fields(fields)?),
             Map(field, _is_sorted) => {
                 let entries = self.from_field(field)?;
@@ -1502,8 +1534,8 @@ pub fn is_parquet_schema_match_source_schema(
         }
         // List type recursive matching
         // Arrow's List matches RisingWave's List if the element type matches recursively
-        (ArrowType::List(arrow_field), RwType::List(rw_elem_ty)) => {
-            is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_elem_ty)
+        (ArrowType::List(arrow_field), RwType::List(rw_list_ty)) => {
+            is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_list_ty.elem())
         }
         // Map type recursive matching
         // Arrow's Map matches RisingWave's Map if the key and value types match recursively,
@@ -1578,10 +1610,10 @@ mod tests {
         let arrow_list =
             ArrowType::List(Box::new(ArrowField::new("item", ArrowType::Float64, true)).into());
         // RW: list<double>
-        let rw_list = RwType::List(Box::new(RwType::Float64));
+        let rw_list = RwType::Float64.list();
         assert!(is_parquet_schema_match_source_schema(&arrow_list, &rw_list));
 
-        let rw_list2 = RwType::List(Box::new(RwType::Int32));
+        let rw_list2 = RwType::Int32.list();
         assert!(!is_parquet_schema_match_source_schema(
             &arrow_list,
             &rw_list2

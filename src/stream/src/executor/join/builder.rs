@@ -15,7 +15,7 @@
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 
 use self::row::JoinRow;
@@ -205,7 +205,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     pub fn with_match<const OP: JoinOpPrimitive>(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<OwnedRow>,
+        matched_row: &JoinRow<impl Row>,
     ) -> Option<StreamChunk> {
         match OP {
             JoinOp::Insert => self.with_match_on_insert(row, matched_row),
@@ -216,7 +216,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     pub fn with_match_on_insert(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<OwnedRow>,
+        matched_row: &JoinRow<impl Row>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -262,7 +262,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     pub fn with_match_on_delete(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<OwnedRow>,
+        matched_row: &JoinRow<impl Row>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {

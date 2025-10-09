@@ -22,6 +22,7 @@ use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
 
 use super::*;
 use crate::executor::MaterializeExecutor;
+use crate::executor::materialize::RefreshableMaterializeArgs;
 
 pub struct MaterializeExecutorBuilder;
 
@@ -43,14 +44,45 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let table = node.get_table()?;
         let versioned = table.version.is_some();
+        let refreshable = table.refreshable;
 
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
-        let version_column_index = table.version_column_index;
+        let version_column_indices: Vec<u32> = table.version_column_indices.clone();
 
-        macro_rules! new_executor {
-            ($SD:ident) => {
-                MaterializeExecutor::<_, $SD>::new(
+        let exec = if refreshable {
+            // Create refresh args for refreshable tables
+            let refresh_args = RefreshableMaterializeArgs::<_, ColumnAwareSerde>::new(
+                store.clone(),
+                table,
+                node.staging_table.as_ref().unwrap(),
+                node.refresh_progress_table.as_ref().unwrap(),
+                params.vnode_bitmap.clone().map(Arc::new),
+            )
+            .await;
+
+            // Use unified MaterializeExecutor with refresh args
+            MaterializeExecutor::<_, ColumnAwareSerde>::new(
+                input,
+                params.info.schema.clone(),
+                store,
+                order_key,
+                params.actor_context,
+                params.vnode_bitmap.map(Arc::new),
+                table,
+                params.watermark_epoch,
+                conflict_behavior,
+                version_column_indices.clone(),
+                params.executor_stats.clone(),
+                Some(refresh_args),
+                params.local_barrier_manager.clone(),
+            )
+            .await
+            .boxed()
+        } else {
+            // Use standard MaterializeExecutor for regular tables (no refresh args)
+            if versioned {
+                MaterializeExecutor::<_, ColumnAwareSerde>::new(
                     input,
                     params.info.schema.clone(),
                     store,
@@ -60,18 +92,32 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     table,
                     params.watermark_epoch,
                     conflict_behavior,
-                    version_column_index,
+                    version_column_indices.clone(),
                     params.executor_stats.clone(),
+                    None, // No refresh args for regular tables
+                    params.local_barrier_manager.clone(),
                 )
                 .await
                 .boxed()
-            };
-        }
-
-        let exec = if versioned {
-            new_executor!(ColumnAwareSerde)
-        } else {
-            new_executor!(BasicSerde)
+            } else {
+                MaterializeExecutor::<_, BasicSerde>::new(
+                    input,
+                    params.info.schema.clone(),
+                    store,
+                    order_key,
+                    params.actor_context,
+                    params.vnode_bitmap.map(Arc::new),
+                    table,
+                    params.watermark_epoch,
+                    conflict_behavior,
+                    version_column_indices.clone(),
+                    params.executor_stats.clone(),
+                    None, // No refresh args for regular tables
+                    params.local_barrier_manager.clone(),
+                )
+                .await
+                .boxed()
+            }
         };
 
         Ok((params.info, exec).into())
@@ -104,7 +150,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
-        let version_column_index = table.version_column_index;
+        let version_column_indices: Vec<u32> = table.version_column_indices.clone();
         let exec = MaterializeExecutor::<_, BasicSerde>::new(
             input,
             params.info.schema.clone(),
@@ -115,8 +161,10 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             table,
             params.watermark_epoch,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             params.executor_stats.clone(),
+            None, // ArrangeExecutor doesn't support refresh functionality
+            params.local_barrier_manager.clone(),
         )
         .await;
 
