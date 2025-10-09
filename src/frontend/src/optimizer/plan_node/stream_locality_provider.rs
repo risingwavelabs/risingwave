@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
@@ -21,7 +22,7 @@ use risingwave_pb::stream_plan::LocalityProviderNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
 use super::{ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::TableCatalog;
 use crate::catalog::TableId;
@@ -88,7 +89,13 @@ impl PlanTreeNodeUnary<Stream> for StreamLocalityProvider {
 }
 
 impl_plan_tree_node_for_unary! { Stream, StreamLocalityProvider }
-impl_distill_by_unit!(StreamLocalityProvider, core, "StreamLocalityProvider");
+
+impl Distill for StreamLocalityProvider {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let vec = self.core.fields_pretty();
+        childless_record("StreamLocalityProvider", vec)
+    }
+}
 
 impl StreamNode for StreamLocalityProvider {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {

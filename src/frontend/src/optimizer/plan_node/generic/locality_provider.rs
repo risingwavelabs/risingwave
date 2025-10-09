@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use risingwave_common::catalog::Schema;
+use pretty_xmlish::Pretty;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 
 use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
 use crate::expr::ExprRewriter;
@@ -30,16 +29,6 @@ pub struct LocalityProvider<PlanRef> {
     pub locality_columns: Vec<usize>,
 }
 
-impl<PlanRef: GenericPlanRef> fmt::Display for LocalityProvider<PlanRef> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "LocalityProvider {{ locality_columns: {:?} }}",
-            self.locality_columns
-        )
-    }
-}
-
 impl<PlanRef: GenericPlanRef> LocalityProvider<PlanRef> {
     pub fn new(input: PlanRef, locality_columns: Vec<usize>) -> Self {
         Self {
@@ -48,9 +37,13 @@ impl<PlanRef: GenericPlanRef> LocalityProvider<PlanRef> {
         }
     }
 
-    pub fn fields_pretty<'a>(&self) -> Vec<(&'a str, pretty_xmlish::Pretty<'a>)> {
-        let locality_columns_str = format!("{:?}", self.locality_columns);
-        vec![("locality_columns", locality_columns_str.into())]
+    pub fn fields_pretty<'a>(&self) -> Vec<(&'a str, Pretty<'a>)> {
+        let locality_columns_display = self
+            .locality_columns
+            .iter()
+            .map(|&i| Pretty::display(&FieldDisplay(self.input.schema().fields.get(i).unwrap())))
+            .collect();
+        vec![("locality_columns", Pretty::Array(locality_columns_display))]
     }
 }
 
