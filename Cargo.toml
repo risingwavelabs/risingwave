@@ -158,7 +158,7 @@ faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 foyer = { version = "0.20.0", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.8", default-features = false, features = ["std"] }
-hashbrown = { version = "0.15", features = [
+hashbrown = { version = "0.16", features = [
     "default-hasher",
     "inline-more",
     "nightly",
