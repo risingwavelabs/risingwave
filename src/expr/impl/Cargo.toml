@@ -41,7 +41,7 @@ iceberg = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
-md5 = "0.8"
+md5 = { package = "md-5", version = "0.10.6" }
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
 openssl = "0.10.72"
