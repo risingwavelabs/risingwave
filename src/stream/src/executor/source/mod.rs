@@ -187,7 +187,7 @@ async fn process_chunk(
     }
 
     let limit = rate_limit_rps.unwrap() as u64;
-    let required_permits = chunk.compute_rate_limit_chunk_permits();
+    let required_permits = chunk.rate_limit_permits();
     if required_permits > limit {
         // This should not happen after the mentioned PR.
         tracing::error!(
