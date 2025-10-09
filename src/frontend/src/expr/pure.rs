@@ -242,6 +242,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::SecureCompare
             | Type::Decrypt
             | Type::Encrypt
+            | Type::PgpSymEncrypt
+            | Type::PgpSymDecrypt
+            | Type::PgpPubEncrypt
+            | Type::PgpPubDecrypt
             | Type::Tand
             | Type::ArrayPositions
             | Type::StringToArray

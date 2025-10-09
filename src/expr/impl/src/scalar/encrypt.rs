@@ -208,8 +208,8 @@ enum PgpError {
 }
 
 /// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
-/// pgp_sym_encrypt(data text, psw text) returns bytea
-/// pgp_sym_encrypt_bytea(data bytea, psw text) returns bytea
+// pgp_sym_encrypt(data text, psw text) returns bytea
+// pgp_sym_encrypt_bytea(data bytea, psw text) returns bytea
 #[function("pgp_sym_encrypt(bytea, varchar) -> bytea")]
 fn pgp_sym_encrypt(data: &[u8], password: &str) -> Result<Box<[u8]>, PgpError> {
     pgp_sym_encrypt_internal(data, password, None)
@@ -235,9 +235,10 @@ fn pgp_sym_encrypt_internal(
     let mut sink = Vec::new();
 
     // Encrypt with password using SKESK (Symmetric-Key Encrypted Session Key)
-    let message = Encryptor2::with_passwords(Message::new(&mut sink), vec![Password::from(password)])
-        .symmetric_algo(SymmetricAlgorithm::AES128)
-        .build()?;
+    let message =
+        Encryptor2::with_passwords(Message::new(&mut sink), vec![Password::from(password)])
+            .symmetric_algo(SymmetricAlgorithm::AES128)
+            .build()?;
 
     // Write literal data packet
     let mut message = LiteralWriter::new(message).build()?;
@@ -248,8 +249,8 @@ fn pgp_sym_encrypt_internal(
 }
 
 /// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
-/// pgp_sym_decrypt(msg bytea, psw text) returns text
-/// pgp_sym_decrypt_bytea(msg bytea, psw text) returns bytea
+// pgp_sym_decrypt(msg bytea, psw text) returns text
+// pgp_sym_decrypt_bytea(msg bytea, psw text) returns bytea
 #[function("pgp_sym_decrypt(bytea, varchar) -> bytea")]
 fn pgp_sym_decrypt(msg: &[u8], password: &str) -> Result<Box<[u8]>, PgpError> {
     pgp_sym_decrypt_internal(msg, password, None)
@@ -302,19 +303,18 @@ fn pgp_sym_decrypt_internal(
             for skesk in skesks {
                 if let Ok((algo, session_key)) =
                     skesk.decrypt(&Password::from(self.password.as_str()))
+                    && decrypt(algo, &session_key)
                 {
-                    if decrypt(algo, &session_key) {
-                        return Ok(None);
-                    }
+                    return Ok(None);
                 }
             }
 
-            Err(anyhow::anyhow!("Decryption failed").into())
+            Err(anyhow::anyhow!("Decryption failed"))
         }
     }
 
     let helper = Helper {
-        password: password.to_string(),
+        password: password.to_owned(),
     };
 
     let mut decryptor = DecryptorBuilder::from_bytes(msg)?.with_policy(policy, None, helper)?;
@@ -326,8 +326,8 @@ fn pgp_sym_decrypt_internal(
 }
 
 /// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
-/// pgp_pub_encrypt(data text, key bytea) returns bytea
-/// pgp_pub_encrypt_bytea(data bytea, key bytea) returns bytea
+// pgp_pub_encrypt(data text, key bytea) returns bytea
+// pgp_pub_encrypt_bytea(data bytea, key bytea) returns bytea
 #[function("pgp_pub_encrypt(bytea, bytea) -> bytea")]
 fn pgp_pub_encrypt(data: &[u8], key: &[u8]) -> Result<Box<[u8]>, PgpError> {
     pgp_pub_encrypt_internal(data, key, None)
@@ -367,7 +367,7 @@ fn pgp_pub_encrypt_internal(
 
     if recipients.is_empty() {
         return Err(PgpError::InvalidKey(
-            "No valid encryption keys found".to_string(),
+            "No valid encryption keys found".to_owned(),
         ));
     }
 
@@ -387,8 +387,8 @@ fn pgp_pub_encrypt_internal(
 }
 
 /// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
-/// pgp_pub_decrypt(msg bytea, key bytea) returns text
-/// pgp_pub_decrypt_bytea(msg bytea, key bytea) returns bytea
+// pgp_pub_decrypt(msg bytea, key bytea) returns text
+// pgp_pub_decrypt_bytea(msg bytea, key bytea) returns bytea
 #[function("pgp_pub_decrypt(bytea, bytea) -> bytea")]
 fn pgp_pub_decrypt(msg: &[u8], key: &[u8]) -> Result<Box<[u8]>, PgpError> {
     pgp_pub_decrypt_internal(msg, key, None, None)
@@ -478,29 +478,27 @@ fn pgp_pub_decrypt_internal(
                         } else {
                             continue;
                         }
+                    } else if let Ok(kp) = ka.key().clone().into_keypair() {
+                        kp
                     } else {
-                        if let Ok(kp) = ka.key().clone().into_keypair() {
-                            kp
-                        } else {
-                            continue;
-                        }
+                        continue;
                     };
 
-                    if let Some((algo, session_key)) = pkesk.decrypt(&mut keypair, sym_algo) {
-                        if decrypt(algo, &session_key) {
-                            return Ok(None);
-                        }
+                    if let Some((algo, session_key)) = pkesk.decrypt(&mut keypair, sym_algo)
+                        && decrypt(algo, &session_key)
+                    {
+                        return Ok(None);
                     }
                 }
             }
 
-            Err(anyhow::anyhow!("Decryption failed").into())
+            Err(anyhow::anyhow!("Decryption failed"))
         }
     }
 
     let helper = Helper {
         cert,
-        password: password.map(|s| s.to_string()),
+        password: password.map(|s| s.to_owned()),
     };
 
     let mut decryptor = DecryptorBuilder::from_bytes(msg)?.with_policy(policy, None, helper)?;
