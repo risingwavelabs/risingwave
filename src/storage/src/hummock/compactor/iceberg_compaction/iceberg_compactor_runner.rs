@@ -195,7 +195,6 @@ impl IcebergCompactorRunner {
         })
     }
 
-    /// Queue integration methods
     pub fn required_parallelism(&self) -> u32 {
         self.compaction_plan.recommended_executor_parallelism() as u32
     }

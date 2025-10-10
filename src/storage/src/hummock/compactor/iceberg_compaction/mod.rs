@@ -52,14 +52,20 @@ struct IcebergTaskQueueInner {
     runners: HashMap<TaskId, IcebergCompactorRunner>, /* optional runner payloads (may be absent in tests) */
 }
 
-/// Basic queue abstraction supporting:
-/// 1. Enqueue (push) with replacement if a waiting task with same unique ident exists.
-/// 2. Dequeue (pop) -> transitions the task to running state.
-/// 3. Duplicate detection: if same unique ident already running, new task is rejected.
-/// 4. Cancel/remove only affects waiting tasks (not running).
-/// 5. Event-driven scheduling notifications when tasks become available
+/// FIFO compaction task queue with lightweight replacement and parallelism budgeting.
+/// Features:
+/// - Push with replacement (same `unique_ident` waiting -> metadata/runner updated in place).
+/// - Pop moves the head (if it fits remaining parallelism) to the running set.
+/// - Reject duplicate if the same `unique_ident` is already running.
+/// - Capacity control: reject when adding/replacing would exceed `pending_parallelism_budget`
+///   (sum of waiting tasks' `required_parallelism`). No eviction beyond hard rejection.
+/// - Optional notification when new tasks become schedulable.
 ///
-/// NOTE: This MVP does not implement capacity eviction policy beyond a hard full rejection.
+/// Invariants (enforced by logic; violation triggers panic):
+/// - `waiting ∩ running = ∅`.
+/// - Each waiting `unique_ident` appears exactly once in `deque`.
+/// - `waiting_parallelism_sum = Σ required_parallelism(waiting)`.
+/// - `running_parallelism_sum = Σ required_parallelism(running)`.
 pub struct IcebergTaskQueue {
     inner: IcebergTaskQueueInner,
     /// Maximum parallelism that a single task may require (cluster effective max / scheduling window upper bound).
@@ -103,7 +109,6 @@ impl IcebergTaskQueue {
         }
     }
 
-    /// Create queue with event-driven scheduling notifications using Notify
     pub fn new_with_notify(
         max_parallelism: u32,
         pending_parallelism_budget: u32,
@@ -114,7 +119,6 @@ impl IcebergTaskQueue {
         (queue, notify)
     }
 
-    /// Provide an async method to wait for schedulable tasks
     pub async fn wait_schedulable(&self) -> bool {
         if let Some(notify) = &self.schedule_notify {
             // Check if we have tasks that can be scheduled right now
@@ -129,7 +133,6 @@ impl IcebergTaskQueue {
         }
     }
 
-    /// Check if there are tasks that can be scheduled with current capacity
     fn has_schedulable_tasks(&self) -> bool {
         if let Some(front_task) = self.inner.deque.front() {
             let available_parallelism = self
@@ -141,7 +144,6 @@ impl IcebergTaskQueue {
         }
     }
 
-    /// Notify that tasks might be schedulable now
     fn notify_schedulable(&self) {
         if let Some(notify) = &self.schedule_notify
             && self.has_schedulable_tasks()
@@ -163,15 +165,14 @@ impl IcebergTaskQueue {
             .saturating_sub(self.inner.running_parallelism_sum)
     }
 
-    /// Enqueue a task. Behavior:
-    /// - If a waiting task with same unique ident exists: replace it (position unchanged), return Replaced.
-    /// - If a running task with same unique ident exists: reject (duplicate running).
-    /// - Else if queue full: reject.
-    /// - Else: push to back.
-    ///   Push a task meta plus optional runner.
-    ///   Replacement semantics:
-    ///   - If same `unique_ident` waiting and new runner Some => replace meta + runner.
-    ///   - If same `unique_ident` waiting and new runner None => replace only meta (keep old runner) -> `ReplacedMetaOnly`.
+    /// Enqueue semantics:
+    /// - Waiting duplicate: replace in place (position preserved) -> `Replaced { old_task_id }`.
+    ///   * If new runner is `Some`, replace runner; else keep old runner.
+    /// - Running duplicate: reject -> `RejectedRunningDuplicate`.
+    /// - Budget exceeded (sum of waiting parallelism would surpass `pending_parallelism_budget`): `RejectedCapacity`.
+    /// - `required_parallelism == 0`: `RejectedInvalidParallelism`.
+    /// - `required_parallelism > max_parallelism`: `RejectedTooLarge`.
+    /// - Otherwise append -> `Added`.
     pub fn push(
         &mut self,
         meta: IcebergTaskMeta,
@@ -253,8 +254,7 @@ impl IcebergTaskQueue {
         PushResult::Added
     }
 
-    /// Pop the head task (strict FIFO) if it fits remaining parallelism.
-    /// Internally maintains `running_parallelism_sum`, no need for caller to pass parameters.
+    // Pop the head task (strict FIFO) if it fits remaining parallelism.
     pub fn pop(&mut self) -> Option<PoppedIcebergTask> {
         let front = self.inner.deque.front()?;
         if front.required_parallelism > self.available_parallelism() {
@@ -277,7 +277,6 @@ impl IcebergTaskQueue {
         Some(PoppedIcebergTask { meta, runner })
     }
 
-    /// Finish a running task, freeing its slot so new tasks with same unique ident can be enqueued.
     pub fn finish_running(&mut self, task_id: TaskId) -> bool {
         let Some((uid, required)) = self.inner.id_map.remove(&task_id) else {
             return false;
@@ -295,12 +294,6 @@ impl IcebergTaskQueue {
         }
     }
 }
-
-// Updated Guidance (simplified):
-// 1. push validates 0 < p <= max_parallelism and waiting parallelism budget; duplicate waiting directly replaces in-place (optional runner update).
-// 2. pop returns meta + Option<runner>, no additional take_runner needed.
-// 3. available = max_parallelism - running_parallelism_sum; strict FIFO, don't skip head.
-// 4. head-of-line blocking not optimized for now, can add lookahead later.
 
 #[cfg(test)]
 mod tests {
@@ -380,5 +373,94 @@ mod tests {
         assert!(q.finish_running(1));
         // after finishing can push again
         assert_eq!(q.push(mk_meta(3, "x", 4), None), PushResult::Added);
+    }
+
+    #[test]
+    fn test_replacement_exceed_budget_reject() {
+        // budget=10, current waiting sum=8, replacement would raise to 11 -> reject
+        let mut q = IcebergTaskQueue::new(8, 10);
+        assert_eq!(q.push(mk_meta(1, "a", 4), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(2, "b", 4), None), PushResult::Added);
+        // Attempt to replace b (waiting) with required_parallelism=7 -> exceeds budget
+        assert_eq!(
+            q.push(mk_meta(3, "b", 7), None),
+            PushResult::RejectedCapacity
+        );
+        // Pop order & parallelism unchanged
+        let p1 = q.pop().unwrap();
+        assert_eq!(p1.meta.unique_ident, "a");
+        let p2 = q.pop().unwrap();
+        assert_eq!(p2.meta.unique_ident, "b");
+        assert_eq!(p2.meta.required_parallelism, 4);
+    }
+
+    #[test]
+    fn test_replacement_position_preserved() {
+        let mut q = IcebergTaskQueue::new(8, 32);
+        assert_eq!(q.push(mk_meta(1, "a", 3), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(2, "b", 3), None), PushResult::Added);
+        // Replace head (a) with new task id 10 and different parallelism
+        assert!(matches!(
+            q.push(mk_meta(10, "a", 5), None),
+            PushResult::Replaced { old_task_id: 1 }
+        ));
+        // Pop should still return "a" (now id 10) before "b"
+        let p1 = q.pop().unwrap();
+        assert_eq!(p1.meta.task_id, 10);
+        assert_eq!(p1.meta.unique_ident, "a");
+        let p2 = q.pop().unwrap();
+        assert_eq!(p2.meta.unique_ident, "b");
+    }
+
+    #[test]
+    fn test_pop_insufficient_parallelism() {
+        // max_parallelism=8, first task uses 6, second needs 4 (cannot run concurrently)
+        let mut q = IcebergTaskQueue::new(8, 32);
+        assert_eq!(q.push(mk_meta(1, "a", 6), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(2, "b", 4), None), PushResult::Added);
+        let p1 = q.pop().unwrap();
+        assert_eq!(p1.meta.unique_ident, "a");
+        // Not enough remaining parallelism (only 2 left)
+        assert!(q.pop().is_none());
+        // Finish first, then second becomes schedulable
+        assert!(q.finish_running(1));
+        let p2 = q.pop().unwrap();
+        assert_eq!(p2.meta.unique_ident, "b");
+    }
+
+    #[test]
+    fn test_finish_running_nonexistent() {
+        let mut q = IcebergTaskQueue::new(4, 16);
+        assert!(!q.finish_running(999)); // no such task id
+        assert_eq!(q.running_parallelism_sum(), 0);
+        assert_eq!(q.waiting_parallelism_sum(), 0);
+    }
+
+    #[test]
+    fn test_finish_running_updates_sums() {
+        let mut q = IcebergTaskQueue::new(8, 32);
+        assert_eq!(q.push(mk_meta(1, "a", 5), None), PushResult::Added);
+        let _ = q.pop().unwrap();
+        assert_eq!(q.running_parallelism_sum(), 5);
+        assert!(q.finish_running(1));
+        assert_eq!(q.running_parallelism_sum(), 0);
+        assert!(q.pop().is_none()); // queue empty
+    }
+
+    #[test]
+    fn test_replacement_parallelism_sum_adjustment() {
+        let mut q = IcebergTaskQueue::new(8, 32);
+        assert_eq!(q.push(mk_meta(1, "a", 3), None), PushResult::Added);
+        assert_eq!(q.waiting_parallelism_sum(), 3);
+        // Replace with higher required_parallelism
+        assert!(matches!(
+            q.push(mk_meta(2, "a", 6), None),
+            PushResult::Replaced { old_task_id: 1 }
+        ));
+        assert_eq!(q.waiting_parallelism_sum(), 6);
+        // Pop should show new parallelism
+        let p = q.pop().unwrap();
+        assert_eq!(p.meta.required_parallelism, 6);
+        assert!(q.finish_running(p.meta.task_id));
     }
 }
