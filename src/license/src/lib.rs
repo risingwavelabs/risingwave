@@ -14,7 +14,7 @@
 
 #![feature(let_chains)]
 
-mod cpu;
+mod rwu;
 mod feature;
 mod key;
 mod manager;
