@@ -40,7 +40,7 @@ use risingwave_meta_model::{
     VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, fragment_splits, object,
     sink, source, source_splits, streaming_job, table,
 };
-use risingwave_meta_model_migration::{Alias, ExprTrait, OnConflict, SelectStatement, SimpleExpr};
+use risingwave_meta_model_migration::{ExprTrait, OnConflict, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
@@ -62,7 +62,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ColumnTrait, DbErr, EntityTrait, FromQueryResult, JoinType, ModelTrait, PaginatorTrait,
-    QueryFilter, QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
+    QueryFilter, QuerySelect, RelationTrait, TransactionTrait, Value,
 };
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -96,6 +96,7 @@ pub struct InflightActorInfo {
 pub struct InflightFragmentInfo {
     pub fragment_id: crate::model::FragmentId,
     pub distribution_type: DistributionType,
+    pub vnode_count: usize,
     pub nodes: PbStreamNode,
     pub actors: HashMap<crate::model::ActorId, InflightActorInfo>,
     pub state_table_ids: HashSet<risingwave_common::catalog::TableId>,
@@ -465,59 +466,31 @@ impl CatalogController {
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
     }
 
-    pub async fn running_fragment_parallelisms(
+    pub fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
-        let inner = self.inner.read().await;
+        let info = self.env.shared_actor_infos().read_guard();
 
-        let query_alias = Alias::new("fragment_actor_count");
-        let count_alias = Alias::new("count");
+        let mut result = HashMap::new();
+        for (fragment_id, fragment) in info.iter_over_fragments() {
+            if let Some(id_filter) = &id_filter
+                && !id_filter.contains(&(*fragment_id as _))
+            {
+                continue; // Skip fragments not in the filter
+            }
 
-        let mut query = SelectStatement::new()
-            .column(actor::Column::FragmentId)
-            .expr_as(actor::Column::ActorId.count(), count_alias.clone())
-            .from(Actor)
-            .group_by_col(actor::Column::FragmentId)
-            .to_owned();
-
-        if let Some(id_filter) = id_filter {
-            query.cond_having(actor::Column::FragmentId.is_in(id_filter));
+            result.insert(
+                *fragment_id as _,
+                FragmentParallelismInfo {
+                    distribution_type: fragment.distribution_type.into(),
+                    actor_count: fragment.actors.len() as _,
+                    vnode_count: fragment.vnode_count,
+                },
+            );
         }
 
-        let outer = SelectStatement::new()
-            .column((FragmentModel, fragment::Column::FragmentId))
-            .column(count_alias)
-            .column(fragment::Column::DistributionType)
-            .column(fragment::Column::VnodeCount)
-            .from_subquery(query.to_owned(), query_alias.clone())
-            .inner_join(
-                FragmentModel,
-                Expr::col((query_alias, actor::Column::FragmentId))
-                    .equals((FragmentModel, fragment::Column::FragmentId)),
-            )
-            .to_owned();
-
-        let fragment_parallelisms: Vec<(FragmentId, i64, DistributionType, i32)> =
-            Selector::<SelectGetableTuple<(FragmentId, i64, DistributionType, i32)>>::into_tuple(
-                outer.to_owned(),
-            )
-            .all(&inner.db)
-            .await?;
-
-        Ok(fragment_parallelisms
-            .into_iter()
-            .map(|(fragment_id, count, distribution_type, vnode_count)| {
-                (
-                    fragment_id,
-                    FragmentParallelismInfo {
-                        distribution_type: distribution_type.into(),
-                        actor_count: count as usize,
-                        vnode_count: vnode_count as usize,
-                    },
-                )
-            })
-            .collect())
+        Ok(result)
     }
 
     pub async fn fragment_job_mapping(&self) -> MetaResult<HashMap<FragmentId, ObjectId>> {
@@ -816,21 +789,22 @@ impl CatalogController {
         Ok(count > 0)
     }
 
-    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
-        let inner = self.inner.read().await;
-        let actor_cnt: Vec<(WorkerId, i64)> = Actor::find()
-            .select_only()
-            .column(actor::Column::WorkerId)
-            .column_as(actor::Column::ActorId.count(), "count")
-            .group_by(actor::Column::WorkerId)
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        Ok(actor_cnt
+    pub fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        let read_guard = self.env.shared_actor_infos().read_guard();
+        let actor_cnt: HashMap<WorkerId, _> = read_guard
+            .iter_over_fragments()
+            .flat_map(|(_, fragment)| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|(actor_id, actor)| (actor.worker_id, *actor_id))
+            })
+            .into_group_map()
             .into_iter()
-            .map(|(worker_id, count)| (worker_id, count as usize))
-            .collect())
+            .map(|(k, v)| (k, v.len()))
+            .collect();
+
+        Ok(actor_cnt)
     }
 
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
@@ -915,10 +889,24 @@ impl CatalogController {
         Ok(upstream_fragments)
     }
 
-    pub async fn list_actor_locations(&self) -> MetaResult<Vec<PartialActorLocation>> {
-        let inner = self.inner.read().await;
-        let actor_locations: Vec<PartialActorLocation> =
-            Actor::find().into_partial_model().all(&inner.db).await?;
+    pub fn list_actor_locations(&self) -> MetaResult<Vec<PartialActorLocation>> {
+        let info = self.env.shared_actor_infos().read_guard();
+
+        let actor_locations = info
+            .iter_over_fragments()
+            .flat_map(|(fragment_id, fragment)| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|(actor_id, actor)| PartialActorLocation {
+                        actor_id: *actor_id as _,
+                        fragment_id: *fragment_id as _,
+                        worker_id: actor.worker_id,
+                        status: ActorStatus::Running,
+                    })
+            })
+            .collect_vec();
+
         Ok(actor_locations)
     }
 
@@ -1111,6 +1099,7 @@ impl CatalogController {
                     StreamNode,
                     I32Array,
                     DistributionType,
+                    i32,
                     DatabaseId,
                     ObjectId,
                 ),
@@ -1126,6 +1115,7 @@ impl CatalogController {
             .column(fragment::Column::StreamNode)
             .column(fragment::Column::StateTableIds)
             .column(fragment::Column::DistributionType)
+            .column(fragment::Column::VnodeCount)
             .column(object::Column::DatabaseId)
             .column(object::Column::Oid)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
@@ -1147,6 +1137,7 @@ impl CatalogController {
             node,
             state_table_ids,
             distribution_type,
+            vnode_count,
             database_id,
             job_id,
         )) = actor_info_stream.try_next().await?
@@ -1186,6 +1177,7 @@ impl CatalogController {
                     entry.insert(InflightFragmentInfo {
                         fragment_id: fragment_id as _,
                         distribution_type,
+                        vnode_count: vnode_count as _,
                         nodes: node.to_protobuf(),
                         actors: HashMap::from_iter([(actor_id as _, actor_info)]),
                         state_table_ids,

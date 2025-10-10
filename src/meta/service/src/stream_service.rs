@@ -380,8 +380,7 @@ impl StreamManagerService for StreamServiceImpl {
         let actor_locations = self
             .metadata_manager
             .catalog_controller
-            .list_actor_locations()
-            .await?;
+            .list_actor_locations()?;
         let states = actor_locations
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {

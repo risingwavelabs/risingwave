@@ -45,6 +45,7 @@ pub struct SharedFragmentInfo {
     pub fragment_id: FragmentId,
     pub distribution_type: DistributionType,
     pub actors: HashMap<ActorId, InflightActorInfo>,
+    pub vnode_count: usize,
 }
 
 impl From<&InflightFragmentInfo> for SharedFragmentInfo {
@@ -53,6 +54,7 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
             fragment_id,
             distribution_type,
             actors,
+            vnode_count,
             ..
         } = info;
 
@@ -60,6 +62,7 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
             fragment_id: *fragment_id,
             distribution_type: *distribution_type,
             actors: actors.clone(),
+            vnode_count: *vnode_count,
         }
     }
 }
