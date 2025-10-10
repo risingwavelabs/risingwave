@@ -138,7 +138,7 @@ pub const GIT_SHA: &str = git_sha!("GIT_SHA");
 
 pub fn current_cluster_version() -> String {
     format!(
-        "PostgreSQL {}-RisingWave-{} ({})",
+        "PostgreSQL {}-Rising!!Wave-{} ({})",
         PG_VERSION, RW_VERSION, GIT_SHA
     )
 }
