@@ -16,17 +16,19 @@
 #[cfg(debug_assertions)]
 #[cfg(test)]
 mod tests {
+    const GB: u64 = 1024 * 1024 * 1024;
+
     use expect_test::expect;
     use risingwave_pb::common::ClusterResource;
     use thiserror_ext::AsReport as _;
 
     use crate::{Feature, LicenseKey, LicenseManager, TEST_ALL_LICENSE_KEY_CONTENT};
 
-    fn do_test(key: &str, cpu_core_count: u64, expect: expect_test::Expect) {
+    fn do_test(key: &str, cpu_core_count: u64, memory_bytes: u64, expect: expect_test::Expect) {
         let manager = LicenseManager::new();
         manager.refresh(LicenseKey(key));
         manager.update_cluster_resource(ClusterResource {
-            total_memory_bytes: 0, // currently unused
+            total_memory_bytes: memory_bytes,
             total_cpu_cores: cpu_core_count,
         });
 
@@ -38,7 +40,8 @@ mod tests {
 
     #[test]
     fn test_no_limit() {
-        do_test(TEST_ALL_LICENSE_KEY_CONTENT, 114514, expect!["ok"]);
+        do_test(TEST_ALL_LICENSE_KEY_CONTENT, 114514, 0, expect!["ok"]);
+        do_test(TEST_ALL_LICENSE_KEY_CONTENT, 0, 114514 * GB, expect!["ok"]);
     }
 
     #[test]
@@ -48,6 +51,7 @@ mod tests {
         do_test(
             KEY,
             0,
+            0,
             expect![
                 "feature TestDummy is not available due to license error: invalid license key: InvalidToken"
             ],
@@ -55,25 +59,41 @@ mod tests {
         do_test(
             KEY,
             114514,
+            0,
             expect![
                 "feature TestDummy is not available due to license error: invalid license key: InvalidToken"
             ],
         );
     }
 
-    #[test]
-    fn test_limit() {
-        const KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+    const KEY_32: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
           eyJzdWIiOiJwYWlkLXRlc3QtMzIiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwidGllciI6InBhaWQiLCJleHAiOjIxNTA0OTU5OTksImlhdCI6MTczNzYxMjQ5NSwiY3B1X2NvcmVfbGltaXQiOjMyfQ.\
           SQpX2Dmon5Mb04VUbHyxsU7owJhcdLZHqUefxAXBwG5AqgKdpfS0XUePW5E4D-EfxtH_cWJiD4QDFsfdRUz88g_n_KvfNUObMW7NV5TUoRs_ImtS4ySugExNX3JzJi71QqgI8kugStQ7uOR9kZ_C-cCc_IG2CwwEmhhW1Ij0vX7qjhG5JNMit_bhxPY7Rh27ppgPTqWxJFTTsw-9B7O5WR_yIlaDjxVzk0ALm_j6DPB249gG3dkeK0rP0AK_ip2cK6iQdy8Cge7ATD6yUh4c_aR6GILDF6-vyB7QdWU6DdQS4KhdkPNWoe_Z9psotcXQJ7NhQ39hk8tdLzmTfGDDBA";
 
-        do_test(KEY, 31, expect!["ok"]);
-        do_test(KEY, 32, expect!["ok"]);
+    #[test]
+    fn test_cpu_limit() {
+        do_test(KEY_32, 31, 0, expect!["ok"]);
+        do_test(KEY_32, 32, 0, expect!["ok"]);
         do_test(
-            KEY,
+            KEY_32,
             33,
+            0,
             expect![
                 "feature TestDummy is not available due to license error: a valid license key is set, but it is currently not effective because the CPU core in the cluster (33) exceeds the maximum allowed by the license key (32); consider removing some nodes or acquiring a new license key with a higher limit"
+            ],
+        );
+    }
+
+    #[test]
+    fn test_memory_limit() {
+        do_test(KEY_32, 0, 31 * 4 * GB, expect!["ok"]);
+        do_test(KEY_32, 0, 32 * 4 * GB, expect!["ok"]);
+        do_test(
+            KEY_32,
+            0,
+            33 * 4 * GB,
+            expect![
+                "feature TestDummy is not available due to license error: a valid license key is set, but it is currently not effective because the memory in the cluster (132 GiB) exceeds the maximum allowed by the license key (128 GiB); consider removing some nodes or acquiring a new license key with a higher limit"
             ],
         );
     }
