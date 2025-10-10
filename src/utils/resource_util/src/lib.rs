@@ -15,6 +15,10 @@
 /// Returns the hostname of the current machine, or an empty string if failed,
 /// which rarely happens.
 pub fn hostname() -> String {
+    if cfg!(madsim) {
+        return "".to_owned();
+    }
+
     hostname::get()
         .unwrap_or_default()
         .into_string()
