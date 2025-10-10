@@ -10078,8 +10078,19 @@ checksum = "cc5b72d8145275d844d4b5f6d4e1eef00c8cd889edb6035c21675d1bb1f45c9f"
 dependencies = [
  "bitflags 2.9.0",
  "hex",
- "procfs-core",
+ "procfs-core 0.17.0",
  "rustix 0.38.41",
+]
+
+[[package]]
+name = "procfs"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25485360a54d6861439d60facef26de713b1e126bf015ec8f98239467a2b82f7"
+dependencies = [
+ "bitflags 2.9.0",
+ "procfs-core 0.18.0",
+ "rustix 1.0.3",
 ]
 
 [[package]]
@@ -10087,6 +10098,16 @@ name = "procfs-core"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "239df02d8349b06fc07398a3a1697b06418223b1c7725085e801e7c0fc6a12ec"
+dependencies = [
+ "bitflags 2.9.0",
+ "hex",
+]
+
+[[package]]
+name = "procfs-core"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6401bf7b6af22f78b563665d15a22e9aef27775b79b149a66ca022468a4e405"
 dependencies = [
  "bitflags 2.9.0",
  "hex",
@@ -10104,7 +10125,7 @@ dependencies = [
  "libc",
  "memchr",
  "parking_lot 0.12.1",
- "procfs",
+ "procfs 0.17.0",
  "protobuf",
  "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -11418,7 +11439,7 @@ dependencies = [
  "pin-project-lite",
  "postgres-types",
  "pretty_assertions",
- "procfs",
+ "procfs 0.18.0",
  "prometheus",
  "prost 0.13.4",
  "rand 0.9.0",
@@ -11523,7 +11544,7 @@ dependencies = [
  "madsim-tonic",
  "parking_lot 0.12.1",
  "pin-project-lite",
- "procfs",
+ "procfs 0.18.0",
  "prometheus",
  "rw_iter_util",
  "rw_resource_util",
@@ -12822,7 +12843,7 @@ dependencies = [
  "num-integer",
  "parking_lot 0.12.1",
  "parquet 54.2.0",
- "procfs",
+ "procfs 0.18.0",
  "prometheus",
  "prost 0.13.4",
  "rand 0.9.0",
