@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::row::RowDeserializer;
-use risingwave_common::types::{DataType, StructType};
-use risingwave_pb::common::PbDistanceType;
-use risingwave_pb::stream_plan::{VectorIndexLookupJoinNode};
+use risingwave_common::types::{DataType};
+use risingwave_pb::stream_plan::VectorIndexLookupJoinNode;
 use risingwave_storage::StateStore;
+use risingwave_storage::table::batch_table::VectorIndexReader;
 
 use crate::error::StreamResult;
 use crate::executor::{Executor, VectorIndexLookupJoinExecutor};
@@ -36,35 +34,7 @@ impl ExecutorBuilder for VectorIndexLookupJoinBuilder {
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
-        let deserializer = RowDeserializer::new(
-            node.info_column_desc
-                .iter()
-                .map(|col| DataType::from(col.column_type.clone().unwrap()))
-                .collect_vec(),
-        );
-
-        let info_output_indices: Vec<usize> = node
-            .info_output_indices
-            .iter()
-            .map(|&idx| idx as _)
-            .collect();
-
-        let vector_info_struct_type = StructType::new(
-            info_output_indices
-                .iter()
-                .map(|idx| {
-                    (
-                        node.info_column_desc[*idx].name.clone(),
-                        DataType::from(node.info_column_desc[*idx].column_type.clone().unwrap()),
-                    )
-                })
-                .chain(
-                    node.include_distance
-                        .then(|| [("__distance".to_owned(), DataType::Float64)].into_iter())
-                        .into_iter()
-                        .flatten(),
-                ),
-        );
+        let reader = VectorIndexReader::new(node.reader_desc.as_ref().unwrap(), store);
 
         assert!(
             params
@@ -74,22 +44,11 @@ impl ExecutorBuilder for VectorIndexLookupJoinBuilder {
                 .last()
                 .expect("non-empty")
                 .data_type
-                .equals_datatype(&DataType::Struct(vector_info_struct_type.clone()).list())
+                .equals_datatype(&DataType::Struct(reader.info_struct_type().clone()).list())
         );
 
-        let executor = VectorIndexLookupJoinExecutor::new(
-            input,
-            store,
-            vector_info_struct_type,
-            info_output_indices,
-            node.include_distance,
-            node.table_id.into(),
-            node.vector_column_idx as _,
-            node.top_n as _,
-            PbDistanceType::try_from(node.distance_type).unwrap().into(),
-            deserializer,
-            node.hnsw_ef_search as usize,
-        );
+        let executor =
+            VectorIndexLookupJoinExecutor::new(input, reader, node.vector_column_idx as _);
         Ok(Executor::new(params.info, Box::new(executor)))
     }
 }
