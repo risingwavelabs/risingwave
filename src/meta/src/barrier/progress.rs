@@ -546,8 +546,12 @@ impl CreateMviewProgressTracker {
     pub(super) fn take_pending_backfill_nodes(&mut self) -> PendingBackfillFragments {
         let mut result = PendingBackfillFragments::default();
         for fragments in take(&mut self.pending_backfill_fragments) {
-            result.next_backfill_nodes.extend(fragments.next_backfill_nodes);
-            result.last_backfill_nodes.extend(fragments.last_backfill_nodes);
+            result
+                .next_backfill_nodes
+                .extend(fragments.next_backfill_nodes);
+            result
+                .last_backfill_nodes
+                .extend(fragments.last_backfill_nodes);
         }
         result
     }
