@@ -17,7 +17,7 @@ use futures::pin_mut;
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use futures_util::TryStreamExt;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, DataChunk, ListArrayBuilder};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -112,23 +112,9 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
         let read_snapshot = self.reader.new_snapshot(query_epoch.into()).await?;
 
         while let Some(chunk) = input.try_next().await? {
-            let mut vector_info_columns_builder = ListArrayBuilder::with_type(
-                chunk.cardinality(),
-                DataType::list(DataType::Struct(self.reader.info_struct_type().clone())),
-            );
-            let (mut columns, vis) = chunk.into_parts();
-            let vector_column = columns[vector_column_idx].as_vector();
-            for (idx, vis) in vis.iter().enumerate() {
-                if vis && let Some(vector) = vector_column.value_at(idx) {
-                    let value = read_snapshot.query(vector).await?;
-                    vector_info_columns_builder.append_owned(Some(value));
-                } else {
-                    vector_info_columns_builder.append_null();
-                }
-            }
-            columns.push(ArrayImpl::List(vector_info_columns_builder.finish()).into());
-
-            yield DataChunk::new(columns, vis);
+            yield read_snapshot
+                .query_expand_chunk(chunk, vector_column_idx)
+                .await?;
         }
     }
 }
