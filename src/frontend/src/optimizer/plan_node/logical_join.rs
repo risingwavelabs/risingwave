@@ -28,9 +28,9 @@ use super::generic::{
 };
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalLocalityProvider,
-    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin,
-    StreamPlanRef, StreamProject, ToBatch, ToStream, generic,
+    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
+    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject, ToBatch,
+    ToStream, generic, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -903,19 +903,12 @@ impl LogicalJoin {
         let lhs_join_key_idx = self.eq_indexes().into_iter().map(|(l, _)| l).collect_vec();
         let rhs_join_key_idx = self.eq_indexes().into_iter().map(|(_, r)| r).collect_vec();
 
-        let logical_right = self
-            .right()
-            .try_better_locality(&rhs_join_key_idx)
-            .unwrap_or_else(|| self.right());
+        let logical_right = try_enforce_locality_requirement(self.right(), &rhs_join_key_idx);
         let mut right = logical_right.to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
             ctx,
         )?;
-        let logical_left = self
-            .left()
-            .try_better_locality(&lhs_join_key_idx)
-            .unwrap_or_else(|| self.left());
-
+        let logical_left = try_enforce_locality_requirement(self.left(), &lhs_join_key_idx);
         let r2l =
             predicate.r2l_eq_columns_mapping(logical_left.schema().len(), right.schema().len());
         let l2r =
@@ -1255,10 +1248,7 @@ impl LogicalJoin {
             .into_iter()
             .map(|(l, _)| l)
             .collect_vec();
-        let logical_left = self
-            .left()
-            .try_better_locality(&lhs_join_key_idx)
-            .unwrap_or_else(|| self.left());
+        let logical_left = try_enforce_locality_requirement(self.left(), &lhs_join_key_idx);
         let left = logical_left.to_stream(ctx)?;
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.stream_enforce(left);
@@ -1541,26 +1531,6 @@ impl LogicalJoin {
             .into()),
         }
     }
-
-    fn try_better_locality_inner(&self, columns: &[usize]) -> Option<PlanRef> {
-        let mut ctx = ToStreamContext::new(false);
-        // only pass through the locality information if it can be converted to dynamic filter
-        if let Ok(Some(_)) = self.to_stream_dynamic_filter(self.on().clone(), &mut ctx) {
-            // since dynamic filter only supports left input ref in the output indices, we can safely use o2i mapping to convert the required columns.
-            let o2i_mapping = self.core.o2i_col_mapping();
-            let left_input_columns = columns
-                .iter()
-                .map(|&col| o2i_mapping.try_map(col))
-                .collect::<Option<Vec<usize>>>()?;
-            if let Some(better_left_plan) = self.left().try_better_locality(&left_input_columns) {
-                return Some(
-                    self.clone_with_left_right(better_left_plan, self.right())
-                        .into(),
-                );
-            }
-        }
-        None
-    }
 }
 
 impl ToBatch for LogicalJoin {
@@ -1774,19 +1744,23 @@ impl ToStream for LogicalJoin {
     }
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if let Some(better_plan) = self.try_better_locality_inner(columns) {
-            Some(better_plan)
-        } else if self.ctx().session_ctx().config().enable_locality_backfill() {
-            Some(
-                LogicalLocalityProvider::new(
-                    self.clone_with_left_right(self.left(), self.right()).into(),
-                    columns.to_owned(),
-                )
-                .into(),
-            )
-        } else {
-            None
+        let mut ctx = ToStreamContext::new(false);
+        // only pass through the locality information if it can be converted to dynamic filter
+        if let Ok(Some(_)) = self.to_stream_dynamic_filter(self.on().clone(), &mut ctx) {
+            // since dynamic filter only supports left input ref in the output indices, we can safely use o2i mapping to convert the required columns.
+            let o2i_mapping = self.core.o2i_col_mapping();
+            let left_input_columns = columns
+                .iter()
+                .map(|&col| o2i_mapping.try_map(col))
+                .collect::<Option<Vec<usize>>>()?;
+            if let Some(better_left_plan) = self.left().try_better_locality(&left_input_columns) {
+                return Some(
+                    self.clone_with_left_right(better_left_plan, self.right())
+                        .into(),
+                );
+            }
         }
+        None
     }
 }
 
