@@ -14,10 +14,10 @@
 
 #![feature(let_chains)]
 
-mod rwu;
 mod feature;
 mod key;
 mod manager;
+mod rwu;
 
 pub use feature::*;
 pub use key::*;
