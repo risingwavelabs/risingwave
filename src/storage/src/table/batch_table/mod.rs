@@ -42,6 +42,8 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
+mod vector_index_reader;
+pub use vector_index_reader::VectorIndexReader;
 
 use crate::StateStore;
 use crate::error::{StorageError, StorageResult};
