@@ -246,6 +246,7 @@ impl StreamJobFragments {
                 InflightFragmentInfo {
                     fragment_id: fragment.fragment_id,
                     distribution_type: fragment.distribution_type.into(),
+                    fragment_type_mask: fragment.fragment_type_mask,
                     vnode_count: fragment.vnode_count(),
                     nodes: fragment.nodes.clone(),
                     actors: fragment
