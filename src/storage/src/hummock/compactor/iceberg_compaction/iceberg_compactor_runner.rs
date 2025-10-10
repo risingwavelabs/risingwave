@@ -203,10 +203,6 @@ impl IcebergCompactorRunner {
         self.input_parallelism
     }
 
-    pub fn output_parallelism(&self) -> u32 {
-        self.output_parallelism
-    }
-
     pub fn unique_ident(&self) -> String {
         format!(
             "{}-{}",

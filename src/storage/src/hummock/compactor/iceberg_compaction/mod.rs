@@ -31,7 +31,7 @@ pub struct IcebergTaskMeta {
     pub task_id: TaskId,
     pub unique_ident: TaskUniqueIdent,
     pub enqueue_at: std::time::Instant,
-    /// Estimated parallelism required to execute this task (must be >0 and <= max_parallelism)
+    /// Estimated parallelism required to execute this task (must be >0 and <= `max_parallelism`)
     pub required_parallelism: u32,
 }
 
@@ -64,7 +64,7 @@ pub struct IcebergTaskQueue {
     inner: IcebergTaskQueueInner,
     /// Maximum parallelism that a single task may require (cluster effective max / scheduling window upper bound).
     max_parallelism: u32,
-    /// Budget for sum(required_parallelism) of waiting tasks (buffer), e.g. 4 * max_parallelism.
+    /// Budget for `sum(required_parallelism)` of waiting tasks (buffer), e.g. 4 * `max_parallelism`.
     pending_parallelism_budget: u32,
     /// Notification for when tasks become schedulable
     schedule_notify: Option<Arc<Notify>>,
@@ -143,10 +143,10 @@ impl IcebergTaskQueue {
 
     /// Notify that tasks might be schedulable now
     fn notify_schedulable(&self) {
-        if let Some(notify) = &self.schedule_notify {
-            if self.has_schedulable_tasks() {
-                notify.notify_one();
-            }
+        if let Some(notify) = &self.schedule_notify
+            && self.has_schedulable_tasks()
+        {
+            notify.notify_one();
         }
     }
 
@@ -168,10 +168,10 @@ impl IcebergTaskQueue {
     /// - If a running task with same unique ident exists: reject (duplicate running).
     /// - Else if queue full: reject.
     /// - Else: push to back.
-    /// Push a task meta plus optional runner.
-    /// Replacement semantics:
-    ///   - If same unique_ident waiting and new runner Some => replace meta + runner.
-    ///   - If same unique_ident waiting and new runner None => replace only meta (keep old runner) -> ReplacedMetaOnly.
+    ///   Push a task meta plus optional runner.
+    ///   Replacement semantics:
+    ///   - If same `unique_ident` waiting and new runner Some => replace meta + runner.
+    ///   - If same `unique_ident` waiting and new runner None => replace only meta (keep old runner) -> `ReplacedMetaOnly`.
     pub fn push(
         &mut self,
         meta: IcebergTaskMeta,
@@ -189,7 +189,7 @@ impl IcebergTaskQueue {
         }
 
         if self.inner.waiting.contains(uid) {
-            for slot in self.inner.deque.iter_mut() {
+            for slot in &mut self.inner.deque {
                 if slot.unique_ident == *uid {
                     let old_task_id = slot.task_id;
                     let old_required = slot.required_parallelism;
@@ -213,10 +213,10 @@ impl IcebergTaskQueue {
                         self.inner.runners.insert(slot.task_id, r);
                     } else {
                         // retain old runner mapping
-                        if old_task_id != slot.task_id {
-                            if let Some(old_runner) = self.inner.runners.remove(&old_task_id) {
-                                self.inner.runners.insert(slot.task_id, old_runner);
-                            }
+                        if old_task_id != slot.task_id
+                            && let Some(old_runner) = self.inner.runners.remove(&old_task_id)
+                        {
+                            self.inner.runners.insert(slot.task_id, old_runner);
                         }
                     }
                     return PushResult::Replaced { old_task_id };
@@ -246,7 +246,7 @@ impl IcebergTaskQueue {
     }
 
     /// Pop the head task (strict FIFO) if it fits remaining parallelism.
-    /// Internally maintains running_parallelism_sum, no need for caller to pass parameters.
+    /// Internally maintains `running_parallelism_sum`, no need for caller to pass parameters.
     pub fn pop(&mut self) -> Option<PoppedIcebergTask> {
         let front = self.inner.deque.front()?;
         if front.required_parallelism > self.available_parallelism() {

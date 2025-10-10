@@ -394,7 +394,7 @@ pub fn start_iceberg_compactor(
                             &compactor_context,
                             &shutdown_map,
                             &task_completion_tx,
-                        ).await;
+                        );
                         continue 'consume_stream;
                     }
 
@@ -406,7 +406,7 @@ pub fn start_iceberg_compactor(
                             max_task_parallelism,
                             max_pull_task_count,
                             &request_sender,
-                        ).await;
+                        );
 
                         if should_restart_stream {
                             continue 'start_stream;
@@ -1081,7 +1081,7 @@ fn get_task_progress(
 }
 
 /// Schedule queued tasks if we have capacity
-async fn schedule_queued_tasks(
+fn schedule_queued_tasks(
     task_queue: &mut IcebergTaskQueue,
     compactor_context: &CompactorContext,
     shutdown_map: &Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>>,
@@ -1125,7 +1125,7 @@ async fn schedule_queued_tasks(
                     }
                     // Notify main loop that task is completed
                     // Multiple tasks can send completion notifications concurrently via mpsc
-                    if let Err(_) = completion_tx.send(task_id) {
+                    if completion_tx.send(task_id).is_err() {
                         tracing::warn!(task_id = task_id, "Failed to notify task completion - main loop may have shut down");
                     }
                 },
@@ -1140,7 +1140,7 @@ async fn schedule_queued_tasks(
 
 /// Handle pulling new tasks from meta service
 /// Returns true if the stream should be restarted
-async fn handle_meta_task_pulling(
+fn handle_meta_task_pulling(
     pull_task_ack: &mut bool,
     task_queue: &IcebergTaskQueue,
     max_task_parallelism: u32,
