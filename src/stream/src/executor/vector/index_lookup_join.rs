@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use futures::TryStreamExt;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
 use risingwave_storage::table::batch_table::VectorIndexReader;
@@ -77,6 +78,9 @@ impl<S: StateStore> VectorIndexLookupJoinExecutor<S> {
                 }
                 Message::Chunk(chunk) => {
                     let (chunk, ops) = chunk.into_parts();
+                    if ops.iter().any(|op| *op != Op::Insert) {
+                        bail!("streaming vector index lookup join only support append-only input");
+                    }
                     let chunk = read_snapshot
                         .query_expand_chunk(chunk, vector_column_idx)
                         .await?;
