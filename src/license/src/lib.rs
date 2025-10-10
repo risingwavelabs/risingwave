@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
+#![allow(clippy::doc_markdown)]
 
 mod feature;
 mod key;
