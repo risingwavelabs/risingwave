@@ -62,8 +62,8 @@ use risingwave_pb::stream_plan::{
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ColumnTrait, DbErr, EntityTrait, FromQueryResult, JoinType, PaginatorTrait,
-    QueryFilter, QuerySelect, RelationTrait, TransactionTrait, Value,
+    ColumnTrait, DbErr, EntityTrait, FromQueryResult, JoinType, PaginatorTrait, QueryFilter,
+    QuerySelect, RelationTrait, TransactionTrait, Value,
 };
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -1686,7 +1686,6 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        // todo, optimize
         let downstream_fragment_ids = downstream_fragment_relations
             .iter()
             .map(|model| model.target_fragment_id as FragmentId)

@@ -1322,14 +1322,8 @@ impl CompleteStreamFragmentGraph {
     /// For replacing an existing table based on shared cdc source, which has both upstreams and downstreams.
     pub fn with_upstreams_and_downstreams(
         graph: StreamFragmentGraph,
-        // upstream_root_fragments: HashMap<TableId, SharedFragmentInfo>,
-        // upstream_actor_location: HashMap<ActorId, WorkerId>,
         upstream_context: FragmentGraphUpstreamContext,
         downstream_context: FragmentGraphDownstreamContext,
-
-        // original_root_fragment_id: FragmentId,
-        // downstream_fragments: Vec<(DispatcherType, SharedFragmentInfo)>,
-        // downstream_actor_location: HashMap<ActorId, WorkerId>,
         job_type: StreamingJobType,
     ) -> MetaResult<Self> {
         Self::build_helper(
