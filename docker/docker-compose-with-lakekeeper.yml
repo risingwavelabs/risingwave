@@ -470,7 +470,7 @@ services:
     container_name: lakekeeper-db
     networks:
       - default
- 
+
   lakekeeper-bootstrap:
     image: alpine:3.20
     restart: "no"
@@ -483,13 +483,11 @@ services:
       sh -lc '
         set -e
 
-        
         apk add --no-cache curl >/dev/null
 
         echo "Waiting for Lakekeeper to be ready..."
         sleep 5
 
-        
         echo "Bootstrapping Lakekeeper..."
         for attempt in 1 2 3 4 5; do
           http=$$(curl -s -o /tmp/bootstrap.json -w "%{http_code}" -X POST \
@@ -506,7 +504,6 @@ services:
           esac
         done
 
-        
         echo "Creating warehouse risingwave-warehouse..."
         sleep 2
         for attempt in 1 2 3 4 5; do
