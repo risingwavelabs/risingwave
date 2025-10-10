@@ -531,6 +531,11 @@ impl MetadataManager {
             .get_downstream_fragments(job_id as _)
             .await?;
 
+        let actors = actors
+            .into_iter()
+            .map(|(actor, worker)| (actor as u32, worker))
+            .collect();
+
         Ok((fragments, actors))
     }
 

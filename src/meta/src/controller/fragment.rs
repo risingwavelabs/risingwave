@@ -1592,7 +1592,7 @@ impl CatalogController {
         job_ids: Vec<ObjectId>,
     ) -> MetaResult<(
         HashMap<ObjectId, (SharedFragmentInfo, PbStreamNode)>,
-        Vec<(ActorId, WorkerId)>,
+        HashMap<ActorId, WorkerId>,
     )> {
         let inner = self.inner.read().await;
 
@@ -1623,7 +1623,10 @@ impl CatalogController {
             .collect();
 
         for fragment in root_fragment_to_jobs.keys() {
-            let fragment_info = info.get_fragment(*fragment).unwrap();
+            let fragment_info = info.get_fragment(*fragment).context(format!(
+                "fragment {} not found in shared actor info",
+                fragment
+            ))?;
 
             let job_id = root_fragment_to_jobs[&fragment_info.fragment_id];
             let fragment = root_fragments
@@ -1636,11 +1639,11 @@ impl CatalogController {
             );
         }
 
-        let mut all_actor_locations = vec![];
+        let mut all_actor_locations = HashMap::new();
 
         for (_, SharedFragmentInfo { actors, .. }) in info.iter_over_fragments() {
             for (actor_id, actor_info) in actors {
-                all_actor_locations.push((*actor_id as ActorId, actor_info.worker_id));
+                all_actor_locations.insert(*actor_id as ActorId, actor_info.worker_id);
             }
         }
 
@@ -1650,16 +1653,13 @@ impl CatalogController {
     pub async fn get_root_fragment(
         &self,
         job_id: ObjectId,
-    ) -> MetaResult<(SharedFragmentInfo, HashMap<u32, WorkerId>)> {
+    ) -> MetaResult<(SharedFragmentInfo, HashMap<ActorId, WorkerId>)> {
         let (mut root_fragments, actors) = self.get_root_fragments(vec![job_id]).await?;
         let (root_fragment, _) = root_fragments
             .remove(&job_id)
             .context(format!("root fragment for job {} not found", job_id))?;
 
-        Ok((
-            root_fragment,
-            actors.into_iter().map(|(k, v)| (k as _, v)).collect(),
-        ))
+        Ok((root_fragment, actors))
     }
 
     /// Get the downstream fragments connected to the specified job.
@@ -1672,7 +1672,7 @@ impl CatalogController {
             SharedFragmentInfo,
             PbStreamNode,
         )>,
-        HashMap<u32, WorkerId>,
+        HashMap<ActorId, WorkerId>,
     )> {
         let (root_fragment, actor_locations) = self.get_root_fragment(job_id).await?;
 
