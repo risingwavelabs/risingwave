@@ -1170,6 +1170,14 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSinkOperation::SetBackfillRateLimit { rate_limit: _ } => {
+                todo!()
+                // alter_back_fill_rate_limit::handle_alter_back_fill_rate_limit(
+                //     handler_args,
+                //     rate_limit,
+                // )
+                // .await
+            }
             AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
                 alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(
                     handler_args,
