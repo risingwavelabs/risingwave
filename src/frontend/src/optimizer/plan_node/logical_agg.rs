@@ -25,6 +25,7 @@ use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
     PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamPlanRef, StreamProject,
     StreamShare, StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch, ToStream,
+    try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -1419,9 +1420,7 @@ impl ToStream for LogicalAgg {
         let input = if self.group_key().is_empty() {
             self.input()
         } else {
-            self.input()
-                .try_better_locality(&self.group_key().to_vec())
-                .unwrap_or_else(|| self.input())
+            try_enforce_locality_requirement(self.input(), &self.group_key().to_vec())
         };
 
         let stream_input = input.to_stream(ctx)?;
