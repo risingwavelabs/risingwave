@@ -14,6 +14,7 @@
 
 use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
+use risingwave_pb::plan_common::PbVectorIndexReaderDesc;
 use risingwave_pb::stream_plan::PbVectorIndexLookupJoinNode;
 
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -82,24 +83,26 @@ impl StreamNode for StreamVectorIndexLookupJoin {
     ) -> risingwave_pb::stream_plan::stream_node::NodeBody {
         risingwave_pb::stream_plan::stream_node::NodeBody::VectorIndexLookupJoin(
             PbVectorIndexLookupJoinNode {
-                table_id: self.core.index_table_id.table_id,
-                info_column_desc: self
-                    .core
-                    .info_column_desc
-                    .iter()
-                    .map(|col| col.to_protobuf())
-                    .collect(),
+                reader_desc: Some(PbVectorIndexReaderDesc {
+                    table_id: self.core.index_table_id.table_id,
+                    info_column_desc: self
+                        .core
+                        .info_column_desc
+                        .iter()
+                        .map(|col| col.to_protobuf())
+                        .collect(),
+                    top_n: self.core.top_n as _,
+                    distance_type: self.core.distance_type as _,
+                    hnsw_ef_search: self.core.hnsw_ef_search.unwrap_or(0) as _,
+                    info_output_indices: self
+                        .core
+                        .info_output_indices
+                        .iter()
+                        .map(|&idx| idx as _)
+                        .collect(),
+                    include_distance: self.core.include_distance,
+                }),
                 vector_column_idx: self.core.vector_column_idx as _,
-                top_n: self.core.top_n as _,
-                distance_type: self.core.distance_type as _,
-                hnsw_ef_search: self.core.hnsw_ef_search.unwrap_or(0) as _,
-                info_output_indices: self
-                    .core
-                    .info_output_indices
-                    .iter()
-                    .map(|&idx| idx as _)
-                    .collect(),
-                include_distance: self.core.include_distance,
             }
             .into(),
         )
