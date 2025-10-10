@@ -41,6 +41,15 @@ enum BackfillState {
     Done(ConsumedRows),
 }
 
+/// Represents the backfill nodes that need to be scheduled or cleaned up.
+#[derive(Debug, Default)]
+pub(super) struct PendingBackfillFragments {
+    /// Fragment IDs that should start backfilling in the next checkpoint
+    pub next_backfill_nodes: Vec<FragmentId>,
+    /// State tables of locality provider fragments that should be truncated
+    pub truncate_locality_provider_state_tables: Vec<TableId>,
+}
+
 /// Progress of all actors containing backfill executors while creating mview.
 #[derive(Debug)]
 pub(super) struct Progress {
@@ -101,13 +110,14 @@ impl Progress {
     }
 
     /// Update the progress of `actor`.
+    /// Returns the backfill fragments that need to be scheduled or cleaned up.
     fn update(
         &mut self,
         actor: ActorId,
         new_state: BackfillState,
         upstream_total_key_count: u64,
-    ) -> Vec<FragmentId> {
-        let mut next_backfill_nodes = vec![];
+    ) -> PendingBackfillFragments {
+        let mut result = PendingBackfillFragments::default();
         self.upstream_mvs_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
         let backfill_upstream_type = self.backfill_upstream_types.get(&actor).unwrap();
@@ -131,7 +141,26 @@ impl Progress {
                 tracing::debug!("actor {} done", actor);
                 new = *new_consumed_rows;
                 self.done_count += 1;
-                next_backfill_nodes = self.backfill_order_state.finish_actor(actor);
+                let before_backfill_nodes = self
+                    .backfill_order_state
+                    .current_backfill_node_fragment_ids();
+                result.next_backfill_nodes = self.backfill_order_state.finish_actor(actor);
+                let after_backfill_nodes = self
+                    .backfill_order_state
+                    .current_backfill_node_fragment_ids();
+                // last_backfill_nodes = before_backfill_nodes - after_backfill_nodes
+                let last_backfill_nodes_iter = before_backfill_nodes
+                    .into_iter()
+                    .filter(|x| !after_backfill_nodes.contains(x));
+                result.truncate_locality_provider_state_tables = last_backfill_nodes_iter
+                    .filter_map(|fragment_id| {
+                        self.backfill_order_state
+                            .get_locality_fragment_state_table_mapping()
+                            .get(&fragment_id)
+                    })
+                    .flatten()
+                    .copied()
+                    .collect();
                 tracing::debug!(
                     "{} actors out of {} complete",
                     self.done_count,
@@ -156,7 +185,7 @@ impl Progress {
             }
         }
         self.states.insert(actor, new_state);
-        next_backfill_nodes
+        result
     }
 
     /// Returns whether all backfill executors are done.
@@ -300,10 +329,21 @@ impl std::fmt::Debug for TrackingJob {
     }
 }
 
+/// Information collected during barrier completion that needs to be committed.
+#[derive(Debug, Default)]
+pub(super) struct StagingCommitInfo {
+    /// Finished jobs that should be committed
+    pub finished_jobs: Vec<TrackingJob>,
+    /// Table IDs whose locality provider state tables need to be truncated
+    pub table_ids_to_truncate: Vec<TableId>,
+}
+
 pub(super) enum UpdateProgressResult {
     None,
-    Finished(TrackingJob),
-    BackfillNodeFinished(Vec<FragmentId>),
+    /// The finished job, along with its pending backfill fragments for cleanup.
+    Finished(TrackingJob, PendingBackfillFragments),
+    /// Backfill nodes have finished and new ones need to be scheduled.
+    BackfillNodeFinished(PendingBackfillFragments),
 }
 
 /// Tracking is done as follows:
@@ -318,11 +358,11 @@ pub(super) struct CreateMviewProgressTracker {
 
     actor_map: HashMap<ActorId, TableId>,
 
-    /// Stash of finished jobs. They will be finally finished on checkpoint.
-    pending_finished_jobs: Vec<TrackingJob>,
-
     /// Stash of pending backfill nodes. They will start backfilling on checkpoint.
     pending_backfill_nodes: Vec<FragmentId>,
+
+    /// Staging commit info that will be committed on checkpoint.
+    staging_commit_info: StagingCommitInfo,
 }
 
 impl CreateMviewProgressTracker {
@@ -372,8 +412,8 @@ impl CreateMviewProgressTracker {
         Self {
             progress_map,
             actor_map,
-            pending_finished_jobs: Vec::new(),
             pending_backfill_nodes: Vec::new(),
+            staging_commit_info: StagingCommitInfo::default(),
         }
     }
 
@@ -422,64 +462,71 @@ impl CreateMviewProgressTracker {
             .collect()
     }
 
+    /// Update the progress of tracked jobs, and add a new job to track if `info` is `Some`.
+    /// Return the table ids whose locality provider state tables need to be truncated.
     pub(super) fn update_tracking_jobs<'a>(
         &mut self,
         info: Option<&CreateStreamingJobCommandInfo>,
         create_mview_progress: impl IntoIterator<Item = &'a CreateMviewProgress>,
         version_stats: &HummockVersionStats,
     ) {
-        {
+        let mut table_ids_to_truncate = vec![];
+        // Save `finished_commands` for Create MVs.
+        let finished_commands = {
+            let mut commands = vec![];
+            // Add the command to tracker.
+            if let Some(create_job_info) = info
+                && let Some(command) = self.add(create_job_info, version_stats)
             {
-                // Save `finished_commands` for Create MVs.
-                let finished_commands = {
-                    let mut commands = vec![];
-                    // Add the command to tracker.
-                    if let Some(create_job_info) = info
-                        && let Some(command) = self.add(create_job_info, version_stats)
-                    {
-                        // Those with no actors to track can be finished immediately.
+                // Those with no actors to track can be finished immediately.
+                commands.push(command);
+            }
+            // Update the progress of all commands.
+            for progress in create_mview_progress {
+                // Those with actors complete can be finished immediately.
+                match self.update(progress, version_stats) {
+                    UpdateProgressResult::None => {
+                        tracing::trace!(?progress, "update progress");
+                    }
+                    UpdateProgressResult::Finished(command, pending) => {
+                        table_ids_to_truncate
+                            .extend(pending.truncate_locality_provider_state_tables.clone());
+                        self.queue_backfill(pending.next_backfill_nodes);
+                        tracing::trace!(?progress, "finish progress");
                         commands.push(command);
                     }
-                    // Update the progress of all commands.
-                    for progress in create_mview_progress {
-                        // Those with actors complete can be finished immediately.
-                        match self.update(progress, version_stats) {
-                            UpdateProgressResult::None => {
-                                tracing::trace!(?progress, "update progress");
-                            }
-                            UpdateProgressResult::Finished(command) => {
-                                tracing::trace!(?progress, "finish progress");
-                                commands.push(command);
-                            }
-                            UpdateProgressResult::BackfillNodeFinished(next_backfill_nodes) => {
-                                tracing::trace!(
-                                    ?progress,
-                                    ?next_backfill_nodes,
-                                    "start next backfill node"
-                                );
-                                self.queue_backfill(next_backfill_nodes);
-                            }
-                        }
+                    UpdateProgressResult::BackfillNodeFinished(pending) => {
+                        table_ids_to_truncate
+                            .extend(pending.truncate_locality_provider_state_tables.clone());
+                        tracing::trace!(
+                            ?progress,
+                            next_backfill_nodes = ?pending.next_backfill_nodes,
+                            "start next backfill node"
+                        );
+                        self.queue_backfill(pending.next_backfill_nodes);
                     }
-                    commands
-                };
-
-                for command in finished_commands {
-                    self.stash_command_to_finish(command);
                 }
             }
+            commands
+        };
+
+        for command in finished_commands {
+            self.staging_commit_info.finished_jobs.push(command);
         }
+        self.staging_commit_info
+            .table_ids_to_truncate
+            .extend(table_ids_to_truncate);
     }
 
     /// Apply a collected epoch node command to the tracker
-    /// Return the finished jobs when the barrier kind is `Checkpoint`
+    /// Return the staging commit info when the barrier kind is `Checkpoint`.
     pub(super) fn apply_collected_command(
         &mut self,
         command: Option<&Command>,
         barrier_info: &BarrierInfo,
         resps: impl IntoIterator<Item = &PbBarrierCompleteResponse>,
         version_stats: &HummockVersionStats,
-    ) -> Vec<TrackingJob> {
+    ) -> Option<StagingCommitInfo> {
         let new_tracking_job_info =
             if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
                 match job_type {
@@ -507,25 +554,14 @@ impl CreateMviewProgressTracker {
             self.cancel_command(table_id);
         }
         if barrier_info.kind.is_checkpoint() {
-            self.take_finished_jobs()
+            Some(take(&mut self.staging_commit_info))
         } else {
-            vec![]
+            None
         }
-    }
-
-    /// Stash a command to finish later.
-    pub(super) fn stash_command_to_finish(&mut self, finished_job: TrackingJob) {
-        self.pending_finished_jobs.push(finished_job);
     }
 
     fn queue_backfill(&mut self, backfill_nodes: impl IntoIterator<Item = FragmentId>) {
         self.pending_backfill_nodes.extend(backfill_nodes);
-    }
-
-    /// Finish stashed jobs on checkpoint.
-    pub(super) fn take_finished_jobs(&mut self) -> Vec<TrackingJob> {
-        tracing::trace!(finished_jobs=?self.pending_finished_jobs, progress_map=?self.progress_map, "take_finished_jobs");
-        take(&mut self.pending_finished_jobs)
     }
 
     pub(super) fn take_pending_backfill_nodes(&mut self) -> Vec<FragmentId> {
@@ -533,12 +569,13 @@ impl CreateMviewProgressTracker {
     }
 
     pub(super) fn has_pending_finished_jobs(&self) -> bool {
-        !self.pending_finished_jobs.is_empty()
+        !self.staging_commit_info.finished_jobs.is_empty()
     }
 
     pub(super) fn cancel_command(&mut self, id: TableId) {
         let _ = self.progress_map.remove(&id);
-        self.pending_finished_jobs
+        self.staging_commit_info
+            .finished_jobs
             .retain(|x| x.table_to_create() != id);
         self.actor_map.retain(|_, table_id| *table_id != id);
     }
@@ -546,7 +583,7 @@ impl CreateMviewProgressTracker {
     /// Notify all tracked commands that error encountered and clear them.
     pub fn abort_all(&mut self) {
         self.actor_map.clear();
-        self.pending_finished_jobs.clear();
+        self.staging_commit_info = StagingCommitInfo::default();
         self.progress_map.clear();
     }
 
@@ -583,6 +620,7 @@ impl CreateMviewProgressTracker {
             definition,
             create_type,
             fragment_backfill_ordering,
+            locality_fragment_state_table_mapping,
             ..
         } = info;
 
@@ -595,8 +633,11 @@ impl CreateMviewProgressTracker {
             self.actor_map.insert(*actor, creating_job_id);
         }
 
-        let backfill_order_state =
-            BackfillOrderState::new(fragment_backfill_ordering, &table_fragments);
+        let backfill_order_state = BackfillOrderState::new(
+            fragment_backfill_ordering,
+            &table_fragments,
+            locality_fragment_state_table_mapping,
+        );
         let progress = Progress::new(
             actors,
             upstream_mv_count,
@@ -659,8 +700,7 @@ impl CreateMviewProgressTracker {
                     calculate_total_key_count(&progress.upstream_mv_count, version_stats);
 
                 tracing::debug!(?table_id, "updating progress for table");
-                let next_backfill_nodes =
-                    progress.update(actor, new_state, upstream_total_key_count);
+                let pending = progress.update(actor, new_state, upstream_total_key_count);
 
                 if progress.is_done() {
                     tracing::debug!(
@@ -672,11 +712,12 @@ impl CreateMviewProgressTracker {
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }
-                    assert!(next_backfill_nodes.is_empty());
-                    UpdateProgressResult::Finished(o.remove().1)
-                } else if !next_backfill_nodes.is_empty() {
-                    tracing::debug!("scheduling next backfill nodes: {:?}", next_backfill_nodes);
-                    UpdateProgressResult::BackfillNodeFinished(next_backfill_nodes)
+                    assert!(pending.next_backfill_nodes.is_empty());
+                    UpdateProgressResult::Finished(o.remove().1, pending)
+                } else if !pending.next_backfill_nodes.is_empty()
+                    || !pending.truncate_locality_provider_state_tables.is_empty()
+                {
+                    UpdateProgressResult::BackfillNodeFinished(pending)
                 } else {
                     UpdateProgressResult::None
                 }

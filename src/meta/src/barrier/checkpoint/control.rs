@@ -884,7 +884,7 @@ impl DatabaseCheckpointControl {
                         .extend(refresh_finished_table_ids);
                 }
 
-                let mut finished_jobs = self.create_mview_tracker.apply_collected_command(
+                let staging_commit_info = self.create_mview_tracker.apply_collected_command(
                     node.command_ctx.command.as_ref(),
                     &node.command_ctx.barrier_info,
                     &node.state.resps,
@@ -894,7 +894,7 @@ impl DatabaseCheckpointControl {
                     .cdc_table_backfill_tracker
                     .apply_collected_command(&node.state.resps);
                 if !node.command_ctx.barrier_info.kind.is_checkpoint() {
-                    assert!(finished_jobs.is_empty());
+                    assert!(staging_commit_info.is_none());
                     node.notifiers.into_iter().for_each(|notifier| {
                         notifier.notify_collected();
                     });
@@ -909,12 +909,16 @@ impl DatabaseCheckpointControl {
                     }
                     continue;
                 }
+                let mut staging_commit_info =
+                    staging_commit_info.expect("should be Some for checkpoint");
                 node.state
                     .finished_jobs
                     .drain()
                     .for_each(|(job_id, (resps, source_change))| {
                         node.state.resps.extend(resps);
-                        finished_jobs.push(TrackingJob::new(job_id.table_id as _, source_change));
+                        staging_commit_info
+                            .finished_jobs
+                            .push(TrackingJob::new(job_id.table_id as _, source_change));
                     });
                 let task = task.get_or_insert_default();
                 node.command_ctx.collect_commit_epoch_info(
@@ -923,7 +927,7 @@ impl DatabaseCheckpointControl {
                     self.collect_backfill_pinned_upstream_log_epoch(),
                 );
                 self.completing_barrier = Some(node.command_ctx.barrier_info.prev_epoch());
-                task.finished_jobs.extend(finished_jobs);
+                task.finished_jobs.extend(staging_commit_info.finished_jobs);
                 task.finished_cdc_table_backfill
                     .extend(finished_cdc_backfill);
                 task.notifiers.extend(node.notifiers);
@@ -933,6 +937,9 @@ impl DatabaseCheckpointControl {
                         (Some((node.command_ctx, node.enqueue_time)), vec![]),
                     )
                     .expect("non duplicate");
+                task.commit_info
+                    .truncate_tables
+                    .extend(staging_commit_info.table_ids_to_truncate);
                 break;
             }
         }
