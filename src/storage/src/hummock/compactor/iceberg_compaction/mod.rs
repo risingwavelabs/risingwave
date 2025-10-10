@@ -309,7 +309,7 @@ mod tests {
     fn mk_meta(id: u64, ident: &str, p: u32) -> IcebergTaskMeta {
         IcebergTaskMeta {
             task_id: id,
-            unique_ident: ident.to_string(),
+            unique_ident: ident.to_owned(),
             enqueue_at: std::time::Instant::now(),
             required_parallelism: p,
         }
