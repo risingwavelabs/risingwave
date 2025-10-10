@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ListValue, StructArrayBuilder, StructValue, VectorRef,
+    Array, ArrayBuilder, ArrayImpl, DataChunk, ListArrayBuilder, ListValue, StructArrayBuilder,
+    StructValue, VectorRef,
 };
 use risingwave_common::catalog::TableId;
 use risingwave_common::row::RowDeserializer;
@@ -154,5 +155,29 @@ impl<S: StateStore> VectorIndexSnapshot<'_, S> {
         let struct_array = struct_array_builder.finish();
 
         Ok(ListValue::new(ArrayImpl::Struct(struct_array)))
+    }
+
+    pub async fn query_expand_chunk(
+        &self,
+        chunk: DataChunk,
+        vector_column_idx: usize,
+    ) -> StorageResult<DataChunk> {
+        let mut vector_info_columns_builder = ListArrayBuilder::with_type(
+            chunk.cardinality(),
+            DataType::list(DataType::Struct(self.reader.info_struct_type().clone())),
+        );
+        let (mut columns, vis) = chunk.into_parts();
+        let vector_column = columns[vector_column_idx].as_vector();
+        for (idx, vis) in vis.iter().enumerate() {
+            if vis && let Some(vector) = vector_column.value_at(idx) {
+                let value = self.query(vector).await?;
+                vector_info_columns_builder.append_owned(Some(value));
+            } else {
+                vector_info_columns_builder.append_null();
+            }
+        }
+        columns.push(ArrayImpl::List(vector_info_columns_builder.finish()).into());
+
+        Ok(DataChunk::new(columns, vis))
     }
 }
