@@ -420,8 +420,14 @@ impl SourceManager {
         let handle = create_source_worker(source, self.metrics.clone())
             .await
             .context("failed to create source worker")?;
+
+        let enable_adaptive_splits = handle.enable_adaptive_splits;
         core.managed_sources.insert(source_id, handle);
-        core.update_source_splits(source_id).await?;
+
+        if !enable_adaptive_splits {
+            core.update_source_splits(source_id).await?;
+        }
+
         Ok(())
     }
 
@@ -436,8 +442,13 @@ impl SourceManager {
             tracing::warn!("source {} already registered", source_id);
             return Ok(());
         }
+
+        let enable_adaptive_splits = handle.enable_adaptive_splits;
         core.managed_sources.insert(source_id, handle);
-        core.update_source_splits(source_id).await?;
+
+        if !enable_adaptive_splits {
+            core.update_source_splits(source_id).await?;
+        }
 
         Ok(())
     }

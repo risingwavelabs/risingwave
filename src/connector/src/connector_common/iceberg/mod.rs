@@ -25,8 +25,8 @@ use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{Context, anyhow};
 use iceberg::io::{
-    AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, GCS_CREDENTIALS_JSON,
-    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
+    ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
+    GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use phf::{Set, phf_set};
@@ -68,6 +68,13 @@ pub struct IcebergCommon {
     pub azblob_account_key: Option<String>,
     #[serde(rename = "azblob.endpoint_url")]
     pub azblob_endpoint_url: Option<String>,
+
+    #[serde(rename = "adlsgen2.account_name")]
+    pub adlsgen2_account_name: Option<String>,
+    #[serde(rename = "adlsgen2.account_key")]
+    pub adlsgen2_account_key: Option<String>,
+    #[serde(rename = "adlsgen2.endpoint")]
+    pub adlsgen2_endpoint: Option<String>,
 
     /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
@@ -156,6 +163,8 @@ impl EnforceSecret for IcebergCommon {
         "catalog.credential",
         "catalog.token",
         "catalog.oauth2_server_uri",
+        "adlsgen2.account_key",
+        "adlsgen2.client_secret",
     };
 }
 
@@ -172,8 +181,9 @@ impl IcebergCommon {
     }
 
     pub fn headers(&self) -> ConnectorResult<HashMap<String, String>> {
+        let mut headers = HashMap::new();
+        headers.insert("User-Agent".to_owned(), "RisingWave".to_owned());
         if let Some(header) = &self.header {
-            let mut headers = HashMap::new();
             for pair in header.split(';') {
                 let mut parts = pair.split('=');
                 if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
@@ -182,10 +192,8 @@ impl IcebergCommon {
                     bail!("Invalid header format: {}", pair);
                 }
             }
-            Ok(headers)
-        } else {
-            Ok(HashMap::new())
         }
+        Ok(headers)
     }
 
     pub fn enable_config_load(&self) -> bool {
@@ -245,6 +253,17 @@ impl IcebergCommon {
 
                 if catalog_type != "rest" && catalog_type != "rest_rust" {
                     bail!("azblob unsupported in {} catalog", &catalog_type);
+                }
+            }
+
+            if let (Some(account_name), Some(account_key)) = (
+                self.adlsgen2_account_name.as_ref(),
+                self.adlsgen2_account_key.as_ref(),
+            ) {
+                iceberg_configs.insert(ADLS_ACCOUNT_NAME.to_owned(), account_name.clone());
+                iceberg_configs.insert(ADLS_ACCOUNT_KEY.to_owned(), account_key.clone());
+                if catalog_type != "rest" && catalog_type != "rest_rust" {
+                    bail!("adlsgen2 unsupported in {} catalog", &catalog_type);
                 }
             }
 

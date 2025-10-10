@@ -452,39 +452,9 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let updated_table_ids = Self::clean_dirty_sink_downstreams(&txn).await?;
-        let updated_table_objs = if !updated_table_ids.is_empty() {
-            Table::find()
-                .find_also_related(Object)
-                .filter(table::Column::TableId.is_in(updated_table_ids))
-                .all(&txn)
-                .await?
-        } else {
-            vec![]
-        };
+        Self::clean_dirty_sink_downstreams(&txn).await?;
 
         if dirty_job_objs.is_empty() {
-            if !updated_table_objs.is_empty() {
-                txn.commit().await?;
-
-                // Notify the frontend to update the table info.
-                self.notify_frontend(
-                    NotificationOperation::Update,
-                    NotificationInfo::ObjectGroup(PbObjectGroup {
-                        objects: updated_table_objs
-                            .into_iter()
-                            .map(|(t, obj)| PbObject {
-                                object_info: PbObjectInfo::Table(
-                                    ObjectModel(t, obj.unwrap()).into(),
-                                )
-                                .into(),
-                            })
-                            .collect(),
-                    }),
-                )
-                .await;
-            }
-
             return Ok(vec![]);
         }
 
@@ -597,23 +567,6 @@ impl CatalogController {
             .notify_frontend(NotificationOperation::Delete, object_group)
             .await;
 
-        // Notify the frontend to update the table info.
-        if !updated_table_objs.is_empty() {
-            self.notify_frontend(
-                NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: updated_table_objs
-                        .into_iter()
-                        .map(|(t, obj)| PbObject {
-                            object_info: PbObjectInfo::Table(ObjectModel(t, obj.unwrap()).into())
-                                .into(),
-                        })
-                        .collect(),
-                }),
-            )
-            .await;
-        }
-
         Ok(dirty_associated_source_ids)
     }
 
@@ -720,6 +673,9 @@ impl CatalogController {
     }
 
     async fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
+        if tables.is_empty() {
+            return;
+        }
         let objects = tables
             .into_iter()
             .map(|t| PbObject {

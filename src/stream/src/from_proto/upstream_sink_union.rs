@@ -27,30 +27,31 @@ impl ExecutorBuilder for UpstreamSinkUnionExecutorBuilder {
         node: &Self::Node,
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let mut upstreams = Vec::with_capacity(node.get_init_upstreams().len());
-        for init_upstream in node.get_init_upstreams() {
-            let upstream_fragment_id = init_upstream.get_upstream_fragment_id();
-            let upstream_fragment_info = UpstreamFragmentInfo::new(
-                upstream_fragment_id,
-                &params.actor_context.initial_upstream_actors,
-                init_upstream.get_sink_output_schema(),
-                init_upstream.get_project_exprs(),
-                params.eval_error_report.clone(),
-            )?;
-            upstreams.push(upstream_fragment_info);
-        }
+        let init_upstreams = node
+            .get_init_upstreams()
+            .iter()
+            .map(|init_upstream| {
+                let upstream_fragment_id = init_upstream.get_upstream_fragment_id();
+                UpstreamFragmentInfo::new(
+                    upstream_fragment_id,
+                    &params.actor_context.initial_upstream_actors,
+                    init_upstream.get_sink_output_schema(),
+                    init_upstream.get_project_exprs(),
+                    params.eval_error_report.clone(),
+                )
+            })
+            .try_collect()?;
 
-        Ok((
-            params.info,
-            UpstreamSinkUnionExecutor::new(
-                params.actor_context,
-                params.local_barrier_manager,
-                params.executor_stats,
-                params.env.config().developer.chunk_size,
-                upstreams,
-                params.eval_error_report,
-            ),
+        let executor = UpstreamSinkUnionExecutor::new(
+            params.actor_context,
+            params.local_barrier_manager,
+            params.executor_stats,
+            params.env.config().developer.chunk_size,
+            init_upstreams,
+            params.eval_error_report,
         )
-            .into())
+        .await?;
+
+        Ok((params.info, executor).into())
     }
 }
