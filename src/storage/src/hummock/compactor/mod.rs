@@ -313,7 +313,11 @@ pub fn start_iceberg_compactor(
 
     let join_handle = tokio::spawn(async move {
         // Initialize task queue with event-driven scheduling using Notify
-        let pending_parallelism_budget = max_task_parallelism * 4;
+        let pending_parallelism_budget = (max_task_parallelism as f32
+            * compactor_context
+                .storage_opts
+                .iceberg_compaction_pending_parallelism_budget_multiplier)
+            .ceil() as u32;
         let (mut task_queue, _schedule_notify) =
             IcebergTaskQueue::new_with_notify(max_task_parallelism, pending_parallelism_budget);
 

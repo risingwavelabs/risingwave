@@ -222,8 +222,16 @@ impl IcebergTaskQueue {
                     return PushResult::Replaced { old_task_id };
                 }
             }
-            tracing::warn!(unique_ident = %uid, "Inconsistent state: waiting set has ident but not found in deque");
-            return PushResult::RejectedCapacity;
+            // Invariant violation: `waiting` contains `uid` but no corresponding entry in `deque`.
+            // This indicates internal inconsistency (likely a logic regression). Crash fast to surface the bug.
+            panic!(
+                "IcebergTaskQueue invariant violated: waiting contains {uid} but deque missing. waiting_size={}, deque_len={}, id_map_size={}, waiting_parallelism_sum={}, running_parallelism_sum={}",
+                self.inner.waiting.len(),
+                self.inner.deque.len(),
+                self.inner.id_map.len(),
+                self.inner.waiting_parallelism_sum,
+                self.inner.running_parallelism_sum,
+            );
         }
         // New unique ident
         if self.inner.waiting_parallelism_sum + meta.required_parallelism

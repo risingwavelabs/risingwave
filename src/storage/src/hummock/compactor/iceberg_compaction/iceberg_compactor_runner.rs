@@ -69,9 +69,6 @@ pub struct IcebergCompactorRunner {
     compaction_type: CompactionType,
     branch: String,
     compaction_plan: CompactionPlan,
-
-    input_parallelism: u32,
-    output_parallelism: u32,
 }
 
 pub fn default_writer_properties() -> WriterProperties {
@@ -172,15 +169,16 @@ impl IcebergCompactorRunner {
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
         let input_parallelism = compaction_plan.recommended_executor_parallelism() as u32;
-        let output_parallelism = compaction_plan.recommended_output_parallelism() as u32;
 
-        // Validate parallelism bounds before creating runner
-        if input_parallelism == 0 || input_parallelism > config.max_parallelism {
-            return Err(HummockError::compaction_executor(format!(
-                "Recommended parallelism {} is out of bounds (0, {}]",
-                input_parallelism, config.max_parallelism
-            )));
-        }
+        // Parallelism validation is now centralized in the queue (`IcebergTaskQueue::push`).
+        // Keep lightweight debug assertions here to catch planner regressions early in tests.
+        debug_assert!(input_parallelism > 0, "Planner returned zero parallelism");
+        debug_assert!(
+            input_parallelism <= config.max_parallelism,
+            "Planner recommended parallelism {} exceeding config.max_parallelism {}",
+            input_parallelism,
+            config.max_parallelism
+        );
 
         Ok(Self {
             task_id,
@@ -193,14 +191,12 @@ impl IcebergCompactorRunner {
             compaction_type,
             branch,
             compaction_plan,
-            input_parallelism,
-            output_parallelism,
         })
     }
 
     /// Queue integration methods
     pub fn required_parallelism(&self) -> u32 {
-        self.input_parallelism
+        self.compaction_plan.recommended_executor_parallelism() as u32
     }
 
     pub fn unique_ident(&self) -> String {
@@ -250,8 +246,8 @@ impl IcebergCompactorRunner {
                 task_id = task_id,
                 task_type = ?self.task_type,
                 table = ?self.table_ident,
-                input_parallelism = self.input_parallelism,
-                output_parallelism = self.output_parallelism,
+                input_parallelism = self.compaction_plan.recommended_executor_parallelism(),
+                output_parallelism = self.compaction_plan.recommended_output_parallelism(),
                 statistics = ?statistics,
                 preplanned = true,
                 "Iceberg compaction task started (using cached plan)",
@@ -271,12 +267,14 @@ impl IcebergCompactorRunner {
             .build();
 
             self.metrics.compact_task_pending_num.inc();
+
+            let input_parallelism = self.compaction_plan.recommended_executor_parallelism() as u32;
             self.metrics
                 .compact_task_pending_parallelism
-                .add(self.input_parallelism as _);
+                .add(input_parallelism as _);
 
             let _release_guard = scopeguard::guard(
-                (self.input_parallelism, self.metrics.clone()),
+                (input_parallelism, self.metrics.clone()),
                 |(val, metrics_guard)| {
                     metrics_guard.compact_task_pending_num.dec();
                     metrics_guard.compact_task_pending_parallelism.sub(val as _);
