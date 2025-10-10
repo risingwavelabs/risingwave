@@ -22,6 +22,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, TableId};
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
@@ -204,6 +205,7 @@ impl AutoRefreshSchemaSinkContext {
         InflightFragmentInfo {
             fragment_id: self.new_fragment.fragment_id,
             distribution_type: self.new_fragment.distribution_type.into(),
+            vnode_count: self.new_fragment.vnode_count(),
             nodes: self.new_fragment.nodes.clone(),
             actors: self
                 .new_fragment

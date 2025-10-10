@@ -20,7 +20,7 @@ use std::iter;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ActorMapping;
+use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
@@ -246,6 +246,7 @@ impl StreamJobFragments {
                 InflightFragmentInfo {
                     fragment_id: fragment.fragment_id,
                     distribution_type: fragment.distribution_type.into(),
+                    vnode_count: fragment.vnode_count(),
                     nodes: fragment.nodes.clone(),
                     actors: fragment
                         .actors

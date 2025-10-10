@@ -40,6 +40,7 @@ user disable_purify_definition
 user dml_rate_limit
 user enable_index_selection
 user enable_join_ordering
+user enable_locality_backfill
 user enable_share_plan
 user enable_two_phase_agg
 user extra_float_digits
