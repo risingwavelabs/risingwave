@@ -254,6 +254,7 @@ iceberg_compaction_enable_dynamic_size_estimation = true
 iceberg_compaction_size_estimation_smoothing_factor = 0.3
 iceberg_compaction_small_file_threshold_mb = 32
 iceberg_compaction_max_task_total_size_mb = 51200
+iceberg_compaction_pending_parallelism_budget_multiplier = 4.0
 
 [storage.cache]
 vector_block_cache_capacity_mb = 16
