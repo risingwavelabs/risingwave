@@ -55,7 +55,7 @@ impl ObserverState for HummockObserverNode {
                         PbObjectInfo::Table(table_catalog) => {
                             self.handle_catalog_notification(resp.operation(), table_catalog);
                         }
-                        info => panic!("invalid notification info: {info:?}"),
+                        info => panic!("invalid notification info: {info}"),
                     };
                 }
                 assert!(
