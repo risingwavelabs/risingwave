@@ -1048,7 +1048,6 @@ impl DdlService for DdlServiceImpl {
                 "schema change message is required",
             ));
         };
-
         for table_change in schema_change.table_changes {
             for c in &table_change.columns {
                 let c = ColumnCatalog::from(c.clone());
@@ -1114,7 +1113,6 @@ impl DdlService for DdlServiceImpl {
                         new_columns.insert((col.column_desc.name.clone(), col.data_type().clone()));
                     }
                 }
-
                 if !(original_columns.is_subset(&new_columns)
                     || original_columns.is_superset(&new_columns))
                 {

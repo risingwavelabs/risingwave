@@ -210,6 +210,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             },
             source_desc.source.config.clone(),
             None,
+            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::default(),
         )
     }
 
