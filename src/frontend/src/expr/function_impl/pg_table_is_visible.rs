@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::acl::AclMode;
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{Result, capture_context, function};
-use risingwave_pb::user::grant_privilege::Object as GrantObject;
 
 use super::context::{AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER};
 use crate::catalog::CatalogReader;
@@ -57,9 +55,7 @@ fn pg_table_is_visible_impl(
         if let Ok(schema) = catalog_reader.get_schema_by_name(db_name, schema)
             && schema.contains_object(oid as u32)
         {
-            return if user_info.is_super
-                || user_info.has_privilege(&GrantObject::SchemaId(schema.id()), AclMode::Usage)
-            {
+            return if user_info.is_super || user_info.has_schema_usage_privilege(schema.id()) {
                 Ok(Some(true))
             } else {
                 Ok(Some(false))

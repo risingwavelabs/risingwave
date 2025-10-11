@@ -380,8 +380,7 @@ impl StreamManagerService for StreamServiceImpl {
         let actor_locations = self
             .metadata_manager
             .catalog_controller
-            .list_actor_locations()
-            .await?;
+            .list_actor_locations()?;
         let states = actor_locations
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {
@@ -425,8 +424,9 @@ impl StreamManagerService for StreamServiceImpl {
         let SourceManagerRunningInfo {
             source_fragments,
             backfill_fragments,
-            mut actor_splits,
         } = self.stream_manager.source_manager.get_running_info().await;
+
+        let mut actor_splits = self.env.shared_actor_infos().list_assignments();
 
         let source_actors = self
             .metadata_manager
@@ -538,61 +538,78 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<AlterConnectorPropsRequest>,
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
+        let secret_manager = LocalSecretManager::global();
+        let (new_props_plaintext, object_id) =
+            match AlterConnectorPropsObject::try_from(request.object_type) {
+                Ok(AlterConnectorPropsObject::Sink) => (
+                    self.metadata_manager
+                        .update_sink_props_by_sink_id(
+                            request.object_id as i32,
+                            request.changed_props.clone().into_iter().collect(),
+                        )
+                        .await?,
+                    request.object_id,
+                ),
+                Ok(AlterConnectorPropsObject::IcebergTable) => {
+                    self.metadata_manager
+                        .update_iceberg_table_props_by_table_id(
+                            TableId::from(request.object_id),
+                            request.changed_props.clone().into_iter().collect(),
+                            request.extra_options,
+                        )
+                        .await?
+                }
+
+                Ok(AlterConnectorPropsObject::Source) => {
+                    // alter source and table's associated source
+                    if request.connector_conn_ref.is_some() {
+                        return Err(Status::invalid_argument(
+                            "alter connector_conn_ref is not supported",
+                        ));
+                    }
+                    let options_with_secret = self
+                        .metadata_manager
+                        .catalog_controller
+                        .update_source_props_by_source_id(
+                            request.object_id as SourceId,
+                            request.changed_props.clone().into_iter().collect(),
+                            request.changed_secret_refs.clone().into_iter().collect(),
+                        )
+                        .await?;
+
+                    self.stream_manager
+                        .source_manager
+                        .validate_source_once(request.object_id, options_with_secret.clone())
+                        .await?;
+
+                    let (options, secret_refs) = options_with_secret.into_parts();
+                    (
+                        secret_manager
+                            .fill_secrets(options, secret_refs)
+                            .map_err(MetaError::from)?
+                            .into_iter()
+                            .collect(),
+                        request.object_id,
+                    )
+                }
+
+                _ => {
+                    unimplemented!(
+                        "Unsupported object type for AlterConnectorProps: {:?}",
+                        request.object_type
+                    );
+                }
+            };
 
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(request.object_id as ObjectId)
+            .get_object_database_id(object_id as ObjectId)
             .await?;
         let database_id = DatabaseId::new(database_id as _);
 
-        let secret_manager = LocalSecretManager::global();
-        let new_props_plaintext = match request.object_type() {
-            AlterConnectorPropsObject::Sink => {
-                self.metadata_manager
-                    .update_sink_props_by_sink_id(
-                        request.object_id as i32,
-                        request.changed_props.clone().into_iter().collect(),
-                    )
-                    .await?
-            }
-            AlterConnectorPropsObject::Source => {
-                // alter source and table's associated source
-                if request.connector_conn_ref.is_some() {
-                    return Err(Status::invalid_argument(
-                        "alter connector_conn_ref is not supported",
-                    ));
-                }
-                let options_with_secret = self
-                    .metadata_manager
-                    .catalog_controller
-                    .update_source_props_by_source_id(
-                        request.object_id as SourceId,
-                        request.changed_props.clone().into_iter().collect(),
-                        request.changed_secret_refs.clone().into_iter().collect(),
-                    )
-                    .await?;
-
-                self.stream_manager
-                    .source_manager
-                    .validate_source_once(request.object_id, options_with_secret.clone())
-                    .await?;
-
-                let (options, secret_refs) = options_with_secret.into_parts();
-                secret_manager
-                    .fill_secrets(options, secret_refs)
-                    .map_err(MetaError::from)?
-                    .into_iter()
-                    .collect()
-            }
-            AlterConnectorPropsObject::Connection => {
-                todo!()
-            }
-            AlterConnectorPropsObject::Unspecified => unreachable!(),
-        };
-
         let mut mutation = HashMap::default();
-        mutation.insert(request.object_id, new_props_plaintext);
+        mutation.insert(object_id, new_props_plaintext);
 
         let _i = self
             .barrier_scheduler

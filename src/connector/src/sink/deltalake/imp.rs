@@ -38,7 +38,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use sea_orm::DatabaseConnection;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
 use with_options::WithOptions;
@@ -309,7 +309,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         }
         DataType::List(rw_list) => {
             if let DeltaLakeDataType::Array(dl_list) = dl_data_type {
-                check_field_type(rw_list, dl_list.element_type())?
+                check_field_type(rw_list.elem(), dl_list.element_type())?
             } else {
                 false
             }

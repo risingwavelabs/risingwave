@@ -283,6 +283,11 @@ impl Binder {
                     Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, vec![input], DataType::Varchar).into())
                 })),
                 ("string_to_array", raw_call(ExprType::StringToArray)),
+                ("get_bit", raw_call(ExprType::GetBit)),
+                ("get_byte", raw_call(ExprType::GetByte)),
+                ("set_bit", raw_call(ExprType::SetBit)),
+                ("set_byte", raw_call(ExprType::SetByte)),
+                ("bit_count", raw_call(ExprType::BitCount)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
                 ("convert_from", raw_call(ExprType::ConvertFrom)),
@@ -336,7 +341,7 @@ impl Binder {
                 ("arraycontained", raw_call(ExprType::ArrayContained)),
                 ("array_flatten", guard_by_len(|_binder, [input]| {
                     input.ensure_array_type().map_err(|_| ErrorCode::BindError("array_flatten expects `any[][]` input".into()))?;
-                    let return_type = input.return_type().into_list_element_type();
+                    let return_type = input.return_type().into_list_elem();
                     if !return_type.is_array() {
                         return Err(ErrorCode::BindError("array_flatten expects `any[][]` input".into()).into());
                     }
@@ -471,7 +476,7 @@ impl Binder {
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
-                        return Ok(ExprImpl::literal_null(DataType::List(Box::new(DataType::Varchar))));
+                        return Ok(ExprImpl::literal_null(DataType::Varchar.list()));
                     };
 
                     let paths = if bool {

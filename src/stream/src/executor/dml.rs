@@ -359,16 +359,14 @@ async fn apply_dml_rate_limit(
                     }
                     RateLimit::Fixed(limit) => {
                         let max_permits = limit.get();
-                        let required_permits = chunk.compute_rate_limit_chunk_permits();
+                        let required_permits = chunk.rate_limit_permits();
                         if required_permits <= max_permits {
                             rate_limiter.wait(required_permits).await;
                             yield TxnMsg::Data(txn_id, chunk);
                         } else {
                             // Split the chunk into smaller chunks.
                             for small_chunk in chunk.split(max_permits as _) {
-                                let required_permits =
-                                    small_chunk.compute_rate_limit_chunk_permits();
-                                rate_limiter.wait(required_permits).await;
+                                rate_limiter.wait_chunk(&small_chunk).await;
                                 yield TxnMsg::Data(txn_id, small_chunk);
                             }
                         }

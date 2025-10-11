@@ -37,7 +37,7 @@ const APPEND_ONLY_TOPIC: &str = "t_sink_append_only";
 const DEBEZIUM_TOPIC: &str = "t_sink_debezium";
 
 use risingwave_common::hash::WorkerSlotId;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

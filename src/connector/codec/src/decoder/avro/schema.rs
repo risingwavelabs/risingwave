@@ -171,7 +171,7 @@ fn avro_type_mapping(
         Schema::Array(item_schema) => {
             let item_type =
                 avro_type_mapping(item_schema.as_ref(), ancestor_records, refs, map_handling)?;
-            DataType::List(Box::new(item_type))
+            DataType::list(item_type)
         }
         Schema::Union(union_schema) => {
             // Note: Unions may not immediately contain other unions. So a `null` must represent a top-level null.

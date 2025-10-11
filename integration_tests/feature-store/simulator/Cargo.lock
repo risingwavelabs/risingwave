@@ -772,7 +772,7 @@ dependencies = [
  "futures",
  "prost",
  "rand",
- "serde_derive",
+ "serde",
  "serde_json",
  "tokio",
  "tonic",

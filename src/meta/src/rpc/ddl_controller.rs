@@ -553,7 +553,7 @@ impl DdlController {
             .await?;
         self.source_manager
             .register_source_with_handle(source_id, handle)
-            .await;
+            .await?;
         Ok(version)
     }
 
@@ -878,6 +878,19 @@ impl DdlController {
         }
     }
 
+    pub async fn validate_table_for_sink(&self, table_id: TableId) -> MetaResult<()> {
+        let migrated = self
+            .metadata_manager
+            .catalog_controller
+            .has_table_been_migrated(table_id)
+            .await?;
+        if !migrated {
+            Err(anyhow::anyhow!("Creating sink into table is not allowed for unmigrated table {}. Please migrate it first.", table_id).into())
+        } else {
+            Ok(())
+        }
+    }
+
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
     #[await_tree::instrument(boxed, "create_streaming_job({streaming_job})")]
@@ -889,6 +902,11 @@ impl DdlController {
         specific_resource_group: Option<String>,
         if_not_exists: bool,
     ) -> MetaResult<NotificationVersion> {
+        if let StreamingJob::Sink(sink) = &streaming_job
+            && let Some(target_table) = sink.target_table
+        {
+            self.validate_table_for_sink(target_table as _).await?;
+        }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         let check_ret = self
             .metadata_manager
@@ -1206,11 +1224,9 @@ impl DdlController {
                 )
             })
             .collect();
-        let dropped_actors = removed_actors.iter().map(|id| *id as _).collect();
         self.source_manager
             .apply_source_change(SourceChange::DropMv {
                 dropped_source_fragments,
-                dropped_actors,
             })
             .await;
 
@@ -1440,7 +1456,6 @@ impl DdlController {
             let replace_upstream = ctx.replace_upstream.clone();
 
             if let Some(sinks) = &ctx.auto_refresh_schema_sinks {
-                let empty_actor_splits = HashMap::new();
                 let empty_downstreams = FragmentDownstreamRelation::default();
                 for sink in sinks {
                     self.metadata_manager
@@ -1449,7 +1464,6 @@ impl DdlController {
                             sink.tmp_sink_id,
                             || [&sink.new_fragment].into_iter(),
                             &sink.actor_status,
-                            &empty_actor_splits,
                             &empty_downstreams,
                             true,
                             None,

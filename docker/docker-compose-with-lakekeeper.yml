@@ -1,6 +1,6 @@
 ---
 x-image: &image
-  image: ${RW_IMAGE:-risingwavelabs/risingwave:nightly-20250902}
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.6.0-rc.1}
 
 x-lakekeeper-image: &lakekeeper-image
   image: ${LAKEKEEPER__SERVER_IMAGE:-quay.io/lakekeeper/catalog:latest-main}
@@ -48,7 +48,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/6660; exit $$?;'
+        - bash -c 'printf "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/6660; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -61,6 +61,7 @@ services:
           memory: 1G
     networks:
       - default
+
   compactor-1:
     <<: *image
     command:
@@ -80,7 +81,7 @@ services:
     expose:
       - "6661"
       - "1261"
-    ports: [ ]
+    ports: []
     depends_on:
       - meta-node-0
     volumes:
@@ -92,7 +93,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/6661; exit $$?;'
+        - bash -c 'printf "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/6661; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -135,7 +136,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5688; exit $$?;'
+        - bash -c 'printf "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/5688; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -237,7 +238,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $$?;'
+        - bash -c 'printf "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/5690; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -275,12 +276,12 @@ services:
 
   grafana-0:
     image: "grafana/grafana-oss:latest"
-    command: [ ]
+    command: []
     expose:
       - "3001"
     ports:
       - "3001:3001"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "grafana-0:/var/lib/grafana"
       - "./grafana.ini:/etc/grafana/grafana.ini"
@@ -292,7 +293,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/3001; exit $$?;'
+        - bash -c 'printf "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/3001; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -315,20 +316,15 @@ services:
     ports:
       - "9301:9301"
       - "9400:9400"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "minio-0:/data"
-    entrypoint: "
-
+    entrypoint: |
       /bin/sh -c '
-
       set -e
-
-      mkdir -p \"/data/hummock001\"
-
-      /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
-
-      '"
+      mkdir -p "/data/hummock001"
+      /usr/bin/docker-entrypoint.sh "$0" "$@"
+      '
     environment:
       MINIO_CI_CD: "1"
       MINIO_PROMETHEUS_AUTH_TYPE: public
@@ -340,7 +336,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/9301; exit $$?;'
+        - bash -c 'printf "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/9301; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -361,7 +357,7 @@ services:
       - "9500"
     ports:
       - "9500:9500"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "prometheus-0:/prometheus"
       - "./prometheus.yaml:/etc/prometheus/prometheus.yml"
@@ -406,7 +402,7 @@ services:
       - "9092:9092"
       - "9644:9644"
       - "8081:8081"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "message_queue:/var/lib/redpanda/data"
     environment: {}
@@ -476,7 +472,7 @@ services:
       - default
 
   lakekeeper-bootstrap:
-    image: curlimages/curl:latest
+    image: alpine:3.20
     restart: "no"
     depends_on:
       lakekeeper:
@@ -484,93 +480,64 @@ services:
     networks:
       - default
     command: |
-      sh -c '
+      sh -lc '
+        set -e
+
+        apk add --no-cache curl >/dev/null
+
         echo "Waiting for Lakekeeper to be ready..."
         sleep 5
 
-        # Bootstrap Lakekeeper
         echo "Bootstrapping Lakekeeper..."
         for attempt in 1 2 3 4 5; do
-          response=$$(curl -s -w "%{http_code}" -X POST \
+          http=$$(curl -s -o /tmp/bootstrap.json -w "%{http_code}" -X POST \
             -H "Content-Type: application/json" \
-            -d "{\"accept-terms-of-use\": true, \"is-operator\": true}" \
-            http://lakekeeper:8181/management/v1/bootstrap \
-            -o /tmp/bootstrap.json)
+            -d "{\"accept-terms-of-use\": true}" \
+            http://lakekeeper:8181/management/v1/bootstrap)
 
-          http_code=$${response##*[^0-9]}
-
-          if [ "$$http_code" = "200" ] || [ "$$http_code" = "201" ]; then
-            echo "✓ Successfully bootstrapped Lakekeeper!"
-            break
-          elif [ "$$http_code" = "400" ] || [ "$$http_code" = "409" ]; then
-            if grep -q "already bootstrapped\|Server already initialized" /tmp/bootstrap.json 2>/dev/null; then
-              echo "✓ Lakekeeper already bootstrapped, skipping..."
-              break
-            else
-              echo "✗ Bootstrap conflict"
-              cat /tmp/bootstrap.json 2>/dev/null || true
-              exit 1
-            fi
-          else
-            echo "Bootstrap attempt $$attempt failed (HTTP $$http_code)"
-            if [ $$attempt -eq 5 ]; then
-              cat /tmp/bootstrap.json 2>/dev/null || true
-              exit 1
-            fi
-            sleep $$((2 ** attempt))
-          fi
+          case "$$http" in
+            200|201) echo "✓ Successfully bootstrapped Lakekeeper!"; break ;;
+            400|409) echo "✓ Already bootstrapped or conflict; continuing..."; break ;;
+            *) echo "Bootstrap attempt $$attempt failed (HTTP $$http)"; \
+               [ $$attempt -eq 5 ] && { cat /tmp/bootstrap.json 2>/dev/null || true; exit 1; }; \
+               sleep $$((2 ** attempt)) ;;
+          esac
         done
 
-        # Create default warehouse
-        echo "Creating default warehouse..."
+        echo "Creating warehouse risingwave-warehouse..."
         sleep 2
         for attempt in 1 2 3 4 5; do
-          response=$$(curl -s -w "%{http_code}" -X POST \
+          http=$$(curl -s -o /tmp/warehouse.json -w "%{http_code}" -X POST \
             -H "Content-Type: application/json" \
             -d "{
               \"warehouse-name\": \"risingwave-warehouse\",
-              \"storage-profile\": {
-                \"type\": \"s3\",
-                \"bucket\": \"hummock001\",
-                \"key-prefix\": \"risingwave-lakekeeper\",
-                \"region\": \"us-east-1\",
-                \"sts-enabled\": false,
-                \"flavor\": \"s3-compat\",
-                \"endpoint\": \"http://minio-0:9301/\",
-                \"path-style-access\": true
-              },
+              \"delete-profile\": { \"type\": \"hard\" },
               \"storage-credential\": {
                 \"type\": \"s3\",
                 \"credential-type\": \"access-key\",
                 \"aws-access-key-id\": \"hummockadmin\",
                 \"aws-secret-access-key\": \"hummockadmin\"
+              },
+              \"storage-profile\": {
+                \"type\": \"s3\",
+                \"bucket\": \"hummock001\",
+                \"region\": \"us-east-1\",
+                \"flavor\": \"s3-compat\",
+                \"endpoint\": \"http://minio-0:9301\",
+                \"path-style-access\": true,
+                \"sts-enabled\": false,
+                \"key-prefix\": \"risingwave-lakekeeper\"
               }
             }" \
-            http://lakekeeper:8181/management/v1/warehouse \
-            -o /tmp/warehouse.json)
+            http://lakekeeper:8181/management/v1/warehouse)
 
-          http_code=$${response##*[^0-9]}
-
-          if [ "$$http_code" = "200" ] || [ "$$http_code" = "201" ]; then
-            echo "✓ Successfully created default warehouse!"
-            break
-          elif [ "$$http_code" = "400" ]; then
-            if grep -q "Storage profile overlaps" /tmp/warehouse.json 2>/dev/null; then
-              echo "✓ Warehouse already exists, skipping..."
-              break
-            else
-              echo "✗ Warehouse creation failed"
-              cat /tmp/warehouse.json 2>/dev/null || true
-              exit 1
-            fi
-          else
-            echo "Warehouse creation attempt $$attempt failed (HTTP $$http_code)"
-            if [ $$attempt -eq 5 ]; then
-              cat /tmp/warehouse.json 2>/dev/null || true
-              exit 1
-            fi
-            sleep $$((2 ** attempt))
-          fi
+          case "$$http" in
+            200|201) echo "✓ Successfully created warehouse!"; break ;;
+            400|409) echo "✓ Warehouse already exists/overlaps; continuing..."; break ;;
+            *) echo "Warehouse creation attempt $$attempt failed (HTTP $$http)"; \
+               [ $$attempt -eq 5 ] && { cat /tmp/warehouse.json 2>/dev/null || true; exit 1; }; \
+               sleep $$((2 ** attempt)) ;;
+          esac
         done
 
         echo "🎉 Lakekeeper setup completed successfully!"

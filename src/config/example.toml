@@ -168,6 +168,7 @@ unsafe_enable_strict_consistency = true
 stream_enable_executor_row_count = false
 stream_connector_message_buffer_size = 16
 stream_unsafe_extreme_cache_size = 10
+stream_topn_cache_min_capacity = 10
 stream_chunk_size = 256
 stream_exchange_initial_permits = 2048
 stream_exchange_batched_permits = 256
@@ -201,6 +202,7 @@ stream_iceberg_sink_write_parquet_max_row_group_rows = 100000
 stream_default_enable_mem_preload_state_table = false
 stream_mem_preload_state_table_ids_whitelist = []
 stream_mem_preload_state_table_ids_blacklist = []
+stream_aggressive_noop_update_elimination = false
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5

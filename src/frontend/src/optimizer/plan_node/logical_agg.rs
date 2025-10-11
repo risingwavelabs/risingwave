@@ -25,6 +25,7 @@ use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
     PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamPlanRef, StreamProject,
     StreamShare, StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch, ToStream,
+    try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -1415,16 +1416,13 @@ impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
 
-        for agg_call in self.agg_calls() {
-            if matches!(agg_call.agg_type, agg_types::unimplemented_in_stream!()) {
-                bail_not_implemented!("{} aggregation in materialized view", agg_call.agg_type);
-            }
-        }
         let eowc = ctx.emit_on_window_close();
-        let input = self
-            .input()
-            .try_better_locality(&self.group_key().to_vec())
-            .unwrap_or_else(|| self.input());
+        let input = if self.group_key().is_empty() {
+            self.input()
+        } else {
+            try_enforce_locality_requirement(self.input(), &self.group_key().to_vec())
+        };
+
         let stream_input = input.to_stream(ctx)?;
 
         // Use Dedup operator, if possible.

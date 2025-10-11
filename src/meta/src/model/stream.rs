@@ -22,7 +22,6 @@ use risingwave_common::hash::{
     ActorAlignmentId, IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat,
 };
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
-use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, PbActorLocation};
@@ -44,7 +43,6 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::{ActorId, FragmentId};
-use crate::stream::{SplitAssignment, build_actor_connector_splits};
 
 /// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -256,10 +254,6 @@ pub struct StreamJobFragments {
     /// The status of actors
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
 
-    /// The splits of actors,
-    /// incl. both `Source` and `SourceBackfill` actors.
-    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-
     /// The streaming context associated with this stream plan and its fragments
     pub ctx: StreamContext,
 
@@ -334,7 +328,6 @@ impl StreamJobFragments {
                 })
                 .collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
-            actor_splits: build_actor_connector_splits(&self.actor_splits),
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),
@@ -388,7 +381,6 @@ impl StreamJobFragments {
             state: State::Initial,
             fragments,
             actor_status,
-            actor_splits: HashMap::default(),
             ctx,
             assigned_parallelism: table_parallelism,
             max_parallelism,
@@ -445,10 +437,6 @@ impl StreamJobFragments {
         for actor_status in self.actor_status.values_mut() {
             actor_status.set_state(state);
         }
-    }
-
-    pub fn set_actor_splits_by_split_assignment(&mut self, split_assignment: SplitAssignment) {
-        self.actor_splits = split_assignment.into_values().flatten().collect();
     }
 
     /// Returns actor ids associated with this table.
@@ -515,6 +503,7 @@ impl StreamJobFragments {
                 FragmentTypeFlag::Values,
                 FragmentTypeFlag::StreamScan,
                 FragmentTypeFlag::SourceScan,
+                FragmentTypeFlag::LocalityProvider,
             ]) {
                 actor_ids.extend(fragment.actors.iter().map(|actor| {
                     (
@@ -794,6 +783,7 @@ pub enum BackfillUpstreamType {
     MView,
     Values,
     Source,
+    LocalityProvider,
 }
 
 impl BackfillUpstreamType {
@@ -801,12 +791,13 @@ impl BackfillUpstreamType {
         let is_mview = mask.contains(FragmentTypeFlag::StreamScan);
         let is_values = mask.contains(FragmentTypeFlag::Values);
         let is_source = mask.contains(FragmentTypeFlag::SourceScan);
+        let is_locality_provider = mask.contains(FragmentTypeFlag::LocalityProvider);
 
         // Note: in theory we can have multiple backfill executors in one fragment, but currently it's not possible.
         // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
         debug_assert!(
-            is_mview as u8 + is_values as u8 + is_source as u8 == 1,
-            "a backfill fragment should either be mview, value or source, found {:?}",
+            is_mview as u8 + is_values as u8 + is_source as u8 + is_locality_provider as u8 == 1,
+            "a backfill fragment should either be mview, value, source, or locality provider, found {:?}",
             mask
         );
 
@@ -816,6 +807,8 @@ impl BackfillUpstreamType {
             BackfillUpstreamType::Values
         } else if is_source {
             BackfillUpstreamType::Source
+        } else if is_locality_provider {
+            BackfillUpstreamType::LocalityProvider
         } else {
             unreachable!("invalid fragment type mask: {:?}", mask);
         }

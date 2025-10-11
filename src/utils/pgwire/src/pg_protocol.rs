@@ -29,6 +29,7 @@ use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
 use risingwave_common::util::deployment::Deployment;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
 use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
@@ -100,6 +101,9 @@ where
     // If None, not expected to build ssl connection (panic).
     tls_context: Option<SslContext>,
 
+    // TLS configuration including SSL enforcement setting
+    tls_config: Option<TlsConfig>,
+
     // Used in extended query protocol. When encounter error in extended query, we need to ignore
     // the following message util sync message.
     ignore_util_sync: bool,
@@ -118,14 +122,26 @@ pub struct TlsConfig {
     pub cert: String,
     /// The path to the TLS key.
     pub key: String,
+    /// Whether to enforce SSL connections (reject non-SSL clients).
+    pub enforce_ssl: bool,
 }
 
 impl TlsConfig {
     pub fn new_default() -> Option<Self> {
         let cert = std::env::var("RW_SSL_CERT").ok()?;
         let key = std::env::var("RW_SSL_KEY").ok()?;
-        tracing::info!("RW_SSL_CERT={}, RW_SSL_KEY={}", cert, key);
-        Some(Self { cert, key })
+        let enforce_ssl = env_var_is_true("RW_SSL_ENFORCE");
+        tracing::info!(
+            "RW_SSL_CERT={}, RW_SSL_KEY={}, RW_SSL_ENFORCE={}",
+            cert,
+            key,
+            enforce_ssl
+        );
+        Some(Self {
+            cert,
+            key,
+            enforce_ssl,
+        })
     }
 }
 
@@ -219,6 +235,7 @@ where
             tls_context: tls_config
                 .as_ref()
                 .and_then(|e| build_ssl_ctx_from_config(e).ok()),
+            tls_config: tls_config.clone(),
             result_cache: Default::default(),
             unnamed_prepare_statement: Default::default(),
             prepare_statement_store: Default::default(),
@@ -245,7 +262,7 @@ where
                 notice_fut = Some(Box::pin(async move {
                     loop {
                         let notice = session.next_notice().await;
-                        if let Err(e) = stream.write(&BeMessage::NoticeResponse(&notice)).await {
+                        if let Err(e) = stream.write(BeMessage::NoticeResponse(&notice)).await {
                             tracing::error!(error = %e.as_report(), notice, "failed to send notice");
                         }
                     }
@@ -429,7 +446,7 @@ where
 
                     PsqlError::StartupError(_) | PsqlError::PasswordError => {
                         self.stream
-                            .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
+                            .write_no_flush(BeMessage::ErrorResponse(&e))
                             .ok()?;
                         let _ = self.stream.flush().await;
                         return None;
@@ -437,14 +454,14 @@ where
 
                     PsqlError::SimpleQueryError(_) | PsqlError::ServerThrottle(_) => {
                         self.stream
-                            .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
+                            .write_no_flush(BeMessage::ErrorResponse(&e))
                             .ok()?;
                         self.ready_for_query().ok()?;
                     }
 
                     PsqlError::IdleInTxnTimeout | PsqlError::Panic(_) => {
                         self.stream
-                            .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
+                            .write_no_flush(BeMessage::ErrorResponse(&e))
                             .ok()?;
                         let _ = self.stream.flush().await;
 
@@ -459,7 +476,7 @@ where
                     | PsqlError::ExtendedPrepareError(_)
                     | PsqlError::ExtendedExecuteError(_) => {
                         self.stream
-                            .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
+                            .write_no_flush(BeMessage::ErrorResponse(&e))
                             .ok()?;
                     }
                 }
@@ -482,7 +499,7 @@ where
         match msg {
             FeMessage::Gss => self.process_gss_msg().await?,
             FeMessage::Ssl => self.process_ssl_msg().await?,
-            FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
+            FeMessage::Startup(msg) => self.process_startup_msg(msg).await?,
             FeMessage::Password(msg) => self.process_password_msg(msg).await?,
             FeMessage::Query(query_msg) => {
                 let sql = Arc::from(query_msg.get_sql()?);
@@ -582,7 +599,7 @@ where
 
     /// Writes a `ReadyForQuery` message to the client without flushing.
     fn ready_for_query(&mut self) -> io::Result<()> {
-        self.stream.write_no_flush(&BeMessage::ReadyForQuery(
+        self.stream.write_no_flush(BeMessage::ReadyForQuery(
             self.session
                 .as_ref()
                 .map(|s| s.transaction_status())
@@ -592,7 +609,7 @@ where
 
     async fn process_gss_msg(&mut self) -> PsqlResult<()> {
         // We don't support GSSAPI, so we just say no gracefully.
-        self.stream.write(&BeMessage::EncryptionResponseNo).await?;
+        self.stream.write(BeMessage::EncryptionResponseNo).await?;
         Ok(())
     }
 
@@ -600,17 +617,27 @@ where
         if let Some(context) = self.tls_context.as_ref() {
             // If got and ssl context, say yes for ssl connection.
             // Construct ssl stream and replace with current one.
-            self.stream.write(&BeMessage::EncryptionResponseSsl).await?;
+            self.stream.write(BeMessage::EncryptionResponseSsl).await?;
             self.stream.upgrade_to_ssl(context).await?;
         } else {
             // If no, say no for encryption.
-            self.stream.write(&BeMessage::EncryptionResponseNo).await?;
+            self.stream.write(BeMessage::EncryptionResponseNo).await?;
         }
 
         Ok(())
     }
 
-    fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
+    async fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
+        // Check SSL enforcement: if SSL is enforced but connection is not using SSL, reject
+        if let Some(ref tls_config) = self.tls_config
+            && tls_config.enforce_ssl
+            && !self.stream.is_ssl_connection().await
+        {
+            return Err(PsqlError::StartupError(
+                "SSL connection is required but not established".into(),
+            ));
+        }
+
         let db_name = msg
             .config
             .get("database")
@@ -636,14 +663,14 @@ where
 
         match session.user_authenticator() {
             UserAuthenticator::None => {
-                self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
+                self.stream.write_no_flush(BeMessage::AuthenticationOk)?;
 
                 // Cancel request need this for identify and verification. According to postgres
                 // doc, it should be written to buffer after receive AuthenticationOk.
                 self.stream
-                    .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
+                    .write_no_flush(BeMessage::BackendKeyData(session.id()))?;
 
-                self.stream.write_no_flush(&BeMessage::ParameterStatus(
+                self.stream.write_no_flush(BeMessage::ParameterStatus(
                     BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
                 ))?;
                 self.stream
@@ -656,11 +683,11 @@ where
             | UserAuthenticator::OAuth(_)
             | UserAuthenticator::Ldap(_) => {
                 self.stream
-                    .write_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
+                    .write_no_flush(BeMessage::AuthenticationCleartextPassword)?;
             }
             UserAuthenticator::Md5WithSalt { salt, .. } => {
                 self.stream
-                    .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))?;
+                    .write_no_flush(BeMessage::AuthenticationMd5Password(salt))?;
             }
         }
 
@@ -673,8 +700,8 @@ where
         let session = self.session.as_ref().unwrap();
         let authenticator = session.user_authenticator();
         authenticator.authenticate(&msg.password).await?;
-        self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
-        self.stream.write_no_flush(&BeMessage::ParameterStatus(
+        self.stream.write_no_flush(BeMessage::AuthenticationOk)?;
+        self.stream.write_no_flush(BeMessage::ParameterStatus(
             BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
         ))?;
         self.stream
@@ -714,7 +741,7 @@ where
         // The following inner_process_query_msg_one_stmt can be slow. Release potential large String early.
         drop(sql);
         if stmts.is_empty() {
-            self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+            self.stream.write_no_flush(BeMessage::EmptyQueryResponse)?;
         }
 
         // Execute multiple statements in simple query. KISS later.
@@ -741,33 +768,55 @@ where
         // Take all remaining notices (if any) and send them before `CommandComplete`.
         while let Some(notice) = session.next_notice().now_or_never() {
             self.stream
-                .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+                .write_no_flush(BeMessage::NoticeResponse(&notice))?;
         }
 
         let mut res = res.map_err(PsqlError::SimpleQueryError)?;
 
         for notice in res.notices() {
             self.stream
-                .write_no_flush(&BeMessage::NoticeResponse(notice))?;
+                .write_no_flush(BeMessage::NoticeResponse(notice))?;
         }
 
         let status = res.status();
         if let Some(ref application_name) = status.application_name {
-            self.stream.write_no_flush(&BeMessage::ParameterStatus(
+            self.stream.write_no_flush(BeMessage::ParameterStatus(
                 BeParameterStatusMessage::ApplicationName(application_name),
             ))?;
         }
 
-        if res.is_query() {
+        if res.is_copy_query_to_stdout() {
             self.stream
-                .write_no_flush(&BeMessage::RowDescription(&res.row_desc()))?;
+                .write_no_flush(BeMessage::CopyOutResponse(res.row_desc().len()))?;
+            let mut count = 0;
+            while let Some(row_set) = res.values_stream().next().await {
+                let row_set = row_set.map_err(PsqlError::SimpleQueryError)?;
+                for row in row_set {
+                    self.stream.write_no_flush(BeMessage::CopyData(&row))?;
+                    count += 1;
+                }
+            }
+
+            self.stream.write_no_flush(BeMessage::CopyDone)?;
+
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
+            self.stream
+                .write_no_flush(BeMessage::CommandComplete(BeCommandCompleteMessage {
+                    stmt_type: res.stmt_type(),
+                    rows_cnt: count,
+                }))?;
+        } else if res.is_query() {
+            self.stream
+                .write_no_flush(BeMessage::RowDescription(res.row_desc()))?;
 
             let mut rows_cnt = 0;
 
             while let Some(row_set) = res.values_stream().next().await {
                 let row_set = row_set.map_err(PsqlError::SimpleQueryError)?;
                 for row in row_set {
-                    self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                    self.stream.write_no_flush(BeMessage::DataRow(&row))?;
                     rows_cnt += 1;
                 }
             }
@@ -776,7 +825,7 @@ where
             res.run_callback().await?;
 
             self.stream
-                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                .write_no_flush(BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.stmt_type(),
                     rows_cnt,
                 }))?;
@@ -804,7 +853,7 @@ where
             res.run_callback().await?;
 
             self.stream
-                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                .write_no_flush(BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.stmt_type(),
                     rows_cnt: affected_rows_cnt,
                 }))?;
@@ -813,7 +862,7 @@ where
             res.run_callback().await?;
 
             self.stream
-                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                .write_no_flush(BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.stmt_type(),
                     rows_cnt: 0,
                 }))?;
@@ -906,7 +955,7 @@ where
             .or_default()
             .clear();
 
-        self.stream.write_no_flush(&BeMessage::ParseComplete)?;
+        self.stream.write_no_flush(BeMessage::ParseComplete)?;
         Ok(())
     }
 
@@ -952,7 +1001,7 @@ where
             .unwrap()
             .push(portal_name);
 
-        self.stream.write_no_flush(&BeMessage::BindComplete)?;
+        self.stream.write_no_flush(BeMessage::BindComplete)?;
         Ok(())
     }
 
@@ -1014,18 +1063,17 @@ where
                 .unwrap()
                 .describe_statement(prepare_statement)
                 .map_err(PsqlError::Uncategorized)?;
-            self.stream
-                .write_no_flush(&BeMessage::ParameterDescription(
-                    &param_types.iter().map(|t| t.to_oid()).collect_vec(),
-                ))?;
+            self.stream.write_no_flush(BeMessage::ParameterDescription(
+                &param_types.iter().map(|t| t.to_oid()).collect_vec(),
+            ))?;
 
             if row_descriptions.is_empty() {
                 // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
                 // return NoData message if the statement is not a query.
-                self.stream.write_no_flush(&BeMessage::NoData)?;
+                self.stream.write_no_flush(BeMessage::NoData)?;
             } else {
                 self.stream
-                    .write_no_flush(&BeMessage::RowDescription(&row_descriptions))?;
+                    .write_no_flush(BeMessage::RowDescription(&row_descriptions))?;
             }
         } else if msg.kind == b'P' {
             let portal = self.get_portal(&name)?;
@@ -1037,10 +1085,10 @@ where
             if row_descriptions.is_empty() {
                 // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
                 // return NoData message if the statement is not a query.
-                self.stream.write_no_flush(&BeMessage::NoData)?;
+                self.stream.write_no_flush(BeMessage::NoData)?;
             } else {
                 self.stream
-                    .write_no_flush(&BeMessage::RowDescription(&row_descriptions))?;
+                    .write_no_flush(BeMessage::RowDescription(&row_descriptions))?;
             }
         }
         Ok(())
@@ -1065,7 +1113,7 @@ where
         } else if msg.kind == b'P' {
             self.remove_portal(&name);
         }
-        self.stream.write_no_flush(&BeMessage::CloseComplete)?;
+        self.stream.write_no_flush(BeMessage::CloseComplete)?;
         Ok(())
     }
 
@@ -1158,6 +1206,12 @@ impl<S> PgStream<S> {
             read_header: None,
         }
     }
+
+    /// Check if the current connection is using SSL
+    async fn is_ssl_connection(&self) -> bool {
+        let stream = self.stream.lock().await;
+        matches!(*stream, PgStreamInner::Ssl(_))
+    }
 }
 
 impl<S> Clone for PgStream<S> {
@@ -1246,28 +1300,28 @@ where
     }
 
     fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
-        self.write_no_flush(&BeMessage::ParameterStatus(
+        self.write_no_flush(BeMessage::ParameterStatus(
             BeParameterStatusMessage::ClientEncoding(SERVER_ENCODING),
         ))?;
-        self.write_no_flush(&BeMessage::ParameterStatus(
+        self.write_no_flush(BeMessage::ParameterStatus(
             BeParameterStatusMessage::StandardConformingString(STANDARD_CONFORMING_STRINGS),
         ))?;
-        self.write_no_flush(&BeMessage::ParameterStatus(
+        self.write_no_flush(BeMessage::ParameterStatus(
             BeParameterStatusMessage::ServerVersion(PG_VERSION),
         ))?;
         if let Some(application_name) = &status.application_name {
-            self.write_no_flush(&BeMessage::ParameterStatus(
+            self.write_no_flush(BeMessage::ParameterStatus(
                 BeParameterStatusMessage::ApplicationName(application_name),
             ))?;
         }
         Ok(())
     }
 
-    pub fn write_no_flush(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
+    pub fn write_no_flush(&mut self, message: BeMessage<'_>) -> io::Result<()> {
         BeMessage::write(&mut self.write_buf, message)
     }
 
-    async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
+    async fn write(&mut self, message: BeMessage<'_>) -> io::Result<()> {
         self.write_no_flush(message)?;
         self.flush().await?;
         Ok(())

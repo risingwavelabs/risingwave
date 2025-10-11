@@ -46,7 +46,6 @@ use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk,
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
 use crate::task::cdc_progress::CdcProgressReporter;
-
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -171,6 +170,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         let mut state_impl = ParallelizedCdcBackfillState::new(self.state_table);
         // The buffered chunks have already been mapped.
         let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+
         // Need reset on CDC table snapshot splits reschedule.
         'with_cdc_table_snapshot_splits: loop {
             assert!(upstream_chunk_buffer.is_empty());

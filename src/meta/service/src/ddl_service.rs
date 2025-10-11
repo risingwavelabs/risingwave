@@ -13,15 +13,18 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::pin::pin;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
+use futures::future::select;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_meta::MetaResult;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
@@ -38,6 +41,8 @@ use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
 use thiserror_ext::AsReport;
+use tokio::sync::oneshot::Sender;
+use tokio::task::JoinHandle;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
@@ -118,6 +123,89 @@ impl DdlServiceImpl {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
         }
+    }
+
+    pub fn start_migrate_table_fragments(&self) -> (JoinHandle<()>, Sender<()>) {
+        tracing::info!("start migrate legacy table fragments task");
+        let env = self.env.clone();
+        let metadata_manager = self.metadata_manager.clone();
+        let ddl_controller = self.ddl_controller.clone();
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            async fn migrate_inner(
+                env: &MetaSrvEnv,
+                metadata_manager: &MetadataManager,
+                ddl_controller: &DdlController,
+            ) -> MetaResult<()> {
+                let tables = metadata_manager
+                    .catalog_controller
+                    .list_unmigrated_tables()
+                    .await?;
+
+                if tables.is_empty() {
+                    tracing::info!("no legacy table fragments need migration");
+                    return Ok(());
+                }
+
+                let client = {
+                    let workers = metadata_manager
+                        .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
+                        .await?;
+                    if workers.is_empty() {
+                        return Err(anyhow::anyhow!("no active frontend nodes found").into());
+                    }
+                    let worker = workers.choose(&mut thread_rng()).unwrap();
+                    env.frontend_client_pool().get(worker).await?
+                };
+
+                for table in tables {
+                    let start = tokio::time::Instant::now();
+                    let req = GetTableReplacePlanRequest {
+                        database_id: table.database_id,
+                        owner: table.owner,
+                        table_name: table.name.clone(),
+                        cdc_table_change: None,
+                    };
+                    let resp = client
+                        .get_table_replace_plan(req)
+                        .await
+                        .context("failed to get table replace plan from frontend")?;
+
+                    let plan = resp.into_inner().replace_plan.unwrap();
+                    let replace_info = DdlServiceImpl::extract_replace_table_info(plan);
+                    ddl_controller
+                        .run_command(DdlCommand::ReplaceStreamJob(replace_info))
+                        .await?;
+                    tracing::info!(elapsed=?start.elapsed(), table_id=table.id, "migrated table fragments");
+                }
+                tracing::info!("successfully migrated all legacy table fragments");
+
+                Ok(())
+            }
+
+            let migrate_future = async move {
+                let mut attempt = 0;
+                loop {
+                    match migrate_inner(&env, &metadata_manager, &ddl_controller).await {
+                        Ok(_) => break,
+                        Err(e) => {
+                            attempt += 1;
+                            tracing::error!(
+                                "failed to migrate legacy table fragments: {}, attempt {}, retrying in 5 secs",
+                                e.as_report(),
+                                attempt
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
+                    }
+                }
+            };
+
+            select(pin!(migrate_future), shutdown_rx).await;
+        });
+
+        (join_handle, shutdown_tx)
     }
 }
 
@@ -1037,6 +1125,18 @@ impl DdlService for DdlServiceImpl {
                                     original_columns = ?original_columns,
                                     new_columns = ?new_columns,
                                     "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported");
+
+                    let fail_info = "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported".to_owned();
+                    add_auto_schema_change_fail_event_log(
+                        &self.meta_metrics,
+                        table.id,
+                        table.name.clone(),
+                        table_change.cdc_table_id.clone(),
+                        table_change.upstream_ddl.clone(),
+                        &self.env.event_log_manager_ref(),
+                        fail_info,
+                    );
+
                     return Err(Status::invalid_argument(
                         "New columns should be a subset or superset of the original columns (including hidden columns)",
                     ));
@@ -1065,7 +1165,7 @@ impl DdlService for DdlServiceImpl {
                         database_id: table.database_id,
                         owner: table.owner,
                         table_name: table.name.clone(),
-                        table_change: Some(table_change.clone()),
+                        cdc_table_change: Some(table_change.clone()),
                     })
                     .await;
 
@@ -1114,6 +1214,8 @@ impl DdlService for DdlServiceImpl {
                                         upstraem_ddl = table_change.upstream_ddl,
                                         "failed to replace the table",
                                     );
+                                    let fail_info =
+                                        format!("failed to replace the table: {}", e.as_report());
                                     add_auto_schema_change_fail_event_log(
                                         &self.meta_metrics,
                                         table.id,
@@ -1121,6 +1223,7 @@ impl DdlService for DdlServiceImpl {
                                         table_change.cdc_table_id.clone(),
                                         table_change.upstream_ddl.clone(),
                                         &self.env.event_log_manager_ref(),
+                                        fail_info,
                                     );
                                 }
                             };
@@ -1134,6 +1237,8 @@ impl DdlService for DdlServiceImpl {
                             cdc_table_id = table.cdc_table_id,
                             "failed to get replace table plan",
                         );
+                        let fail_info =
+                            format!("failed to get replace table plan: {}", e.as_report());
                         add_auto_schema_change_fail_event_log(
                             &self.meta_metrics,
                             table.id,
@@ -1141,6 +1246,7 @@ impl DdlService for DdlServiceImpl {
                             table_change.cdc_table_id.clone(),
                             table_change.upstream_ddl.clone(),
                             &self.env.event_log_manager_ref(),
+                            fail_info,
                         );
                     }
                 };
@@ -1267,6 +1373,7 @@ fn add_auto_schema_change_fail_event_log(
     cdc_table_id: String,
     upstream_ddl: String,
     event_log_manager: &EventLogManagerRef,
+    fail_info: String,
 ) {
     meta_metrics
         .auto_schema_change_failure_cnt
@@ -1277,6 +1384,7 @@ fn add_auto_schema_change_fail_event_log(
         table_name,
         cdc_table_id,
         upstream_ddl,
+        fail_info,
     };
     event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
 }

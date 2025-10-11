@@ -278,6 +278,18 @@ impl Bitmap {
         Self::from_bytes_with_len(buf, buf.len() * 8)
     }
 
+    /// Creates a new bitmap from the indices of bits set to 1.
+    pub fn from_indices(num_bits: usize, ones: &[usize]) -> Self {
+        let mut builder = BitmapBuilder::zeroed(num_bits);
+
+        for &idx in ones {
+            debug_assert!(idx < num_bits);
+            builder.set(idx, true);
+        }
+
+        builder.finish()
+    }
+
     /// Creates a new bitmap from bytes and length.
     fn from_bytes_with_len(buf: &[u8], num_bits: usize) -> Self {
         let mut bits = Vec::with_capacity(Self::vec_len(num_bits));
@@ -1147,5 +1159,40 @@ mod tests {
             let item = iter.next();
             assert!(item.is_none());
         }
+    }
+
+    #[test]
+    fn from_indices_creates_correct_bitmap() {
+        let bitmap = Bitmap::from_indices(10, &[1, 3, 5, 7, 9]);
+        assert_eq!(bitmap.len(), 10);
+        for i in [1, 3, 5, 7, 9] {
+            assert!(bitmap.is_set(i));
+        }
+
+        for i in [0, 2, 4, 6, 8] {
+            assert!(!bitmap.is_set(i));
+        }
+    }
+
+    #[test]
+    fn from_indices_empty_indices_creates_zeroed_bitmap() {
+        let bitmap = Bitmap::from_indices(10, &[]);
+        assert_eq!(bitmap.len(), 10);
+        assert!(!bitmap.any());
+    }
+
+    #[test]
+    fn from_indices_out_of_bounds_panics() {
+        let result = std::panic::catch_unwind(|| {
+            Bitmap::from_indices(5, &[0, 6]);
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn from_indices_all_indices_set_creates_filled_bitmap() {
+        let bitmap = Bitmap::from_indices(5, &[0, 1, 2, 3, 4]);
+        assert_eq!(bitmap.len(), 5);
+        assert!(bitmap.all());
     }
 }

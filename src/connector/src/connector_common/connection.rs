@@ -26,7 +26,7 @@ use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_pb::catalog::PbConnection;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::serde_as;
 use tonic::async_trait;
 use url::Url;
@@ -254,6 +254,12 @@ pub struct IcebergConnection {
     /// - Multiple headers can be specified, separated by a ';'.
     #[serde(rename = "catalog.header")]
     pub header: Option<String>,
+    #[serde(rename = "adlsgen2.account_name")]
+    pub adlsgen2_account_name: Option<String>,
+    #[serde(rename = "adlsgen2.account_key")]
+    pub adlsgen2_account_key: Option<String>,
+    #[serde(rename = "adlsgen2.endpoint")]
+    pub adlsgen2_endpoint: Option<String>,
 }
 
 impl EnforceSecret for IcebergConnection {
@@ -393,6 +399,9 @@ impl Connection for IcebergConnection {
             azblob_account_name: self.azblob_account_name.clone(),
             azblob_account_key: self.azblob_account_key.clone(),
             azblob_endpoint_url: self.azblob_endpoint_url.clone(),
+            adlsgen2_account_name: self.adlsgen2_account_name.clone(),
+            adlsgen2_account_key: self.adlsgen2_account_key.clone(),
+            adlsgen2_endpoint: self.adlsgen2_endpoint.clone(),
             warehouse_path: self.warehouse_path.clone(),
             glue_id: self.glue_id.clone(),
             catalog_name: self.catalog_name.clone(),

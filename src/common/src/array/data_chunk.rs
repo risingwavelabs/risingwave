@@ -146,6 +146,11 @@ impl DataChunk {
         self.visibility.count_ones()
     }
 
+    // Compute the required permits of this chunk for rate limiting.
+    pub fn rate_limit_permits(&self) -> u64 {
+        self.cardinality() as _
+    }
+
     // TODO(rc): shall we rename this to `size`?
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
@@ -723,7 +728,7 @@ impl DataChunkTestExt for DataChunk {
         use crate::types::ScalarImpl;
         fn parse_type(s: &str) -> DataType {
             if let Some(s) = s.strip_suffix("[]") {
-                return DataType::List(Box::new(parse_type(s)));
+                return DataType::list(parse_type(s));
             }
 
             // Special logic to support Map type in `DataChunk::from_pretty`.

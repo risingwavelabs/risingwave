@@ -150,7 +150,7 @@ pub trait TopNCacheTrait {
     ///
     /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
     /// used to generate messages to be sent to downstream operators.
-    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging);
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging);
 
     /// Delete input row from the cache.
     ///
@@ -165,14 +165,26 @@ pub trait TopNCacheTrait {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
+        row: impl Row,
         staging: &mut TopNStaging,
     ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     /// `data_types` -- Data types for the full row.
+    /// `min_capacity` -- Minimum capacity for the high cache. When not provided, defaults to `TOPN_CACHE_MIN_CAPACITY`.
     pub fn new(offset: usize, limit: usize, data_types: Vec<DataType>) -> Self {
+        Self::with_min_capacity(offset, limit, data_types, TOPN_CACHE_MIN_CAPACITY)
+    }
+
+    /// `data_types` -- Data types for the full row.
+    /// `min_capacity` -- Minimum capacity for the high cache.
+    pub fn with_min_capacity(
+        offset: usize,
+        limit: usize,
+        data_types: Vec<DataType>,
+        min_capacity: usize,
+    ) -> Self {
         assert!(limit > 0);
         if WITH_TIES {
             // It's trickier to support.
@@ -183,7 +195,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             .checked_add(limit)
             .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
             .unwrap_or(usize::MAX)
-            .max(TOPN_CACHE_MIN_CAPACITY);
+            .max(min_capacity);
         Self {
             low: if offset > 0 { Some(Cache::new()) } else { None },
             middle: Cache::new(),
@@ -278,7 +290,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
 }
 
 impl TopNCacheTrait for TopNCache<false> {
-    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
@@ -362,7 +374,7 @@ impl TopNCacheTrait for TopNCache<false> {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
+        row: impl Row,
         staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
@@ -470,7 +482,7 @@ impl TopNCacheTrait for TopNCache<false> {
 }
 
 impl TopNCacheTrait for TopNCache<true> {
-    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
@@ -575,7 +587,7 @@ impl TopNCacheTrait for TopNCache<true> {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
+        row: impl Row,
         staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
@@ -894,5 +906,59 @@ impl TopNStaging {
     ) -> impl Iterator<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_ {
         self.into_changes()
             .map(|(op, row)| Ok((op, deserializer.deserialize(row.row.as_ref())?)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+
+    use super::*;
+
+    #[test]
+    fn test_topn_cache_new_uses_default_min_capacity() {
+        let cache = TopNCache::<false>::new(0, 5, vec![DataType::Int32]);
+        assert_eq!(cache.high_cache_capacity, TOPN_CACHE_MIN_CAPACITY);
+    }
+
+    #[test]
+    fn test_topn_cache_with_custom_min_capacity() {
+        let custom_min_capacity = 25;
+        let cache =
+            TopNCache::<false>::with_min_capacity(0, 5, vec![DataType::Int32], custom_min_capacity);
+        assert_eq!(cache.high_cache_capacity, custom_min_capacity);
+    }
+
+    #[test]
+    fn test_topn_cache_high_capacity_factor_respected() {
+        let custom_min_capacity = 1;
+        let offset = 2;
+        let limit = 5;
+        let expected_capacity = (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR;
+
+        let cache = TopNCache::<false>::with_min_capacity(
+            offset,
+            limit,
+            vec![DataType::Int32],
+            custom_min_capacity,
+        );
+        assert_eq!(cache.high_cache_capacity, expected_capacity);
+    }
+
+    #[test]
+    fn test_topn_cache_min_capacity_takes_precedence_when_larger() {
+        let large_min_capacity = 100;
+        let offset = 0;
+        let limit = 5;
+        let expected_from_formula = (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR; // Should be 10
+
+        let cache = TopNCache::<false>::with_min_capacity(
+            offset,
+            limit,
+            vec![DataType::Int32],
+            large_min_capacity,
+        );
+        assert_eq!(cache.high_cache_capacity, large_min_capacity);
+        assert!(cache.high_cache_capacity > expected_from_formula);
     }
 }

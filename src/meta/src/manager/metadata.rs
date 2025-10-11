@@ -19,7 +19,9 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{Either, select};
+use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
@@ -402,15 +404,14 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn running_fragment_parallelisms(
+    pub fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
         Ok(self
             .catalog_controller
-            .running_fragment_parallelisms(id_filter)
-            .await?
+            .running_fragment_parallelisms(id_filter)?
             .into_iter()
             .map(|(k, v)| (k as FragmentId, v))
             .collect())
@@ -635,8 +636,8 @@ impl MetadataManager {
         Ok(actor_maps)
     }
 
-    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
-        let actor_cnt = self.catalog_controller.worker_actor_count().await?;
+    pub fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        let actor_cnt = self.catalog_controller.worker_actor_count()?;
         Ok(actor_cnt
             .into_iter()
             .map(|(id, cnt)| (id as WorkerId, cnt))
@@ -728,6 +729,25 @@ impl MetadataManager {
         Ok(new_props)
     }
 
+    pub async fn update_iceberg_table_props_by_table_id(
+        &self,
+        table_id: TableId,
+        props: BTreeMap<String, String>,
+        alter_iceberg_table_props: Option<
+            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
+        >,
+    ) -> MetaResult<(HashMap<String, String>, u32)> {
+        let (new_props, sink_id) = self
+            .catalog_controller
+            .update_iceberg_table_props_by_table_id(
+                table_id.table_id as _,
+                props,
+                alter_iceberg_table_props,
+            )
+            .await?;
+        Ok((new_props, sink_id))
+    }
+
     pub async fn update_fragment_rate_limit_by_fragment_id(
         &self,
         fragment_id: FragmentId,
@@ -750,6 +770,36 @@ impl MetadataManager {
     ) -> MetaResult<()> {
         self.catalog_controller
             .update_actor_splits(split_assignment)
+            .await
+    }
+
+    #[await_tree::instrument]
+    pub async fn update_source_splits(
+        &self,
+        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
+    ) -> MetaResult<()> {
+        self.catalog_controller
+            .update_source_splits(source_splits)
+            .await
+    }
+
+    #[await_tree::instrument]
+    pub async fn update_fragment_splits(
+        &self,
+        split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        let fragment_splits = split_assignment
+            .iter()
+            .map(|(fragment_id, splits)| {
+                (
+                    *fragment_id as _,
+                    splits.values().flatten().cloned().collect_vec(),
+                )
+            })
+            .collect();
+
+        self.catalog_controller
+            .update_fragment_splits(&fragment_splits)
             .await
     }
 

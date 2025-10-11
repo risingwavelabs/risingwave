@@ -476,6 +476,18 @@ fn build_fragment(
                     .add(FragmentTypeFlag::VectorIndexWrite);
             }
 
+            NodeBody::UpstreamSinkUnion(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::UpstreamSinkUnion);
+            }
+
+            NodeBody::LocalityProvider(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::LocalityProvider);
+            }
+
             _ => {}
         };
 

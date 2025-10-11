@@ -35,6 +35,7 @@ use pgwire::pg_server::{
     UserAuthenticator,
 };
 use pgwire::types::{Format, FormatIterator};
+use prometheus_http_query::Client as PrometheusClient;
 use rand::RngCore;
 use risingwave_batch::monitor::{BatchSpillMetrics, GLOBAL_BATCH_SPILL_METRICS};
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -82,13 +83,13 @@ use risingwave_rpc_client::{
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
-use tracing::log::error;
+use tracing::{error, info};
 
 use self::cursor_manager::CursorManager;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
@@ -186,6 +187,12 @@ pub(crate) struct FrontendEnv {
 
     /// address of the serverless backfill controller.
     serverless_backfill_controller_addr: String,
+
+    /// Prometheus client for querying metrics.
+    prometheus_client: Option<PrometheusClient>,
+
+    /// The additional selector used when querying Prometheus.
+    prometheus_selector: String,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -269,6 +276,8 @@ impl FrontendEnv {
             compute_runtime,
             mem_context: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
+            prometheus_client: None,
+            prometheus_selector: String::new(),
         }
     }
 
@@ -308,7 +317,7 @@ impl FrontendEnv {
                 internal_rpc_host_addr: internal_rpc_host_addr.to_string(),
                 ..Default::default()
             },
-            &config.meta,
+            Arc::new(config.meta.clone()),
         )
         .await;
 
@@ -487,6 +496,28 @@ impl FrontendEnv {
             batch_memory_limit as u64,
         );
 
+        // Initialize Prometheus client if endpoint is provided
+        let prometheus_client = if let Some(ref endpoint) = opts.prometheus_endpoint {
+            match PrometheusClient::try_from(endpoint.as_str()) {
+                Ok(client) => {
+                    info!("Prometheus client initialized with endpoint: {}", endpoint);
+                    Some(client)
+                }
+                Err(e) => {
+                    error!(
+                        error = %e.as_report(),
+                        "failed to initialize Prometheus client",
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Initialize Prometheus selector
+        let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
+
         info!(
             "Frontend  total_memory: {} batch_memory: {}",
             convert(total_memory_bytes as _),
@@ -522,6 +553,8 @@ impl FrontendEnv {
                 creating_streaming_job_tracker,
                 compute_runtime,
                 mem_context,
+                prometheus_client,
+                prometheus_selector,
             },
             join_handles,
             shutdown_senders,
@@ -584,6 +617,16 @@ impl FrontendEnv {
 
     pub fn sbc_address(&self) -> &String {
         &self.serverless_backfill_controller_addr
+    }
+
+    /// Get a reference to the Prometheus client if available.
+    pub fn prometheus_client(&self) -> Option<&PrometheusClient> {
+        self.prometheus_client.as_ref()
+    }
+
+    /// Get the Prometheus selector string.
+    pub fn prometheus_selector(&self) -> &str {
+        &self.prometheus_selector
     }
 
     pub fn server_address(&self) -> &HostAddr {

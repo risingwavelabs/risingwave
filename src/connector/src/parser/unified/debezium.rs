@@ -191,6 +191,7 @@ macro_rules! jsonb_access_field {
 pub fn parse_schema_change(
     accessor: &impl Access,
     source_id: u32,
+    source_name: &str,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
@@ -203,7 +204,7 @@ pub fn parse_schema_change(
         .to_string();
 
     if let Some(ScalarRefImpl::List(table_changes)) = accessor
-        .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?
+        .access(&[TABLE_CHANGES], &DataType::Jsonb.list())?
         .to_datum_ref()
     {
         for datum in table_changes.iter() {
@@ -211,8 +212,10 @@ pub fn parse_schema_change(
                 Some(ScalarRefImpl::Jsonb(jsonb)) => jsonb,
                 _ => unreachable!(""),
             };
-            let id = jsonb_access_field!(jsonb, "id", string);
+            let id: String = jsonb_access_field!(jsonb, "id", string);
             let ty = jsonb_access_field!(jsonb, "type", string);
+
+            let table_name = id.trim_matches('"').to_owned();
             let ddl_type: TableChangeType = ty.as_str().into();
             if matches!(ddl_type, TableChangeType::Create | TableChangeType::Drop) {
                 tracing::debug!("skip table schema change for create/drop command");
@@ -237,14 +240,24 @@ pub fn parse_schema_change(
                                 DataType::Varchar
                             } else {
                                 match ty {
-                                    Some(ty) => pg_type_to_rw_type(&ty).map_err(|err| {
-                                        tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
-                                        AccessError::UnsupportedType {
-                                            ty: type_name.clone(),
+                                    Some(ty) => match pg_type_to_rw_type(&ty) {
+                                        Ok(data_type) => data_type,
+                                        Err(err) => {
+                                            tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
+                                            return Err(AccessError::CdcAutoSchemaChangeError {
+                                                ty: type_name,
+                                                table_name: format!(
+                                                    "{}.{}",
+                                                    source_name, table_name
+                                                ),
+                                            });
                                         }
-                                    })?,
+                                    },
                                     None => {
-                                        Err(AccessError::UnsupportedType { ty: type_name.clone() })?
+                                        return Err(AccessError::CdcAutoSchemaChangeError {
+                                            ty: type_name,
+                                            table_name: format!("{}.{}", source_name, table_name),
+                                        });
                                     }
                                 }
                             }
@@ -252,14 +265,21 @@ pub fn parse_schema_change(
                         ConnectorProperties::MysqlCdc(_) => {
                             let ty = type_name_to_mysql_type(type_name.as_str());
                             match ty {
-                                Some(ty) => mysql_type_to_rw_type(&ty).map_err(|err| {
-                                    tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
-                                    AccessError::UnsupportedType {
-                                        ty: type_name.clone(),
+                                Some(ty) => match mysql_type_to_rw_type(&ty) {
+                                    Ok(data_type) => data_type,
+                                    Err(err) => {
+                                        tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
+                                        return Err(AccessError::CdcAutoSchemaChangeError {
+                                            ty: type_name,
+                                            table_name: format!("{}.{}", source_name, table_name),
+                                        });
                                     }
-                                })?,
+                                },
                                 None => {
-                                    Err(AccessError::UnsupportedType { ty: type_name })?
+                                    return Err(AccessError::CdcAutoSchemaChangeError {
+                                        ty: type_name,
+                                        table_name: format!("{}.{}", source_name, table_name),
+                                    });
                                 }
                             }
                         }
@@ -756,13 +776,14 @@ pub fn extract_bson_field(
         }
 
         DataType::List(list_type) => {
+            let elem_type = list_type.elem();
             let Some(d_array) = datum.as_array() else {
                 return Err(type_error(datum));
             };
 
-            let mut builder = list_type.create_array_builder(d_array.len());
+            let mut builder = elem_type.create_array_builder(d_array.len());
             for item in d_array {
-                builder.append(extract_bson_field(list_type, item, None)?);
+                builder.append(extract_bson_field(elem_type, item, None)?);
             }
             Some(ScalarImpl::from(ListValue::new(builder.finish())))
         }

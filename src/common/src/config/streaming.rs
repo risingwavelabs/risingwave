@@ -92,6 +92,10 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::unsafe_stream_extreme_cache_size")]
     pub unsafe_extreme_cache_size: usize,
 
+    /// Minimum cache size for TopN cache per group key.
+    #[serde(default = "default::developer::stream_topn_cache_min_capacity")]
+    pub topn_cache_min_capacity: usize,
+
     /// The maximum size of the chunk produced by executor at a time.
     #[serde(default = "default::developer::stream_chunk_size")]
     pub chunk_size: usize,
@@ -239,6 +243,11 @@ pub struct StreamingDeveloperConfig {
     /// Only takes effect when `default_enable_mem_preload_state_table` is true.
     #[serde(default)]
     pub mem_preload_state_table_ids_blacklist: Vec<u32>,
+
+    /// Eliminate unnecessary updates aggressively, even if it impacts performance. Enable this
+    /// only if it's confirmed that no-op updates are causing significant streaming amplification.
+    #[serde(default)]
+    pub aggressive_noop_update_elimination: bool,
 }
 
 pub mod default {

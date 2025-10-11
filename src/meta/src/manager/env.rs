@@ -536,7 +536,7 @@ impl MetaSrvEnv {
         &self.await_tree_reg
     }
 
-    pub(crate) fn shared_actor_infos(&self) -> &SharedActorInfos {
+    pub fn shared_actor_infos(&self) -> &SharedActorInfos {
         &self.shared_actor_info
     }
 

@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use risingwave_connector::WithPropertiesExt;
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
+use risingwave_connector::source::base::ConnectorProperties;
 
 use super::*;
 
@@ -357,6 +359,14 @@ impl ConnectorSourceWorker {
                 .map(|split| (split.id(), split))
                 .collect(),
         );
+        // Call enumerator's `on_tick` method for monitoring tasks
+        if let Err(e) = self.enumerator.on_tick().await {
+            tracing::error!(
+                "Failed to execute enumerator `on_tick` for source {}: {}",
+                self.source_id,
+                e.as_report()
+            );
+        }
 
         Ok(())
     }
