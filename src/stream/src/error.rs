@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::ArrayError;
 use risingwave_common::error::tonic::extra::{Score, ScoredError};
 use risingwave_common::secret::SecretError;
 use risingwave_connector::error::ConnectorError;
@@ -50,13 +49,6 @@ pub enum ErrorKind {
         #[from]
         #[backtrace]
         ExprError,
-    ),
-
-    #[error("Array/Chunk error: {0}")]
-    Array(
-        #[from]
-        #[backtrace]
-        ArrayError,
     ),
 
     #[error("Executor error: {0}")]
@@ -167,12 +159,20 @@ impl StreamError {
                 // Executor errors first.
                 ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
 
+                // Uncategorized: try to downcast to known types and reuse their scores. Fallback to 1000.
+                ErrorKind::Uncategorized(e) => {
+                    let root_error = e.root_cause();
+                    if let Some(e) = root_error.downcast_ref::<StreamError>() {
+                        stream_error_score(e)
+                    } else if let Some(ee) = root_error.downcast_ref::<StreamExecutorError>() {
+                        2000 + stream_executor_error_score(ee)
+                    } else {
+                        1000
+                    }
+                }
+
                 // Then other errors.
-                ErrorKind::Uncategorized(_)
-                | ErrorKind::Storage(_)
-                | ErrorKind::Expression(_)
-                | ErrorKind::Array(_)
-                | ErrorKind::Secret(_) => 1000,
+                ErrorKind::Storage(_) | ErrorKind::Expression(_) | ErrorKind::Secret(_) => 1000,
             }
         }
 
