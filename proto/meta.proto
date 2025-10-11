@@ -539,7 +539,9 @@ message MetaSnapshot {
   reserved "parallel_unit_mappings";
   GetSessionParamsResponse session_params = 20;
   repeated catalog.Secret secrets = 23;
-  uint64 compute_node_total_cpu_count = 24;
+  reserved 24;
+  reserved "compute_node_total_cpu_count";
+  common.ClusterResource cluster_resource = 25;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
@@ -609,12 +611,14 @@ message SubscribeResponse {
     FragmentWorkerSlotMapping streaming_worker_slot_mapping = 27;
     FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
     catalog.Secret secret = 29;
-    uint64 compute_node_total_cpu_count = 30;
+    common.ClusterResource cluster_resource = 31;
   }
   reserved 12;
   reserved "parallel_unit_mapping";
   reserved 23;
   reserved "serving_parallel_unit_mappings";
+  reserved 30;
+  reserved "compute_node_total_cpu_count";
 }
 
 service NotificationService {

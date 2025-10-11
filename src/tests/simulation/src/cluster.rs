@@ -338,6 +338,15 @@ default_parallelism = {default_parallelism}
             ..Default::default()
         }
     }
+
+    /// Returns the total number of cores in the cluster.
+    pub fn cores(&self) -> usize {
+        self.compute_nodes * self.compute_node_cores
+        // Nodes other than compute nodes are default to 1 core.
+            + self.frontend_nodes
+            + self.meta_nodes
+            + self.compactor_nodes
+    }
 }
 
 /// A risingwave cluster.

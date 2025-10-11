@@ -114,8 +114,8 @@ impl ObserverState for FrontendObserverNode {
             Info::Recovery(_) => {
                 self.compute_client_pool.invalidate_all();
             }
-            Info::ComputeNodeTotalCpuCount(count) => {
-                LicenseManager::get().update_cpu_core_count(count as _);
+            Info::ClusterResource(resource) => {
+                LicenseManager::get().update_cluster_resource(resource);
             }
         }
     }
@@ -150,7 +150,7 @@ impl ObserverState for FrontendObserverNode {
             session_params,
             version,
             secrets,
-            compute_node_total_cpu_count,
+            cluster_resource,
         } = snapshot;
 
         for db in databases {
@@ -208,7 +208,7 @@ impl ObserverState for FrontendObserverNode {
         *self.session_params.write() =
             serde_json::from_str(&session_params.unwrap().params).unwrap();
         LocalSecretManager::global().init_secrets(secrets);
-        LicenseManager::get().update_cpu_core_count(compute_node_total_cpu_count as _);
+        LicenseManager::get().update_cluster_resource(cluster_resource.unwrap());
     }
 }
 
