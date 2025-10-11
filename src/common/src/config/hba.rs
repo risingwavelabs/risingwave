@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// RisingWave HBA (Host-Based Authentication) configuration, similar to PostgreSQL's `pg_hba.conf`
 /// This determines which authentication method to use for each connection.
@@ -66,6 +66,7 @@ pub struct HbaEntry {
     /// Authentication method
     pub auth_method: AuthMethod,
     /// Authentication method options
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub auth_options: HashMap<String, String>,
 }
 
@@ -83,7 +84,7 @@ pub enum ConnectionType {
     HostNoSsl,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AddressPattern {
     /// IP address with CIDR notation (e.g., "192.168.1.0/24")
     Cidr(String),
@@ -91,6 +92,35 @@ pub enum AddressPattern {
     Hostname(String),
     /// Keyword "all"
     All,
+}
+
+impl Serialize for AddressPattern {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            AddressPattern::All => serializer.serialize_str("all"),
+            AddressPattern::Cidr(s) => serializer.serialize_str(s),
+            AddressPattern::Hostname(s) => serializer.serialize_str(s),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AddressPattern {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s == "all" {
+            Ok(AddressPattern::All)
+        } else if s.contains('/') {
+            Ok(AddressPattern::Cidr(s))
+        } else {
+            Ok(AddressPattern::Hostname(s))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
