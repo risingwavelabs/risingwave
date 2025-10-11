@@ -31,6 +31,7 @@ use iceberg::io::{
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use phf::{Set, phf_set};
 use risingwave_common::bail;
+use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 use serde_with::serde_as;
@@ -182,7 +183,12 @@ impl IcebergCommon {
 
     pub fn headers(&self) -> ConnectorResult<HashMap<String, String>> {
         let mut headers = HashMap::new();
-        headers.insert("User-Agent".to_owned(), "RisingWave".to_owned());
+        let user_agent = match Deployment::current() {
+            Deployment::Ci => "RisingWave(CI)".to_owned(),
+            Deployment::Cloud => "RisingWave(Cloud)".to_owned(),
+            Deployment::Other => "RisingWave(OSS)".to_owned(),
+        };
+        headers.insert("User-Agent".to_owned(), user_agent);
         if let Some(header) = &self.header {
             for pair in header.split(';') {
                 let mut parts = pair.split('=');
