@@ -63,15 +63,15 @@ use risingwave_pb::stream_plan::{
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType, ModelTrait,
-    PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait, Value,
+    ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, PaginatorTrait,
+    QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::MetaResult;
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
-use crate::controller::catalog::{CatalogController, CatalogControllerInner};
+use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,

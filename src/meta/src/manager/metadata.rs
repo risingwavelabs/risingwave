@@ -31,15 +31,13 @@ use tokio::sync::oneshot;
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::{Reschedule, SharedFragmentInfo};
+use crate::barrier::SharedFragmentInfo;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{
-    ActorId, ClusterId, FragmentId, StreamActor, StreamJobFragments, SubscriptionId,
-};
-use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
+use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
+use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 
 #[derive(Clone)]
@@ -491,6 +489,11 @@ impl MetadataManager {
             .catalog_controller
             .get_downstream_fragments(job_id as _)
             .await?;
+
+        let actors = actors
+            .into_iter()
+            .map(|(actor, worker)| (actor as u32, worker))
+            .collect();
 
         Ok((fragments, actors))
     }
