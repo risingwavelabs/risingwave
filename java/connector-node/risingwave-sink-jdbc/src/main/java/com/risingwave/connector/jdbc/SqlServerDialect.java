@@ -64,13 +64,14 @@ public class SqlServerDialect implements JdbcDialect {
     @Override
     public Optional<String> getUpsertStatement(
             SchemaTableName schemaTableName,
-            List<String> fieldNames,
-            List<String> primaryKeyFields) {
+            TableSchema tableSchema,
+            List<String> uniqueKeyFields) {
+        List<String> fieldNames = List.of(tableSchema.getColumnNames());
         String allColNames =
                 fieldNames.stream().map(this::quoteIdentifier).collect(Collectors.joining(", "));
         String placeholders = fieldNames.stream().map(f -> "?").collect(Collectors.joining(", "));
         String pkMatch =
-                primaryKeyFields.stream()
+                uniqueKeyFields.stream()
                         .map(
                                 identifier ->
                                         "[SOURCE].["
