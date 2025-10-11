@@ -8,6 +8,11 @@ on:
         required: true
         type: string
         default: 'unlabeled'
+      skip_target_amd64:
+        description: 'Skip x64 and build arm only'
+        required: false
+        type: boolean
+        default: false
       push_dockerhub:
         description: 'Whether to push to DockerHub'
         required: false
@@ -51,6 +56,10 @@ jobs:
           IMAGE_TAG="v$VERSION--$LABEL--$COMMIT_SHA--$NO_SLASH_BRANCH_NAME"
           echo "IMAGE_TAG=$IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+          SKIP_TARGET_AMD64="${{ inputs.skip_target_amd64 }}"
+          echo "SKIP_TARGET_AMD64=$SKIP_TARGET_AMD64"
+          echo "SKIP_TARGET_AMD64=$SKIP_TARGET_AMD64" >> $GITHUB_ENV
 
           # Always set PUSH_DOCKERHUB based on input
           if [[ "${{ github.event.inputs.push_dockerhub }}" == "true" ]]; then
