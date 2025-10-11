@@ -585,7 +585,7 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
-        ExprType::ArrayContains | ExprType::ArrayContained => {
+        ExprType::ArrayContains | ExprType::ArrayContained | ExprType::ArrayOverlap => {
             ensure_arity!("array_contains/array_contained", | inputs | == 2);
             let left_type = (!inputs[0].is_untyped()).then(|| inputs[0].return_type());
             let right_type = (!inputs[1].is_untyped()).then(|| inputs[1].return_type());
