@@ -716,6 +716,7 @@ pub struct CatalogStats {
     pub function_num: u64,
     pub streaming_job_num: u64,
     pub actor_num: u64,
+    pub database_num: u64,
 }
 
 impl CatalogControllerInner {
@@ -771,6 +772,7 @@ impl CatalogControllerInner {
         let function_num = Function::find().count(&self.db).await?;
         let streaming_job_num = StreamingJob::find().count(&self.db).await?;
         let actor_num = Actor::find().count(&self.db).await?;
+        let database_num = Database::find().count(&self.db).await?;
 
         Ok(CatalogStats {
             table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
@@ -783,6 +785,7 @@ impl CatalogControllerInner {
             function_num,
             streaming_job_num,
             actor_num,
+            database_num
         })
     }
 
