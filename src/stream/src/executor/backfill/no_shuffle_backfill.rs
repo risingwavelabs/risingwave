@@ -460,7 +460,7 @@ where
                         Mutation::Resume => {
                             global_pause = false;
                         }
-                        Mutation::StartFragmentBackfill { fragment_ids } if backfill_paused => {
+                        Mutation::StartFragmentBackfill { fragment_ids, .. } if backfill_paused => {
                             if fragment_ids.contains(&self.fragment_id) {
                                 backfill_paused = false;
                             }

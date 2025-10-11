@@ -397,8 +397,10 @@ pub enum Command {
     ConnectorPropsChange(ConnectorPropsChange),
 
     /// `StartFragmentBackfill` command will trigger backfilling for specified scans by `fragment_id`.
+    /// The `truncate_locality_fragment_ids` are the locality backfill fragments that need to truncate their state.
     StartFragmentBackfill {
         fragment_ids: Vec<FragmentId>,
+        truncate_locality_fragment_ids: Vec<FragmentId>,
     },
 
     /// `Refresh` command generates a barrier to refresh a table by truncating state
@@ -1318,11 +1320,15 @@ impl Command {
                     },
                 ))
             }
-            Command::StartFragmentBackfill { fragment_ids } => Some(
-                Mutation::StartFragmentBackfill(StartFragmentBackfillMutation {
+            Command::StartFragmentBackfill {
+                fragment_ids,
+                truncate_locality_fragment_ids,
+            } => Some(Mutation::StartFragmentBackfill(
+                StartFragmentBackfillMutation {
                     fragment_ids: fragment_ids.clone(),
-                }),
-            ),
+                    truncate_locality_fragment_ids: truncate_locality_fragment_ids.clone(),
+                },
+            )),
             Command::Refresh {
                 table_id,
                 associated_source_id,
