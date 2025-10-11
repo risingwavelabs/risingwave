@@ -86,6 +86,13 @@ pub struct SourceMetrics {
 
     pub parquet_source_skip_row_count: LabelGuardedIntCounterVec,
     pub file_source_input_row_count: LabelGuardedIntCounterVec,
+
+    // kinesis source
+    pub kinesis_throughput_exceeded_count: LabelGuardedIntCounterVec,
+    pub kinesis_timeout_count: LabelGuardedIntCounterVec,
+    pub kinesis_rebuild_shard_iter_count: LabelGuardedIntCounterVec,
+    pub kinesis_early_terminate_shard_count: LabelGuardedIntCounterVec,
+    pub kinesis_lag_latency_ms: LabelGuardedHistogramVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -153,6 +160,47 @@ impl SourceMetrics {
             registry
         )
         .unwrap();
+
+        let kinesis_throughput_exceeded_count = register_guarded_int_counter_vec_with_registry!(
+            "kinesis_throughput_exceeded_count",
+            "Total number of times throughput exceeded in kinesis source",
+            &["source_id", "source_name", "fragment_id", "shard_id"],
+            registry
+        )
+        .unwrap();
+
+        let kinesis_timeout_count = register_guarded_int_counter_vec_with_registry!(
+            "kinesis_timeout_count",
+            "Total number of times timeout in kinesis source",
+            &["source_id", "source_name", "fragment_id", "shard_id"],
+            registry
+        )
+        .unwrap();
+
+        let kinesis_rebuild_shard_iter_count = register_guarded_int_counter_vec_with_registry!(
+            "kinesis_rebuild_shard_iter_count",
+            "Total number of times rebuild shard iter in kinesis source",
+            &["source_id", "source_name", "fragment_id", "shard_id"],
+            registry
+        )
+        .unwrap();
+
+        let kinesis_early_terminate_shard_count = register_guarded_int_counter_vec_with_registry!(
+            "kinesis_early_terminate_shard_count",
+            "Total number of times early terminate shard in kinesis source",
+            &["source_id", "source_name", "fragment_id", "shard_id"],
+            registry
+        )
+        .unwrap();
+
+        let kinesis_lag_latency_ms = register_guarded_histogram_vec_with_registry!(
+            "kinesis_lag_latency_ms",
+            "Lag latency in kinesis source",
+            &["source_id", "source_name", "fragment_id", "shard_id"],
+            registry
+        )
+        .unwrap();
+
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,
@@ -161,6 +209,12 @@ impl SourceMetrics {
             direct_cdc_event_lag_latency,
             parquet_source_skip_row_count,
             file_source_input_row_count,
+
+            kinesis_throughput_exceeded_count,
+            kinesis_timeout_count,
+            kinesis_rebuild_shard_iter_count,
+            kinesis_early_terminate_shard_count,
+            kinesis_lag_latency_ms,
         }
     }
 }

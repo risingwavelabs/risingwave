@@ -19,9 +19,6 @@ use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::object::PbObjectInfo;
-use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
-use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -249,9 +246,9 @@ impl CommandContext {
                     .await?;
 
                 barrier_manager_context
-                    .source_manager
-                    .apply_source_change(SourceChange::SplitChange(assignment.clone()))
-                    .await;
+                    .metadata_manager
+                    .update_fragment_splits(assignment)
+                    .await?;
             }
 
             Command::DropStreamingJobs {
@@ -262,7 +259,7 @@ impl CommandContext {
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
-                let tables = barrier_manager_context
+                barrier_manager_context
                     .metadata_manager
                     .catalog_controller
                     .complete_dropped_tables(
@@ -270,23 +267,6 @@ impl CommandContext {
                             .iter()
                             .map(|id| id.table_id as _),
                     )
-                    .await;
-                let objects = tables
-                    .into_iter()
-                    .map(|t| PbObject {
-                        object_info: Some(PbObjectInfo::Table(t)),
-                    })
-                    .collect();
-                let group = PbInfo::ObjectGroup(PbObjectGroup { objects });
-                barrier_manager_context
-                    .env
-                    .notification_manager()
-                    .notify_hummock(Operation::Delete, group.clone())
-                    .await;
-                barrier_manager_context
-                    .env
-                    .notification_manager()
-                    .notify_compactor(Operation::Delete, group)
                     .await;
             }
             Command::ConnectorPropsChange(obj_id_map_props) => {
@@ -384,13 +364,17 @@ impl CommandContext {
                 let source_change = SourceChange::CreateJob {
                     added_source_fragments: stream_job_fragments.stream_source_fragments(),
                     added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
-                    split_assignment: init_split_assignment.clone(),
                 };
 
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(&info.init_split_assignment)
+                    .await?;
             }
             Command::RescheduleFragment {
                 reschedules,
@@ -401,6 +385,18 @@ impl CommandContext {
                     .scale_controller
                     .post_apply_reschedule(reschedules, post_updates)
                     .await?;
+
+                let fragment_splits = reschedules
+                    .iter()
+                    .map(|(fragment_id, reschedule)| {
+                        (*fragment_id, reschedule.actor_splits.clone())
+                    })
+                    .collect();
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(&fragment_splits)
+                    .await?;
             }
 
             Command::ReplaceStreamJob(
@@ -408,9 +404,9 @@ impl CommandContext {
                     old_fragments,
                     new_fragments,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
                     to_drop_state_table_ids,
                     auto_refresh_schema_sinks,
+                    init_split_assignment,
                     ..
                 },
             ) => {
@@ -449,13 +445,17 @@ impl CommandContext {
                     .handle_replace_job(
                         old_fragments,
                         new_fragments.stream_source_fragments(),
-                        init_split_assignment.clone(),
                         replace_plan,
                     )
                     .await;
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
+                    .await?;
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(init_split_assignment)
                     .await?;
             }
 

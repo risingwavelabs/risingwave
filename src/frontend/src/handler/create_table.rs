@@ -92,7 +92,7 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, MAX_SNAPSHOTS_NUM,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
     SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     parse_partition_by_exprs,
@@ -1939,6 +1939,26 @@ pub async fn create_iceberg_engine_table(
         );
     }
 
+    if let Some(max_snapshots_num_before_compaction) =
+        handler_args.with_options.get(MAX_SNAPSHOTS_NUM)
+    {
+        let max_snapshots_num_before_compaction = max_snapshots_num_before_compaction
+            .parse::<u32>()
+            .map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "max_snapshots_num_before_compaction must be a positive integer: {}",
+                    max_snapshots_num_before_compaction
+                ))
+            })?;
+        if max_snapshots_num_before_compaction == 0 {
+            bail!("max_snapshots_num_before_compaction must be a positive integer: 0");
+        }
+        sink_with.insert(
+            MAX_SNAPSHOTS_NUM.to_owned(),
+            max_snapshots_num_before_compaction.to_string(),
+        );
+    }
+
     let partition_by = handler_args
         .with_options
         .get("partition_by")
@@ -2336,7 +2356,7 @@ fn bind_webhook_info(
         column_name: columns_defs[0].name.real_value(),
         secret_name,
     };
-    let mut binder = Binder::new_for_ddl_with_secure_compare(session, secure_compare_context);
+    let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
     let expr = binder.bind_expr(&signature_expr)?;
 
     // validate expr, ensuring it is SECURE_COMPARE()

@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use anyhow::Context;
+use either::Either;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
@@ -665,6 +666,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         self.flush_data(barrier.epoch).await?;
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+
+                    // We don't include the time post yielding barrier because the vnode update
+                    // is a one-off and rare operation.
+                    barrier_join_match_duration_ns
+                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of both sides if asked.
@@ -689,9 +695,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     ] {
                         join_cached_entry_count.set(ht.entry_count() as i64);
                     }
-
-                    barrier_join_match_duration_ns
-                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                 }
             }
             start_time = Instant::now();
@@ -1010,7 +1013,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         let mut entry_state_count = 0;
 
         let mut degree = 0;
-        let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
+        let mut append_only_matched_row = None;
         let mut matched_rows_to_clean = vec![];
 
         macro_rules! match_row {
@@ -1019,9 +1022,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 $degree_table:expr,
                 $matched_row:expr,
                 $matched_row_ref:expr,
-                $from_cache:literal
+                $from_cache:literal,
+                $map_output:expr,
             ) => {
-                Self::handle_match_row::<SIDE, { JOIN_OP }, { $from_cache }>(
+                Self::handle_match_row::<_, _, SIDE, { JOIN_OP }, { $from_cache }>(
                     row,
                     $matched_row,
                     $matched_row_ref,
@@ -1036,6 +1040,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     append_only_optimize,
                     &mut append_only_matched_row,
                     &mut matched_rows_to_clean,
+                    $map_output,
                 )
             };
         }
@@ -1064,7 +1069,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         match_degree_state,
                         matched_row,
                         Some(matched_row_ref),
-                        true
+                        true,
+                        Either::Left,
                     )
                     .await
                     {
@@ -1100,7 +1106,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         degree_table,
                         matched_row,
                         matched_row_ref,
-                        false
+                        false,
+                        Either::Right,
                     )
                     .await
                     {
@@ -1161,12 +1168,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
     #[inline]
     async fn handle_match_row<
         'a,
+        R: Row,  // input row type
+        RO: Row, // output row type
         const SIDE: SideTypePrimitive,
         const JOIN_OP: JoinOpPrimitive,
         const MATCHED_ROWS_FROM_CACHE: bool,
     >(
         update_row: RowRef<'a>,
-        mut matched_row: JoinRow<OwnedRow>,
+        mut matched_row: JoinRow<R>,
         mut matched_row_cache_ref: Option<&mut E::EncodedRow>,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
         match_order_key_indices: &[usize],
@@ -1177,8 +1186,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         update_row_degree: &mut u64,
         useful_state_clean_columns: &[(usize, &'a Watermark)],
         append_only_optimize: bool,
-        append_only_matched_row: &mut Option<JoinRow<OwnedRow>>,
-        matched_rows_to_clean: &mut Vec<JoinRow<OwnedRow>>,
+        append_only_matched_row: &mut Option<JoinRow<RO>>,
+        matched_rows_to_clean: &mut Vec<JoinRow<RO>>,
+        map_output: impl Fn(R) -> RO,
     ) -> Option<StreamChunk> {
         let mut need_state_clean = false;
         let mut chunk_opt = None;
@@ -1255,12 +1265,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             // Since join key contains pk and pk is unique, there should be only
             // one row if matched.
             assert!(append_only_matched_row.is_none());
-            *append_only_matched_row = Some(matched_row);
+            *append_only_matched_row = Some(matched_row.map(map_output));
         } else if need_state_clean {
             // `append_only_optimize` and `need_state_clean` won't both be true.
             // 'else' here is only to suppress compiler error, otherwise
             // `matched_row` will be moved twice.
-            matched_rows_to_clean.push(matched_row);
+            matched_rows_to_clean.push(matched_row.map(map_output));
         }
 
         chunk_opt

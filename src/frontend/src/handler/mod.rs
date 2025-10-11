@@ -118,7 +118,9 @@ pub mod vacuum;
 pub mod variable;
 mod wait;
 
-pub use alter_table_column::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
+pub use alter_table_column::{
+    fetch_table_catalog_for_alter, get_new_table_definition_for_cdc_table, get_replace_table_plan,
+};
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
@@ -599,6 +601,15 @@ pub async fn handle(
         | Statement::Insert { .. }
         | Statement::Delete { .. }
         | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
+        Statement::Copy {
+            entity: CopyEntity::Query(query),
+            target: CopyTarget::Stdout,
+        } => {
+            let response =
+                query::handle_query(handler_args, Statement::Query(query), vec![Format::Text])
+                    .await?;
+            Ok(response.into_copy_query_to_stdout())
+        }
         Statement::CreateView {
             materialized,
             if_not_exists,

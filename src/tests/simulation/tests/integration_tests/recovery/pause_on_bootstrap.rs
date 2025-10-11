@@ -106,7 +106,7 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
 
     // Resume the cluster.
     resume_by.resume(&mut cluster).await?;
-    sleep(Duration::from_secs(10)).await;
+    sleep(Duration::from_secs(30)).await;
 
     // The source should be resumed.
     let new_count = cluster.run(SELECT).await?;

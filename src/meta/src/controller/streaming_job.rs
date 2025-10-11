@@ -30,7 +30,7 @@ use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_f
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::source::{ConnectorProperties, SplitImpl};
+use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
@@ -410,7 +410,6 @@ impl CatalogController {
             stream_job_fragments.stream_job_id().table_id as _,
             || stream_job_fragments.fragments.values(),
             &stream_job_fragments.actor_status,
-            &stream_job_fragments.actor_splits,
             &stream_job_fragments.downstreams,
             for_replace,
             Some(streaming_job),
@@ -429,16 +428,19 @@ impl CatalogController {
         job_id: ObjectId,
         get_fragments: impl Fn() -> I + 'a,
         actor_status: &BTreeMap<crate::model::ActorId, PbActorStatus>,
-        actor_splits: &HashMap<crate::model::ActorId, Vec<SplitImpl>>,
         downstreams: &FragmentDownstreamRelation,
         for_replace: bool,
         creating_streaming_job: Option<&'a StreamingJob>,
     ) -> MetaResult<()> {
+        // NOTE: we don't need to pass actor splits for now
+        // splits field will be updated during the post_collect_job_fragments stage
+        let empty_actor_splits = Default::default();
+
         let fragment_actors = Self::extract_fragment_and_actors_from_fragments(
             job_id,
             get_fragments(),
             actor_status,
-            actor_splits,
+            &empty_actor_splits,
         )?;
         let inner = self.inner.write().await;
 
@@ -652,23 +654,25 @@ impl CatalogController {
             }
         }
 
-        let dropped_tables = Table::find()
-            .find_also_related(Object)
-            .filter(
-                table::Column::TableId.is_in(
-                    internal_table_ids
-                        .iter()
-                        .cloned()
-                        .chain(table_obj.iter().map(|t| t.table_id as _)),
-                ),
-            )
-            .all(&txn)
-            .await?
-            .into_iter()
-            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
-        inner
-            .dropped_tables
-            .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
+        if is_cancelled {
+            let dropped_tables = Table::find()
+                .find_also_related(Object)
+                .filter(
+                    table::Column::TableId.is_in(
+                        internal_table_ids
+                            .iter()
+                            .cloned()
+                            .chain(table_obj.iter().map(|t| t.table_id as _)),
+                    ),
+                )
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
+            inner
+                .dropped_tables
+                .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
+        }
 
         if need_notify {
             let obj: Option<PartialObject> = Object::find_by_id(job_id)

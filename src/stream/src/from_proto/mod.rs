@@ -30,6 +30,7 @@ mod group_top_n;
 mod hash_agg;
 mod hash_join;
 mod hop_window;
+mod locality_provider;
 mod lookup;
 mod lookup_union;
 mod materialized_exprs;
@@ -85,6 +86,7 @@ use self::group_top_n::GroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
 use self::hop_window::*;
+use self::locality_provider::*;
 use self::lookup::*;
 use self::lookup_union::*;
 use self::materialized_exprs::MaterializedExprsExecutorBuilder;
@@ -201,5 +203,6 @@ pub async fn create_executor(
         NodeBody::MaterializedExprs => MaterializedExprsExecutorBuilder,
         NodeBody::VectorIndexWrite => VectorIndexWriteExecutorBuilder,
         NodeBody::UpstreamSinkUnion => UpstreamSinkUnionExecutorBuilder,
+        NodeBody::LocalityProvider => LocalityProviderBuilder,
     }
 }

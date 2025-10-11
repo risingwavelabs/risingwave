@@ -380,8 +380,7 @@ impl StreamManagerService for StreamServiceImpl {
         let actor_locations = self
             .metadata_manager
             .catalog_controller
-            .list_actor_locations()
-            .await?;
+            .list_actor_locations()?;
         let states = actor_locations
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {
@@ -425,8 +424,9 @@ impl StreamManagerService for StreamServiceImpl {
         let SourceManagerRunningInfo {
             source_fragments,
             backfill_fragments,
-            mut actor_splits,
         } = self.stream_manager.source_manager.get_running_info().await;
+
+        let mut actor_splits = self.env.shared_actor_infos().list_assignments();
 
         let source_actors = self
             .metadata_manager

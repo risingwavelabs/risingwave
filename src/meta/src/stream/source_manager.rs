@@ -35,7 +35,7 @@ use risingwave_connector::source::{
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-pub use split_assignment::SplitState;
+pub use split_assignment::{SplitDiffOptions, SplitState, reassign_splits};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, MutexGuard, oneshot};
@@ -46,8 +46,8 @@ pub use worker::create_source_worker;
 use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
 
 use crate::MetaResult;
-use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan};
-use crate::manager::MetadataManager;
+use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan, SharedActorInfos};
+use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
 
@@ -78,15 +78,12 @@ pub struct SourceManagerCore {
     /// `source_id` -> `(fragment_id, upstream_fragment_id)`
     backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
 
-    /// Splits assigned per actor,
-    /// incl. both `Source` and `SourceBackfill`.
-    actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    env: MetaSrvEnv,
 }
 
 pub struct SourceManagerRunningInfo {
     pub source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
     pub backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
-    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 impl SourceManagerCore {
@@ -95,14 +92,14 @@ impl SourceManagerCore {
         managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
-        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+        env: MetaSrvEnv,
     ) -> Self {
         Self {
             metadata_manager,
             managed_sources,
             source_fragments,
             backfill_fragments,
-            actor_splits,
+            env,
         }
     }
 
@@ -111,8 +108,6 @@ impl SourceManagerCore {
         let mut added_source_fragments = Default::default();
         let mut added_backfill_fragments = Default::default();
         let mut finished_backfill_fragments = Default::default();
-        let mut split_assignment = Default::default();
-        let mut dropped_actors = Default::default();
         let mut fragment_replacements = Default::default();
         let mut dropped_source_fragments = Default::default();
         let mut dropped_source_ids = Default::default();
@@ -123,38 +118,28 @@ impl SourceManagerCore {
             SourceChange::CreateJob {
                 added_source_fragments: added_source_fragments_,
                 added_backfill_fragments: added_backfill_fragments_,
-                split_assignment: split_assignment_,
             } => {
                 added_source_fragments = added_source_fragments_;
                 added_backfill_fragments = added_backfill_fragments_;
-                split_assignment = split_assignment_;
             }
             SourceChange::CreateJobFinished {
                 finished_backfill_fragments: finished_backfill_fragments_,
             } => {
                 finished_backfill_fragments = finished_backfill_fragments_;
             }
-            SourceChange::SplitChange(split_assignment_) => {
-                split_assignment = split_assignment_;
-            }
+
             SourceChange::DropMv {
                 dropped_source_fragments: dropped_source_fragments_,
-                dropped_actors: dropped_actors_,
             } => {
                 dropped_source_fragments = dropped_source_fragments_;
-                dropped_actors = dropped_actors_;
             }
             SourceChange::ReplaceJob {
                 dropped_source_fragments: dropped_source_fragments_,
-                dropped_actors: dropped_actors_,
                 added_source_fragments: added_source_fragments_,
-                split_assignment: split_assignment_,
                 fragment_replacements: fragment_replacements_,
             } => {
                 dropped_source_fragments = dropped_source_fragments_;
-                dropped_actors = dropped_actors_;
                 added_source_fragments = added_source_fragments_;
-                split_assignment = split_assignment_;
                 fragment_replacements = fragment_replacements_;
             }
             SourceChange::DropSource {
@@ -162,13 +147,7 @@ impl SourceManagerCore {
             } => {
                 dropped_source_ids = dropped_source_ids_;
             }
-            SourceChange::Reschedule {
-                split_assignment: split_assignment_,
-                dropped_actors: dropped_actors_,
-            } => {
-                split_assignment = split_assignment_;
-                dropped_actors = dropped_actors_;
-            }
+
             SourceChange::UpdateSourceProps {
                 source_id_map_new_props,
             } => {
@@ -216,17 +195,6 @@ impl SourceManagerCore {
                 );
             });
             handle.finish_backfill(fragments.iter().map(|(id, _up_id)| *id).collect());
-        }
-
-        for (_, actor_splits) in split_assignment {
-            for (actor_id, splits) in actor_splits {
-                // override previous splits info
-                self.actor_splits.insert(actor_id, splits);
-            }
-        }
-
-        for actor_id in dropped_actors {
-            self.actor_splits.remove(&actor_id);
         }
 
         for (source_id, fragment_ids) in dropped_source_fragments {
@@ -334,6 +302,7 @@ impl SourceManager {
         barrier_scheduler: BarrierScheduler,
         metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
+        env: MetaSrvEnv,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
@@ -370,30 +339,13 @@ impl SourceManager {
                 )
             })
             .collect();
-        let actor_splits = metadata_manager
-            .catalog_controller
-            .load_actor_splits()
-            .await?
-            .into_iter()
-            .map(|(actor_id, splits)| {
-                (
-                    actor_id as ActorId,
-                    splits
-                        .to_protobuf()
-                        .splits
-                        .iter()
-                        .map(|split| SplitImpl::try_from(split).unwrap())
-                        .collect(),
-                )
-            })
-            .collect();
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,
             managed_sources,
             source_fragments,
             backfill_fragments,
-            actor_splits,
+            env,
         ));
 
         Ok(Self {
@@ -433,26 +385,14 @@ impl SourceManager {
         &self,
         dropped_job_fragments: &StreamJobFragments,
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        split_assignment: SplitAssignment,
         replace_plan: &ReplaceStreamJobPlan,
     ) {
         // Extract the fragments that include source operators.
         let dropped_source_fragments = dropped_job_fragments.stream_source_fragments().clone();
 
-        let fragments = &dropped_job_fragments.fragments;
-
-        let dropped_actors = dropped_source_fragments
-            .values()
-            .flatten()
-            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().actors.iter())
-            .map(|actor| actor.actor_id)
-            .collect::<HashSet<_>>();
-
         self.apply_source_change(SourceChange::ReplaceJob {
             dropped_source_fragments,
-            dropped_actors,
             added_source_fragments,
-            split_assignment,
             fragment_replacements: replace_plan.fragment_replacements(),
         })
         .await;
@@ -480,8 +420,14 @@ impl SourceManager {
         let handle = create_source_worker(source, self.metrics.clone())
             .await
             .context("failed to create source worker")?;
+
+        let enable_adaptive_splits = handle.enable_adaptive_splits;
         core.managed_sources.insert(source_id, handle);
-        core.update_source_splits(source_id).await?;
+
+        if !enable_adaptive_splits {
+            core.update_source_splits(source_id).await?;
+        }
+
         Ok(())
     }
 
@@ -496,23 +442,23 @@ impl SourceManager {
             tracing::warn!("source {} already registered", source_id);
             return Ok(());
         }
+
+        let enable_adaptive_splits = handle.enable_adaptive_splits;
         core.managed_sources.insert(source_id, handle);
-        core.update_source_splits(source_id).await?;
+
+        if !enable_adaptive_splits {
+            core.update_source_splits(source_id).await?;
+        }
 
         Ok(())
     }
 
-    pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
-        let core = self.core.lock().await;
-        core.actor_splits.clone()
-    }
-
     pub async fn get_running_info(&self) -> SourceManagerRunningInfo {
         let core = self.core.lock().await;
+
         SourceManagerRunningInfo {
             source_fragments: core.source_fragments.clone(),
             backfill_fragments: core.backfill_fragments.clone(),
-            actor_splits: core.actor_splits.clone(),
         }
     }
 
@@ -573,7 +519,6 @@ pub enum SourceChange {
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
         added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
-        split_assignment: SplitAssignment,
     },
     UpdateSourceProps {
         // the new properties to be set for each source_id
@@ -587,27 +532,16 @@ pub enum SourceChange {
         /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
         finished_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
     },
-    SplitChange(SplitAssignment),
     /// `DROP SOURCE` or `DROP MV`
-    DropSource {
-        dropped_source_ids: Vec<SourceId>,
-    },
+    DropSource { dropped_source_ids: Vec<SourceId> },
     DropMv {
         // FIXME: we should consider source backfill fragments here for MV on shared source.
         dropped_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        dropped_actors: HashSet<ActorId>,
     },
     ReplaceJob {
         dropped_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        dropped_actors: HashSet<ActorId>,
-
         added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        split_assignment: SplitAssignment,
         fragment_replacements: HashMap<FragmentId, FragmentId>,
-    },
-    Reschedule {
-        split_assignment: SplitAssignment,
-        dropped_actors: HashSet<ActorId>,
     },
 }
 

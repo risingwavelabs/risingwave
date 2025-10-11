@@ -20,7 +20,7 @@ use std::iter;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ActorMapping;
+use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
@@ -147,7 +147,10 @@ pub struct ReplaceStreamJobPlan {
 impl ReplaceStreamJobPlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
-        for (fragment_id, new_fragment) in self.new_fragments.new_fragment_info() {
+        for (fragment_id, new_fragment) in self
+            .new_fragments
+            .new_fragment_info(&self.init_split_assignment)
+        {
             let fragment_change = CommandFragmentChanges::NewFragment {
                 job_id: self.streaming_job.id().into(),
                 info: new_fragment,
@@ -228,15 +231,22 @@ pub struct CreateStreamingJobCommandInfo {
 }
 
 impl StreamJobFragments {
-    pub(super) fn new_fragment_info(
-        &self,
-    ) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
+    pub(super) fn new_fragment_info<'a>(
+        &'a self,
+        assignment: &'a SplitAssignment,
+    ) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + 'a {
         self.fragments.values().map(|fragment| {
+            let mut fragment_splits = assignment
+                .get(&fragment.fragment_id)
+                .cloned()
+                .unwrap_or_default();
+
             (
                 fragment.fragment_id,
                 InflightFragmentInfo {
                     fragment_id: fragment.fragment_id,
                     distribution_type: fragment.distribution_type.into(),
+                    vnode_count: fragment.vnode_count(),
                     nodes: fragment.nodes.clone(),
                     actors: fragment
                         .actors
@@ -252,6 +262,9 @@ impl StreamJobFragments {
                                         .worker_id()
                                         as WorkerId,
                                     vnode_bitmap: actor.vnode_bitmap.clone(),
+                                    splits: fragment_splits
+                                        .remove(&actor.actor_id)
+                                        .unwrap_or_default(),
                                 },
                             )
                         })
@@ -496,7 +509,7 @@ impl Command {
                 );
                 let mut changes: HashMap<_, _> = info
                     .stream_job_fragments
-                    .new_fragment_info()
+                    .new_fragment_info(&info.init_split_assignment)
                     .map(|(fragment_id, fragment_info)| {
                         (
                             fragment_id,
@@ -547,6 +560,11 @@ impl Command {
                                                         .0
                                                         .vnode_bitmap
                                                         .clone(),
+                                                    splits: reschedule
+                                                        .actor_splits
+                                                        .get(actor_id)
+                                                        .cloned()
+                                                        .unwrap_or_default(),
                                                 },
                                             )
                                         })
@@ -562,6 +580,7 @@ impl Command {
                                     .map(|(actor_id, bitmap)| (*actor_id, bitmap.clone()))
                                     .collect(),
                                 to_remove: reschedule.removed_actors.iter().cloned().collect(),
+                                actor_splits: reschedule.actor_splits.clone(),
                             },
                         )
                     })
@@ -569,7 +588,21 @@ impl Command {
             ),
             Command::ReplaceStreamJob(plan) => Some(plan.fragment_changes()),
             Command::MergeSnapshotBackfillStreamingJobs(_) => None,
-            Command::SourceChangeSplit { .. } => None,
+            Command::SourceChangeSplit(SplitState {
+                split_assignment, ..
+            }) => Some(
+                split_assignment
+                    .iter()
+                    .map(|(&fragment_id, splits)| {
+                        (
+                            fragment_id,
+                            CommandFragmentChanges::SplitAssignment {
+                                actor_splits: splits.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
+            ),
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
