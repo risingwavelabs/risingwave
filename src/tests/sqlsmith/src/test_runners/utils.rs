@@ -197,7 +197,7 @@ pub(super) fn get_seed_table_sql(testdata: &str) -> String {
 /// Create the tables defined in testdata, along with some mviews.
 /// TODO: Generate indexes and sinks.
 pub(super) async fn create_base_tables(testdata: &str, client: &Client) -> Result<Vec<Table>> {
-    tracing::info!("Preparing tables...");
+    tracing::info!("Preparing tables");
 
     let sql = get_seed_table_sql(testdata);
     let (base_tables, statements) = parse_create_table_statements(sql);
@@ -251,7 +251,7 @@ pub(super) async fn drop_mview_table(mview: &Table, client: &Client) {
 
 /// Drops mview tables and seed tables
 pub(super) async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
-    tracing::info!("Cleaning tables...");
+    tracing::info!("Cleaning tables");
 
     for mview in mviews.iter().rev() {
         drop_mview_table(mview, client).await;
