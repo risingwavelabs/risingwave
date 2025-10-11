@@ -23,8 +23,8 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeMask, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
-use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -43,10 +43,12 @@ use crate::model::{ActorId, FragmentId, SubscriptionId};
 #[derive(Debug, Clone)]
 pub struct SharedFragmentInfo {
     pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
     pub distribution_type: DistributionType,
     pub actors: HashMap<ActorId, InflightActorInfo>,
     pub vnode_count: usize,
     pub fragment_type_mask: FragmentTypeMask,
+    //    pub nodes: PbStreamNode,
 }
 
 impl From<&InflightFragmentInfo> for SharedFragmentInfo {
@@ -54,6 +56,7 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
         let InflightFragmentInfo {
             fragment_id,
             distribution_type,
+            job_id,
             fragment_type_mask,
             actors,
             vnode_count,
@@ -64,6 +67,8 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
             fragment_id: *fragment_id,
             distribution_type: *distribution_type,
             fragment_type_mask: *fragment_type_mask,
+            job_id: *job_id,
+            // nodes: nodes.clone(),
             actors: actors.clone(),
             vnode_count: *vnode_count,
         }
@@ -526,7 +531,7 @@ impl InflightDatabaseInfo {
                         for (actor_id, new_vnodes) in actor_update_vnode_bitmap {
                             actors
                                 .get_mut(&actor_id)
-                                .expect("should exist")
+                                .unwrap_or_else(|| panic!("actor {actor_id} should exist"))
                                 .vnode_bitmap = Some(new_vnodes);
                         }
                         for (actor_id, actor) in new_actors {
