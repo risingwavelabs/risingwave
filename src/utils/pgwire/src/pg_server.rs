@@ -21,6 +21,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
+use risingwave_common::config::HbaEntry;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -29,6 +30,7 @@ use serde::Deserialize;
 use thiserror_ext::AsReport;
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::ldap_auth::LdapAuthenticator;
 use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
@@ -175,6 +177,7 @@ pub enum UserAuthenticator {
         salt: [u8; 4],
     },
     OAuth(HashMap<String, String>),
+    Ldap(HbaEntry),
 }
 
 /// A JWK Set is a JSON object that represents a set of JWKs.
@@ -254,6 +257,13 @@ impl UserAuthenticator {
                 .await
                 .map_err(PsqlError::StartupError)?
             }
+            UserAuthenticator::Ldap(hba_entry) => {
+                let ldap_auth = LdapAuthenticator::new(&hba_entry)?;
+                // Convert password to string, defaulting to empty if not valid UTF-8
+                let password_str = String::from_utf8_lossy(password).into_owned();
+                // Implement a username placeholder. In RisingWave, this would be passed from the session context
+                ldap_auth.authenticate("username", &password_str).await?
+            }
         };
         if !success {
             return Err(PsqlError::PasswordError);
@@ -275,6 +285,35 @@ pub async fn pg_serve(
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
 
+    // FIXME: only for debugging, remove it after hba config feature is complete.
+    // check and create another unix socket if addr is binding locally with a port
+    let extra_unix_listener = match &listener {
+        Listener::Tcp(_) => {
+            let host_and_port = addr.split(':').collect::<Vec<_>>();
+            let port = if host_and_port.len() == 2 {
+                host_and_port[1].parse::<i16>().ok()
+            } else {
+                None
+            };
+            if let Some(port) = port {
+                let local_unix_addr = format!("unix:/tmp/.s.PGSQL.{}", port);
+                match Listener::bind(&local_unix_addr).await {
+                    Ok(l) => {
+                        tracing::info!(local_unix_addr, "also bind a local unix socket");
+                        Some(l)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), local_unix_addr, "failed to bind a local unix socket");
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        }
+        Listener::Unix(_) => None,
+    };
+
     let acceptor_runtime = BackgroundShutdownRuntime::from({
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         builder.worker_threads(1);
@@ -290,17 +329,20 @@ pub async fn pg_serve(
     #[cfg(madsim)]
     let worker_runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
     let session_mgr_clone = session_mgr.clone();
+    let worker_runtime_clone = worker_runtime.clone();
+    let context_clone = context.clone();
+    let tcp_keepalive_clone = tcp_keepalive.clone();
     let f = async move {
         loop {
-            let conn_ret = listener.accept(&tcp_keepalive).await;
+            let conn_ret = listener.accept(&tcp_keepalive_clone).await;
             match conn_ret {
                 Ok((stream, peer_addr)) => {
                     tracing::info!(%peer_addr, "accept connection");
-                    worker_runtime.spawn(handle_connection(
+                    worker_runtime_clone.spawn(handle_connection(
                         stream,
                         session_mgr_clone.clone(),
                         Arc::new(peer_addr),
-                        context.clone(),
+                        context_clone.clone(),
                     ));
                 }
 
@@ -311,6 +353,31 @@ pub async fn pg_serve(
         }
     };
     acceptor_runtime.spawn(f);
+
+    if let Some(local_unix_listener) = extra_unix_listener {
+        let session_mgr_clone = session_mgr.clone();
+        let f = async move {
+            loop {
+                let conn_ret = local_unix_listener.accept(&tcp_keepalive).await;
+                match conn_ret {
+                    Ok((stream, peer_addr)) => {
+                        tracing::info!(%peer_addr, "accept connection from local unix socket");
+                        worker_runtime.spawn(handle_connection(
+                            stream,
+                            session_mgr_clone.clone(),
+                            Arc::new(peer_addr),
+                            context.clone(),
+                        ));
+                    }
+
+                    Err(e) => {
+                        tracing::error!(error = %e.as_report(), "failed to accept connection from local unix socket",);
+                    }
+                }
+            }
+        };
+        acceptor_runtime.spawn(f);
+    }
 
     // Wait for the shutdown signal.
     shutdown.cancelled().await;

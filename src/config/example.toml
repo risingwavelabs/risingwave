@@ -158,6 +158,19 @@ max_total_query_size_bytes = 1073741824
 min_single_query_size_bytes = 1048576
 max_single_query_size_bytes = 1073741824
 
+[[frontend.hba_config.entries]]
+connection_type = "Local"
+databases = ["all"]
+users = ["all"]
+auth_method = "trust"
+
+[[frontend.hba_config.entries]]
+connection_type = "Host"
+databases = ["all"]
+users = ["all"]
+addresses = ["0.0.0.0/0"]
+auth_method = "password"
+
 [streaming]
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
