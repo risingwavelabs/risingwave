@@ -505,6 +505,7 @@ pub async fn start_service_as_election_leader(
 
     sub_tasks.push(IcebergCompactionManager::gc_loop(
         iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_gc_interval_sec,
     ));
 
     let scale_controller = Arc::new(ScaleController::new(
