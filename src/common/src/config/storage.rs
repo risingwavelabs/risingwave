@@ -231,6 +231,13 @@ pub struct StorageConfig {
     /// The maximum total size of tasks in small file compaction in MB.
     #[serde(default = "default::storage::iceberg_compaction_max_task_total_size_mb")]
     pub iceberg_compaction_max_task_total_size_mb: u32,
+    /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
+    /// Effective pending budget = `ceil(max_task_parallelism * multiplier)`. Default 4.0.
+    /// Set < 1.0 to reduce buffering (may increase `PullTask` RPC frequency); set higher to batch more tasks.
+    #[serde(
+        default = "default::storage::iceberg_compaction_pending_parallelism_budget_multiplier"
+    )]
+    pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
@@ -1072,6 +1079,10 @@ pub mod default {
 
         pub fn iceberg_compaction_max_task_total_size_mb() -> u32 {
             50 * 1024 // 50GB
+        }
+
+        pub fn iceberg_compaction_pending_parallelism_budget_multiplier() -> f32 {
+            4.0
         }
     }
 
