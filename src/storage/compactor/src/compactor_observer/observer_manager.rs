@@ -44,7 +44,7 @@ impl ObserverState for CompactorObserverNode {
                         PbObjectInfo::Table(table_catalog) => {
                             self.handle_catalog_notification(resp.operation(), table_catalog);
                         }
-                        _ => panic!("error type notification"),
+                        object => panic!("invalid notification object: {object}"),
                     };
                 }
                 assert!(
@@ -62,8 +62,8 @@ impl ObserverState for CompactorObserverNode {
             Info::ComputeNodeTotalCpuCount(count) => {
                 LicenseManager::get().update_cpu_core_count(count as _);
             }
-            _ => {
-                panic!("error type notification");
+            info => {
+                panic!("invalid notification info: {info}");
             }
         }
     }
