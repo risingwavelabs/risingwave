@@ -108,7 +108,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .iter()
             .map(|column| Field::from(&column.column_desc))
             .collect();
-
+        let is_sql_server = matches!(sink, SinkImpl::SqlServer(_));
         if let Some(col_dix) = sink_writer_param.extra_partition_col_idx {
             // Remove the partition column from the schema.
             assert_eq!(sink_input_schema.data_types(), {
@@ -156,15 +156,17 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         // after compacting with the stream key, the two event with the same user defined sink pk must have different stream key.
         // So the delete event is not to delete the inserted record in our internal streaming SQL semantic.
-        let need_advance_delete = stream_key_sink_pk_mismatch
+        let need_advance_delete = (stream_key_sink_pk_mismatch
             && !matches!(
                 sink_param.sink_type,
                 SinkType::AppendOnly | SinkType::ForceAppendOnly
-            );
+            ))
+            || is_sql_server;
         // NOTE(st1page): reconstruct with sink pk need extra cost to buffer a barrier's data, so currently we bind it with mismatch case.
-        let re_construct_with_sink_pk = need_advance_delete
+        let re_construct_with_sink_pk = (need_advance_delete
             && sink_param.sink_type == SinkType::Upsert
-            && !sink_param.downstream_pk.is_empty();
+            && !sink_param.downstream_pk.is_empty())
+            || is_sql_server;
         let pk_matched = !stream_key_sink_pk_mismatch;
         // Don't compact chunk for blackhole sink for better benchmark performance.
         let compact_chunk = !sink.is_blackhole();

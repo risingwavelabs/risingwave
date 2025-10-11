@@ -40,7 +40,7 @@ use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWrite
 pub const SQLSERVER_SINK: &str = "sqlserver";
 
 fn default_max_batch_rows() -> usize {
-    1024
+    800
 }
 
 #[serde_as]
@@ -292,19 +292,16 @@ ORDER BY
     }
 }
 
-enum SqlOp {
-    Insert(OwnedRow),
-    Merge(OwnedRow),
-    Delete(OwnedRow),
-}
-
 pub struct SqlServerSinkWriter {
     config: SqlServerConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
     sql_client: SqlServerClient,
-    ops: Vec<SqlOp>,
+    // ops: Vec<SqlOp>,
+    insert_ops: Vec<OwnedRow>,
+    delete_ops: Vec<OwnedRow>,
+    upsert_ops: Vec<OwnedRow>,
 }
 
 impl SqlServerSinkWriter {
@@ -321,43 +318,47 @@ impl SqlServerSinkWriter {
             pk_indices,
             is_append_only,
             sql_client,
-            ops: vec![],
+            insert_ops: vec![],
+            delete_ops: vec![],
+            upsert_ops: vec![],
         };
         Ok(writer)
     }
 
+    fn buffer_size(&self) -> usize {
+        self.insert_ops.len() + self.delete_ops.len() + self.upsert_ops.len()
+    }
+
     async fn delete_one(&mut self, row: RowRef<'_>) -> Result<()> {
-        if self.ops.len() + 1 >= self.config.max_batch_rows {
+        if self.buffer_size() + 1 >= self.config.max_batch_rows {
             self.flush().await?;
         }
-        self.ops.push(SqlOp::Delete(row.into_owned_row()));
+        self.delete_ops.push(row.into_owned_row());
         Ok(())
     }
 
     async fn upsert_one(&mut self, row: RowRef<'_>) -> Result<()> {
-        if self.ops.len() + 1 >= self.config.max_batch_rows {
+        if self.buffer_size() + 1 >= self.config.max_batch_rows {
             self.flush().await?;
         }
-        self.ops.push(SqlOp::Merge(row.into_owned_row()));
+        self.upsert_ops.push(row.into_owned_row());
         Ok(())
     }
 
     async fn insert_one(&mut self, row: RowRef<'_>) -> Result<()> {
-        if self.ops.len() + 1 >= self.config.max_batch_rows {
+        if self.buffer_size() + 1 >= self.config.max_batch_rows {
             self.flush().await?;
         }
-        self.ops.push(SqlOp::Insert(row.into_owned_row()));
+        self.insert_ops.push(row.into_owned_row());
         Ok(())
     }
 
     async fn flush(&mut self) -> Result<()> {
         use std::fmt::Write;
-        if self.ops.is_empty() {
+        if self.buffer_size() == 0 {
             return Ok(());
         }
-        let mut query_str = String::new();
         let col_num = self.schema.fields.len();
-        let mut next_param_id = 1;
         let non_pk_col_indices = (0..col_num)
             .filter(|idx| !self.pk_indices.contains(idx))
             .collect::<Vec<usize>>();
@@ -404,78 +405,117 @@ impl SqlServerSinkWriter {
             })
             .collect::<Vec<_>>()
             .join(",");
-        // TODO: avoid repeating the SQL
-        for op in &self.ops {
-            match op {
-                SqlOp::Insert(_) => {
-                    write!(
-                        &mut query_str,
-                        "INSERT INTO {} ({}) VALUES ({});",
-                        self.config.full_object_path(),
-                        all_col_names,
-                        param_placeholders(&mut next_param_id),
-                    )
-                    .unwrap();
-                }
-                SqlOp::Merge(_) => {
-                    write!(
-                        &mut query_str,
-                        r#"MERGE {} WITH (HOLDLOCK) AS [TARGET]
-                        USING (VALUES ({})) AS [SOURCE] ({})
-                        ON {}
-                        WHEN MATCHED THEN UPDATE SET {}
-                        WHEN NOT MATCHED THEN INSERT ({}) VALUES ({});"#,
-                        self.config.full_object_path(),
-                        param_placeholders(&mut next_param_id),
-                        all_col_names,
-                        pk_match,
-                        set_all_source_col,
-                        all_col_names,
-                        all_source_col_names,
-                    )
-                    .unwrap();
-                }
-                SqlOp::Delete(_) => {
-                    write!(
-                        &mut query_str,
-                        r#"DELETE FROM {} WHERE {};"#,
-                        self.config.full_object_path(),
-                        self.pk_indices
-                            .iter()
-                            .map(|idx| {
-                                let condition =
-                                    format!("[{}]=@P{}", self.schema[*idx].name, next_param_id);
-                                next_param_id += 1;
-                                condition
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" AND "),
-                    )
-                    .unwrap();
-                }
+
+        // Flush DELETE
+        if !self.delete_ops.is_empty() {
+            let mut next_param_id = 1;
+            let mut query_str = String::new();
+            write!(
+                &mut query_str,
+                r#"DELETE FROM {} WHERE "#,
+                self.config.full_object_path(),
+            )
+            .unwrap();
+            for i in 0..self.delete_ops.len() {
+                let split = if i == 0 { " " } else { " OR " };
+                write!(
+                    &mut query_str,
+                    r#"{}({})"#,
+                    split,
+                    self.pk_indices
+                        .iter()
+                        .map(|idx| {
+                            let condition =
+                                format!("[{}]=@P{}", self.schema[*idx].name, next_param_id);
+                            next_param_id += 1;
+                            condition
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" AND "),
+                )
+                .unwrap();
             }
+            write!(&mut query_str, ";").unwrap();
+            // tracing::debug!(query_str, "Flush delete.");
+            let mut query = Query::new(query_str);
+            for row in self.delete_ops.drain(..) {
+                bind_params(
+                    &mut query,
+                    row,
+                    &self.schema,
+                    self.pk_indices.iter().copied(),
+                )?;
+            }
+            query.execute(&mut self.sql_client.inner_client).await?;
         }
 
-        let mut query = Query::new(query_str);
-        for op in self.ops.drain(..) {
-            match op {
-                SqlOp::Insert(row) => {
-                    bind_params(&mut query, row, &self.schema, 0..col_num)?;
-                }
-                SqlOp::Merge(row) => {
-                    bind_params(&mut query, row, &self.schema, 0..col_num)?;
-                }
-                SqlOp::Delete(row) => {
-                    bind_params(
-                        &mut query,
-                        row,
-                        &self.schema,
-                        self.pk_indices.iter().copied(),
-                    )?;
-                }
+        // Flush INSERT
+        if !self.insert_ops.is_empty() {
+            let mut next_param_id = 1;
+            let mut query_str = String::new();
+            write!(
+                &mut query_str,
+                "INSERT INTO {} ({}) VALUES ",
+                self.config.full_object_path(),
+                all_col_names,
+            )
+            .unwrap();
+            for i in 0..self.insert_ops.len() {
+                let split = if i == 0 { " " } else { "," };
+                write!(
+                    &mut query_str,
+                    r#"{}({})"#,
+                    split,
+                    param_placeholders(&mut next_param_id)
+                )
+                .unwrap();
             }
+            write!(&mut query_str, ";").unwrap();
+            // tracing::debug!(query_str, "Flush insert.");
+            let mut query = Query::new(query_str);
+            for row in self.insert_ops.drain(..) {
+                bind_params(&mut query, row, &self.schema, 0..col_num)?;
+            }
+            query.execute(&mut self.sql_client.inner_client).await?;
         }
-        query.execute(&mut self.sql_client.inner_client).await?;
+
+        // Flush MERGE
+        if !self.upsert_ops.is_empty() {
+            let mut next_param_id = 1;
+            let mut query_str = String::new();
+            write!(
+                &mut query_str,
+                r#"MERGE {} AS [TARGET]
+                USING (VALUES "#,
+                self.config.full_object_path(),
+            )
+            .unwrap();
+            for i in 0..self.upsert_ops.len() {
+                let split = if i == 0 { " " } else { "," };
+                write!(
+                    &mut query_str,
+                    r#"{}({})"#,
+                    split,
+                    param_placeholders(&mut next_param_id),
+                )
+                .unwrap();
+            }
+            write!(
+                &mut query_str,
+                r#") AS [SOURCE] ({})
+                ON {}
+                WHEN MATCHED THEN UPDATE SET {}
+                WHEN NOT MATCHED THEN INSERT ({}) VALUES ({});"#,
+                all_col_names, pk_match, set_all_source_col, all_col_names, all_source_col_names,
+            )
+            .unwrap();
+            // tracing::debug!(query_str, "Flush merge.");
+            let mut query = Query::new(query_str);
+            for row in self.upsert_ops.drain(..) {
+                bind_params(&mut query, row, &self.schema, 0..col_num)?;
+            }
+            query.execute(&mut self.sql_client.inner_client).await?;
+        }
         Ok(())
     }
 }
