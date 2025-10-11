@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use gcp_bigquery_client::error::BQError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::def_anyhow_newtype;
 use risingwave_pb::PbFieldNotFound;
@@ -62,6 +63,7 @@ def_anyhow_newtype! {
     apache_avro::Error => "Avro error",
     rdkafka::error::KafkaError => "Kafka error",
     pulsar::Error => "Pulsar error",
+    BQError => "BigQuery error",
 
     async_nats::jetstream::consumer::StreamError => "Nats error",
     async_nats::jetstream::consumer::pull::MessagesError => "Nats error",
