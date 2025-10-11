@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ use futures::{Future, FutureExt, TryFutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
@@ -213,8 +215,30 @@ impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<O>,
     ) -> impl StorageFuture<'_, Vec<O>> {
-        // TODO: monitor
-        self.inner.nearest(vec, options, on_nearest_item_fn)
+        async move {
+            thread_local! {
+                static THREAD_HISTOGRAM_VEC: RefCell<HashMap<(TableId, usize, usize), LabelGuardedHistogram>> = RefCell::new(HashMap::new());
+            }
+            let start_time = Instant::now();
+            let metric_key = (self.table_id(), options.top_n, options.hnsw_ef_search);
+            let ret = self.inner.nearest(vec, options, on_nearest_item_fn).await?;
+            THREAD_HISTOGRAM_VEC.with_borrow_mut(|map| {
+                map.entry(metric_key)
+                    .or_insert_with(|| {
+                        let (table_id, top_n, ef) = metric_key;
+                        let labels = [
+                            table_id.table_id.to_string(),
+                            top_n.to_string(),
+                            ef.to_string(),
+                        ];
+                        self.storage_metrics
+                            .vector_nearest_duration
+                            .with_guarded_label_values(&labels.each_ref().map(|s| s.as_str()))
+                    })
+                    .observe(start_time.elapsed().as_secs_f64());
+            });
+            Ok(ret)
+        }
     }
 }
 
