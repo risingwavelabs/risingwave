@@ -1577,15 +1577,15 @@ impl SessionManagerImpl {
             }
 
             // Check HBA configuration for LDAP authentication
-            let connection_type = match peer_addr.as_ref() {
-                Address::Tcp(_) => ConnectionType::Host,
-                Address::Unix(_) => ConnectionType::Local,
+            let (connection_type, client_addr) = match peer_addr.as_ref() {
+                Address::Tcp(socket_addr) => (ConnectionType::Host, Some(&socket_addr.ip())),
+                Address::Unix(_) => (ConnectionType::Local, None),
             };
-
-            let client_addr = match peer_addr.as_ref() {
-                Address::Tcp(socket_addr) => Some(&socket_addr.ip()),
-                _ => None,
-            };
+            tracing::debug!(
+                "receive connection: type={:?}, client_addr={:?}",
+                connection_type,
+                client_addr
+            );
 
             let hba_entry_opt = self.env.frontend_config().hba_config.find_matching_entry(
                 &connection_type,
