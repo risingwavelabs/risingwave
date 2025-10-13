@@ -66,7 +66,7 @@ struct JoinSide<K: HashKey, S: StateStore, E: JoinEncoding> {
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
-    /// The mapping from input indices of a side to output columes.
+    /// The mapping from input indices of a side to output columns.
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
     /// Whether degree table is needed for this side.
