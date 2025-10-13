@@ -163,13 +163,21 @@ impl LdapAuthenticator {
         let bind_result = ldap
             .simple_bind(user_dn, password)
             .await
-            .map_err(|e| PsqlError::StartupError(format!("LDAP bind failed: {}", e).into()))
-            .map(|_| true);
+            .map_err(|e| PsqlError::StartupError(format!("LDAP bind failed: {}", e).into()));
 
         // Explicitly unbind the connection
         let _ = ldap.unbind().await;
 
-        bind_result
+        let bind_result = bind_result?;
+        match bind_result.success() {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                tracing::error!(%e, "LDAP bind unsuccessful");
+                Err(PsqlError::StartupError(
+                    format!("LDAP bind failed: {}", e).into(),
+                ))
+            }
+        }
     }
 
     /// Simple bind authentication
@@ -193,12 +201,20 @@ impl LdapAuthenticator {
         let bind_result = ldap
             .simple_bind(&dn, password)
             .await
-            .map_err(|e| PsqlError::StartupError(format!("LDAP bind failed: {}", e).into()))
-            .map(|res| res.success().is_ok());
+            .map_err(|e| PsqlError::StartupError(format!("LDAP bind failed: {}", e).into()));
 
         // Explicitly unbind the connection
         let _ = ldap.unbind().await;
 
-        bind_result
+        let bind_result = bind_result?;
+        match bind_result.success() {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                tracing::error!(%e, "LDAP bind unsuccessful");
+                Err(PsqlError::StartupError(
+                    format!("LDAP bind failed: {}", e).into(),
+                ))
+            }
+        }
     }
 }
