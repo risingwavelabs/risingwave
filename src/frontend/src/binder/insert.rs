@@ -311,18 +311,31 @@ impl Binder {
 
         let default_columns = default_column_indices
             .into_iter()
-            .map(|i| {
-                (
-                    i,
-                    default_columns_from_catalog
-                        .get(&i)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone())
-                        }),
-                )
+            .map(|i| -> Result<(usize, ExprImpl)> {
+                let column = &cols_to_insert_in_table[i];
+                let expr = default_columns_from_catalog
+                    .get(&i)
+                    .cloned()
+                    .unwrap_or_else(|| ExprImpl::literal_null(column.data_type().clone()));
+
+                let expr = if column.nullable() {
+                    expr
+                } else {
+                    FunctionCall::new_unchecked(
+                        ExprType::CheckNotNull,
+                        vec![
+                            expr,
+                            ExprImpl::literal_varchar(column.name().to_owned()),
+                            ExprImpl::literal_varchar(table_name.to_owned()),
+                        ],
+                        column.data_type().clone(),
+                    )
+                    .into()
+                };
+
+                Ok((i, expr))
             })
-            .collect_vec();
+            .try_collect()?;
 
         let insert = BoundInsert {
             table_id,
