@@ -153,6 +153,7 @@ impl ToBatchPb for BatchVectorSearch {
             top_n: self.core.top_n as _,
             distance_type: self.core.distance_type as _,
             hnsw_ef_search: self.core.hnsw_ef_search.unwrap_or(0) as _,
+            query_epoch: None,
         })
     }
 }

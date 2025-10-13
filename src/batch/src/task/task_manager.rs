@@ -23,7 +23,6 @@ use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
-use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
@@ -91,14 +90,13 @@ impl BatchManager {
         self: &Arc<Self>,
         tid: &PbTaskId,
         plan: PlanFragment,
-        epoch: BatchQueryEpoch,
         context: Arc<dyn BatchTaskContext>, // ComputeNodeContext
         state_reporter: StateReporter,
         tracing_context: TracingContext,
         expr_context: ExprContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
-        let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
+        let task = BatchTaskExecution::new(tid, plan, context, self.runtime())?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
         // Here the task id insert into self.tasks is put in front of `.async_execute`, cuz when
@@ -136,14 +134,11 @@ impl BatchManager {
         tid: &PbTaskId,
         plan: PlanFragment,
     ) -> Result<()> {
-        use risingwave_hummock_sdk::test_batch_query_epoch;
-
         use crate::task::ComputeNodeContext;
 
         self.fire_task(
             tid,
             plan,
-            test_batch_query_epoch(),
             ComputeNodeContext::for_test(),
             StateReporter::new_with_test(),
             TracingContext::none(),

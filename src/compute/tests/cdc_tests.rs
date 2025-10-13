@@ -385,7 +385,6 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         "RowSeqExecutor2".to_owned(),
         None,
         None,
-        None,
     ));
 
     // check result
@@ -1062,7 +1061,6 @@ async fn assert_mv(
         test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_owned(),
-        None,
         None,
         None,
     ));

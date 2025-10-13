@@ -15,6 +15,7 @@
 use std::marker::PhantomData;
 use std::mem::swap;
 
+use anyhow::anyhow;
 use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_batch::task::ShutdownToken;
@@ -39,8 +40,8 @@ use super::AsOfDesc;
 use crate::error::Result;
 use crate::executor::join::JoinType;
 use crate::executor::{
-    AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
-    ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase, unix_timestamp_sec_to_epoch,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
+    ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
 
 /// Distributed Lookup Join Executor.
@@ -89,24 +90,6 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::DistributedLookupJoin
         )?;
-
-        // as_of takes precedence
-        let as_of = distributed_lookup_join_node
-            .as_of
-            .as_ref()
-            .map(AsOf::try_from)
-            .transpose()?;
-        let query_epoch = as_of
-            .map(|a| {
-                let epoch = unix_timestamp_sec_to_epoch(a.timestamp).0;
-                tracing::debug!(epoch, "time travel");
-                risingwave_pb::common::BatchQueryEpoch {
-                    epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::TimeTravel(
-                        epoch,
-                    )),
-                }
-            })
-            .unwrap_or_else(|| source.epoch());
 
         let join_type = JoinType::from_prost(distributed_lookup_join_node.get_join_type()?);
         let condition = match distributed_lookup_join_node.get_condition() {
@@ -204,7 +187,9 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 outer_side_key_types,
                 inner_side_key_types.clone(),
                 lookup_prefix_len,
-                query_epoch,
+                distributed_lookup_join_node
+                    .query_epoch
+                    .ok_or_else(|| anyhow!("query_epoch not set in distributed lookup join"))?,
                 vec![],
                 table,
                 chunk_size,

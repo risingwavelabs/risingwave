@@ -23,7 +23,6 @@ use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
-use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{
     ResizeCacheRequest, ResizeCacheResponse, ShowConfigRequest, ShowConfigResponse,
@@ -174,7 +173,6 @@ impl ComputeClient {
         &self,
         task_id: TaskId,
         plan: PlanFragment,
-        epoch: BatchQueryEpoch,
         expr_context: ExprContext,
     ) -> Result<Streaming<TaskInfoResponse>> {
         Ok(self
@@ -183,7 +181,6 @@ impl ComputeClient {
             .create_task(CreateTaskRequest {
                 task_id: Some(task_id),
                 plan: Some(plan),
-                epoch: Some(epoch),
                 tracing_context: TracingContext::from_current_span().to_protobuf(),
                 expr_context: Some(expr_context),
             })
