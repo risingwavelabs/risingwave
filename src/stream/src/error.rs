@@ -161,14 +161,14 @@ impl StreamError {
 
                 // Uncategorized: try to downcast to known types and reuse their scores. Fallback to 1000.
                 ErrorKind::Uncategorized(e) => {
-                    let root_error = e.root_cause();
-                    if let Some(e) = root_error.downcast_ref::<StreamError>() {
-                        stream_error_score(e)
-                    } else if let Some(ee) = root_error.downcast_ref::<StreamExecutorError>() {
-                        2000 + stream_executor_error_score(ee)
-                    } else {
-                        1000
+                    for cause in e.chain() {
+                        if let Some(e) = cause.downcast_ref::<StreamError>() {
+                            return stream_error_score(e);
+                        } else if let Some(ee) = cause.downcast_ref::<StreamExecutorError>() {
+                            return 2000 + stream_executor_error_score(ee);
+                        }
                     }
+                    1000
                 }
 
                 // Then other errors.
