@@ -386,13 +386,18 @@ impl IcebergCompactionManager {
     /// GC loop for expired snapshots management
     /// This is a separate loop that periodically checks all tracked Iceberg tables
     /// and performs garbage collection operations like expiring old snapshots
-    pub fn gc_loop(manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn gc_loop(manager: Arc<Self>, interval_sec: u64) -> (JoinHandle<()>, Sender<()>) {
+        assert!(
+            interval_sec > 0,
+            "Iceberg GC interval must be greater than 0"
+        );
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
-            // Run GC every hour by default
-            const GC_LOOP_INTERVAL_SECS: u64 = 3600;
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(GC_LOOP_INTERVAL_SECS));
+            tracing::info!(
+                interval_sec = interval_sec,
+                "Starting Iceberg GC loop with configurable interval"
+            );
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_sec));
 
             loop {
                 tokio::select! {
