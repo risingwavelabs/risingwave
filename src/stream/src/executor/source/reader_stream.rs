@@ -46,6 +46,7 @@ pub(crate) struct StreamReaderBuilder {
     // cdc related
     pub is_auto_schema_change_enable: bool,
     pub actor_ctx: ActorContextRef,
+    pub cdc_table_schema_change_policies: HashMap<String, risingwave_connector::source::cdc::SchemaChangeFailurePolicy>,
 }
 
 impl StreamReaderBuilder {
@@ -55,8 +56,8 @@ impl StreamReaderBuilder {
                 mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
             let meta_client = self.actor_ctx.meta_client.clone();
 
-            // Extract schema change failure policy before moving into async closure
-            let schema_change_failure_policy = match &self.source_desc.source.config {
+            // Extract source-level schema change failure policy as fallback
+            let source_level_policy = match &self.source_desc.source.config {
                 risingwave_connector::source::ConnectorProperties::MysqlCdc(props) => {
                     props.schema_change_failure_policy.clone()
                 }
@@ -65,6 +66,9 @@ impl StreamReaderBuilder {
                 }
                 _ => risingwave_connector::source::cdc::SchemaChangeFailurePolicy::default(),
             };
+
+            // Clone table-level policy mapping for use in async closure
+            let table_policies = self.cdc_table_schema_change_policies.clone();
 
             // spawn a task to handle schema change event from source parser
             let _join_handle = tokio::task::spawn(async move {
@@ -86,7 +90,25 @@ impl StreamReaderBuilder {
                                 finish_tx.send(()).unwrap();
                             }
                             Err(e) => {
-                                match schema_change_failure_policy {
+                                // Extract cdc_table_id from the first table change event
+                                let cdc_table_id = schema_change.table_changes.first()
+                                    .map(|tc| tc.cdc_table_id.as_str())
+                                    .unwrap_or("");
+                                println!("这里cdc_table_id: {:?}", cdc_table_id);
+                                println!("这里table_policies: {:?}", table_policies);
+                                // Use table-level policy if available, otherwise fallback to source-level
+                                let policy = table_policies
+                                    .get(cdc_table_id)
+                                    .cloned()
+                                    .unwrap_or(source_level_policy.clone());
+
+                                tracing::info!(
+                                    target: "auto_schema_change",
+                                    cdc_table_id = cdc_table_id,
+                                    policy = ?policy,
+                                    "Using schema change failure policy");
+
+                                match policy {
                                     risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Block => {
                                         tracing::error!(
                                             target: "auto_schema_change",
@@ -186,6 +208,7 @@ impl StreamReaderBuilder {
             schema_change_tx,
             on_cdc_auto_schema_change_failure,
             schema_change_failure_policy,
+            self.cdc_table_schema_change_policies.clone(),
         );
 
         (column_ids, source_ctx)

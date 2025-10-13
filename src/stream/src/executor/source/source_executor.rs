@@ -185,6 +185,7 @@ impl<S: StateStore> SourceExecutor<S> {
             is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
             actor_ctx: self.actor_ctx.clone(),
             reader_stream: None,
+            cdc_table_schema_change_policies: self.cdc_table_schema_change_policies.clone(),
         }
     }
 

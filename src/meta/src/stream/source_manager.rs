@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::DatabaseId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
@@ -130,18 +130,18 @@ impl SourceManagerCore {
     /// Add a table schema change policy for a CDC table
     pub fn add_table_schema_policy(
         &mut self,
-        table_id: TableId,
+        cdc_table_id: String,
         source_id: SourceId,
         policy: SchemaChangeFailurePolicy,
     ) -> Result<(), String> {
         tracing::info!(
-            "Adding CDC table schema change policy: table_id={}, source_id={}, policy={:?}",
-            table_id,
+            "Adding CDC table schema change policy: cdc_table_id={}, source_id={}, policy={:?}",
+            cdc_table_id,
             source_id,
             policy
         );
         self.cdc_table_schema_change_policies
-            .insert(table_id.to_string(), policy);
+            .insert(cdc_table_id, policy);
         self.debug_print_table_schema_policies();
 
         // Serialize the policies mapping to JSON
@@ -160,23 +160,23 @@ impl SourceManagerCore {
     /// Remove a table schema change policy for a CDC table
     pub fn remove_table_schema_policy(
         &mut self,
-        table_id: TableId,
+        cdc_table_id: String,
         source_id: SourceId,
     ) -> Result<(), String> {
         tracing::info!(
-            "Removing CDC table schema change policy: table_id={}, source_id={}",
-            table_id,
+            "Removing CDC table schema change policy: cdc_table_id={}, source_id={}",
+            cdc_table_id,
             source_id
         );
         let removed = self
             .cdc_table_schema_change_policies
-            .remove(&table_id.to_string());
+            .remove(&cdc_table_id);
         if removed.is_some() {
-            tracing::info!("Successfully removed policy for table_id={}", table_id);
+            tracing::info!("Successfully removed policy for cdc_table_id={}", cdc_table_id);
         } else {
             tracing::warn!(
-                "No policy found for table_id={}, nothing to remove",
-                table_id
+                "No policy found for cdc_table_id={}, nothing to remove",
+                cdc_table_id
             );
         }
         self.debug_print_table_schema_policies();
@@ -587,15 +587,14 @@ impl SourceManager {
     /// Add a CDC table schema change policy and trigger ConnectorPropsChange
     pub async fn add_cdc_table_schema_policy(
         &self,
-        table_id: TableId,
+        cdc_table_id: String,
         source_id: SourceId,
         policy: SchemaChangeFailurePolicy,
     ) -> MetaResult<()> {
-        println!("这里1");
         // First, add the policy to the mapping
         {
             let mut core = self.core.lock().await;
-            core.add_table_schema_policy(table_id, source_id, policy)
+            core.add_table_schema_policy(cdc_table_id.clone(), source_id, policy)
                 .map_err(|e| {
                     MetaError::invalid_parameter(&format!(
                         "Failed to add table schema policy: {}",
@@ -603,14 +602,12 @@ impl SourceManager {
                     ))
                 })?;
         }
-        println!("这里2");
         // Get the existing source properties and add the policies
         let sources = {
             let core = self.core.lock().await;
             core.metadata_manager.list_sources().await?
         };
         let source = sources.iter().find(|s| s.id == source_id as u32);
-        println!("这里3");
         if let Some(source) = source {
             // Get the policies JSON
             let policies_json = {
@@ -666,13 +663,13 @@ impl SourceManager {
     /// Remove a CDC table schema change policy and trigger ConnectorPropsChange
     pub async fn remove_cdc_table_schema_policy(
         &self,
-        table_id: TableId,
+        cdc_table_id: String,
         source_id: SourceId,
     ) -> MetaResult<()> {
         // First, remove the policy from the mapping
         {
             let mut core = self.core.lock().await;
-            core.remove_table_schema_policy(table_id, source_id)
+            core.remove_table_schema_policy(cdc_table_id.clone(), source_id)
                 .map_err(|e| {
                     MetaError::invalid_parameter(&format!(
                         "Failed to remove table schema policy: {}",
