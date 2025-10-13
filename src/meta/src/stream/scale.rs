@@ -1606,8 +1606,7 @@ impl ScaleController {
                 .await?;
             let streaming_parallelisms = self
                 .metadata_manager
-                .running_fragment_parallelisms(Some(reschedules.keys().cloned().collect()))
-                .await?;
+                .running_fragment_parallelisms(Some(reschedules.keys().cloned().collect()))?;
             let serving_worker_slot_mapping = Arc::new(ServingVnodeMapping::default());
             let max_serving_parallelism = self
                 .env

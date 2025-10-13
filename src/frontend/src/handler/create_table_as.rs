@@ -66,7 +66,7 @@ pub async fn handle_create_as(
 
     // Generate catalog descs from query
     let mut columns: Vec<_> = {
-        let mut binder = Binder::new(&session);
+        let mut binder = Binder::new_for_batch(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
             // Create ColumnCatelog by Field

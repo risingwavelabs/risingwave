@@ -1,0 +1,64 @@
+- sql: |
+    set enable_locality_backfill = true;
+    create table t (a int, b int, c int);
+    select count(*) from t group by b;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t1 (a int, b int, c int);
+    create table t2 (a int, b int, c int);
+    select count(*) from t1 join t2 on t1.a = t2.a group by t1.b;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t (a int, b int, c int, primary key (b, a));
+    select count(*) from t group by a, b;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t (a int, b int, c int);
+    select count(*) from t where c > 1 group by a, b;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t1 (a int, b int, c int);
+    create table t2 (a int, b int, c int);
+    select count(*) from t1 join t2 on t1.a = t2.a where t1.c > t2.c group by t1.b;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t (a int, b int, c int);
+    select RANK() OVER (PARTITION BY a ORDER BY b) as rank from t;
+  expected_outputs:
+    - stream_plan
+- name: enforce locality for temporal join for both sides.
+  sql: |
+    set enable_locality_backfill = true;
+    create table stream(id1 int, a1 int, b1 int);
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx2 on version (a2, b2);
+    select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t(a int, b int, c int) append only;
+    select distinct on(a) * from t ;
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t(a int, b int, c int);
+    SELECT * FROM (
+    SELECT
+        *,
+        row_number() OVER (PARTITION BY a ORDER BY b) AS rank
+        FROM t
+    ) WHERE rank <= 1;
+  expected_outputs:
+    - stream_plan
