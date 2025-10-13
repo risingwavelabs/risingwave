@@ -24,7 +24,7 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" source
 
 echo "--- starting risingwave cluster"
-risedev ci-start ci-sink-test
+ENABLE_BUILD_RW_CONNECTOR=1 risedev ci-start ci-sink-test
 sleep 1
 
 echo "--- create SQL Server table"
