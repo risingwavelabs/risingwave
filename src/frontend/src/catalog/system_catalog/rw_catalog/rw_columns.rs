@@ -69,7 +69,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 is_primary_key: false,
                 is_distribution_key: false,
                 is_generated: false,
-                is_nullable: false,
+                is_nullable: true,
                 generation_expression: None,
                 data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
