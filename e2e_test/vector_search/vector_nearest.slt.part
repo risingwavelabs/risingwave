@@ -103,7 +103,7 @@ explain(verbose) select * from query_view;
 ----
 BatchExchange { order: [], dist: Single }
 └─BatchProject { exprs: [vector_info] }
-  └─BatchVectorSearch { schema: ['[3,2,1]':Vector(3):Vector(3), vector_info:List(Struct(StructType { fields: [("items.id", Int32), ("text", Varchar)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: '[3,2,1]':Vector(3) }
+  └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: '[3,2,1]':Vector(3), lookup_output: [("items.id", Int32), ("text", Varchar)], include_distance: false }
     └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
 
 
@@ -196,7 +196,7 @@ explain(verbose) select * from query_view;
 ----
 BatchExchange { order: [], dist: Single }
 └─BatchProject { exprs: [vector_info] }
-  └─BatchVectorSearch { schema: ['[3,2,1]':Vector(3):Vector(3), vector_info:List(Struct(StructType { fields: [("items.id", Int32), ("text", Varchar)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: '[3,2,1]':Vector(3) }
+  └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: '[3,2,1]':Vector(3), lookup_output: [("items.id", Int32), ("text", Varchar)], include_distance: false }
     └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
 
 
