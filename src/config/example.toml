@@ -22,6 +22,7 @@ max_inflight_time_travel_query = 1000
 periodic_compaction_interval_sec = 60
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
+iceberg_gc_interval_sec = 3600
 hummock_version_checkpoint_interval_sec = 30
 enable_hummock_data_archive = false
 hummock_time_travel_snapshot_interval = 100
