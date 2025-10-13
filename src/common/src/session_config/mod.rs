@@ -421,6 +421,10 @@ pub struct SessionConfig {
     /// Enable index selection for queries
     #[parameter(default = true)]
     enable_index_selection: bool,
+
+    /// Enable locality backfill for streaming queries. Defaults to false.
+    #[parameter(default = false)]
+    enable_locality_backfill: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

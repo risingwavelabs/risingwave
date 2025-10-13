@@ -20,7 +20,7 @@ use itertools::Itertools;
 use parking_lot::RawRwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeMask, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
@@ -45,6 +45,8 @@ pub struct SharedFragmentInfo {
     pub fragment_id: FragmentId,
     pub distribution_type: DistributionType,
     pub actors: HashMap<ActorId, InflightActorInfo>,
+    pub vnode_count: usize,
+    pub fragment_type_mask: FragmentTypeMask,
 }
 
 impl From<&InflightFragmentInfo> for SharedFragmentInfo {
@@ -52,14 +54,18 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
         let InflightFragmentInfo {
             fragment_id,
             distribution_type,
+            fragment_type_mask,
             actors,
+            vnode_count,
             ..
         } = info;
 
         Self {
             fragment_id: *fragment_id,
             distribution_type: *distribution_type,
+            fragment_type_mask: *fragment_type_mask,
             actors: actors.clone(),
+            vnode_count: *vnode_count,
         }
     }
 }

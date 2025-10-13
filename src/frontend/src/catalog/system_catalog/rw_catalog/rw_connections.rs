@@ -39,12 +39,15 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
     let users = user_reader.get_all_users();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     let username_map = user_reader.get_user_name_map();
 
     // todo: redesign the internal table for connection params
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_connections().map(|conn| {
+            schema.iter_connections_with_acl(current_user).map(|conn| {
                 let mut rw_connection = RwConnection {
                     id: conn.id as i32,
                     name: conn.name.clone(),

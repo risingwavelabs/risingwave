@@ -790,7 +790,7 @@ impl<T: Into<ScalarImpl>> ToOwnedDatum for Option<T> {
 }
 
 #[auto_impl::auto_impl(&)]
-pub trait ToDatumRef: PartialEq + Eq + Debug {
+pub trait ToDatumRef: PartialEq + Eq + Debug + Send + Sync {
     /// Convert the datum to [`DatumRef`].
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }

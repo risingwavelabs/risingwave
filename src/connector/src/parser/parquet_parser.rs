@@ -20,6 +20,7 @@ use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_mat
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::types::{Datum, ScalarImpl};
+use thiserror_ext::AsReport;
 
 use crate::parser::ConnectorResult;
 use crate::source::SourceColumnDesc;
@@ -122,10 +123,31 @@ impl ParquetParser {
                             rw_data_type,
                         )
                     {
-                        let arrow_field =
-                            IcebergArrowConvert.to_arrow_field(rw_column_name, rw_data_type)?;
+                        let arrow_field = IcebergArrowConvert
+                            .to_arrow_field(rw_column_name, rw_data_type)
+                            .map_err(|e| {
+                                crate::parser::AccessError::ParquetParser {
+                                    message: format!(
+                                        "to_arrow_field failed, column='{}', rw_type='{}', offset={}, error={}",
+                                        rw_column_name, rw_data_type, self.offset, e.as_report()
+                                    )
+                                }
+                            })?;
                         let array_impl = IcebergArrowConvert
-                            .array_from_arrow_array(&arrow_field, parquet_column)?;
+                            .array_from_arrow_array(&arrow_field, parquet_column)
+                            .map_err(|e| {
+                                crate::parser::AccessError::ParquetParser {
+                                    message: format!(
+                                        "array_from_arrow_array failed, column='{}', rw_type='{}', arrow_field='{}', parquet_type='{}', offset={}, error={}",
+                                        rw_column_name,
+                                        rw_data_type,
+                                        arrow_field.data_type(),
+                                        parquet_column.data_type(),
+                                        self.offset,
+                                        e.as_report()
+                                    )
+                                }
+                            })?;
                         chunk_columns.push(Arc::new(array_impl));
                     } else {
                         // Handle additional columns, for file source, the additional columns are offset and file name;

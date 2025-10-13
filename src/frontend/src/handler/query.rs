@@ -66,18 +66,33 @@ pub async fn handle_query(
     execute(session, plan_fragmenter_result, formats).await
 }
 
-pub fn handle_parse(
-    handler_args: HandlerArgs,
-    statement: Statement,
-    specific_param_types: Vec<Option<DataType>>,
-) -> Result<PrepareStatement> {
-    let session = handler_args.session;
-    let bound_result = gen_bound(&session, statement.clone(), specific_param_types)?;
+fn handle_parse_inner(binder: Binder, statement: Statement) -> Result<PrepareStatement> {
+    let bound_result = gen_bound(binder, statement.clone())?;
 
     Ok(PrepareStatement::Prepared(PreparedResult {
         statement,
         bound_result,
     }))
+}
+
+pub fn handle_parse_for_batch(
+    handler_args: HandlerArgs,
+    statement: Statement,
+    specified_param_types: Vec<Option<DataType>>,
+) -> Result<PrepareStatement> {
+    let binder = Binder::new_for_batch(&handler_args.session)
+        .with_specified_params_types(specified_param_types);
+    handle_parse_inner(binder, statement)
+}
+
+pub fn handle_parse_for_stream(
+    handler_args: HandlerArgs,
+    statement: Statement,
+    specified_param_types: Vec<Option<DataType>>,
+) -> Result<PrepareStatement> {
+    let binder = Binder::new_for_stream(&handler_args.session)
+        .with_specified_params_types(specified_param_types);
+    handle_parse_inner(binder, statement)
 }
 
 /// Execute a "Portal", which is a prepared statement with bound parameters.
@@ -189,7 +204,8 @@ pub fn gen_batch_plan_by_statement(
     context: OptimizerContextRef,
     stmt: Statement,
 ) -> Result<BatchQueryPlanResult> {
-    let bound_result = gen_bound(session, stmt, vec![])?;
+    let binder = Binder::new_for_batch(session);
+    let bound_result = gen_bound(binder, stmt)?;
     gen_batch_query_plan(session, context, bound_result)
 }
 
@@ -205,16 +221,11 @@ pub struct BoundResult {
     pub(crate) dependent_udfs: HashSet<FunctionId>,
 }
 
-fn gen_bound(
-    session: &SessionImpl,
-    stmt: Statement,
-    specific_param_types: Vec<Option<DataType>>,
-) -> Result<BoundResult> {
+fn gen_bound(mut binder: Binder, stmt: Statement) -> Result<BoundResult> {
     let stmt_type = StatementType::infer_from_statement(&stmt)
         .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
     let must_dist = must_run_in_distributed_mode(&stmt)?;
 
-    let mut binder = Binder::new_with_param_types(session, specific_param_types);
     let bound = binder.bind(stmt)?;
 
     Ok(BoundResult {

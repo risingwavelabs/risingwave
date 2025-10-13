@@ -453,16 +453,6 @@ impl StageRunner {
                     expr_context.clone(),
                 ));
             }
-        } else if self.stage.has_vector_search {
-            let id = 0;
-            let task_id = PbTaskId {
-                query_id: self.stage.query_id.id.clone(),
-                stage_id: self.stage.id,
-                task_id: id as u64,
-            };
-            let plan_fragment = self.create_plan_fragment(id as u64, None);
-            let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
-            futures.push(self.schedule_task(task_id, plan_fragment, worker, expr_context.clone()));
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
                 let task_id = PbTaskId {
