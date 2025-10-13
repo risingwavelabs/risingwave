@@ -4,7 +4,8 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-
+export CONNECTOR_LIBS_PATH="./connector-node/libs"
+export ENABLE_BUILD_RW_CONNECTOR=1
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -24,7 +25,7 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" source
 
 echo "--- starting risingwave cluster"
-ENABLE_BUILD_RW_CONNECTOR=1 risedev ci-start ci-sink-test
+risedev ci-start ci-sink-test
 sleep 1
 
 echo "--- create SQL Server table"
