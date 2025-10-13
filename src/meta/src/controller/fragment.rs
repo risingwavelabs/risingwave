@@ -985,7 +985,7 @@ impl CatalogController {
         let mut all_upstreams = upstreams.into_iter().into_group_map();
 
         for fragment_desc in fragments {
-            // note: here sometime fragment is not found in the cache, failback to 0
+            // note: here sometimes fragment is not found in the cache, fallback to 0
             let parallelism = guard
                 .get_fragment(fragment_desc.fragment_id as _)
                 .map(|fragment| fragment.actors.len())
