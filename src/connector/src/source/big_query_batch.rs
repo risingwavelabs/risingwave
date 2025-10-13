@@ -15,17 +15,20 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use gcp_bigquery_client::Client;
-use gcp_bigquery_client::model::job_configuration_query::JobConfigurationQuery;
-use gcp_bigquery_client::model::query_request::QueryRequest;
+use google_cloud_bigquery::client::Client as BigQueryClient;
+use google_cloud_bigquery::client::google_cloud_auth::credentials::CredentialsFile;
+use google_cloud_bigquery::http::job::query::QueryRequest;
+use google_cloud_bigquery::query::row::Row;
+use google_cloud_bigquery::storage::value::StructDecodable;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::JsonbVal;
-use risingwave_common::util::iter_util::ZipEqFast;
 use serde::{Deserialize, Serialize};
 use with_options::WithOptions;
 
@@ -42,8 +45,7 @@ use crate::source::{
 };
 
 pub const BATCH_BIGQUERY_CONNECTOR: &str = "batch_bigquery";
-
-const BATCH_BIGQUERY_CONNECTOR_PAGE_SIZE: i32 = 1000;
+pub const BATCH_BIGQUERY_CONNECTOR_PAGE_SIZE: usize = 1000;
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct BatchBigQueryProperties {
@@ -208,82 +210,50 @@ impl SplitReader for BatchBigQueryReader {
 
 #[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
 async fn build_bigquery_stream(
-    client: Client,
-    project: String,
+    client: BigQueryClient,
+    project_id: String,
     split_id: Arc<str>,
-    mut query: QueryRequest,
+    query_str: String,
 ) {
-    let query_str = query.query.clone();
-    // get metadata only in the call
-    query.max_results = Some(0);
+    tracing::info!("Starting BigQuery query: {}", query_str);
 
-    // get schema and create job
-    let result_set = client.job().query(&project, query).await?;
-
-    let Some(job_ref) = result_set.query_response().job_reference.clone() else {
-        return Err(crate::error::ConnectorError::from(anyhow::anyhow!(
-            "Failed to get job reference"
-        )));
-    };
-
-    let fields = {
-        if let Some(schema) = result_set.query_response().schema.clone()
-            && let Some(fields) = schema.fields
-        {
-            fields
-        } else {
-            return Err(crate::error::ConnectorError::from(anyhow::anyhow!(
-                "Failed to get result schema from BigQuery"
-            )));
-        }
-    };
-
-    drop(result_set);
-
-    let mut offset: u64 = 0;
-
-    let query_all_params = JobConfigurationQuery {
+    let request = QueryRequest {
         query: query_str,
         ..Default::default()
     };
-    let stream = client.job().query_all(
-        &project,
-        query_all_params,
-        Some(BATCH_BIGQUERY_CONNECTOR_PAGE_SIZE),
-    );
 
-    #[for_await]
-    for row_batch in stream {
-        let row_batch = row_batch?;
-        let mut source_message_batch = Vec::with_capacity(row_batch.len());
-        for row in row_batch {
-            let mut json_obj = serde_json::Map::new();
-            if let Some(columns) = row.columns {
-                assert_eq!(columns.len(), fields.len());
-                columns
-                    .into_iter()
-                    .zip_eq_fast(fields.iter())
-                    .for_each(|(column, field)| {
-                        json_obj.insert(
-                            field.name.clone(),
-                            column.value.unwrap_or(serde_json::Value::Null),
-                        );
-                    })
-            } else {
-                unreachable!();
-            }
+    let mut iter = client
+        .query::<Row>(&project_id, request)
+        .await
+        .context("Failed to execute BigQuery query")?;
 
-            source_message_batch.push(SourceMessage {
-                key: None,
-                payload: Some(serde_json::to_vec(&json_obj).unwrap()),
-                offset: offset.to_string(),
-                split_id: split_id.clone(),
-                meta: SourceMeta::Empty,
-            });
-            offset += 1;
+    let mut offset: u64 = 0;
+    let mut batch = Vec::with_capacity(BATCH_BIGQUERY_CONNECTOR_PAGE_SIZE);
+
+    while let Some(row_value) = iter.next().await.context("Failed to fetch BigQuery row")? {
+        // row_value is already a serde_json::Value representing the row
+        let x = row_value.column::<serde_json::Value>(0)?;
+        let json_bytes = serde_json::to_vec(&row_value)
+            .map_err(|e| anyhow!("Failed to serialize row to JSON: {}", e))?;
+
+        batch.push(SourceMessage {
+            key: None,
+            payload: Some(json_bytes),
+            offset: offset.to_string(),
+            split_id: split_id.clone(),
+            meta: SourceMeta::Empty,
+        });
+        offset += 1;
+
+        // Yield in batches for better performance
+        if batch.len() >= BATCH_BIGQUERY_CONNECTOR_PAGE_SIZE {
+            yield std::mem::take(&mut batch);
         }
+    }
 
-        yield source_message_batch;
+    // Yield remaining rows
+    if !batch.is_empty() {
+        yield batch;
     }
 
     tracing::info!("Finished fetching all rows from BigQuery");
@@ -293,14 +263,17 @@ impl BatchBigQueryReader {
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_stream_inner(self) {
         for split in &self.splits {
-            let client = self.build_client().await?;
+            let client = self
+                .properties
+                .common
+                .build_client(&self.properties.aws_auth_props)
+                .await?;
 
-            let query_request = QueryRequest::new(split.query.clone());
             let source_message_stream: BoxSourceMessageStream = build_bigquery_stream(
                 client,
                 self.properties.common.project.clone(),
                 split.id(),
-                query_request,
+                split.query.clone(),
             )
             .boxed();
 
@@ -318,24 +291,5 @@ impl BatchBigQueryReader {
                 yield chunk?;
             }
         }
-    }
-
-    async fn build_client(&self) -> ConnectorResult<Client> {
-        let client = self
-            .properties
-            .common
-            .build_client(&self.properties.aws_auth_props)
-            .await
-            .map_err(|e| match e {
-                crate::sink::SinkError::BigQuery(err) => {
-                    tracing::error!("Failed to build BigQuery client for batch source: {}", err);
-                    anyhow!("Failed to build BigQuery client: {}. Please check your credentials (supports both JSON and base64-encoded JSON).", err)
-                },
-                _ => {
-                    tracing::error!("Failed to build BigQuery client for batch source: {}", e);
-                    anyhow!("Failed to build BigQuery client: {}", e)
-                },
-            })?;
-        Ok(client)
     }
 }
