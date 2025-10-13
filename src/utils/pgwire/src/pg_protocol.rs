@@ -681,7 +681,7 @@ where
             }
             UserAuthenticator::ClearText(_)
             | UserAuthenticator::OAuth(_)
-            | UserAuthenticator::Ldap(_) => {
+            | UserAuthenticator::Ldap(..) => {
                 self.stream
                     .write_no_flush(BeMessage::AuthenticationCleartextPassword)?;
             }

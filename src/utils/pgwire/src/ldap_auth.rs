@@ -19,6 +19,12 @@ use risingwave_common::config::{AuthMethod, HbaEntry};
 
 use crate::error::{PsqlError, PsqlResult};
 
+const LDAP_SERVER_KEY: &str = "ldapserver";
+const LDAP_PORT_KEY: &str = "ldapport";
+const LDAP_SCHEME_KEY: &str = "ldapscheme";
+const LDAP_BASE_DN_KEY: &str = "ldapbasedn";
+const LDAP_SEARCH_FILTER_KEY: &str = "ldapsearchfilter";
+
 /// LDAP configuration extracted from HBA entry
 #[derive(Debug, Clone)]
 pub struct LdapConfig {
@@ -37,14 +43,33 @@ impl LdapConfig {
     /// Create LDAP configuration from HBA entry options
     pub fn from_hba_options(options: &HashMap<String, String>) -> PsqlResult<Self> {
         let server = options
-            .get("host")
-            .ok_or_else(|| PsqlError::StartupError("LDAP host is required".into()))?
+            .get(LDAP_SERVER_KEY)
+            .ok_or_else(|| PsqlError::StartupError("LDAP server (ldapserver) is required".into()))?
             .clone();
+
+        let scheme = options
+            .get(LDAP_SCHEME_KEY)
+            .map(|s| s.as_str())
+            .unwrap_or("ldap");
+        if scheme != "ldap" && scheme != "ldaps" {
+            return Err(PsqlError::StartupError(
+                "LDAP scheme (ldapscheme) must be either 'ldap' or 'ldaps'".into(),
+            ));
+        }
+
+        let port = options
+            .get(LDAP_PORT_KEY)
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or_else(|| if scheme == "ldaps" { 636 } else { 389 });
+
+        let server = format!("ldap://{}:{}", server, port);
+        let base_dn = options.get(LDAP_BASE_DN_KEY).cloned();
+        let search_filter = options.get(LDAP_SEARCH_FILTER_KEY).cloned();
 
         Ok(Self {
             server,
-            base_dn: options.get("base_dn").cloned(),
-            search_filter: options.get("search_filter").cloned(),
+            base_dn,
+            search_filter,
             options: options.clone(),
         })
     }
@@ -89,7 +114,10 @@ impl LdapAuthenticator {
 
     /// Establish an LDAP connection with configurable options
     async fn establish_connection(server: &str) -> Result<ldap3::Ldap, LdapError> {
-        LdapConnAsync::new(server).await.map(|(_, ldap)| ldap)
+        let (conn, ldap) = LdapConnAsync::new(server).await?;
+        ldap3::drive!(conn);
+
+        Ok(ldap)
     }
 
     /// Search for user in LDAP directory and then bind
@@ -160,11 +188,13 @@ impl LdapAuthenticator {
                 PsqlError::StartupError(format!("LDAP connection failed: {}", e).into())
             })?;
 
+        tracing::info!(%config.server, %dn, "simple bind authentication with LDAP server");
+
         let bind_result = ldap
             .simple_bind(&dn, password)
             .await
             .map_err(|e| PsqlError::StartupError(format!("LDAP bind failed: {}", e).into()))
-            .map(|_| true);
+            .map(|res| res.success().is_ok());
 
         // Explicitly unbind the connection
         let _ = ldap.unbind().await;

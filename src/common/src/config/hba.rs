@@ -66,7 +66,7 @@ pub struct HbaEntry {
     /// Authentication method
     pub auth_method: AuthMethod,
     /// Authentication method options
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub auth_options: HashMap<String, String>,
 }
 
