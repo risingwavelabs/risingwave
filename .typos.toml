@@ -53,4 +53,7 @@ extend-exclude = [
     "integration_tests/deltalake-sink/spark-script/run-sql-file.sh",
     # These files are copied from debezium connector, we don't want to fix their typos
     "java/connector-node/risingwave-source-cdc/src/main/java/io/debezium/connector/postgresql/*.java",
+    # These files are generated, we should fix the typos in the generation scripts instead
+    "docker/dashboards/*.json",
+    "grafana/*.json",
 ]
