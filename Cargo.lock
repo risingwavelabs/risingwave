@@ -5954,7 +5954,7 @@ dependencies = [
  "base64 0.21.7",
  "gcloud-metadata",
  "home",
- "jsonwebtoken",
+ "jsonwebtoken 9.3.1",
  "reqwest 0.12.15",
  "serde",
  "serde_json",
@@ -7317,16 +7317,32 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "9.3.0"
+version = "9.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9ae10193d25051e74945f1ea2d0b42e03cc3b890f7e4cc5faa44997d808193f"
+checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "js-sys",
  "pem",
  "ring",
  "serde",
  "serde_json",
+ "simple_asn1",
+]
+
+[[package]]
+name = "jsonwebtoken"
+version = "10.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1417155a38e99d7704ddb3ea7445fe57fdbd5d756d727740a9ed8b9ebaed6e1"
+dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.2.11",
+ "js-sys",
+ "pem",
+ "serde",
+ "serde_json",
+ "signature 2.2.0",
  "simple_asn1",
 ]
 
@@ -9535,7 +9551,7 @@ dependencies = [
  "bytes",
  "futures",
  "itertools 0.14.0",
- "jsonwebtoken",
+ "jsonwebtoken 10.0.0",
  "madsim-tokio",
  "openssl",
  "panic-message",
@@ -10915,7 +10931,7 @@ dependencies = [
  "hmac",
  "home",
  "http 1.3.1",
- "jsonwebtoken",
+ "jsonwebtoken 9.3.1",
  "log",
  "once_cell",
  "percent-encoding",
@@ -12301,7 +12317,7 @@ dependencies = [
  "auto_enums",
  "expect-test",
  "jsonbb",
- "jsonwebtoken",
+ "jsonwebtoken 10.0.0",
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",

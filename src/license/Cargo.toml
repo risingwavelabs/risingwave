@@ -11,7 +11,7 @@ repository = { workspace = true }
 [dependencies]
 auto_enums = { workspace = true }
 jsonbb = { workspace = true }
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 risingwave_pb = { workspace = true }
 risingwave_telemetry_event = { workspace = true }
 serde = { workspace = true }
