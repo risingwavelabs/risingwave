@@ -114,6 +114,12 @@ pub struct CompactorOpts {
 
     #[clap(long, env = "RW_COMPACTOR_META_CACHE_MEMORY_BYTES", default_value_t = default_compactor_meta_cache_memory_bytes())]
     pub compactor_meta_cache_memory_bytes: usize,
+
+    #[clap(long, env = "RW_COMPACTOR_RPC_MAX_DECODING_MESSAGE_SIZE_BYTES")]
+    pub rpc_max_decoding_message_size_bytes: Option<usize>,
+
+    #[clap(long, env = "RW_COMPACTOR_RPC_MAX_ENCODING_MESSAGE_SIZE_BYTES")]
+    pub rpc_max_encoding_message_size_bytes: Option<usize>,
 }
 
 impl risingwave_common::opts::Opts for CompactorOpts {
@@ -209,4 +215,12 @@ pub fn default_compactor_total_memory_bytes() -> usize {
 
 pub fn default_compactor_meta_cache_memory_bytes() -> usize {
     128 * 1024 * 1024 // 128MB
+}
+
+pub fn default_rpc_max_decoding_message_size_bytes() -> usize {
+    4 * 1024 * 1024 // 4MB
+}
+
+pub fn default_rpc_max_encoding_message_size_bytes() -> usize {
+    4 * 1024 * 1024 // 4MB
 }
