@@ -391,7 +391,7 @@ impl TemplateRedisStreamValueEncoder {
         value_template: String,
     ) -> Self {
         let key_encoder =
-            TemplateStringEncoder::new(schema.clone(), col_indices.clone(), key_template.clone());
+            TemplateStringEncoder::new(schema.clone(), col_indices.clone(), key_template);
         let value_encoder = TemplateStringEncoder::new(schema, col_indices, value_template);
         Self {
             key_encoder,
