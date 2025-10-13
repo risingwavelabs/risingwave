@@ -432,6 +432,7 @@ impl ToBatch for LogicalVectorSearch {
                     info_output_indices: (0..info_column_desc.len()).collect(),
                     info_column_desc,
                     include_distance: true,
+                    as_of: scan.as_of(),
                     vector_column_idx: 0,
                     hnsw_ef_search,
                     ctx: self.core.ctx(),
