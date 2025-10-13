@@ -514,8 +514,9 @@ impl CatalogController {
                 .get_fragment(fragment.fragment_id as _)
                 .unwrap_or_else(|| {
                     panic!(
-                        "fragment {} not found in shared actor info",
-                        fragment.fragment_id
+                        "Failed to retrieve fragment description: fragment {} (job_id {}) not found in shared actor info",
+                        fragment.fragment_id,
+                        fragment.job_id
                     )
                 });
 
