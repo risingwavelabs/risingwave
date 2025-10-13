@@ -96,6 +96,7 @@ pub struct InflightActorInfo {
 #[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
     pub fragment_id: crate::model::FragmentId,
+    pub job_id: ObjectId,
     pub distribution_type: DistributionType,
     pub fragment_type_mask: FragmentTypeMask,
     pub vnode_count: usize,
@@ -1174,6 +1175,7 @@ impl CatalogController {
                 Entry::Vacant(entry) => {
                     entry.insert(InflightFragmentInfo {
                         fragment_id: fragment_id as _,
+                        job_id,
                         distribution_type,
                         fragment_type_mask: FragmentTypeMask::from(fragment_type_mask),
                         vnode_count: vnode_count as _,

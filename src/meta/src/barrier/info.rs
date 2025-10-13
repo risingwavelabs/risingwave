@@ -23,7 +23,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeMask, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
@@ -43,6 +43,7 @@ use crate::model::{ActorId, FragmentId, SubscriptionId};
 #[derive(Debug, Clone)]
 pub struct SharedFragmentInfo {
     pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
     pub distribution_type: DistributionType,
     pub actors: HashMap<ActorId, InflightActorInfo>,
     pub vnode_count: usize,
@@ -53,6 +54,7 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
     fn from(info: &InflightFragmentInfo) -> Self {
         let InflightFragmentInfo {
             fragment_id,
+            job_id,
             distribution_type,
             fragment_type_mask,
             actors,
@@ -62,6 +64,7 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
 
         Self {
             fragment_id: *fragment_id,
+            job_id: *job_id,
             distribution_type: *distribution_type,
             fragment_type_mask: *fragment_type_mask,
             actors: actors.clone(),
