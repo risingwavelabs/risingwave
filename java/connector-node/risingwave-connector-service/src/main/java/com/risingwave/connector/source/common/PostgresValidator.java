@@ -87,11 +87,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         || userProps
                                 .getOrDefault(DbzConnectorConfig.PG_TEST_ONLY_FORCE_RDS, "false")
                                 .equalsIgnoreCase("true");
-        LOG.info(
-                "AWS RDS detection: isAwsRds={}, hostname={}, postgres.is.aws.rds={}",
-                this.isAwsRds,
-                dbHost,
-                userProps.getOrDefault(DbzConnectorConfig.PG_IS_AWS_RDS, "not set"));
         this.dbName = dbName;
         this.user = user;
         this.schemaName = userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME);
