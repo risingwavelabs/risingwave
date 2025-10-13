@@ -15,7 +15,6 @@
 use std::sync::LazyLock;
 
 use mysql_async::Row as MysqlRow;
-use mysql_common::constants::ColumnFlags;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
@@ -59,42 +58,6 @@ macro_rules! handle_data_type {
                     $i,
                     stringify!($rw_type),
                 ))),
-        }
-    }};
-}
-
-macro_rules! handle_data_type_with_signed {
-    (
-        $mysql_row:expr,
-        $mysql_datum_index:expr,
-        $column_name:expr,
-        $signed_type:ty,
-        $unsigned_type:ty
-    ) => {{
-        let column_flags = $mysql_row.columns()[$mysql_datum_index].flags();
-
-        if column_flags.contains(ColumnFlags::UNSIGNED_FLAG) {
-            // UNSIGNED type: use unsigned type conversion, then convert to signed
-            match $mysql_row.take_opt::<Option<$unsigned_type>, _>($mysql_datum_index) {
-                Some(Ok(Some(val))) => Ok(Some(ScalarImpl::from(val as $signed_type))),
-                Some(Ok(None)) => Ok(None),
-                Some(Err(e)) => Err(anyhow::Error::new(e.clone())
-                    .context("failed to deserialize MySQL value into rust value")
-                    .context(format!(
-                        "column: {}, index: {}, rust_type: {}",
-                        $column_name,
-                        $mysql_datum_index,
-                        stringify!($unsigned_type),
-                    ))),
-                None => bail!(
-                    "no value found at column: {}, index: {}",
-                    $column_name,
-                    $mysql_datum_index
-                ),
-            }
-        } else {
-            // SIGNED type: use default signed type conversion
-            handle_data_type!($mysql_row, $mysql_datum_index, $column_name, $signed_type)
         }
     }};
 }
@@ -144,10 +107,10 @@ pub fn mysql_datum_to_rw_datum(
             }
         }
         DataType::Int16 => {
-            handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i16, u16)
+            handle_data_type!(mysql_row, mysql_datum_index, column_name, i16)
         }
         DataType::Int32 => {
-            handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i32, u32)
+            handle_data_type!(mysql_row, mysql_datum_index, column_name, i32)
         }
         DataType::Int64 => {
             // for bigint unsigned, should up cast to decimal.
