@@ -17,7 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, DataChunk, ListArrayBuilder, ListValue, StructArrayBuilder,
-    StructValue, VectorRef,
+    StructValue,
 };
 use risingwave_common::catalog::TableId;
 use risingwave_common::row::RowDeserializer;
@@ -36,6 +36,10 @@ pub struct VectorIndexReader<S> {
     vector_info_struct_type: StructType,
     state_store: S,
     table_id: TableId,
+
+    info_output_indices: Arc<Vec<usize>>,
+    include_distance: bool,
+
     top_n: usize,
     measure: DistanceMeasurement,
     sqrt_distance: bool,
@@ -55,15 +59,27 @@ impl<S: StateStore> VectorIndexReader<S> {
 
         let vector_info_struct_type = StructType::new(
             reader_desc
-                .info_column_desc
+                .info_output_indices
                 .iter()
-                .map(|col| {
+                .map(|idx| {
+                    let idx = *idx as usize;
                     (
-                        col.name.clone(),
-                        DataType::from(col.column_type.clone().unwrap()),
+                        reader_desc.info_column_desc[idx].name.clone(),
+                        DataType::from(
+                            reader_desc.info_column_desc[idx]
+                                .column_type
+                                .clone()
+                                .unwrap(),
+                        ),
                     )
                 })
-                .chain([("__distance".to_owned(), DataType::Float64)]),
+                .chain(
+                    reader_desc
+                        .include_distance
+                        .then(|| [("__distance".to_owned(), DataType::Float64)].into_iter())
+                        .into_iter()
+                        .flatten(),
+                ),
         );
 
         let measure = PbDistanceType::try_from(reader_desc.distance_type)
@@ -82,6 +98,13 @@ impl<S: StateStore> VectorIndexReader<S> {
             state_store,
             table_id: reader_desc.table_id.into(),
 
+            info_output_indices: reader_desc
+                .info_output_indices
+                .iter()
+                .map(|idx| *idx as _)
+                .collect_vec()
+                .into(),
+            include_distance: reader_desc.include_distance,
             top_n: reader_desc.top_n as usize,
             measure,
             sqrt_distance,
@@ -119,49 +142,15 @@ pub struct VectorIndexSnapshot<'a, S: StateStore> {
 }
 
 impl<S: StateStore> VectorIndexSnapshot<'_, S> {
-    pub async fn query(&self, vector: VectorRef<'_>) -> StorageResult<ListValue> {
-        let deserializer = self.reader.deserializer.clone();
-        let sqrt_distance = self.reader.sqrt_distance;
-        let row_results: Vec<StorageResult<StructValue>> = self
-            .snapshot
-            .nearest(
-                vector.to_owned_scalar(),
-                VectorNearestOptions {
-                    top_n: self.reader.top_n,
-                    measure: self.reader.measure,
-                    hnsw_ef_search: self.reader.hnsw_ef_search,
-                },
-                move |_vec, distance, value| {
-                    let mut values = Vec::with_capacity(deserializer.data_types().len() + 1);
-                    deserializer.deserialize_to(value, &mut values)?;
-                    let distance = if sqrt_distance {
-                        distance.sqrt()
-                    } else {
-                        distance
-                    };
-                    values.push(Some(ScalarImpl::Float64(distance.into())));
-                    Ok(StructValue::new(values))
-                },
-            )
-            .await?;
-        let mut struct_array_builder = StructArrayBuilder::with_type(
-            row_results.len(),
-            DataType::Struct(self.reader.vector_info_struct_type.clone()),
-        );
-        for row in row_results {
-            let row = row?;
-            struct_array_builder.append_owned(Some(row));
-        }
-        let struct_array = struct_array_builder.finish();
-
-        Ok(ListValue::new(ArrayImpl::Struct(struct_array)))
-    }
-
     pub async fn query_expand_chunk(
         &self,
         chunk: DataChunk,
         vector_column_idx: usize,
     ) -> StorageResult<DataChunk> {
+        let sqrt_distance = self.reader.sqrt_distance;
+        let struct_len = self.reader.vector_info_struct_type.len();
+        let include_distance = self.reader.include_distance;
+
         let mut vector_info_columns_builder = ListArrayBuilder::with_type(
             chunk.cardinality(),
             DataType::list(DataType::Struct(self.reader.info_struct_type().clone())),
@@ -170,7 +159,47 @@ impl<S: StateStore> VectorIndexSnapshot<'_, S> {
         let vector_column = columns[vector_column_idx].as_vector();
         for (idx, vis) in vis.iter().enumerate() {
             if vis && let Some(vector) = vector_column.value_at(idx) {
-                let value = self.query(vector).await?;
+                let deserializer = self.reader.deserializer.clone();
+                let info_output_indices = self.reader.info_output_indices.clone();
+                let row_results: Vec<StorageResult<StructValue>> = self
+                    .snapshot
+                    .nearest(
+                        vector.to_owned_scalar(),
+                        VectorNearestOptions {
+                            top_n: self.reader.top_n,
+                            measure: self.reader.measure,
+                            hnsw_ef_search: self.reader.hnsw_ef_search,
+                        },
+                        move |_vec, distance, value| {
+                            let mut values = Vec::with_capacity(deserializer.data_types().len());
+                            deserializer.deserialize_to(value, &mut values)?;
+                            let mut info = Vec::with_capacity(struct_len);
+                            for idx in &*info_output_indices {
+                                info.push(values[*idx].clone());
+                            }
+                            if include_distance {
+                                let distance = if sqrt_distance {
+                                    distance.sqrt()
+                                } else {
+                                    distance
+                                };
+                                info.push(Some(ScalarImpl::Float64(distance.into())));
+                            }
+                            Ok(StructValue::new(info))
+                        },
+                    )
+                    .await?;
+                let mut struct_array_builder = StructArrayBuilder::with_type(
+                    row_results.len(),
+                    DataType::Struct(self.reader.vector_info_struct_type.clone()),
+                );
+                for row in row_results {
+                    let row = row?;
+                    struct_array_builder.append_owned(Some(row));
+                }
+                let struct_array = struct_array_builder.finish();
+
+                let value = ListValue::new(ArrayImpl::Struct(struct_array));
                 vector_info_columns_builder.append_owned(Some(value));
             } else {
                 vector_info_columns_builder.append_null();
