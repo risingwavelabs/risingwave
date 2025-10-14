@@ -71,7 +71,7 @@ pub struct ActorModel {
     pub splits: ConnectorSplits,
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<VnodeBitmap>,
-    pub expr_context_2: ExprContext,
+    pub expr_context: ExprContext,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

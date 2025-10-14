@@ -1520,49 +1520,6 @@ pub fn rebuild_fragment_mapping_from_actors(
     }
     result
 }
-// /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
-// pub async fn get_fragment_actor_ids<C>(
-//     db: &C,
-//     actor_cache: &ActorInfo,
-//     fragment_ids: Vec<FragmentId>,
-// ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
-// where
-//     C: ConnectionTrait,
-// {
-//     let fragment_actors_from_cache: Vec<(FragmentId, ActorId)> = fragment_ids
-//         .iter()
-//         .flat_map(|&fid| {
-//             actor_cache
-//                 .actors_by_fragment_id
-//                 .get(&fid)
-//                 .into_iter()
-//                 .flat_map(move |ids| ids.iter().copied().map(move |aid| (fid, aid)))
-//         })
-//         .collect();
-//
-//     {
-//         let fragment_actors_from_db: Vec<(FragmentId, ActorId)> = Actor::find()
-//             .select_only()
-//             .columns([actor::Column::FragmentId, actor::Column::ActorId])
-//             .filter(actor::Column::FragmentId.is_in(fragment_ids))
-//             .into_tuple()
-//             .all(db)
-//             .await?;
-//
-//         let set_db: HashSet<(FragmentId, ActorId)> = fragment_actors_from_db.into_iter().collect();
-//         let set_cache: HashSet<(FragmentId, ActorId)> =
-//             fragment_actors_from_cache.iter().cloned().collect();
-//
-//         debug_assert_eq!(
-//             set_db, set_cache,
-//             "Fragment–actor pairs mismatch between DB and cache"
-//         );
-//     }
-//
-//     let fragment_actors = fragment_actors_from_cache;
-//
-//     Ok(fragment_actors.into_iter().into_group_map())
-// }
 
 /// For the given streaming jobs, returns
 /// - All source fragments
