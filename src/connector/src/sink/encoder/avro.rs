@@ -447,6 +447,25 @@ fn on_field<D: MaybeData>(
         },
         DataType::Varchar => match inner {
             AvroSchema::String => maybe.on_base(|s| Ok(Value::String(s.into_utf8().into())))?,
+
+            // Add enum support
+            AvroSchema::Enum(enum_schema) => maybe.on_base(|s| {
+                let str_value = s.into_utf8();
+
+                if let Some(position) = enum_schema
+                    .symbols
+                    .iter()
+                    .position(|symbol| symbol == str_value)
+                {
+                    Ok(Value::Enum(position as u32, str_value.to_owned()))
+                } else {
+                    Err(FieldEncodeError::new(format!(
+                        "Value '{}' is not a valid enum symbol. Valid symbols are: {:?}",
+                        str_value, enum_schema.symbols
+                    )))
+                }
+            })?,
+
             _ => return no_match_err(),
         },
         DataType::Bytea => match inner {
@@ -972,6 +991,28 @@ mod tests {
                     ]),
                 ),
             ]),
+        );
+
+        // NEW: Varchar to Enum tests
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("RED".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(0, "RED".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("BLUE".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(2, "BLUE".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("ACTIVE".into())),
+            r#"{"type": "enum", "name": "Status", "symbols": ["ACTIVE", "INACTIVE"]}"#,
+            Value::Enum(0, "ACTIVE".to_owned()),
         );
 
         // Test complex JSON with nested structures - using serde_json::Value comparison
