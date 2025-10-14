@@ -60,8 +60,8 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 
-use super::RwPgResponse;
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
+use super::{RwPgResponse, alter_streaming_rate_limit};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -92,12 +92,13 @@ pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, MAX_SNAPSHOTS_NUM,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
-    parse_partition_by_exprs,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
+    MAX_SNAPSHOTS_NUM, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
+    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
+use risingwave_pb::meta::PbThrottleTarget;
 
 use crate::handler::create_sink::{SinkPlanContext, gen_sink_plan};
 
@@ -2073,6 +2074,8 @@ pub async fn create_iceberg_engine_table(
     )
     .await?;
 
+    let has_connector = source.is_some();
+
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
     let _ = Jvm::get_or_init()?;
@@ -2093,6 +2096,17 @@ pub async fn create_iceberg_engine_table(
             if_not_exists,
         )
         .await?;
+
+    // TODO: remove it together with rate limit rewrite after we support atomic DDL in meta side.
+    if has_connector {
+        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+            handler_args,
+            PbThrottleTarget::TableWithSource,
+            table_name,
+            -1,
+        )
+        .await?;
+    }
 
     Ok(())
 }

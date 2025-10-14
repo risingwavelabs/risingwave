@@ -23,7 +23,9 @@ use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
+use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_meta::MetaResult;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism;
@@ -34,12 +36,14 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -1370,10 +1374,145 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateIcebergTableRequest>,
     ) -> Result<Response<CreateIcebergTableResponse>, Status> {
         let req = request.into_inner();
-        println!("heiheihei: {:?}", req);
+        let CreateIcebergTableRequest {
+            table_info,
+            sink_info,
+            iceberg_source,
+            if_not_exists,
+        } = req;
 
-        // TODO: reset rate limit if source is present.
-        todo!()
+        // 1. create table job
+        let PbTableJobInfo {
+            source,
+            table,
+            fragment_graph,
+        } = table_info.unwrap();
+        let table = table.unwrap();
+        let database_id = table.get_database_id();
+        let schema_id = table.get_schema_id();
+        let table_name = table.get_name().to_string();
+
+        let stream_job = StreamingJob::Table(source, table, PbTableJobType::General);
+        let _ = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob {
+                stream_job,
+                fragment_graph: fragment_graph.unwrap(),
+                dependencies: HashSet::new(),
+                specific_resource_group: None,
+                if_not_exists,
+            })
+            .await?;
+
+        let table_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_id_by_name(database_id as _, schema_id as _, &table_name)
+            .await?
+            .ok_or(Status::not_found("Internal error: table not found"))?;
+
+        // 2. create iceberg sink job
+        let PbSinkJobInfo {
+            sink,
+            fragment_graph,
+        } = sink_info.unwrap();
+        let sink = sink.unwrap();
+        let iceberg_config = IcebergConfig::from_btreemap(sink.properties.clone())
+            .map_err(|e| Status::invalid_argument(format!("Invalid iceberg sink config: {}", e)))?;
+        let mut fragment_graph = fragment_graph.unwrap();
+
+        assert_eq!(fragment_graph.dependent_table_ids.len(), 1);
+        assert_eq!(
+            fragment_graph.dependent_table_ids[0],
+            risingwave_common::catalog::TableId::placeholder().table_id
+        );
+        fragment_graph.dependent_table_ids[0] = table_id as _;
+        for fragment in fragment_graph.fragments.values_mut() {
+            stream_graph_visitor::visit_fragment_mut(fragment, |node| match node {
+                NodeBody::StreamScan(scan) => {
+                    scan.table_id = table_id as _;
+                }
+                _ => {}
+            });
+        }
+
+        println!("heiheihei: {:?}", fragment_graph);
+
+        let dependencies = HashSet::from_iter([table_id]);
+        let stream_job = StreamingJob::Sink(sink);
+        let res = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob {
+                stream_job,
+                fragment_graph,
+                dependencies,
+                specific_resource_group: None,
+                if_not_exists,
+            })
+            .await;
+
+        if res.is_err() {
+            let _ = self
+                .ddl_controller
+                .run_command(DdlCommand::DropStreamingJob {
+                    job_id: StreamingJobId::Table(None, table_id as _),
+                    drop_mode: DropMode::Cascade,
+                })
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(
+                        "Failed to clean up table after iceberg sink creation failure: {}",
+                        err
+                    );
+                });
+            res?;
+        }
+
+        // 3. create iceberg source
+        let iceberg_source = iceberg_source.unwrap();
+        let res = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateNonSharedSource(iceberg_source))
+            .await;
+        if res.is_err() {
+            let _ = self
+                .ddl_controller
+                .run_command(DdlCommand::DropStreamingJob {
+                    job_id: StreamingJobId::Table(None, table_id as _),
+                    drop_mode: DropMode::Cascade,
+                })
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(
+                        "Failed to clean up table after iceberg source creation failure: {}",
+                        err
+                    );
+                });
+
+            // Purge table from warehouse
+            let iceberg_catalog = iceberg_config.create_catalog().await.map_err(|e| {
+                Status::internal(format!(
+                    "Failed to create iceberg catalog for cleanup: {}",
+                    e.as_report()
+                ))
+            })?;
+            let table_identifier = iceberg_config.full_table_name().unwrap();
+            iceberg_catalog
+                .drop_table(&table_identifier)
+                .await
+                .map_err(|e| {
+                    Status::internal(format!(
+                        "Failed to drop iceberg table {} during cleanup: {}",
+                        table_identifier,
+                        e.as_report()
+                    ))
+                })?;
+        }
+
+        Ok(Response::new(CreateIcebergTableResponse {
+            status: None,
+            version: res?,
+        }))
     }
 }
 
