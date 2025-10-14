@@ -163,11 +163,40 @@ where
         .collect()
 }
 
+/// Wrapper for `ObjectName` to be used as a field in a row.
+// TODO: replace remaining `name: String` with `name: ObjectNameField`
+struct ObjectNameField(ObjectName);
+
+fn with_schema_name(schema_name: &str, name: &str) -> ObjectNameField {
+    if schema_name.is_empty() {
+        ObjectNameField(ObjectName(vec![name.into()]))
+    } else {
+        ObjectNameField(ObjectName(vec![schema_name.into(), name.into()]))
+    }
+}
+
+impl WithDataType for ObjectNameField {
+    fn default_data_type() -> DataType {
+        DataType::Varchar
+    }
+}
+
+impl ToOwnedDatum for ObjectNameField {
+    fn to_owned_datum(self) -> Datum {
+        Some(self.0.to_string().into())
+    }
+}
+
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowObjectRow {
-    schema_name: String,
-    name: String,
+    name: ObjectNameField,
+}
+
+impl ShowObjectRow {
+    fn base_name(&self) -> String {
+        self.name.0.base_name()
+    }
 }
 
 #[derive(Fields)]
@@ -303,8 +332,7 @@ impl ShowColumnRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowConnectionRow {
-    schema_name: String,
-    name: String,
+    name: ObjectNameField,
     r#type: String,
     properties: String,
 }
@@ -312,8 +340,7 @@ struct ShowConnectionRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowFunctionRow {
-    schema_name: String,
-    name: String,
+    name: ObjectNameField,
     arguments: String,
     return_type: String,
     language: String,
@@ -389,8 +416,7 @@ struct ShowCreateObjectRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowSubscriptionRow {
-    schema_name: String,
-    name: String,
+    name: ObjectNameField,
     retention_seconds: i64,
 }
 
@@ -470,7 +496,11 @@ pub async fn handle_show_object(
         ShowObject::Table { schema } => {
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
-                schema.iter_user_table().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_user_table()
+                    .map(|t| with_schema_name(&schema.name, &t.name))
+                    .map(|name| ShowObjectRow { name })
+                    .collect()
             })
         }
         ShowObject::InternalTable { schema } => {
@@ -478,43 +508,79 @@ pub async fn handle_show_object(
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                 schema
                     .iter_internal_table()
-                    .map(|t| t.name.clone())
+                    .map(|t| with_schema_name(&schema.name, &t.name))
+                    .map(|name| ShowObjectRow { name })
                     .collect()
             })
         }
         ShowObject::Database => {
             let reader = catalog_reader.read_guard();
-            reader.get_all_database_names()
+            let rows = reader
+                .get_all_database_names()
+                .into_iter()
+                .map(|name| ShowDatabaseRow { name });
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .rows(rows)
+                .into());
         }
         ShowObject::Schema => {
             let reader = catalog_reader.read_guard();
-            reader.get_all_schema_names(&session.database())?
+            let rows = reader
+                .get_all_schema_names(&session.database())?
+                .into_iter()
+                .map(|name| ShowSchemaRow { name });
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .rows(rows)
+                .into());
         }
         ShowObject::View { schema } => {
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
-                schema.iter_view().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_view()
+                    .map(|t| with_schema_name(&schema.name, &t.name))
+                    .map(|name| ShowObjectRow { name })
+                    .collect()
             })
         }
         ShowObject::MaterializedView { schema } => {
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
-                schema.iter_created_mvs().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_created_mvs()
+                    .map(|t| with_schema_name(&schema.name, &t.name))
+                    .map(|name| ShowObjectRow { name })
+                    .collect()
             })
         }
         ShowObject::Source { schema } => {
             let (reader, current_user) = get_catalog_reader();
             let mut sources =
                 iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
-                    schema.iter_source().map(|t| t.name.clone()).collect()
+                    schema
+                        .iter_source()
+                        .map(|t| with_schema_name(&schema.name, &t.name))
+                        .map(|name| ShowObjectRow { name })
+                        .collect()
                 });
-            sources.extend(session.temporary_source_manager().keys());
+            sources.extend(
+                session
+                    .temporary_source_manager()
+                    .keys()
+                    .into_iter()
+                    .map(|t| with_schema_name("", &t))
+                    .map(|name| ShowObjectRow { name }),
+            );
             sources
         }
         ShowObject::Sink { schema } => {
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
-                schema.iter_sink().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_sink()
+                    .map(|t| with_schema_name(&schema.name, &t.name))
+                    .map(|name| ShowObjectRow { name })
+                    .collect()
             })
         }
         ShowObject::Subscription { schema } => {
@@ -523,8 +589,7 @@ pub async fn handle_show_object(
                 schema
                     .iter_subscription()
                     .map(|t| ShowSubscriptionRow {
-                        schema_name: schema.name.clone(),
-                        name: t.name.clone(),
+                        name: with_schema_name(&schema.name, &t.name),
                         retention_seconds: t.retention_seconds as i64,
                     })
                     .collect()
@@ -536,7 +601,11 @@ pub async fn handle_show_object(
         ShowObject::Secret { schema } => {
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
-                schema.iter_secret().map(|t| t.name.clone()).collect()
+                schema
+                    .iter_secret()
+                    .map(|t| with_schema_name(&schema.name, &t.name))
+                    .map(|name| ShowObjectRow { name })
+                    .collect()
             })
         }
         ShowObject::Columns { table } => {
@@ -606,8 +675,7 @@ pub async fn handle_show_object(
                         }
                     };
                     ShowConnectionRow {
-                        schema_name: schema.name.clone(),
-                        name,
+                        name: with_schema_name(&schema.name, &name),
                         r#type,
                         properties,
                     }
@@ -623,8 +691,7 @@ pub async fn handle_show_object(
                 schema
                     .iter_function()
                     .map(|t| ShowFunctionRow {
-                        schema_name: schema.name.clone(),
-                        name: t.name.clone(),
+                        name: with_schema_name(&schema.name, &t.name),
                         arguments: t.arg_types.iter().map(|t| t.to_string()).join(", "),
                         return_type: t.return_type.to_string(),
                         language: t.language.clone(),
@@ -753,8 +820,8 @@ pub async fn handle_show_object(
 
     // Apply filters.
     let rows = rows.into_iter().filter(|row| match &filter {
-        Some(ShowStatementFilter::Like(pattern)) => like_default(&row.name, pattern),
-        Some(ShowStatementFilter::ILike(pattern)) => i_like_default(&row.name, pattern),
+        Some(ShowStatementFilter::Like(pattern)) => like_default(&row.base_name(), pattern),
+        Some(ShowStatementFilter::ILike(pattern)) => i_like_default(&row.base_name(), pattern),
         Some(ShowStatementFilter::Where(..)) => unreachable!(),
         None => true,
     });
