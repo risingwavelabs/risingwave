@@ -1404,10 +1404,10 @@ impl DdlService for DdlServiceImpl {
             })
             .await?;
 
-        let table_id = self
+        let table_catalog = self
             .metadata_manager
             .catalog_controller
-            .get_table_id_by_name(database_id as _, schema_id as _, &table_name)
+            .get_table_catalog_by_name(database_id as _, schema_id as _, &table_name)
             .await?
             .ok_or(Status::not_found("Internal error: table not found"))?;
 
@@ -1426,18 +1426,42 @@ impl DdlService for DdlServiceImpl {
             fragment_graph.dependent_table_ids[0],
             risingwave_common::catalog::TableId::placeholder().table_id
         );
-        fragment_graph.dependent_table_ids[0] = table_id as _;
+        fragment_graph.dependent_table_ids[0] = table_catalog.id;
         for fragment in fragment_graph.fragments.values_mut() {
             stream_graph_visitor::visit_fragment_mut(fragment, |node| match node {
                 NodeBody::StreamScan(scan) => {
-                    scan.table_id = table_id as _;
+                    scan.table_id = table_catalog.id;
+                    if let Some(table_desc) = &mut scan.table_desc {
+                        assert_eq!(
+                            table_desc.table_id,
+                            risingwave_common::catalog::TableId::placeholder().table_id
+                        );
+                        table_desc.table_id = table_catalog.id;
+                        table_desc.maybe_vnode_count = table_catalog.maybe_vnode_count;
+                    }
+                    if let Some(table) = &mut scan.arrangement_table {
+                        assert_eq!(
+                            table.id,
+                            risingwave_common::catalog::TableId::placeholder().table_id
+                        );
+                        *table = table_catalog.clone();
+                    }
+                }
+                NodeBody::BatchPlan(plan) => {
+                    if let Some(table_desc) = &mut plan.table_desc {
+                        assert_eq!(
+                            table_desc.table_id,
+                            risingwave_common::catalog::TableId::placeholder().table_id
+                        );
+                        table_desc.table_id = table_catalog.id;
+                        table_desc.maybe_vnode_count = table_catalog.maybe_vnode_count;
+                    }
                 }
                 _ => {}
             });
         }
 
-        println!("heiheihei: {:?}", fragment_graph);
-
+        let table_id = table_catalog.id as ObjectId;
         let dependencies = HashSet::from_iter([table_id]);
         let stream_job = StreamingJob::Sink(sink);
         let res = self
