@@ -620,16 +620,8 @@ impl ClusterControllerInner {
                 .entry(info.resource.hostname.as_str())
                 .or_insert_with(ClusterResource::default);
 
-            // Treat nodes with empty hostname as distinct hosts.
-            // TODO: This is currently used as a workaround for madsim.
-            // We should support overriding the hostname in madsim instead.
-            if info.resource.hostname.is_empty() {
-                r.total_cpu_cores += info.resource.total_cpu_cores;
-                r.total_memory_bytes += info.resource.total_memory_bytes;
-            } else {
-                r.total_cpu_cores = max(r.total_cpu_cores, info.resource.total_cpu_cores);
-                r.total_memory_bytes = max(r.total_memory_bytes, info.resource.total_memory_bytes);
-            }
+            r.total_cpu_cores = max(r.total_cpu_cores, info.resource.total_cpu_cores);
+            r.total_memory_bytes = max(r.total_memory_bytes, info.resource.total_memory_bytes);
         }
 
         // For different hostnames, we sum up the resources.
