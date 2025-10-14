@@ -64,7 +64,7 @@ pub struct MetaSrvEnv {
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
-    shared_actor_info: SharedActorInfos,
+    pub(crate) shared_actor_info: SharedActorInfos,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -121,6 +121,8 @@ pub struct MetaOpts {
     /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
     /// meta node.
     pub vacuum_spin_interval_ms: u64,
+    /// Interval of invoking iceberg garbage collection, to expire old snapshots.
+    pub iceberg_gc_interval_sec: u64,
     pub time_travel_vacuum_interval_sec: u64,
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
@@ -301,6 +303,7 @@ impl MetaOpts {
             vacuum_interval_sec: 30,
             time_travel_vacuum_interval_sec: 30,
             vacuum_spin_interval_ms: 0,
+            iceberg_gc_interval_sec: 3600,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             hummock_time_travel_snapshot_interval: 0,

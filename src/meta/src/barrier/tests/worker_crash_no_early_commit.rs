@@ -218,6 +218,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             InflightFragmentInfo {
                                 fragment_id: actor1.fragment_id,
                                 distribution_type: DistributionType::Single,
+                                fragment_type_mask: Default::default(),
                                 vnode_count: VirtualNode::COUNT_FOR_TEST,
                                 nodes: Default::default(),
                                 actors: HashMap::from_iter([(
@@ -236,6 +237,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             InflightFragmentInfo {
                                 fragment_id: actor2.fragment_id,
                                 distribution_type: DistributionType::Single,
+                                fragment_type_mask: Default::default(),
                                 vnode_count: VirtualNode::COUNT_FOR_TEST,
                                 nodes: Default::default(),
                                 actors: HashMap::from_iter([(

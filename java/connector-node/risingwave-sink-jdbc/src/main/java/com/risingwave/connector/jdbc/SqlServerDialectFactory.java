@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod actor;
-mod assignment;
-mod fragment;
-mod id;
-mod schedule;
-pub mod state_match;
+package com.risingwave.connector.jdbc;
 
-pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
-pub use assignment::*;
-pub use fragment::{
-    CompleteStreamFragmentGraph, FragmentBackfillOrder, FragmentGraphDownstreamContext,
-    FragmentGraphUpstreamContext, StreamFragmentGraph, check_sink_fragments_support_refresh_schema,
-    fill_snapshot_backfill_epoch, rewrite_refresh_schema_sink_fragment,
-};
-pub use schedule::Locations;
+import java.util.List;
+
+public class SqlServerDialectFactory implements JdbcDialectFactory {
+
+    @Override
+    public JdbcDialect create(List<Integer> columnSqlTypes, List<Integer> pkIndices) {
+        return new SqlServerDialect(columnSqlTypes, pkIndices);
+    }
+}

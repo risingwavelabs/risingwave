@@ -195,6 +195,7 @@ impl AutoRefreshSchemaSinkContext {
         InflightFragmentInfo {
             fragment_id: self.new_fragment.fragment_id,
             distribution_type: self.new_fragment.distribution_type.into(),
+            fragment_type_mask: self.new_fragment.fragment_type_mask,
             vnode_count: self.new_fragment.vnode_count(),
             nodes: self.new_fragment.nodes.clone(),
             actors: self
