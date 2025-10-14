@@ -202,6 +202,11 @@ message ExprNode {
     QUOTE_NULLABLE = 331;
     HMAC = 332;
     SECURE_COMPARE = 333;
+    GET_BIT = 334;
+    GET_BYTE = 335;
+    SET_BIT = 336;
+    SET_BYTE = 337;
+    BIT_COUNT = 338;
 
     // Constraints Check
     CHECK_NOT_NULL = 350;
@@ -403,6 +408,8 @@ message TableFunction {
     INTERNAL_BACKFILL_PROGRESS = 30;
     // Internal source backfill table function
     INTERNAL_SOURCE_BACKFILL_PROGRESS = 31;
+    // Internal channel delta stats table function
+    INTERNAL_GET_CHANNEL_DELTA_STATS = 32;
     // User defined table function
     USER_DEFINED = 100;
   }

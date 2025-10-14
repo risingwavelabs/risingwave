@@ -482,6 +482,12 @@ fn build_fragment(
                     .add(FragmentTypeFlag::UpstreamSinkUnion);
             }
 
+            NodeBody::LocalityProvider(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::LocalityProvider);
+            }
+
             _ => {}
         };
 

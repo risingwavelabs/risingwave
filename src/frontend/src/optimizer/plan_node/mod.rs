@@ -971,6 +971,7 @@ mod batch_delete;
 mod batch_exchange;
 mod batch_expand;
 mod batch_filter;
+mod batch_get_channel_delta_stats;
 mod batch_group_topn;
 mod batch_hash_agg;
 mod batch_hash_join;
@@ -1005,12 +1006,14 @@ mod logical_delete;
 mod logical_except;
 mod logical_expand;
 mod logical_filter;
+mod logical_get_channel_delta_stats;
 mod logical_hop_window;
 mod logical_insert;
 mod logical_intersect;
 mod logical_join;
 mod logical_kafka_scan;
 mod logical_limit;
+mod logical_locality_provider;
 mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
@@ -1045,6 +1048,7 @@ mod stream_hash_join;
 mod stream_hop_window;
 mod stream_join_common;
 mod stream_local_approx_percentile;
+mod stream_locality_provider;
 mod stream_materialize;
 mod stream_materialized_exprs;
 mod stream_now;
@@ -1092,6 +1096,7 @@ pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
 pub use batch_file_scan::BatchFileScan;
 pub use batch_filter::BatchFilter;
+pub use batch_get_channel_delta_stats::BatchGetChannelDeltaStats;
 pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
@@ -1132,6 +1137,7 @@ pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
 pub use logical_file_scan::LogicalFileScan;
 pub use logical_filter::LogicalFilter;
+pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
@@ -1139,6 +1145,7 @@ pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
+pub use logical_locality_provider::LogicalLocalityProvider;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_mysql_query::LogicalMySqlQuery;
@@ -1177,6 +1184,7 @@ pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
+pub use stream_locality_provider::StreamLocalityProvider;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_materialized_exprs::StreamMaterializedExprs;
 pub use stream_now::StreamNow;
@@ -1264,6 +1272,8 @@ macro_rules! for_all_plan_nodes {
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
             , { Logical, VectorSearch }
+            , { Logical, GetChannelDeltaStats }
+            , { Logical, LocalityProvider }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1297,6 +1307,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
+            , { Batch, GetChannelDeltaStats }
             , { Batch, VectorSearch }
             , { Stream, Project }
             , { Stream, Filter }
@@ -1340,6 +1351,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, MaterializedExprs }
             , { Stream, VectorIndexWrite }
             , { Stream, UpstreamSinkUnion }
+            , { Stream, LocalityProvider }
             $(,$rest)*
         }
     };

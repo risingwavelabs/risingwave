@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::catalog::Database;
@@ -217,6 +218,8 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             InflightFragmentInfo {
                                 fragment_id: actor1.fragment_id,
                                 distribution_type: DistributionType::Single,
+                                fragment_type_mask: Default::default(),
+                                vnode_count: VirtualNode::COUNT_FOR_TEST,
                                 nodes: Default::default(),
                                 actors: HashMap::from_iter([(
                                     actor1.actor_id as _,
@@ -234,6 +237,8 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             InflightFragmentInfo {
                                 fragment_id: actor2.fragment_id,
                                 distribution_type: DistributionType::Single,
+                                fragment_type_mask: Default::default(),
+                                vnode_count: VirtualNode::COUNT_FOR_TEST,
                                 nodes: Default::default(),
                                 actors: HashMap::from_iter([(
                                     actor2.actor_id as _,

@@ -409,7 +409,7 @@ impl ToBatch for LogicalVectorSearch {
                 let vector_data_type = vector_expr.return_type();
                 let literal_vector_input = BatchValues::new(LogicalValues::new(
                     vec![vec![vector_expr]],
-                    Schema::from_iter([Field::unnamed(vector_data_type)]),
+                    Schema::from_iter([Field::new("query_vector", vector_data_type)]),
                     self.core.ctx(),
                 ))
                 .into();
