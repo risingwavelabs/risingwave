@@ -18,6 +18,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::StreamExt;
+use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
 use itertools::Itertools;
 use phf::phf_set;
@@ -246,12 +247,13 @@ impl Sink for PostgresSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         PostgresSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
+            &writer_param,
         )
         .await
     }
@@ -277,6 +279,7 @@ impl PostgresSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        writer_param: &SinkWriterParam,
     ) -> Result<Self> {
         let client = create_pg_client(
             &config.user,
@@ -286,6 +289,11 @@ impl PostgresSinkWriter {
             &config.database,
             &config.ssl_mode,
             &config.ssl_root_cert,
+            format!(
+                "RisingWave-Postgres-Sink-{}-{}",
+                writer_param.sink_id, writer_param.sink_name
+            )
+            .as_str(),
         )
         .await?;
 
@@ -421,11 +429,12 @@ impl PostgresSinkWriter {
 
     async fn write_batch_non_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         let transaction = Arc::new(self.client.transaction().await?);
-        let mut delete_futures = FuturesUnordered::new();
-        let mut upsert_futures = FuturesUnordered::new();
-        for (op, row) in chunk.rows() {
+        let mut delete_futures = Vec::new();
+        let mut upsert_futures = Vec::new();
+
+        for (op, row) in chunk.rows_with_consistent_pk_update(&self.pk_indices) {
             match op {
-                Op::Delete | Op::UpdateDelete => {
+                Op::Delete => {
                     let pg_row =
                         convert_row_to_pg_row(row.project(&self.pk_indices), &self.pk_types);
                     let delete_sql = self.delete_sql.clone();
@@ -462,14 +471,14 @@ impl PostgresSinkWriter {
                     };
                     upsert_futures.push(future);
                 }
+                Op::UpdateDelete => {
+                    // ignore UpdateDelete on consistent pk update
+                }
             }
         }
-        while let Some(result) = delete_futures.next().await {
-            result?;
-        }
-        while let Some(result) = upsert_futures.next().await {
-            result?;
-        }
+
+        try_join_all(delete_futures).await?;
+        try_join_all(upsert_futures).await?;
         if let Some(transaction) = Arc::into_inner(transaction) {
             transaction.commit().await?;
         } else {
