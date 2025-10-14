@@ -480,6 +480,10 @@ pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
         } else {
             false
         }
+    } else if let Some(_) = plan.as_stream_locality_provider() {
+        // Since backfill ordering doesn't support recovery yet, we don't allow
+        // locality provider to be executed in background ddl.
+        false
     } else {
         assert!(!plan.inputs().is_empty());
         plan.inputs().iter().all(plan_can_use_background_ddl)
