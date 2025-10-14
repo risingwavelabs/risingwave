@@ -109,7 +109,7 @@ services:
       - KAFKA_CFG_LISTENER_NAME_CONTROLLER_PLAIN_SASL_JAAS_CONFIG=org.apache.kafka.common.security.plain.PlainLoginModule required username="dev" password="rw" user_dev="rw";
 
   message_queue_sasl_2:
-    image: docker.io/bitnami/kafka:4.0
+    image: docker.io/bitnamilegacy/kafka:4.0
     ports:
       - "19093:19093"
     environment:
