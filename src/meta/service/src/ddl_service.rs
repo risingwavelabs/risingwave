@@ -25,12 +25,12 @@ use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::MetaResult;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
-use risingwave_meta::model::TableParallelism;
+use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
-use risingwave_meta_model::ObjectId;
+use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy};
+use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
+use risingwave_meta_model::{ObjectId, StreamingParallelism};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
 use risingwave_pb::common::WorkerType;
@@ -42,6 +42,7 @@ use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
+use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
@@ -987,13 +988,21 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let job_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
+
+        let table_parallelism = ModelTableParallelism::from(parallelism);
+        let streaming_parallelism = match table_parallelism {
+            ModelTableParallelism::Fixed(n) => StreamingParallelism::Fixed(n),
+            _ => bail_invalid_parameter!(
+                "CDC table backfill parallelism must be set to a fixed value"
+            ),
+        };
+
         self.ddl_controller
             .reschedule_cdc_table_backfill(
                 job_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
-                    resource_group: JobResourceGroupTarget::Keep,
-                },
+                ReschedulePolicy::Parallelism(ParallelismPolicy {
+                    parallelism: streaming_parallelism,
+                }),
             )
             .await?;
         Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
@@ -1008,13 +1017,19 @@ impl DdlService for DdlServiceImpl {
         let job_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
+
+        let parallelism = match parallelism.get_parallelism()? {
+            Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                StreamingParallelism::Fixed(*parallelism as _)
+            }
+            Parallelism::Auto(_) | Parallelism::Adaptive(_) => StreamingParallelism::Adaptive,
+            _ => bail_unavailable!(),
+        };
+
         self.ddl_controller
             .reschedule_streaming_job(
                 job_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
-                    resource_group: JobResourceGroupTarget::Keep,
-                },
+                ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
                 deferred,
             )
             .await?;
@@ -1289,10 +1304,7 @@ impl DdlService for DdlServiceImpl {
         self.ddl_controller
             .reschedule_streaming_job(
                 table_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Refresh,
-                    resource_group: JobResourceGroupTarget::Update(resource_group),
-                },
+                ReschedulePolicy::ResourceGroup(ResourceGroupPolicy { resource_group }),
                 deferred,
             )
             .await?;

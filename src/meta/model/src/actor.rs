@@ -16,9 +16,7 @@ use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap, WorkerId,
-};
+use crate::{ActorId, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap, WorkerId};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
@@ -48,37 +46,13 @@ impl From<ActorStatus> for PbActorState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "actor")]
-pub struct Model {
-    #[sea_orm(primary_key)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActorModel {
     pub actor_id: ActorId,
     pub fragment_id: FragmentId,
     pub status: ActorStatus,
-    pub splits: Option<ConnectorSplits>,
+    pub splits: ConnectorSplits,
     pub worker_id: WorkerId,
-    #[deprecated]
-    pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,
     pub expr_context: ExprContext,
 }
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::fragment::Entity",
-        from = "Column::FragmentId",
-        to = "super::fragment::Column::FragmentId",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Fragment,
-}
-
-impl Related<super::fragment::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Fragment.def()
-    }
-}
-
-impl ActiveModelBehavior for ActiveModel {}
