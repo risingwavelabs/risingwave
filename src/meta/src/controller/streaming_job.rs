@@ -693,8 +693,6 @@ impl CatalogController {
             objs.extend(internal_table_objs);
         }
 
-        let mut deleted_fragments = self.get_fragment_ids_by_job_ids(&txn, &[job_id]).await?;
-
         // Check if the job is creating sink into table.
         if table_obj.is_none()
             && let Some(Some(target_table_id)) = Sink::find_by_id(job_id)
@@ -726,11 +724,6 @@ impl CatalogController {
                     id = tmp_id,
                     "aborting temp streaming job for sink into table"
                 );
-
-                let deleted_tmp_fragments =
-                    self.get_fragment_ids_by_job_ids(&txn, &[tmp_id]).await?;
-
-                deleted_fragments.extend(deleted_tmp_fragments);
 
                 Object::delete_by_id(tmp_id).exec(&txn).await?;
             }
@@ -786,31 +779,6 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        // let actor_ids = actor_ids.into_iter().map(|id| id as ActorId).collect_vec();
-        //
-        // Actor::update_many()
-        //     .col_expr(
-        //         actor::Column::Status,
-        //         SimpleExpr::from(ActorStatus::Running.into_value()),
-        //     )
-        //     .filter(actor::Column::ActorId.is_in(actor_ids))
-        //     .exec(&txn)
-        //     .await?;
-        //
-        // for splits in split_assignment.values() {
-        //     for (actor_id, splits) in splits {
-        //         let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-        //         let connector_splits = &PbConnectorSplits { splits };
-        //         actor::ActiveModel {
-        //             actor_id: Set(*actor_id as _),
-        //             splits: Set(Some(connector_splits.into())),
-        //             ..Default::default()
-        //         }
-        //         .update(&txn)
-        //         .await?;
-        //     }
-        // }
-
         insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;
 
         if let Some(new_downstream) = new_sink_downstream {
@@ -827,22 +795,6 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
-
-        // for actor_id in &actor_ids {
-        //     inner.actors.mutate_actor(*actor_id as ActorId, |actor| {
-        //         actor.status = ActorStatus::Running;
-        //     });
-        // }
-        //
-        // for splits in split_assignment.values() {
-        //     for (&actor_id, splits) in splits {
-        //         let _ = inner.actors.mutate_actor(actor_id as ActorId, |actor| {
-        //             let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-        //             let connector_splits = &PbConnectorSplits { splits };
-        //             actor.splits = Some(connector_splits.into());
-        //         });
-        //     }
-        // }
 
         Ok(())
     }
@@ -1136,13 +1088,6 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        // if let Some(_original_fragment_ids) = old_fragment_ids {
-        //     unimplemented!("_");
-        //     // inner
-        //     //     .actors
-        //     //     .drop_actors_by_fragments(&original_fragment_ids);
-        // }
-
         let mut version = self
             .notify_frontend(
                 notification_op,
@@ -1225,14 +1170,6 @@ impl CatalogController {
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
         auto_refresh_schema_sinks: Option<Vec<FinishAutoRefreshSchemaSinkContext>>,
     ) -> MetaResult<(Vec<PbObject>, Option<(Vec<PbUserInfo>, Vec<PartialObject>)>)> {
-        //         actor_cache: &ActorInfo,
-        //     ) -> MetaResult<(
-        //         Vec<PbObject>,
-        //         Vec<PbFragmentWorkerSlotMapping>,
-        //         Option<(Vec<PbUserInfo>, Vec<PartialObject>)>,
-        //         Vec<FragmentId>,
-        //     )> {
-
         let original_job_id = streaming_job.id() as ObjectId;
         let job_type = streaming_job.job_type();
 
@@ -1378,13 +1315,6 @@ impl CatalogController {
 
             Ok(())
         }
-        // let original_fragment_ids: Vec<FragmentId> = Fragment::find()
-        //     .select_only()
-        //     .column(fragment::Column::FragmentId)
-        //     .filter(fragment::Column::JobId.eq(original_job_id))
-        //     .into_tuple()
-        //     .all(txn)
-        //     .await?;
 
         finish_fragments(txn, tmp_id, original_job_id, replace_upstream).await?;
 
@@ -1511,12 +1441,6 @@ impl CatalogController {
         }
 
         Ok((objects, notification_objs))
-        // Ok((
-        //     objects,
-        //     fragment_mapping,
-        //     notification_objs,
-        //     original_fragment_ids,
-        // ))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.

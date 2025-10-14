@@ -276,10 +276,6 @@ impl CatalogController {
             )
             .await?;
 
-        // todo
-        // let (removed_source_fragments, removed_actors, removed_fragments) =
-        //     get_fragments_for_jobs(&txn, &inner.actors, removed_streaming_job_ids.clone()).await?;
-
         let sink_target_fragments = fetch_target_fragments(&txn, removed_sink_fragments).await?;
         let mut removed_sink_fragment_by_targets = HashMap::new();
         for (sink_fragment, target_fragments) in sink_target_fragments {
@@ -334,10 +330,6 @@ impl CatalogController {
         let user_infos = list_user_info_by_ids(updated_user_ids, &txn).await?;
 
         txn.commit().await?;
-
-        // inner
-        //     .actors
-        //     .drop_actors_by_fragments(&removed_fragments.iter().copied().collect_vec());
 
         // notify about them.
         self.notify_users_update(user_infos).await;
