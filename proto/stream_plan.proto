@@ -1187,6 +1187,9 @@ message BackfillOrder {
 // For the persisted form, see `TableFragments`.
 message StreamFragmentGraph {
   message StreamFragment {
+    reserved 5, 6;
+    reserved "table_ids_cnt", "upstream_table_ids";
+
     // 0-based on frontend, and will be rewritten to global id on meta.
     uint32 fragment_id = 1;
     // root stream node in this fragment.
@@ -1197,10 +1200,6 @@ message StreamFragmentGraph {
     // Note: if this is `false`, the fragment may still be a singleton according to the scheduler.
     // One should check `meta.Fragment.distribution_type` for the final result.
     bool requires_singleton = 4;
-    // Number of table ids (stateful states) for this fragment.
-    uint32 table_ids_cnt = 5;
-    // Mark the upstream table ids of this fragment, Used for fragments with `StreamScan`s.
-    repeated uint32 upstream_table_ids = 6;
   }
 
   message StreamFragmentEdge {
