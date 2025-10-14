@@ -617,7 +617,6 @@ impl SourceManager {
                     MetaError::invalid_parameter(&format!("Failed to serialize policies: {}", e))
                 })?
             };
-            println!("这里4");
             // Get existing source properties
             let mut props: HashMap<String, String> =
                 source.with_properties.clone().into_iter().collect();

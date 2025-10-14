@@ -97,8 +97,6 @@ impl StreamReaderBuilder {
                                     .first()
                                     .map(|tc| tc.cdc_table_id.as_str())
                                     .unwrap_or("");
-                                println!("这里cdc_table_id: {:?}", cdc_table_id);
-                                println!("这里table_policies: {:?}", table_policies);
                                 // Use table-level policy if available, otherwise fallback to source-level
                                 let policy = table_policies
                                     .get(cdc_table_id)

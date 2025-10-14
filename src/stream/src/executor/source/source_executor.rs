@@ -145,7 +145,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
     /// Handle CDC table schema change policies from ConnectorPropsChange
     fn handle_cdc_table_schema_policies_change(&mut self, new_props: &HashMap<String, String>) {
-        println!("这里new_props: {:?}", new_props);
         if let Some(table_policies_json) = new_props.get("cdc_table_schema_change_policies") {
             tracing::info!(
                 "Received CDC table schema change policies: {}",
@@ -684,7 +683,6 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
 
                             Mutation::ConnectorPropsChange(maybe_mutation) => {
-                                println!("这里maybe_mutation: {:?}", maybe_mutation);
                                 if let Some(new_props) = maybe_mutation.get(&source_id.table_id()) {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
