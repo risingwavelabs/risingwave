@@ -18,8 +18,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use futures::TryStreamExt;
-use futures::stream::BoxStream;
-
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
@@ -54,9 +52,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbState};
 use risingwave_pb::meta::{FragmentDistribution, PbFragmentWorkerSlotMapping};
-
 use risingwave_pb::plan_common::PbExprContext;
-
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -73,18 +69,11 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
-
-use crate::controller::catalog::{CatalogController, CatalogControllerInner};
-
-
-
+use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
-};
-use crate::controller::utils::{
     get_sink_fragment_by_ids, has_table_been_migrated, rebuild_fragment_mapping,
     resolve_no_shuffle_actor_dispatcher,
 };
@@ -94,9 +83,8 @@ use crate::model::{
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
-use crate::{MetaError, MetaResult, model};
 use crate::stream::{SourceManagerRef, SplitAssignment, UpstreamSinkInfo};
-
+use crate::{MetaResult, model};
 
 /// Some information of running (inflight) actors.
 #[derive(Clone, Debug)]
@@ -2138,7 +2126,6 @@ impl CatalogController {
         }
         Ok(source_fragment_ids)
     }
-
 
     pub async fn get_all_upstream_sink_infos(
         &self,
