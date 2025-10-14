@@ -48,6 +48,7 @@ pub struct SharedFragmentInfo {
     pub actors: HashMap<ActorId, InflightActorInfo>,
     pub vnode_count: usize,
     pub fragment_type_mask: FragmentTypeMask,
+    //    pub nodes: PbStreamNode,
 }
 
 impl From<(&InflightFragmentInfo, TableId)> for SharedFragmentInfo {
@@ -57,6 +58,7 @@ impl From<(&InflightFragmentInfo, TableId)> for SharedFragmentInfo {
         let InflightFragmentInfo {
             fragment_id,
             distribution_type,
+            job_id,
             fragment_type_mask,
             actors,
             vnode_count,
@@ -68,6 +70,8 @@ impl From<(&InflightFragmentInfo, TableId)> for SharedFragmentInfo {
             job_id: job_id.table_id() as _,
             distribution_type: *distribution_type,
             fragment_type_mask: *fragment_type_mask,
+            job_id: *job_id,
+            // nodes: nodes.clone(),
             actors: actors.clone(),
             vnode_count: *vnode_count,
         }
@@ -535,7 +539,7 @@ impl InflightDatabaseInfo {
                         for (actor_id, new_vnodes) in actor_update_vnode_bitmap {
                             actors
                                 .get_mut(&actor_id)
-                                .expect("should exist")
+                                .unwrap_or_else(|| panic!("actor {actor_id} should exist"))
                                 .vnode_bitmap = Some(new_vnodes);
                         }
                         for (actor_id, actor) in new_actors {

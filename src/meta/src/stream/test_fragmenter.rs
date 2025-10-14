@@ -490,7 +490,6 @@ async fn test_graph_builder() -> MetaResult<()> {
     let mview_fragment_ids = stream_job_fragments.mview_fragment_ids();
 
     assert_eq!(mview_fragment_ids.len(), 1);
-
     assert_eq!(actors.len(), 9);
     assert_eq!(internal_tables.len(), 3);
 

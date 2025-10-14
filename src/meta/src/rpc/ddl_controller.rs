@@ -90,9 +90,9 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
-    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
+    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -489,35 +489,36 @@ impl DdlController {
     pub async fn reschedule_streaming_job(
         &self,
         job_id: u32,
-        target: JobRescheduleTarget,
-        mut deferred: bool,
+        target: ReschedulePolicy,
+        deferred: bool,
     ) -> MetaResult<()> {
+        tracing::info!("altering parallelism for job {}", job_id);
         tracing::info!("alter parallelism");
-        if self.barrier_manager.check_status_running().is_err() {
-            tracing::info!(
-                "alter parallelism is set to deferred mode because the system is in recovery state"
-            );
-            deferred = true;
-        }
+        // if self.barrier_manager.check_status_running().is_err() {
+        //     tracing::info!(
+        //         "alter parallelism is set to deferred mode because the system is in recovery state"
+        //     );
+        //     deferred = true;
+        // }
 
         self.stream_manager
             .reschedule_streaming_job(job_id, target, deferred)
             .await
     }
 
-    pub async fn reschedule_cdc_table_backfill(
-        &self,
-        job_id: u32,
-        target: JobRescheduleTarget,
-    ) -> MetaResult<()> {
-        tracing::info!("alter CDC table backfill parallelism");
-        if self.barrier_manager.check_status_running().is_err() {
-            return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
-        }
-        self.stream_manager
-            .reschedule_cdc_table_backfill(job_id, target)
-            .await
-    }
+    // pub async fn reschedule_cdc_table_backfill(
+    //     &self,
+    //     job_id: u32,
+    //     target: JobRescheduleTarget,
+    // ) -> MetaResult<()> {
+    //     tracing::info!("alter CDC table backfill parallelism");
+    //     if self.barrier_manager.check_status_running().is_err() {
+    //         return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
+    //     }
+    //     self.stream_manager
+    //         .reschedule_cdc_table_backfill(job_id, target)
+    //         .await
+    // }
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         self.drop_object(ObjectType::Database, database_id as _, DropMode::Cascade)
@@ -1860,6 +1861,11 @@ impl DdlController {
             .get_job_fragments_by_id(&id.into())
             .await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
+
+        //   let old_internal_table_ids = self
+        //             .metadata_manager
+        //             .list_job_internal_table_ids_by_id(&id.into())
+        //             .await?;
 
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;

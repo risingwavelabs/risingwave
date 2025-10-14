@@ -339,6 +339,10 @@ impl SourceManagerCore {
                         enable_adaptive: handle.enable_adaptive_splits,
                     },
                 ) {
+                    println!(
+                        "xxk fragment {}, assignment {:?}",
+                        fragment_id, new_assignment
+                    );
                     split_assignment.insert(fragment_id, new_assignment);
                 }
             }
@@ -448,8 +452,8 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    tracing::trace!(fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
-    tracing::trace!(fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
+    tracing::debug!(fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
+    tracing::debug!(fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
 
     let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
 
