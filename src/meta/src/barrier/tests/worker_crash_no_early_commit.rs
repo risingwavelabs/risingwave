@@ -217,7 +217,6 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             actor1.fragment_id,
                             InflightFragmentInfo {
                                 fragment_id: actor1.fragment_id,
-                                job_id: job_id.table_id as _,
                                 distribution_type: DistributionType::Single,
                                 fragment_type_mask: Default::default(),
                                 vnode_count: VirtualNode::COUNT_FOR_TEST,
@@ -237,7 +236,6 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             actor2.fragment_id,
                             InflightFragmentInfo {
                                 fragment_id: actor2.fragment_id,
-                                job_id: job_id.table_id as _,
                                 distribution_type: DistributionType::Single,
                                 fragment_type_mask: Default::default(),
                                 vnode_count: VirtualNode::COUNT_FOR_TEST,

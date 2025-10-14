@@ -688,7 +688,6 @@ impl CatalogController {
                 fragment_id,
                 InflightFragmentInfo {
                     fragment_id: _,
-                    job_id: _,
                     distribution_type,
                     fragment_type_mask,
                     vnode_count,

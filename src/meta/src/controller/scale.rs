@@ -43,7 +43,7 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::id::{IdCategory, IdGeneratorManagerRef};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor};
-use crate::stream::{AssignerBuilder, SourceWorkerProperties};
+use crate::stream::{AssignerBuilder, SplitDiffOptions};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
     txn: &C,
@@ -112,7 +112,6 @@ pub async fn load_fragment_info<C>(
     database_id: Option<DatabaseId>,
     worker_nodes: &ActiveStreamingWorkerNodes,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-    props: HashMap<SourceId, SourceWorkerProperties>,
 ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
 where
     C: ConnectionTrait,
@@ -156,7 +155,6 @@ where
         jobs,
         available_workers,
         adaptive_parallelism_strategy,
-        props,
     )
     .await?;
 
@@ -178,8 +176,6 @@ pub struct WorkerInfo {
 pub struct RenderedGraph {
     pub fragments: HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>,
     pub ensembles: Vec<NoShuffleEnsemble>,
-    pub source_fragments: HashMap<FragmentId, Vec<ActorId>>,
-    pub cdc_source_fragments: HashMap<FragmentId, Vec<ActorId>>,
 }
 
 pub async fn render_jobs<C>(
@@ -188,7 +184,6 @@ pub async fn render_jobs<C>(
     job_ids: HashSet<ObjectId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-    _source_properties: HashMap<SourceId, SourceWorkerProperties>,
 ) -> MetaResult<RenderedGraph>
 where
     C: ConnectionTrait,
@@ -261,7 +256,7 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
-    let mut result: HashMap<
+    let mut all_fragments: HashMap<
         DatabaseId,
         HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
     > = HashMap::new();
@@ -383,8 +378,7 @@ where
                     entry_fragment_id as u32,
                     empty_actor_splits,
                     &splits,
-                    // pre-allocate splits is the first time getting splits, and it does not have scale-in scene
-                    std::default::Default::default(),
+                    SplitDiffOptions::default(),
                 )
                 .unwrap_or_default();
                 (fragment_splits, Some(*source_id))
@@ -450,7 +444,6 @@ where
 
             let fragment = InflightFragmentInfo {
                 fragment_id: fragment_id as u32,
-                job_id,
                 distribution_type,
                 fragment_type_mask: fragment_type_mask.into(),
                 vnode_count,
@@ -467,7 +460,7 @@ where
                 panic!("streaming job {job_id} not found in streaming_job_databases")
             });
 
-            result
+            all_fragments
                 .entry(database_id)
                 .or_default()
                 .entry(job_id)
@@ -477,10 +470,8 @@ where
     }
 
     Ok(RenderedGraph {
-        fragments: result,
-        ensembles: vec![],
-        source_fragments: Default::default(),
-        cdc_source_fragments: Default::default(),
+        fragments: all_fragments,
+        ensembles,
     })
 }
 
@@ -548,35 +539,6 @@ where
             })
         })
         .collect();
-
-    // let source_ids = source_fragment_ids.keys().cloned().collect_vec();
-
-    // let sources: Vec<_> = SourceSplits::find()
-    //     .filter(source_splits::Column::SourceId.is_in(source_ids))
-    //     .all(txn)
-    //     .await?;
-
-    // let source_splits: HashMap<_, _> = sources
-    //     .into_iter()
-    //     .flat_map(|model| {
-    //         model.splits.map(|splits| {
-    //             (
-    //                 model.source_id,
-    //                 (
-    //                     source_properties
-    //                         .remove(&model.source_id)
-    //                         .unwrap_or_default(),
-    //                     splits
-    //                         .to_protobuf()
-    //                         .splits
-    //                         .iter()
-    //                         .flat_map(SplitImpl::try_from)
-    //                         .collect(),
-    //                 ),
-    //             )
-    //         })
-    //     })
-    //     .collect();
 
     Ok((fragment_source_ids, fragment_splits))
 }
