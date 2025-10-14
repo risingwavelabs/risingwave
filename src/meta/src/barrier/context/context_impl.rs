@@ -232,16 +232,11 @@ impl CommandContext {
 
             Command::SourceChangeSplit(SplitState {
                 split_assignment: assignment,
-                discovered_source_splits: source_splits,
+                ..
             }) => {
                 barrier_manager_context
                     .metadata_manager
                     .update_actor_splits_by_split_assignment(assignment)
-                    .await?;
-
-                barrier_manager_context
-                    .metadata_manager
-                    .update_source_splits(source_splits)
                     .await?;
 
                 barrier_manager_context
