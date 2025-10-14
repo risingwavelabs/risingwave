@@ -77,7 +77,6 @@ pub struct CustomActorInfo {
     pub vnode_bitmap: Option<Bitmap>,
 }
 
-use educe::Educe;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::DispatcherType;
