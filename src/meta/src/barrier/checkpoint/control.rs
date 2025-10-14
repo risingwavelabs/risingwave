@@ -58,11 +58,14 @@ pub(crate) struct CheckpointControl {
     pub(crate) env: MetaSrvEnv,
     pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
     pub(super) hummock_version_stats: HummockVersionStats,
+    /// The max barrier nums in flight
+    pub(crate) in_flight_barrier_nums: usize,
 }
 
 impl CheckpointControl {
     pub fn new(env: MetaSrvEnv) -> Self {
         Self {
+            in_flight_barrier_nums: env.opts.in_flight_barrier_nums,
             env,
             databases: Default::default(),
             hummock_version_stats: Default::default(),
@@ -79,6 +82,7 @@ impl CheckpointControl {
         env.shared_actor_infos()
             .retain_databases(databases.keys().chain(&failed_databases).cloned());
         Self {
+            in_flight_barrier_nums: env.opts.in_flight_barrier_nums,
             env,
             databases: databases
                 .into_iter()
@@ -143,15 +147,6 @@ impl CheckpointControl {
                 Ok(())
             }
         }
-    }
-
-    pub(crate) fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        self.databases.values().all(|database| {
-            database
-                .running_state()
-                .map(|database| database.can_inject_barrier(in_flight_barrier_nums))
-                .unwrap_or(true)
-        })
     }
 
     pub(crate) fn recovering_databases(&self) -> impl Iterator<Item = DatabaseId> + '_ {
@@ -275,6 +270,10 @@ impl CheckpointControl {
                 // Skip new barrier for database which is not running.
                 return Ok(());
             };
+            if !database.can_inject_barrier(self.in_flight_barrier_nums) {
+                // Skip new barrier with no explicit command when the database should pause inject additional barrier
+                return Ok(());
+            }
             database.handle_new_barrier(
                 None,
                 checkpoint,
