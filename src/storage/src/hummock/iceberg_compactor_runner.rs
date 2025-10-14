@@ -190,6 +190,7 @@ impl IcebergCompactorRunner {
                 )
                 .small_file_threshold(self.config.small_file_threshold)
                 .max_task_total_size(self.config.max_task_total_size)
+                .grouping_strategy(iceberg_compaction_core::config::GroupingStrategy::Noop)
                 .build()
                 .unwrap_or_else(|e| {
                     panic!(
@@ -211,11 +212,23 @@ impl IcebergCompactorRunner {
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-            let compaction_plan = planner
+            let compaction_plans = planner
                 .plan_compaction_with_branch(&table, compaction_type, &branch)
                 .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?
-                .ok_or_else(|| HummockError::compaction_executor("Not find compaction plan"))?;
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+            if compaction_plans.is_empty() {
+                tracing::info!(
+                    task_id = task_id,
+                    table = ?self.table_ident,
+                    "No files to compact, skip the task",
+                );
+                return Ok::<RewriteFilesStat, HummockError>(RewriteFilesStat::default());
+            }
+
+            assert_eq!(1, compaction_plans.len());
+
+            let compaction_plan = compaction_plans.into_iter().next().unwrap();
 
             let statistics = self.analyze_task_statistics(&compaction_plan);
 
@@ -300,7 +313,8 @@ impl IcebergCompactorRunner {
             } = compaction
                 .compact_with_plan(compaction_plan, &compaction_execution_config)
                 .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?
+                .unwrap();
 
             if let Some(committed_table) = table
                 && should_enable_iceberg_cow(
@@ -422,17 +436,17 @@ impl IcebergCompactorRunner {
         let mut total_eq_del_file_size: u64 = 0;
         let mut total_eq_del_file_count = 0;
 
-        for data_file in &plan.files_to_compact.data_files {
+        for data_file in &plan.file_group.data_files {
             total_data_file_size += data_file.file_size_in_bytes;
             total_data_file_count += 1;
         }
 
-        for pos_del_file in &plan.files_to_compact.position_delete_files {
+        for pos_del_file in &plan.file_group.position_delete_files {
             total_pos_del_file_size += pos_del_file.file_size_in_bytes;
             total_pos_del_file_count += 1;
         }
 
-        for eq_del_file in &plan.files_to_compact.equality_delete_files {
+        for eq_del_file in &plan.file_group.equality_delete_files {
             total_eq_del_file_size += eq_del_file.file_size_in_bytes;
             total_eq_del_file_count += 1;
         }
