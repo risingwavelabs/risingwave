@@ -148,6 +148,10 @@ impl Distill for BatchLookupJoin {
 
         vec.push(("lookup table", Pretty::display(&scan.core().table_name())));
 
+        if let Some(as_of) = &self.as_of {
+            vec.push(("as_of", Pretty::debug(as_of)));
+        }
+
         childless_record("BatchLookupJoin", vec)
     }
 }

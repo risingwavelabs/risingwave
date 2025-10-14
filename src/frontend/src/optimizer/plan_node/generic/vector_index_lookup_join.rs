@@ -18,6 +18,7 @@ use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::PbVectorIndexReaderDesc;
 use risingwave_sqlparser::ast::AsOf;
+
 use crate::OptimizerContextRef;
 use crate::catalog::TableId;
 use crate::expr::{ExprDisplay, ExprImpl, InputRef};
@@ -122,6 +123,9 @@ impl<PlanRef: GenericPlanRef> VectorIndexLookupJoin<PlanRef> {
         ];
         if let Some(hnsw_ef_search) = self.hnsw_ef_search {
             fields.push(("hnsw_ef_search", Pretty::debug(&hnsw_ef_search)));
+        }
+        if let Some(as_of) = &self.as_of {
+            fields.push(("as_of", Pretty::debug(&as_of)));
         }
         fields
     }

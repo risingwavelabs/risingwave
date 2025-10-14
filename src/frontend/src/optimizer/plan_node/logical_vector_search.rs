@@ -516,7 +516,7 @@ impl ToBatch for LogicalVectorSearch {
                         vec![],
                         self.core.input.ctx(),
                         Condition::true_cond(),
-                        None,
+                        scan.as_of(),
                     );
                     let logical_scan = LogicalScan::from(table_scan);
                     let batch_scan = logical_scan.to_batch()?;
