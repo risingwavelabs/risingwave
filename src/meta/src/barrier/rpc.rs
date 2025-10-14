@@ -760,11 +760,18 @@ impl ControlStreamManager {
 
         self.env.shared_actor_infos().recover_database(
             database_id,
-            database_jobs.values().flatten().chain(
-                creating_streaming_job_controls
-                    .values()
-                    .flat_map(|job| job.graph_info().fragment_infos()),
-            ),
+            database_jobs
+                .values()
+                .flat_map(|info| {
+                    info.fragment_infos()
+                        .map(|fragment| (fragment, info.job_id))
+                })
+                .chain(creating_streaming_job_controls.values().flat_map(|job| {
+                    let graph_info = job.graph_info();
+                    graph_info
+                        .fragment_infos()
+                        .map(|fragment| (fragment, graph_info.job_id))
+                })),
         );
 
         let committed_epoch = barrier_info.prev_epoch();
