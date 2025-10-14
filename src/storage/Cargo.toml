@@ -80,7 +80,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tonic = { workspace = true }
 tracing = "0.1"
-xorf = "0.11.0"
+xorf = "0.12.0"
 xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 
