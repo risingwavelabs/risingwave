@@ -2626,7 +2626,7 @@ fn parse_temporal_join() {
     );
 
     let sql = "SELECT * FROM t1 JOIN t2 FOR SYSTEM_TIME AS OF NOW() - '1' SECOND ON c1 = c2";
-    let select = verified_only_select(sql);
+    verified_only_select(sql);
 }
 
 #[test]
