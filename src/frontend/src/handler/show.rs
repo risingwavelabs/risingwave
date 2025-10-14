@@ -1036,10 +1036,7 @@ mod tests {
 
         let mut rows = frontend.query_formatted_result("SHOW SOURCES").await;
         rows.sort();
-        assert_eq!(
-            rows,
-            vec!["Row([Some(b\"public\"), Some(b\"t1\")])".to_owned()]
-        );
+        assert_eq!(rows, vec!["Row([Some(b\"public.t1\")])".to_owned(),]);
     }
 
     #[tokio::test]
