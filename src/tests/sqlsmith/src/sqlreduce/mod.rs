@@ -14,6 +14,9 @@
 
 pub mod checker;
 mod passes;
+pub mod path;
 pub mod reducer;
+pub mod rules;
 
 pub use passes::Strategy;
+pub use reducer::ReductionMode;
