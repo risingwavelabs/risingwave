@@ -317,7 +317,7 @@ impl GlobalStreamManager {
         let table_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id().into();
 
-        let (cancel_tx, mut cancel_rx) = oneshot::channel();
+        let (cancel_tx, cancel_rx) = oneshot::channel();
         let execution = StreamingJobExecution::new(table_id, cancel_tx, permit);
         self.creating_job_info.add_job(execution).await;
 
@@ -357,7 +357,7 @@ impl GlobalStreamManager {
             biased;
 
             res = create_fut => res,
-            notifier = &mut cancel_rx => {
+            notifier = cancel_rx => {
                 let notifier = notifier.expect("sender should not be dropped");
                 tracing::debug!(id=?table_id, "cancelling streaming job");
 

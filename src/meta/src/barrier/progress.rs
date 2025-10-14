@@ -569,7 +569,10 @@ impl CreateMviewProgressTracker {
                 // The command can be finished immediately.
                 return Some(TrackingJob::new(
                     info.stream_job_fragments.stream_job_id.table_id as _,
-                    None,
+                    Some(SourceChange::CreateJobFinished {
+                        finished_backfill_fragments: stream_job_fragments
+                            .source_backfill_fragments(),
+                    }),
                 ));
             }
             (info.clone(), actors)
