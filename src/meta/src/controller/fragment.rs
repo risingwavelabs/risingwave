@@ -82,7 +82,7 @@ use crate::model::{
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
-use crate::stream::{SourceManagerRef, UpstreamSinkInfo};
+use crate::stream::UpstreamSinkInfo;
 use crate::{MetaResult, model};
 
 /// Some information of running (inflight) actors.
@@ -96,7 +96,6 @@ pub struct InflightActorInfo {
 #[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
     pub fragment_id: crate::model::FragmentId,
-    pub job_id: ObjectId,
     pub distribution_type: DistributionType,
     pub fragment_type_mask: FragmentTypeMask,
     pub vnode_count: usize,
@@ -1253,7 +1252,6 @@ impl CatalogController {
         &self,
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
-        source_manager_ref: SourceManagerRef,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
         let adaptive_parallelism_strategy = {
@@ -1262,8 +1260,6 @@ impl CatalogController {
         };
 
         let id_gen = self.env.id_gen_manager();
-
-        let props = source_manager_ref.list_sources_special_props().await;
 
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -1274,7 +1270,6 @@ impl CatalogController {
             database_id,
             worker_nodes,
             adaptive_parallelism_strategy,
-            props,
         )
         .await?;
 

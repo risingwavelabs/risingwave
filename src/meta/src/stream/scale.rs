@@ -431,29 +431,12 @@ impl ScaleController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
-        let props = self.source_manager.list_sources_special_props().await;
         let id_gen = self.env.id_gen_manager();
-
-        // let x: HashMap<_, _> = self
-        //     .env
-        //     .shared_actor_info
-        //     .read_guard()
-        //     .iter_over_fragments()
-        //     .map(|(x, xx)| (*x as _, xx.actors.len()))
-        //     .collect();
 
         let RenderedGraph {
             fragments: render_result,
             ..
-        } = render_jobs(
-            txn,
-            id_gen,
-            jobs,
-            workers,
-            adaptive_parallelism_strategy,
-            props,
-        )
-        .await?;
+        } = render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy).await?;
 
         // for (db, jobs) in &render_result {
         //     println!("\tdb: {db}");
