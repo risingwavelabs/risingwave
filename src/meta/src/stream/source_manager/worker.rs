@@ -392,6 +392,12 @@ pub struct ConnectorSourceWorkerHandle {
     pub enable_adaptive_splits: bool,
 }
 
+#[derive(Default, Debug, Clone)]
+pub struct SourceWorkerProperties {
+    pub enable_drop_split: bool,
+    pub enable_adaptive_splits: bool,
+}
+
 impl ConnectorSourceWorkerHandle {
     pub fn get_enable_adaptive_splits(&self) -> bool {
         self.enable_adaptive_splits
@@ -400,10 +406,10 @@ impl ConnectorSourceWorkerHandle {
     pub async fn discovered_splits(
         &self,
         source_id: SourceId,
-        actors: &HashSet<ActorId>,
+        // actors: &HashSet<ActorId>,
     ) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
         // XXX: when is this None? Can we remove the Option?
-        let Some(mut discovered_splits) = self.splits.lock().await.splits.clone() else {
+        let Some(discovered_splits) = self.splits.lock().await.splits.clone() else {
             tracing::info!(
                 "The discover loop for source {} is not ready yet; we'll wait for the next run",
                 source_id
@@ -413,17 +419,16 @@ impl ConnectorSourceWorkerHandle {
         if discovered_splits.is_empty() {
             tracing::warn!("No splits discovered for source {}", source_id);
         }
-
-        if self.enable_adaptive_splits {
-            // Connector supporting adaptive splits returns just one split, and we need to make the number of splits equal to the number of actors in this fragment.
-            // Because we Risingwave consume the splits statelessly and we do not need to keep the id internally, we always use actor_id as split_id.
-            // And prev splits record should be dropped via CN.
-
-            debug_assert!(self.enable_drop_split);
-            debug_assert!(discovered_splits.len() == 1);
-            discovered_splits =
-                fill_adaptive_split(discovered_splits.values().next().unwrap(), actors)?;
-        }
+        // if self.enable_adaptive_splits {
+        //     // Connector supporting adaptive splits returns just one split, and we need to make the number of splits equal to the number of actors in this fragment.
+        //     // Because we Risingwave consume the splits statelessly and we do not need to keep the id internally, we always use actor_id as split_id.
+        //     // And prev splits record should be dropped via CN.
+        //
+        //     debug_assert!(self.enable_drop_split);
+        //     debug_assert!(discovered_splits.len() == 1);
+        //     discovered_splits =
+        //         fill_adaptive_split(discovered_splits.values().next().unwrap(), actors)?;
+        // }
 
         Ok(discovered_splits)
     }

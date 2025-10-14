@@ -215,12 +215,12 @@ impl HummockManagerService for HummockServiceImpl {
         if request.table_id < SYS_CATALOG_START_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
             let table_id = TableId::new(request.table_id);
-            if let Ok(table_fragment) = self
+            if let Ok(state_table_ids) = self
                 .metadata_manager
-                .get_job_fragments_by_id(&table_id)
+                .list_job_state_table_ids_by_id(&table_id)
                 .await
             {
-                option.internal_table_id = HashSet::from_iter(table_fragment.all_table_ids());
+                option.internal_table_id = HashSet::from_iter(state_table_ids);
             }
         }
 

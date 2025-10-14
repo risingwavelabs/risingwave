@@ -96,16 +96,27 @@ impl SourceManager {
                     .iter()
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
-                let actor_hashset: HashSet<u32> = empty_actor_splits.keys().cloned().collect();
-                let splits = handle.discovered_splits(source_id, &actor_hashset).await?;
-                if splits.is_empty() {
+                // let actor_hashset: HashSet<u32> = empty_actor_splits.keys().cloned().collect();
+                // let splits = handle.discovered_splits(source_id, &actor_hashset).await?;
+                let mut discovered_splits = handle.discovered_splits(source_id).await?;
+                if discovered_splits.is_empty() {
                     tracing::warn!(?stream_job_id, source_id, "no splits detected");
                     continue 'loop_source;
                 }
+
+                if handle.enable_adaptive_splits {
+                    debug_assert!(handle.enable_drop_split);
+                    debug_assert!(discovered_splits.len() == 1);
+                    discovered_splits = fill_adaptive_split(
+                        discovered_splits.values().next().unwrap(),
+                        empty_actor_splits.len(),
+                    )?;
+                }
+
                 if let Some(diff) = reassign_splits(
                     fragment_id,
                     empty_actor_splits,
-                    &splits,
+                    &discovered_splits,
                     SplitDiffOptions::default(),
                 ) {
                     assigned.insert(fragment_id, diff);
@@ -309,10 +320,26 @@ impl SourceManagerCore {
                     }
                 };
 
-                let discovered_splits = handle.discovered_splits(*source_id, &actors).await?;
+                let mut discovered_splits = handle.discovered_splits(*source_id).await?;
+
+                // let discovered_splits = handle.discovered_splits(*source_id, &actors).await?;
                 if discovered_splits.is_empty() {
                     // The discover loop for this source is not ready yet; we'll wait for the next run
                     continue 'loop_source;
+                }
+
+                source_splits_discovered.insert(
+                    *source_id,
+                    discovered_splits.values().cloned().collect_vec(),
+                );
+
+                if handle.enable_adaptive_splits {
+                    debug_assert!(handle.enable_drop_split);
+                    debug_assert!(discovered_splits.len() == 1);
+                    discovered_splits = fill_adaptive_split(
+                        discovered_splits.values().next().unwrap(),
+                        actors.len(),
+                    )?;
                 }
 
                 let prev_actor_splits = {
@@ -332,11 +359,6 @@ impl SourceManagerCore {
                         .unwrap_or_default()
                 };
 
-                source_splits_discovered.insert(
-                    *source_id,
-                    discovered_splits.values().cloned().collect_vec(),
-                );
-
                 if let Some(new_assignment) = reassign_splits(
                     fragment_id,
                     prev_actor_splits,
@@ -346,6 +368,10 @@ impl SourceManagerCore {
                         enable_adaptive: handle.enable_adaptive_splits,
                     },
                 ) {
+                    println!(
+                        "xxk fragment {}, assignment {:?}",
+                        fragment_id, new_assignment
+                    );
                     split_assignment.insert(fragment_id, new_assignment);
                 }
             }
@@ -467,8 +493,8 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    tracing::trace!(fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
-    tracing::trace!(fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
+    tracing::debug!(fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
+    tracing::debug!(fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
 
     let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
 

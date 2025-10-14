@@ -64,7 +64,7 @@ pub struct MetaSrvEnv {
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
-    pub(crate) shared_actor_info: SharedActorInfos,
+    pub shared_actor_info: SharedActorInfos,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,

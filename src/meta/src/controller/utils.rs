@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
@@ -34,9 +32,9 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array,
     JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
-    TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment,
-    fragment_relation, function, index, object, object_dependency, schema, secret, sink, source,
-    streaming_job, subscription, table, user, user_default_privilege, user_privilege, view,
+    TableId, UserId, VnodeBitmap, WorkerId, connection, database, fragment, fragment_relation,
+    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
+    subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -68,10 +66,10 @@ use sea_orm::{
 };
 use thiserror_ext::AsReport;
 
-use crate::barrier::SharedFragmentInfo;
+use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::fragment::FragmentTypeMaskExt;
-use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
+use crate::model::FragmentDownstreamRelation;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -281,7 +279,7 @@ pub struct PartialFragmentStateTables {
     pub state_table_ids: I32Array,
 }
 
-#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[derive(Clone, DerivePartialModel, FromQueryResult, Eq, PartialEq, Debug)]
 #[sea_orm(entity = "Actor")]
 pub struct PartialActorLocation {
     pub actor_id: ActorId,
@@ -290,7 +288,7 @@ pub struct PartialActorLocation {
     pub status: ActorStatus,
 }
 
-#[derive(FromQueryResult)]
+#[derive(FromQueryResult, Debug, Eq, PartialEq, Clone)]
 pub struct FragmentDesc {
     pub fragment_id: FragmentId,
     pub job_id: ObjectId,
@@ -1236,118 +1234,6 @@ pub async fn insert_fragment_relations(
     Ok(())
 }
 
-pub async fn get_fragment_actor_dispatchers<C>(
-    db: &C,
-    fragment_ids: Vec<FragmentId>,
-) -> MetaResult<FragmentActorDispatchers>
-where
-    C: ConnectionTrait,
-{
-    type FragmentActorInfo = (
-        DistributionType,
-        Arc<HashMap<crate::model::ActorId, Option<Bitmap>>>,
-    );
-    let mut fragment_actor_cache: HashMap<FragmentId, FragmentActorInfo> = HashMap::new();
-    let get_fragment_actors = |fragment_id: FragmentId| async move {
-        let result: MetaResult<FragmentActorInfo> = try {
-            let mut fragment_actors = Fragment::find_by_id(fragment_id)
-                .find_with_related(Actor)
-                .filter(actor::Column::Status.eq(ActorStatus::Running))
-                .all(db)
-                .await?;
-            if fragment_actors.is_empty() {
-                return Err(anyhow!("failed to find fragment: {}", fragment_id).into());
-            }
-            assert_eq!(
-                fragment_actors.len(),
-                1,
-                "find multiple fragment {:?}",
-                fragment_actors
-            );
-            let (fragment, actors) = fragment_actors.pop().unwrap();
-            (
-                fragment.distribution_type,
-                Arc::new(
-                    actors
-                        .into_iter()
-                        .map(|actor| {
-                            (
-                                actor.actor_id as _,
-                                actor
-                                    .vnode_bitmap
-                                    .map(|bitmap| Bitmap::from(bitmap.to_protobuf())),
-                            )
-                        })
-                        .collect(),
-                ),
-            )
-        };
-        result
-    };
-    let fragment_relations = FragmentRelation::find()
-        .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids))
-        .all(db)
-        .await?;
-
-    let mut actor_dispatchers_map: HashMap<_, HashMap<_, Vec<_>>> = HashMap::new();
-    for fragment_relation::Model {
-        source_fragment_id,
-        target_fragment_id,
-        dispatcher_type,
-        dist_key_indices,
-        output_indices,
-        output_type_mapping,
-    } in fragment_relations
-    {
-        let (source_fragment_distribution, source_fragment_actors) = {
-            let (distribution, actors) = {
-                match fragment_actor_cache.entry(source_fragment_id) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(entry) => {
-                        entry.insert(get_fragment_actors(source_fragment_id).await?)
-                    }
-                }
-            };
-            (*distribution, actors.clone())
-        };
-        let (target_fragment_distribution, target_fragment_actors) = {
-            let (distribution, actors) = {
-                match fragment_actor_cache.entry(target_fragment_id) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(entry) => {
-                        entry.insert(get_fragment_actors(target_fragment_id).await?)
-                    }
-                }
-            };
-            (*distribution, actors.clone())
-        };
-        let output_mapping = PbDispatchOutputMapping {
-            indices: output_indices.into_u32_array(),
-            types: output_type_mapping.unwrap_or_default().to_protobuf(),
-        };
-        let dispatchers = compose_dispatchers(
-            source_fragment_distribution,
-            &source_fragment_actors,
-            target_fragment_id as _,
-            target_fragment_distribution,
-            &target_fragment_actors,
-            dispatcher_type,
-            dist_key_indices.into_u32_array(),
-            output_mapping,
-        );
-        let actor_dispatchers_map = actor_dispatchers_map
-            .entry(source_fragment_id as _)
-            .or_default();
-        for (actor_id, dispatchers) in dispatchers {
-            actor_dispatchers_map
-                .entry(actor_id as _)
-                .or_default()
-                .push(dispatchers);
-        }
-    }
-    Ok(actor_dispatchers_map)
-}
-
 pub fn compose_dispatchers(
     source_fragment_distribution: DistributionType,
     source_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
@@ -1517,42 +1403,6 @@ pub fn resolve_no_shuffle_actor_dispatcher(
     }
 }
 
-/// `get_fragment_mappings` returns the fragment vnode mappings of the given job.
-pub async fn get_fragment_mappings<C>(
-    db: &C,
-    job_id: ObjectId,
-) -> MetaResult<Vec<PbFragmentWorkerSlotMapping>>
-where
-    C: ConnectionTrait,
-{
-    let job_actors: Vec<(
-        FragmentId,
-        DistributionType,
-        ActorId,
-        Option<VnodeBitmap>,
-        WorkerId,
-        ActorStatus,
-    )> = Actor::find()
-        .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::DistributionType,
-        ])
-        .columns([
-            actor::Column::ActorId,
-            actor::Column::VnodeBitmap,
-            actor::Column::WorkerId,
-            actor::Column::Status,
-        ])
-        .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-        .filter(fragment::Column::JobId.eq(job_id))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    Ok(rebuild_fragment_mapping_from_actors(job_actors))
-}
-
 pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerSlotMapping {
     let fragment_worker_slot_mapping = match fragment.distribution_type {
         DistributionType::Single => {
@@ -1670,25 +1520,49 @@ pub fn rebuild_fragment_mapping_from_actors(
     }
     result
 }
-
-/// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
-pub async fn get_fragment_actor_ids<C>(
-    db: &C,
-    fragment_ids: Vec<FragmentId>,
-) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
-where
-    C: ConnectionTrait,
-{
-    let fragment_actors: Vec<(FragmentId, ActorId)> = Actor::find()
-        .select_only()
-        .columns([actor::Column::FragmentId, actor::Column::ActorId])
-        .filter(actor::Column::FragmentId.is_in(fragment_ids))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    Ok(fragment_actors.into_iter().into_group_map())
-}
+// /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
+// pub async fn get_fragment_actor_ids<C>(
+//     db: &C,
+//     actor_cache: &ActorInfo,
+//     fragment_ids: Vec<FragmentId>,
+// ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
+// where
+//     C: ConnectionTrait,
+// {
+//     let fragment_actors_from_cache: Vec<(FragmentId, ActorId)> = fragment_ids
+//         .iter()
+//         .flat_map(|&fid| {
+//             actor_cache
+//                 .actors_by_fragment_id
+//                 .get(&fid)
+//                 .into_iter()
+//                 .flat_map(move |ids| ids.iter().copied().map(move |aid| (fid, aid)))
+//         })
+//         .collect();
+//
+//     {
+//         let fragment_actors_from_db: Vec<(FragmentId, ActorId)> = Actor::find()
+//             .select_only()
+//             .columns([actor::Column::FragmentId, actor::Column::ActorId])
+//             .filter(actor::Column::FragmentId.is_in(fragment_ids))
+//             .into_tuple()
+//             .all(db)
+//             .await?;
+//
+//         let set_db: HashSet<(FragmentId, ActorId)> = fragment_actors_from_db.into_iter().collect();
+//         let set_cache: HashSet<(FragmentId, ActorId)> =
+//             fragment_actors_from_cache.iter().cloned().collect();
+//
+//         debug_assert_eq!(
+//             set_db, set_cache,
+//             "Fragment–actor pairs mismatch between DB and cache"
+//         );
+//     }
+//
+//     let fragment_actors = fragment_actors_from_cache;
+//
+//     Ok(fragment_actors.into_iter().into_group_map())
+// }
 
 /// For the given streaming jobs, returns
 /// - All source fragments
@@ -1697,6 +1571,7 @@ where
 /// - All fragments
 pub async fn get_fragments_for_jobs<C>(
     db: &C,
+    actor_info: &SharedActorInfos,
     streaming_jobs: Vec<ObjectId>,
 ) -> MetaResult<(
     HashMap<SourceId, BTreeSet<FragmentId>>,
@@ -1727,15 +1602,18 @@ where
         .into_tuple()
         .all(db)
         .await?;
-    let actors: Vec<ActorId> = Actor::find()
-        .select_only()
-        .column(actor::Column::ActorId)
-        .filter(
-            actor::Column::FragmentId.is_in(fragments.iter().map(|(id, _, _)| *id).collect_vec()),
-        )
-        .into_tuple()
-        .all(db)
-        .await?;
+
+    let fragment_ids: HashSet<FragmentId> = fragments.iter().map(|(id, _, _)| *id).collect();
+
+    let guard = actor_info.read_guard();
+
+    let actors = {
+        fragment_ids
+            .iter()
+            .flat_map(|id| guard.get_fragment(*id as _))
+            .flat_map(|f| f.actors.keys().cloned().map(|id| id as _))
+            .collect::<HashSet<_>>()
+    };
 
     let fragment_ids = fragments
         .iter()
