@@ -554,7 +554,7 @@ impl InflightDatabaseInfo {
                         for (actor_id, new_vnodes) in actor_update_vnode_bitmap {
                             actors
                                 .get_mut(&actor_id)
-                                .expect("should exist")
+                                .unwrap_or_else(|| panic!("actor {actor_id} should exist"))
                                 .vnode_bitmap = Some(new_vnodes);
                         }
                         for (actor_id, actor) in new_actors {

@@ -36,7 +36,6 @@ macro_rules! for_all_metadata_models_v2 {
             {seaql_migrations, risingwave_meta_model::serde_seaql_migration},
             {version_stats, risingwave_meta_model::hummock_version_stats},
             {compaction_configs, risingwave_meta_model::compaction_config},
-            {actors, risingwave_meta_model::actor},
             {clusters, risingwave_meta_model::cluster},
             {fragment_relation, risingwave_meta_model::fragment_relation},
             {catalog_versions, risingwave_meta_model::catalog_version},
