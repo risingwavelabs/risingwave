@@ -236,10 +236,17 @@ impl SchemaCatalog {
                 .or_insert(vec![source_ref.id]);
         }
 
-        self.source_by_name
-            .try_insert(name, source_ref.clone())
-            .unwrap();
-        self.source_by_id.try_insert(id, source_ref).unwrap();
+        // For shared CDC sources, the source may already exist when creating a table from it
+        // In this case, we skip inserting to avoid OccupiedError
+        if self.source_by_name.contains_key(&name) {
+            tracing::debug!(
+                "Source '{}' already exists in schema catalog, skipping insert",
+                name
+            );
+        } else {
+            self.source_by_name.insert(name, source_ref.clone());
+            self.source_by_id.insert(id, source_ref);
+        }
     }
 
     pub fn drop_source(&mut self, id: SourceId) {

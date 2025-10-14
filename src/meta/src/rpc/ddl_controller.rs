@@ -844,13 +844,14 @@ impl DdlController {
         table_id: u32,
     ) -> MetaResult<risingwave_connector::source::cdc::SchemaChangeFailurePolicy> {
         use risingwave_connector::source::cdc::SchemaChangeFailurePolicy;
-        
+
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
             .filter(|f| {
                 f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
-                    || f.fragment_type_mask.contains(FragmentTypeFlag::StreamCdcScan)
+                    || f.fragment_type_mask
+                        .contains(FragmentTypeFlag::StreamCdcScan)
             })
             .exactly_one()
             .ok()
@@ -860,36 +861,38 @@ impl DdlController {
                     table_id
                 )
             })?;
-        
+
         // Find the StreamCdcScan node
         let node_body = match &stream_scan_fragment.nodes.node_body {
             Some(NodeBody::StreamCdcScan(_)) => &stream_scan_fragment.nodes.node_body,
-            Some(NodeBody::Project(_)) => {
-                stream_scan_fragment.nodes.input.first()
-                    .map(|n| &n.node_body)
-                    .unwrap_or(&None)
-            }
+            Some(NodeBody::Project(_)) => stream_scan_fragment
+                .nodes
+                .input
+                .first()
+                .map(|n| &n.node_body)
+                .unwrap_or(&None),
             _ => &None,
         };
-        
+
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body {
             if let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc {
                 // Extract policy from connect_properties
-                let policy = cdc_table_desc.connect_properties
+                let policy = cdc_table_desc
+                    .connect_properties
                     .get("schema.change.failure.policy")
                     .and_then(|s| s.parse::<SchemaChangeFailurePolicy>().ok())
                     .unwrap_or_default();
-                
+
                 tracing::debug!(
                     table_id = table_id,
                     policy = ?policy,
                     "Extracted schema change failure policy from cdc_table_desc"
                 );
-                
+
                 return Ok(policy);
             }
         }
-        
+
         // Default policy if not found
         Ok(SchemaChangeFailurePolicy::default())
     }
@@ -1140,10 +1143,12 @@ impl DdlController {
                             if let Some(source_id_str) = cdc_table_id.split('.').next() {
                                 if let Ok(source_id) = source_id_str.parse::<u32>() {
                                     // Extract policy from table's cdc_table_desc connect_properties
-                                    let schema_change_failure_policy = self.extract_cdc_table_policy_from_fragments(
-                                        &stream_job_fragments,
-                                        table.id,
-                                    ).await?;
+                                    let schema_change_failure_policy = self
+                                        .extract_cdc_table_policy_from_fragments(
+                                            &stream_job_fragments,
+                                            table.id,
+                                        )
+                                        .await?;
 
                                     tracing::info!(
                                         table_id = table.id,

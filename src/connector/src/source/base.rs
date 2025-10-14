@@ -336,7 +336,8 @@ pub struct SourceContext {
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
     pub schema_change_failure_policy: crate::source::cdc::SchemaChangeFailurePolicy,
     // per-table schema change failure policies (cdc_table_id -> policy)
-    pub cdc_table_schema_change_policies: std::collections::HashMap<String, crate::source::cdc::SchemaChangeFailurePolicy>,
+    pub cdc_table_schema_change_policies:
+        std::collections::HashMap<String, crate::source::cdc::SchemaChangeFailurePolicy>,
     // callback function to report CDC auto schema change fail events
     pub on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
 }
@@ -354,7 +355,10 @@ impl SourceContext {
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
         schema_change_failure_policy: crate::source::cdc::SchemaChangeFailurePolicy,
-        cdc_table_schema_change_policies: std::collections::HashMap<String, crate::source::cdc::SchemaChangeFailurePolicy>,
+        cdc_table_schema_change_policies: std::collections::HashMap<
+            String,
+            crate::source::cdc::SchemaChangeFailurePolicy,
+        >,
     ) -> Self {
         Self::new_with_auto_schema_change_callback(
             actor_id,
@@ -384,7 +388,10 @@ impl SourceContext {
         >,
         on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
         schema_change_failure_policy: crate::source::cdc::SchemaChangeFailurePolicy,
-        cdc_table_schema_change_policies: std::collections::HashMap<String, crate::source::cdc::SchemaChangeFailurePolicy>,
+        cdc_table_schema_change_policies: std::collections::HashMap<
+            String,
+            crate::source::cdc::SchemaChangeFailurePolicy,
+        >,
     ) -> Self {
         Self {
             actor_id,

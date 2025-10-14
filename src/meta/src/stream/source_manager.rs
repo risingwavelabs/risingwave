@@ -168,11 +168,12 @@ impl SourceManagerCore {
             cdc_table_id,
             source_id
         );
-        let removed = self
-            .cdc_table_schema_change_policies
-            .remove(&cdc_table_id);
+        let removed = self.cdc_table_schema_change_policies.remove(&cdc_table_id);
         if removed.is_some() {
-            tracing::info!("Successfully removed policy for cdc_table_id={}", cdc_table_id);
+            tracing::info!(
+                "Successfully removed policy for cdc_table_id={}",
+                cdc_table_id
+            );
         } else {
             tracing::warn!(
                 "No policy found for cdc_table_id={}, nothing to remove",

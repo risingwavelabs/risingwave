@@ -862,7 +862,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     // Merge table-level schema change policy from context.with_options() into cdc_with_options
     let mut cdc_with_options = cdc_with_options;
     if let Some(table_policy) = context.with_options().get("schema.change.failure.policy") {
-        cdc_with_options.insert("schema.change.failure.policy".to_string(), table_policy.clone());
+        cdc_with_options.insert(
+            "schema.change.failure.policy".to_string(),
+            table_policy.clone(),
+        );
         tracing::info!(
             "Extracted table-level schema.change.failure.policy: {}",
             table_policy
@@ -935,15 +938,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
-    table.cdc_table_id = Some(cdc_table_id.clone());
+    table.cdc_table_id = Some(cdc_table_id);
     table.cdc_table_type = Some(cdc_table_type);
-    println!("这里cdc table id: {:?}", cdc_table_id);
     // Set the associated source ID for CDC table
-    // Note: This field is used to link the table to its source
-    // The source.id is a SourceId, but associated_source_id expects TableId
-    // This is a design issue in the current codebase (see TODO comment in TableCatalog)
-    // For now, we'll leave this field as None to avoid type mismatch issues
-    // table.associated_source_id = Some(TableId::new(source.id));
+    table.associated_source_id = Some(TableId::new(source.id));
     Ok((materialize.into(), table))
 }
 

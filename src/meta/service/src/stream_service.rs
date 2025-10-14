@@ -568,6 +568,51 @@ impl StreamManagerService for StreamServiceImpl {
                             "alter connector_conn_ref is not supported",
                         ));
                     }
+
+                    // Check if this is a CDC table-level policy change
+                    let changed_props_map: std::collections::BTreeMap<_, _> =
+                        request.changed_props.clone().into_iter().collect();
+                    if let Some(cdc_table_id) = changed_props_map.get("__rw_cdc_table_id") {
+                        // This is a table-level schema change policy update
+                        if let Some(new_policy_str) =
+                            changed_props_map.get("schema.change.failure.policy")
+                        {
+                            use risingwave_connector::source::cdc::SchemaChangeFailurePolicy;
+
+                            let new_policy = new_policy_str
+                                .parse::<SchemaChangeFailurePolicy>()
+                                .map_err(|e| {
+                                    Status::invalid_argument(format!("Invalid policy: {}", e))
+                                })?;
+
+                            tracing::info!(
+                                cdc_table_id = cdc_table_id,
+                                source_id = request.object_id,
+                                new_policy = ?new_policy,
+                                "Updating CDC table-level schema change policy via ALTER TABLE"
+                            );
+
+                            // Update the table-level policy mapping
+                            self.stream_manager
+                                .source_manager
+                                .add_cdc_table_schema_policy(
+                                    cdc_table_id.clone(),
+                                    request.object_id as i32,
+                                    new_policy,
+                                )
+                                .await
+                                .map_err(|e| {
+                                    Status::internal(format!(
+                                        "Failed to update CDC table policy: {}",
+                                        e
+                                    ))
+                                })?;
+
+                            // Return early without updating source properties
+                            return Ok(Response::new(AlterConnectorPropsResponse {}));
+                        }
+                    }
+
                     let options_with_secret = self
                         .metadata_manager
                         .catalog_controller

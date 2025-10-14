@@ -46,7 +46,8 @@ pub(crate) struct StreamReaderBuilder {
     // cdc related
     pub is_auto_schema_change_enable: bool,
     pub actor_ctx: ActorContextRef,
-    pub cdc_table_schema_change_policies: HashMap<String, risingwave_connector::source::cdc::SchemaChangeFailurePolicy>,
+    pub cdc_table_schema_change_policies:
+        HashMap<String, risingwave_connector::source::cdc::SchemaChangeFailurePolicy>,
 }
 
 impl StreamReaderBuilder {
@@ -91,7 +92,9 @@ impl StreamReaderBuilder {
                             }
                             Err(e) => {
                                 // Extract cdc_table_id from the first table change event
-                                let cdc_table_id = schema_change.table_changes.first()
+                                let cdc_table_id = schema_change
+                                    .table_changes
+                                    .first()
                                     .map(|tc| tc.cdc_table_id.as_str())
                                     .unwrap_or("");
                                 println!("这里cdc_table_id: {:?}", cdc_table_id);
