@@ -94,22 +94,22 @@ pg_catalog
 public
 rw_catalog
 
-query TT
+query T
 show tables;
 ----
-public t3
+public.t3
 
-query TT
+query T
 show tables from public;
 ----
-public t3
+public.t3
 
-query TT
+query T
 show tables from public like 't_';
 ----
-public t3
+public.t3
 
-query TT
+query T
 show tables from public like '_t';
 ----
 
@@ -123,11 +123,11 @@ create table my_schema.t4 (v1 int, v2 int, v3 int);
 statement ok
 set search_path to my_schema, public;
 
-query TT rowsort
+query T rowsort
 show tables;
 ----
-my_schema t4
-public t3
+my_schema.t4
+public.t3
 
 statement ok
 set search_path to default;
@@ -137,27 +137,27 @@ drop schema my_schema cascade;
 
 # Test search path done.
 
-query TT
+query T
 show views;
 ----
-public v3
+public.v3
 
-query TT
+query T
 show views from public;
 ----
-public v3
+public.v3
 
-query TT
+query T
 show materialized views from public;
 ----
-public mv3
+public.mv3
 
-query TT
+query T
 show materialized views;
 ----
-public mv3
+public.mv3
 
-query TT
+query T
 show sources;
 ----
 
@@ -260,19 +260,19 @@ comment on column "show_another_schema"."t_another".v1 IS 'test column descripti
 statement ok
 create table t4 (v1 int);
 
-query TT
+query T
 show tables;
 ----
-public t4
+public.t4
 
 statement ok
 set search_path to show_another_schema, public;
 
-query TT
+query T
 show tables;
 ----
-show_another_schema t_another
-public t4
+show_another_schema.t_another
+public.t4
 
 statement ok
 drop table t4;

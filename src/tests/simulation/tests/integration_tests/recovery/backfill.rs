@@ -15,27 +15,18 @@
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
-async fn single_internal_table_name(session: &mut Session) -> Result<String> {
-    session
-        .show_internal_tables()
-        .await?
-        .into_iter()
-        .exactly_one()
-        .map(|(_, table_name)| table_name)
-        .context("expected exactly one internal table")
-}
-
 const ROOT_TABLE_CREATE: &str = "create table t1 (v1 int);";
 const ROOT_TABLE_DROP: &str = "drop table t1;";
 const MV1: &str = "create materialized view m1 as select * from t1 where v1 > 5;";
 const INDEX: &str = "create index i1 on t1(v1);";
+const SHOW_INTERNAL_TABLES: &str = "SHOW INTERNAL TABLES;";
 
 static EXPECTED_NO_BACKFILL: LazyLock<String> = LazyLock::new(|| {
     (0..=255)
@@ -49,8 +40,8 @@ fn select_all(table: impl AsRef<str>) -> String {
 
 async fn test_no_backfill_state(session: &mut Session) -> Result<()> {
     // After startup with no backfill, should be NO_BACKFILL state.
-    let table = single_internal_table_name(session).await?;
-    let actual = session.run(select_all(table)).await?;
+    let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
+    let actual = session.run(select_all(internal_table)).await?;
     assert_eq!(&actual, EXPECTED_NO_BACKFILL.as_str());
     Ok(())
 }
@@ -142,7 +133,7 @@ async fn test_backfill_mv() -> Result<()> {
 
     session.run(MV1).await?;
 
-    let internal_table = single_internal_table_name(&mut session).await?;
+    let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
     let results = session
         .run(format!("SELECT * FROM {}", internal_table))
         .await?;
@@ -170,7 +161,7 @@ async fn test_backfill_mv() -> Result<()> {
 
     sleep(Duration::from_secs(3)).await;
 
-    let internal_table = single_internal_table_name(&mut session).await?;
+    let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
     let results = session
         .run(format!("SELECT * FROM {}", internal_table))
         .await?;
@@ -187,7 +178,7 @@ async fn test_backfill_mv() -> Result<()> {
 
     sleep(Duration::from_secs(3)).await;
 
-    let internal_table = single_internal_table_name(&mut session).await?;
+    let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
     let results = session
         .run(format!("SELECT * FROM {}", internal_table))
         .await?;
@@ -213,7 +204,7 @@ async fn test_index_backfill() -> Result<()> {
 
     session.run(INDEX).await?;
 
-    let internal_table = single_internal_table_name(&mut session).await?;
+    let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
     let results = session
         .run(format!("SELECT * FROM {}", internal_table))
         .await?;
@@ -240,7 +231,7 @@ async fn test_index_backfill() -> Result<()> {
         .await?;
     sleep(Duration::from_secs(3)).await;
 
-    let internal_table = single_internal_table_name(&mut session).await?;
+    let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
     let results = session
         .run(format!("SELECT * FROM {}", internal_table))
         .await?;
@@ -256,15 +247,15 @@ async fn test_index_backfill() -> Result<()> {
         .await?;
     sleep(Duration::from_secs(3)).await;
 
-    let internal_table = single_internal_table_name(&mut session).await?;
+    let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
     let results = session
         .run(format!("SELECT * FROM {}", internal_table))
         .await?;
     assert_eq!(results.lines().collect_vec().len(), 256);
 
     session.run(ROOT_TABLE_DROP).await?;
-    let results = session.show_internal_tables().await?;
-    assert!(results.is_empty());
+    let results = session.run(SHOW_INTERNAL_TABLES).await?;
+    assert_eq!(results, "");
 
     Ok(())
 }
