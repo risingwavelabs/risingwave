@@ -21,13 +21,13 @@ use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 
 
 use risingwave_connector::source::SplitImpl;
+
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId, fragment};
 
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
@@ -522,53 +522,6 @@ impl MetadataManager {
         self.catalog_controller
             .get_job_fragments_by_id(job_id.table_id as _)
             .await
-    }
-
-    pub async fn get_job_state_by_id(&self, job_id: &TableId) -> MetaResult<PbState> {
-        let job_info = self
-            .catalog_controller
-            .get_job_info_by_id(job_id.table_id as _)
-            .await?;
-
-        Ok(PbState::from(job_info.job_status))
-    }
-
-    pub async fn get_job_sink_fragments_by_id(
-        &self,
-        job_id: &TableId,
-    ) -> MetaResult<Vec<fragment::Model>> {
-        let fragments = self
-            .catalog_controller
-            .get_job_sink_fragments_by_id(job_id.table_id as _)
-            .await?;
-
-        Ok(fragments)
-    }
-
-    pub async fn list_job_state_table_ids_by_id(&self, job_id: &TableId) -> MetaResult<Vec<u32>> {
-        let state_table_ids = self
-            .catalog_controller
-            .list_job_state_table_ids_by_id(job_id.table_id as _)
-            .await?;
-
-        Ok(state_table_ids)
-    }
-
-    pub async fn list_job_internal_table_ids_by_id(
-        &self,
-        job_id: &TableId,
-    ) -> MetaResult<Vec<u32>> {
-        let state_table_ids = self
-            .catalog_controller
-            .list_job_state_table_ids_by_id(job_id.table_id as _)
-            .await?;
-
-        let internal_table_ids = state_table_ids
-            .into_iter()
-            .filter(|id| *id != job_id.table_id)
-            .collect();
-
-        Ok(internal_table_ids)
     }
 
     pub fn get_running_actors_of_fragment(&self, id: FragmentId) -> MetaResult<HashSet<ActorId>> {

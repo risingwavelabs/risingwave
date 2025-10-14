@@ -52,7 +52,6 @@ use risingwave_pb::meta::table_fragments::fragment::{
 };
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbState};
 use risingwave_pb::meta::{FragmentDistribution, PbFragmentWorkerSlotMapping};
-use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -567,78 +566,6 @@ impl CatalogController {
         Ok(select.into_tuple().all(&inner.db).await?)
     }
 
-    pub async fn get_fragment_ids_by_job_ids(
-        &self,
-        txn: &impl ConnectionTrait,
-        job_id: &[ObjectId],
-    ) -> MetaResult<Vec<FragmentId>> {
-        let fragment_ids: Vec<FragmentId> = FragmentModel::find()
-            .select_only()
-            .column(fragment::Column::FragmentId)
-            .filter(fragment::Column::JobId.is_in(job_id.to_vec()))
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        Ok(fragment_ids)
-    }
-
-    pub async fn get_job_sink_fragments_by_id(
-        &self,
-        job_id: ObjectId,
-    ) -> MetaResult<Vec<fragment::Model>> {
-        let inner = self.inner.read().await;
-
-        let fragments: Vec<_> = FragmentModel::find()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::FragmentTypeMask,
-            ])
-            .filter(fragment::Column::JobId.eq(job_id))
-            .all(&inner.db)
-            .await?;
-
-        let fragments = fragments
-            .into_iter()
-            .filter(|fragment| {
-                FragmentTypeMask::from(fragment.fragment_type_mask).contains(FragmentTypeFlag::Sink)
-            })
-            .collect();
-
-        Ok(fragments)
-    }
-
-    pub async fn get_job_info_by_id(&self, job_id: ObjectId) -> MetaResult<streaming_job::Model> {
-        let inner = self.inner.read().await;
-
-        let job_info = StreamingJob::find_by_id(job_id)
-            .one(&inner.db)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
-
-        Ok(job_info)
-    }
-
-    pub async fn list_job_state_table_ids_by_id(&self, job_id: ObjectId) -> MetaResult<Vec<u32>> {
-        let inner = self.inner.read().await;
-
-        let state_table_ids: Vec<I32Array> = FragmentModel::find()
-            .select_only()
-            .column(fragment::Column::StateTableIds)
-            .filter(fragment::Column::JobId.eq(job_id))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        let state_table_ids = state_table_ids
-            .into_iter()
-            .flat_map(|arr| arr.into_inner().into_iter().map(|id| id as u32))
-            .collect_vec();
-
-        Ok(state_table_ids)
-    }
-
-    // todo, unpatched
     pub async fn get_job_fragments_by_id(
         &self,
         job_id: ObjectId,
@@ -679,10 +606,9 @@ impl CatalogController {
                             vnode_bitmap: actor_info.vnode_bitmap.as_ref().map(|bitmap| {
                                 VnodeBitmap::from(&bitmap.to_protobuf())
                             }),
-                            expr_context: (&PbExprContext {
-                                time_zone: job_info.timezone.clone().unwrap_or("".to_owned()),
-                                strict_mode: false,
-                            }).into(),
+                            expr_context: (&StreamContext {
+                                timezone: job_info.timezone.clone()
+                            }.to_expr_context()).into(),
                         })
                         .collect();
                     (fm, actors)
