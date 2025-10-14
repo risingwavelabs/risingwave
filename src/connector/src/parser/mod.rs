@@ -331,12 +331,11 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                             let source_id = parser.source_ctx().source_id.table_id;
                             let source_name = &parser.source_ctx().source_name;
 
-                            let cdc_table_id = if let Some(access_err) =
-                                error.0.downcast_ref::<AccessError>()
-                            {
-                                if let AccessError::CdcAutoSchemaChangeError {
-                                    table_name, ..
-                                } = access_err
+                            let cdc_table_id =
+                                if let Some(AccessError::CdcAutoSchemaChangeError {
+                                    table_name,
+                                    ..
+                                }) = error.0.downcast_ref::<AccessError>()
                                 {
                                     // table_name format: "source_name.schema\".\"table" or "source_name.schema.table"
                                     // We need to extract "schema.table" part
@@ -354,11 +353,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                                 } else {
                                     // Fallback: empty cdc_table_id
                                     String::new()
-                                }
-                            } else {
-                                // Fallback: empty cdc_table_id
-                                String::new()
-                            };
+                                };
 
                             // Use table-level policy if available, otherwise fallback to source-level
                             let policy = if !cdc_table_id.is_empty() {

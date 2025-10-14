@@ -98,7 +98,7 @@ pub struct SourceExecutor<S: StateStore> {
     barrier_manager: LocalBarrierManager,
 
     /// Table ID -> Schema Change Failure Policy mapping for CDC tables
-    /// Key: TableId, Value: SchemaChangeFailurePolicy
+    /// Key: `TableId`, Value: `SchemaChangeFailurePolicy`
     cdc_table_schema_change_policies: HashMap<String, SchemaChangeFailurePolicy>,
 }
 
@@ -143,7 +143,7 @@ impl<S: StateStore> SourceExecutor<S> {
         );
     }
 
-    /// Handle CDC table schema change policies from ConnectorPropsChange
+    /// Handle CDC table schema change policies from `ConnectorPropsChange`
     fn handle_cdc_table_schema_policies_change(&mut self, new_props: &HashMap<String, String>) {
         if let Some(table_policies_json) = new_props.get("cdc_table_schema_change_policies") {
             tracing::info!(

@@ -375,6 +375,7 @@ impl SourceContext {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_auto_schema_change_callback(
         actor_id: u32,
         source_id: TableId,

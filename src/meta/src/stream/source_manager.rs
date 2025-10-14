@@ -82,7 +82,7 @@ pub struct SourceManagerCore {
     backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
 
     /// Table ID -> Schema Change Failure Policy mapping
-    /// Key: TableId, Value: SchemaChangeFailurePolicy
+    /// Key: `TableId`, Value: `SchemaChangeFailurePolicy`
     cdc_table_schema_change_policies: HashMap<String, SchemaChangeFailurePolicy>,
 
     env: MetaSrvEnv,
@@ -585,7 +585,7 @@ impl SourceManager {
         }
     }
 
-    /// Add a CDC table schema change policy and trigger ConnectorPropsChange
+    /// Add a CDC table schema change policy and trigger `ConnectorPropsChange`
     pub async fn add_cdc_table_schema_policy(
         &self,
         cdc_table_id: String,
@@ -597,10 +597,10 @@ impl SourceManager {
             let mut core = self.core.lock().await;
             core.add_table_schema_policy(cdc_table_id.clone(), source_id, policy)
                 .map_err(|e| {
-                    MetaError::invalid_parameter(&format!(
-                        "Failed to add table schema policy: {}",
-                        e
-                    ))
+                MetaError::invalid_parameter(format!(
+                    "Failed to add table schema policy: {}",
+                    e
+                ))
                 })?;
         }
         // Get the existing source properties and add the policies
@@ -614,7 +614,7 @@ impl SourceManager {
             let policies_json = {
                 let core = self.core.lock().await;
                 serde_json::to_string(core.get_cdc_table_schema_change_policies()).map_err(|e| {
-                    MetaError::invalid_parameter(&format!("Failed to serialize policies: {}", e))
+                    MetaError::invalid_parameter(format!("Failed to serialize policies: {}", e))
                 })?
             };
             // Get existing source properties
@@ -622,7 +622,7 @@ impl SourceManager {
                 source.with_properties.clone().into_iter().collect();
             // Add the CDC table schema change policies
             props.insert(
-                "cdc_table_schema_change_policies".to_string(),
+                "cdc_table_schema_change_policies".to_owned(),
                 policies_json,
             );
 
@@ -631,7 +631,7 @@ impl SourceManager {
                 let core = self.core.lock().await;
                 core.metadata_manager
                     .catalog_controller
-                    .get_object_database_id(source_id as i32)
+                    .get_object_database_id(source_id)
                     .await?
             };
 
@@ -660,7 +660,7 @@ impl SourceManager {
         Ok(())
     }
 
-    /// Remove a CDC table schema change policy and trigger ConnectorPropsChange
+    /// Remove a CDC table schema change policy and trigger `ConnectorPropsChange`
     pub async fn remove_cdc_table_schema_policy(
         &self,
         cdc_table_id: String,
@@ -671,10 +671,10 @@ impl SourceManager {
             let mut core = self.core.lock().await;
             core.remove_table_schema_policy(cdc_table_id.clone(), source_id)
                 .map_err(|e| {
-                    MetaError::invalid_parameter(&format!(
-                        "Failed to remove table schema policy: {}",
-                        e
-                    ))
+                MetaError::invalid_parameter(format!(
+                    "Failed to remove table schema policy: {}",
+                    e
+                ))
                 })?;
         }
 
@@ -690,7 +690,7 @@ impl SourceManager {
             let policies_json = {
                 let core = self.core.lock().await;
                 serde_json::to_string(core.get_cdc_table_schema_change_policies()).map_err(|e| {
-                    MetaError::invalid_parameter(&format!("Failed to serialize policies: {}", e))
+                    MetaError::invalid_parameter(format!("Failed to serialize policies: {}", e))
                 })?
             };
 
@@ -698,10 +698,7 @@ impl SourceManager {
             let mut props: HashMap<String, String> =
                 source.with_properties.clone().into_iter().collect();
             // Add the updated CDC table schema change policies
-            props.insert(
-                "cdc_table_schema_change_policies".to_string(),
-                policies_json,
-            );
+            props.insert("cdc_table_schema_change_policies".to_owned(), policies_json);
 
             // Get the database_id for this source
             let database_id = {

@@ -74,18 +74,18 @@ pub async fn handle_alter_table_connector_props(
 
     // If this is a CDC table policy change, add a special marker
     let mut final_alter_props = alter_props.clone();
-    if is_cdc_policy_change {
-        if let Some(cdc_table_id) = cdc_table_id {
-            // Add special marker for meta to recognize this is a table-level policy update
-            final_alter_props.push(risingwave_sqlparser::ast::SqlOption {
-                name: risingwave_sqlparser::ast::ObjectName(vec![
-                    risingwave_sqlparser::ast::Ident::new_unchecked("__rw_cdc_table_id"),
-                ]),
-                value: risingwave_sqlparser::ast::SqlOptionValue::Value(
-                    risingwave_sqlparser::ast::Value::SingleQuotedString(cdc_table_id),
-                ),
-            });
-        }
+    if is_cdc_policy_change
+        && let Some(cdc_table_id) = cdc_table_id
+    {
+        // Add special marker for meta to recognize this is a table-level policy update
+        final_alter_props.push(risingwave_sqlparser::ast::SqlOption {
+            name: risingwave_sqlparser::ast::ObjectName(vec![
+                risingwave_sqlparser::ast::Ident::new_unchecked("__rw_cdc_table_id"),
+            ]),
+            value: risingwave_sqlparser::ast::SqlOptionValue::Value(
+                risingwave_sqlparser::ast::Value::SingleQuotedString(cdc_table_id),
+            ),
+        });
     }
 
     handle_alter_source_props_inner(&session, final_alter_props, source_id).await?;

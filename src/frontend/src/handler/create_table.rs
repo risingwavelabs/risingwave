@@ -863,7 +863,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let mut cdc_with_options = cdc_with_options;
     if let Some(table_policy) = context.with_options().get("schema.change.failure.policy") {
         cdc_with_options.insert(
-            "schema.change.failure.policy".to_string(),
+            "schema.change.failure.policy".to_owned(),
             table_policy.clone(),
         );
         tracing::info!(
