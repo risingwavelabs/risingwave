@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::FutureExt;
-use hnsw::HnswFlatIndexWriter;
+pub use hnsw::HnswFlatIndexWriter;
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::vector_index::{
     FlatIndex, FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl,

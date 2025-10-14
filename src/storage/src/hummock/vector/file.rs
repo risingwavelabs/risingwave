@@ -492,12 +492,12 @@ impl VectorFileBuilder {
     }
 }
 
-pub(super) struct BuildingVectors {
+pub struct BuildingVectors {
     flushed_next_vector_id: usize,
     pub(super) file_builder: VectorFileBuilder,
 }
 
-pub(crate) struct FileVectorStore {
+pub struct FileVectorStore {
     sstable_store: SstableStoreRef,
 
     flushed_vector_files: Vec<VectorFileInfo>,
@@ -505,7 +505,7 @@ pub(crate) struct FileVectorStore {
 }
 
 impl FileVectorStore {
-    pub(crate) fn new_for_reader(index: &HnswFlatIndex, sstable_store: SstableStoreRef) -> Self {
+    pub fn new_for_reader(index: &HnswFlatIndex, sstable_store: SstableStoreRef) -> Self {
         Self {
             sstable_store,
             flushed_vector_files: index.vector_store_info.vector_files.clone(),
