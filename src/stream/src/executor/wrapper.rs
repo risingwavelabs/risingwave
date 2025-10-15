@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::Either;
+
 use crate::executor::prelude::*;
 
 mod epoch_check;
@@ -67,9 +69,6 @@ impl WrapperExecutor {
     ) -> BoxedMessageStream {
         // -- Shared wrappers --
 
-        // Await tree
-        let stream = trace::instrument_await_tree(info.clone(), stream);
-
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);
         // Epoch check
@@ -94,11 +93,17 @@ impl WrapperExecutor {
             actor_ctx.clone(),
         );
 
-        if cfg!(debug_assertions) {
-            Self::wrap_debug(info, stream).boxed()
+        // -- Debug-only wrappers --
+        let stream = if cfg!(debug_assertions) {
+            Either::Left(Self::wrap_debug(info.clone(), stream))
         } else {
-            stream.boxed()
-        }
+            Either::Right(stream)
+        };
+
+        // Await tree
+        // This should be the last wrapper, so that code in other wrappers are also instrumented with
+        // the span of the current executor.
+        trace::instrument_await_tree(info, stream).boxed()
     }
 }
 
