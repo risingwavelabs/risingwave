@@ -38,9 +38,9 @@ use crate::types::{DataType, DefaultOrdered, ToText};
 /// `Op` represents three operations in `StreamChunk`.
 ///
 /// `UpdateDelete` and `UpdateInsert` are semantically equivalent to `Delete` and `Insert`
-/// but always appear in pairs to represent an update operation.
-/// For example, table source, aggregation and outer join can generate updates by themselves,
-/// while most of the other operators only pass through updates with best effort.
+/// but always appear in pairs to represent an update operation. It's guaranteed that
+/// they are adjacent to each other in the same `StreamChunk`, and the stream key of the two
+/// rows are the same.
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Op {
     Insert,
