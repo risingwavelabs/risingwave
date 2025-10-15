@@ -331,6 +331,7 @@ impl Binder {
                 ("cardinality", raw_call(ExprType::Cardinality)),
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
                 ("array_replace", raw_call(ExprType::ArrayReplace)),
+                ("array_reverse", raw_call(ExprType::ArrayReverse)),
                 ("array_max", raw_call(ExprType::ArrayMax)),
                 ("array_sum", raw_call(ExprType::ArraySum)),
                 ("array_position", raw_call(ExprType::ArrayPosition)),
