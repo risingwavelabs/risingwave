@@ -1,0 +1,49 @@
+query I
+select array_reverse(array[]::int[]);
+----
+{}
+
+query I
+select array_reverse(array[1]);
+----
+{1}
+
+query I
+select array_reverse(array[1, 2]);
+----
+{2,1}
+
+query I
+select array_reverse(array[1, 2, 3]);
+----
+{3,2,1}
+
+query I
+select array_reverse(array[1.618, 2.718, 3.142]);
+----
+{3.142,2.718,1.618}
+
+query I
+select array_reverse(array['a', 'b', 'c']);
+----
+{c,b,a}
+
+query I
+select array_reverse(array['rising', 'wave', 'labs']);
+----
+{labs,wave,rising}
+
+query I
+select array_reverse(array[1, NULL, 3]);
+----
+{3,NULL,1}
+
+query I
+select array_reverse(array[1, 2, 3, NULL, 4, 5, 6]);
+----
+{6,5,4,NULL,3,2,1}
+
+query I
+select array_reverse(array[array[1, 2], array[3, 4], array[5, 6]]);
+----
+{{5,6},{3,4},{1,2}}

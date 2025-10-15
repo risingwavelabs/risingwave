@@ -276,6 +276,7 @@ impl Strong {
             | ExprType::ArrayMax
             | ExprType::ArraySum
             | ExprType::ArraySort
+            | ExprType::ArrayReverse
             | ExprType::ArrayContains
             | ExprType::ArrayContained
             | ExprType::ArrayFlatten
