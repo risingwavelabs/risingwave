@@ -1417,8 +1417,10 @@ impl DdlService for DdlServiceImpl {
             fragment_graph,
         } = sink_info.unwrap();
         let sink = sink.unwrap();
-        let iceberg_config = IcebergConfig::from_btreemap(sink.properties.clone())
-            .map_err(|e| Status::invalid_argument(format!("Invalid iceberg sink config: {}", e)))?;
+        let iceberg_config =
+            IcebergConfig::from_btreemap(sink.properties.clone()).map_err(|e| {
+                Status::invalid_argument(format!("Invalid iceberg sink config: {}", e.as_report()))
+            })?;
         let mut fragment_graph = fragment_graph.unwrap();
 
         assert_eq!(fragment_graph.dependent_table_ids.len(), 1);
@@ -1483,9 +1485,8 @@ impl DdlService for DdlServiceImpl {
                 })
                 .await
                 .inspect_err(|err| {
-                    tracing::error!(
-                        "Failed to clean up table after iceberg sink creation failure: {}",
-                        err
+                    tracing::error!(error = %err.as_report(),
+                        "Failed to clean up table after iceberg sink creation failure",
                     );
                 });
             res?;
@@ -1507,8 +1508,8 @@ impl DdlService for DdlServiceImpl {
                 .await
                 .inspect_err(|err| {
                     tracing::error!(
-                        "Failed to clean up table after iceberg source creation failure: {}",
-                        err
+                        error = %err.as_report(),
+                        "Failed to clean up table after iceberg source creation failure",
                     );
                 });
 
