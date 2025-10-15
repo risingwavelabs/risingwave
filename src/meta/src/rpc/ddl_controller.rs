@@ -31,7 +31,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
-use risingwave_common::{bail, bail_not_implemented};
+use risingwave_common::{bail, bail_not_implemented, catalog};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::source::cdc::CdcScanOptions;
@@ -1191,7 +1191,7 @@ impl DdlController {
         let _guard = self.source_manager.pause_tick().await;
         self.stream_manager
             .drop_streaming_jobs(
-                risingwave_common::catalog::DatabaseId::new(database_id as _),
+                catalog::DatabaseId::new(database_id as _),
                 removed_actors.iter().map(|id| *id as _).collect(),
                 removed_streaming_job_ids,
                 removed_state_table_ids,
@@ -1309,7 +1309,7 @@ impl DdlController {
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
                         .metadata_manager
-                        .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink.id))
+                        .get_job_fragments_by_id(&catalog::TableId::new(sink.id))
                         .await?;
                     if sink_job_fragments.fragments.len() != 1 {
                         return Err(anyhow!(
@@ -1967,7 +1967,11 @@ impl DdlController {
                         );
                     }
 
-                    *downstream_fragment = (&sink.new_fragment_info()).into();
+                    *downstream_fragment = (
+                        &sink.new_fragment_info(),
+                        catalog::TableId::from(stream_job.id()),
+                    )
+                        .into();
                 }
             }
             assert!(remaining_fragment.is_empty());
