@@ -687,11 +687,11 @@ pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'static>(
+        &'a self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         self.inner
             .get_keyed_row_impl(key, self.epoch, self.table_id)
@@ -1007,11 +1007,11 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvLocalStateStore<R> {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'static>(
+        &'a self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         if let Some((key, value)) = match self.mem_table.buffer.get(&key) {
             None => self

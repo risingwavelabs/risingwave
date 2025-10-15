@@ -588,14 +588,14 @@ impl HummockVersionReader {
 const SLOW_ITER_FETCH_META_DURATION_SECOND: f64 = 5.0;
 
 impl HummockVersionReader {
-    pub async fn get<O>(
-        &self,
+    pub async fn get<'a, O>(
+        &'a self,
         table_key: TableKey<Bytes>,
         epoch: u64,
         table_id: TableId,
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
-        on_key_value_fn: impl crate::store::KeyValueFn<O>,
+        on_key_value_fn: impl crate::store::KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
 

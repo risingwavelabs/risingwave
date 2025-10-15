@@ -107,12 +107,12 @@ pub struct LocalHummockStorage {
 }
 
 impl LocalHummockFlushedSnapshotReader {
-    async fn get_flushed<O>(
-        hummock_version_reader: &HummockVersionReader,
+    async fn get_flushed<'a, O>(
+        hummock_version_reader: &'a HummockVersionReader,
         read_version: &HummockReadVersionRef,
         user_key: UserKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl crate::store::KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let table_key_range = (
             Bound::Included(user_key.table_key.clone()),
@@ -266,11 +266,11 @@ pub struct LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockFlushedSnapshotReader {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'static>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let key = UserKey::new(self.table_id, key);
         Self::get_flushed(
@@ -308,11 +308,11 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockStorage {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'static>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let key = UserKey::new(self.table_id, key);
         match self.mem_table.buffer.get(&key.table_key) {
