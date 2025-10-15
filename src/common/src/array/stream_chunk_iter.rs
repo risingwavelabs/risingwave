@@ -18,6 +18,7 @@ use super::RowRef;
 use super::data_chunk_iter::DataChunkRefIter;
 use super::stream_record::Record;
 use crate::array::{Op, StreamChunk};
+use crate::row::RowExt;
 
 impl StreamChunk {
     /// Return an iterator on stream records of this stream chunk.
@@ -87,15 +88,15 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
                 let next_row = self
                     .inner
                     .next()
-                    .unwrap_or_else(|| panic!("expect a row after U-, U- row: {:?}", row));
+                    .unwrap_or_else(|| panic!("expect a row after U-\nU- row: {}", row.display()));
                 // SAFETY: index is checked since `insert_row` is `Some`.
                 let op = unsafe { *self.chunk.ops().get_unchecked(next_row.index()) };
                 debug_assert_eq!(
                     op,
                     Op::UpdateInsert,
-                    "expect a U+ after U-, U- row: {:?}, row after U-: {:?}",
-                    row,
-                    next_row
+                    "expect a U+ after U-\nU- row: {}\nrow after U-: {}",
+                    row.display(),
+                    next_row.display()
                 );
 
                 Some(Record::Update {
@@ -103,7 +104,7 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
                     new_row: next_row,
                 })
             }
-            Op::UpdateInsert => panic!("expect a U- before U+, U+ row: {:?}", row),
+            Op::UpdateInsert => panic!("expect a U- before U+\nU+ row: {}", row.display()),
         }
     }
 
