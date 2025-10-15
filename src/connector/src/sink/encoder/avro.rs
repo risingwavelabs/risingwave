@@ -210,7 +210,7 @@ enum OptIdx {
 /// * For `validate`, the inputs are (RisingWave type, ProtoBuf type).
 /// * For `encode`, the inputs are (RisingWave type, RisingWave data, ProtoBuf type).
 ///
-/// Thus we impl [`MaybeData`] for both [`()`] and [`DatumRef`].
+/// Thus we impl [`MaybeData`] for both `()` and [`DatumRef`].
 trait MaybeData: std::fmt::Debug {
     type Out;
 

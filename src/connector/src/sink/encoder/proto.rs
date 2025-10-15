@@ -175,7 +175,7 @@ impl MessageIndexes {
 /// * For `validate`, the inputs are (RisingWave type, ProtoBuf type).
 /// * For `encode`, the inputs are (RisingWave type, RisingWave data, ProtoBuf type).
 ///
-/// Thus we impl [`MaybeData`] for both [`()`] and [`ScalarRefImpl`].
+/// Thus we impl [`MaybeData`] for both `()` and [`ScalarRefImpl`].
 trait MaybeData: std::fmt::Debug {
     type Out;
 
