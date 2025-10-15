@@ -41,6 +41,7 @@
 #![feature(vec_into_raw_parts)]
 #![feature(exact_div)]
 #![feature(used_with_arg)]
+#![feature(debug_closure_helpers)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
