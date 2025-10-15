@@ -135,16 +135,14 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-      - "1884:1883"
+      - "1883:1883"
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
     command: >
-      bash -c "rabbitmq-plugins enable rabbitmq_mqtt &&
-               rabbitmqctl enable_feature_flag mqtt_v5 &&
-               rabbitmq-server"
+      bash -c "rabbitmq-plugins enable --offline rabbitmq_mqtt rabbitmq_management && rabbitmqctl enable_feature_flag mqtt_v5 && rabbitmq-server"
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 10s
       timeout: 5s
       retries: 5
