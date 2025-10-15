@@ -31,7 +31,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
-use risingwave_common::{bail, bail_not_implemented};
+use risingwave_common::{bail, bail_not_implemented, catalog};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::source::cdc::CdcScanOptions;
@@ -89,10 +89,10 @@ use crate::stream::cdc::{
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
-    SourceManagerRef, StreamFragmentGraph, UpstreamSinkInfo,
-    check_sink_fragments_support_refresh_schema, create_source_worker,
-    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
+    JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
+    StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
+    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -1191,7 +1191,7 @@ impl DdlController {
         let _guard = self.source_manager.pause_tick().await;
         self.stream_manager
             .drop_streaming_jobs(
-                risingwave_common::catalog::DatabaseId::new(database_id as _),
+                catalog::DatabaseId::new(database_id as _),
                 removed_actors.iter().map(|id| *id as _).collect(),
                 removed_streaming_job_ids,
                 removed_state_table_ids,
@@ -1309,7 +1309,7 @@ impl DdlController {
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
                         .metadata_manager
-                        .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink.id))
+                        .get_job_fragments_by_id(&catalog::TableId::new(sink.id))
                         .await?;
                     if sink_job_fragments.fragments.len() != 1 {
                         return Err(anyhow!(
@@ -1714,21 +1714,22 @@ impl DdlController {
 
         let upstream_actors = upstream_root_fragments
             .values()
-            .map(|fragment| {
+            .map(|(fragment, _)| {
                 (
                     fragment.fragment_id,
-                    fragment.actors.iter().map(|actor| actor.actor_id).collect(),
+                    fragment.actors.keys().copied().collect(),
                 )
             })
             .collect();
 
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
-            upstream_root_fragments,
-            existing_actor_location,
+            FragmentGraphUpstreamContext {
+                upstream_root_fragments,
+                upstream_actor_location: existing_actor_location,
+            },
             (&stream_job).into(),
         )?;
-
         let resource_group = match specific_resource_group {
             None => {
                 self.metadata_manager
@@ -1951,13 +1952,13 @@ impl DdlController {
                 .iter()
                 .map(|sink| sink.original_fragment.fragment_id)
                 .collect();
-            for (_, downstream_fragment) in &mut downstream_fragments {
+            for (_, downstream_fragment, _) in &mut downstream_fragments {
                 if let Some(sink) = auto_refresh_schema_sinks.iter().find(|sink| {
                     sink.original_fragment.fragment_id == downstream_fragment.fragment_id
                 }) {
                     assert!(remaining_fragment.remove(&downstream_fragment.fragment_id));
-                    for actor in &downstream_fragment.actors {
-                        downstream_actor_location.remove(&actor.actor_id);
+                    for actor_id in downstream_fragment.actors.keys() {
+                        downstream_actor_location.remove(actor_id);
                     }
                     for (actor_id, status) in &sink.actor_status {
                         downstream_actor_location.insert(
@@ -1965,7 +1966,12 @@ impl DdlController {
                             status.location.as_ref().unwrap().worker_node_id as WorkerId,
                         );
                     }
-                    *downstream_fragment = sink.new_fragment.clone();
+
+                    *downstream_fragment = (
+                        &sink.new_fragment_info(),
+                        catalog::TableId::from(stream_job.id()),
+                    )
+                        .into();
                 }
             }
             assert!(remaining_fragment.is_empty());
@@ -1976,9 +1982,11 @@ impl DdlController {
             StreamingJobType::Table(TableJobType::General) | StreamingJobType::Source => {
                 CompleteStreamFragmentGraph::with_downstreams(
                     fragment_graph,
-                    original_root_fragment.fragment_id,
-                    downstream_fragments,
-                    downstream_actor_location,
+                    FragmentGraphDownstreamContext {
+                        original_root_fragment_id: original_root_fragment.fragment_id,
+                        downstream_fragments,
+                        downstream_actor_location,
+                    },
                     job_type,
                 )?
             }
@@ -1992,11 +2000,15 @@ impl DdlController {
 
                 CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
                     fragment_graph,
-                    upstream_root_fragments,
-                    upstream_actor_location,
-                    original_root_fragment.fragment_id,
-                    downstream_fragments,
-                    downstream_actor_location,
+                    FragmentGraphUpstreamContext {
+                        upstream_root_fragments,
+                        upstream_actor_location,
+                    },
+                    FragmentGraphDownstreamContext {
+                        original_root_fragment_id: original_root_fragment.fragment_id,
+                        downstream_fragments,
+                        downstream_actor_location,
+                    },
                     job_type,
                 )?
             }

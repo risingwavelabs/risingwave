@@ -1122,10 +1122,13 @@ impl DatabaseCheckpointControl {
                         edges.as_mut().expect("should exist"),
                     )?;
 
-                    self.state
-                        .inflight_graph_info
-                        .shared_actor_infos
-                        .upsert(self.database_id, job.graph_info().fragment_infos.values());
+                    self.state.inflight_graph_info.shared_actor_infos.upsert(
+                        self.database_id,
+                        job.graph_info()
+                            .fragment_infos
+                            .values()
+                            .map(|fragment| (fragment, job.job_id)),
+                    );
 
                     self.creating_streaming_job_controls.insert(job_id, job);
                 }

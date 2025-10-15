@@ -45,7 +45,7 @@ fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { workspace = true }
-hashbrown = "0.15.2"
+hashbrown = { workspace = true }
 hex = "0.4.3"
 http = "1"
 humantime = "2.2"
@@ -132,7 +132,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
-procfs = { version = "0.17", default-features = false }
+procfs = { version = "0.18", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }

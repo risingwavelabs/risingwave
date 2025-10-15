@@ -998,6 +998,15 @@ message UpstreamSinkUnionNode {
   repeated UpstreamSinkInfo init_upstreams = 1;
 }
 
+message LocalityProviderNode {
+  // Column indices that define locality
+  repeated uint32 locality_columns = 1;
+  // State table for buffering input data
+  optional catalog.Table state_table = 2;
+  // Progress table for tracking backfill progress
+  optional catalog.Table progress_table = 3;
+}
+
 message StreamNode {
   // This field used to be a `bool append_only`.
   // Enum variants are ordered for backwards compatibility.
@@ -1060,6 +1069,7 @@ message StreamNode {
     MaterializedExprsNode materialized_exprs = 149;
     VectorIndexWriteNode vector_index_write = 150;
     UpstreamSinkUnionNode upstream_sink_union = 151;
+    LocalityProviderNode locality_provider = 152;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -1177,6 +1187,9 @@ message BackfillOrder {
 // For the persisted form, see `TableFragments`.
 message StreamFragmentGraph {
   message StreamFragment {
+    reserved 5, 6;
+    reserved "table_ids_cnt", "upstream_table_ids";
+
     // 0-based on frontend, and will be rewritten to global id on meta.
     uint32 fragment_id = 1;
     // root stream node in this fragment.
@@ -1187,10 +1200,6 @@ message StreamFragmentGraph {
     // Note: if this is `false`, the fragment may still be a singleton according to the scheduler.
     // One should check `meta.Fragment.distribution_type` for the final result.
     bool requires_singleton = 4;
-    // Number of table ids (stateful states) for this fragment.
-    uint32 table_ids_cnt = 5;
-    // Mark the upstream table ids of this fragment, Used for fragments with `StreamScan`s.
-    repeated uint32 upstream_table_ids = 6;
   }
 
   message StreamFragmentEdge {

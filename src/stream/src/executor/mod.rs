@@ -93,6 +93,7 @@ mod filter;
 pub mod hash_join;
 mod hop_window;
 mod join;
+pub mod locality_provider;
 mod lookup;
 mod lookup_union;
 mod merge;

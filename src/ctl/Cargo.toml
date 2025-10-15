@@ -19,7 +19,7 @@ comfy-table = "7"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
-inquire = "0.7.0"
+inquire = "0.9.1"
 itertools = { workspace = true }
 prost = { workspace = true }
 regex = { workspace = true }

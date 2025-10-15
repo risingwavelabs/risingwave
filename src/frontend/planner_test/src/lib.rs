@@ -609,7 +609,7 @@ impl TestCase {
         let mut ret = TestCaseResult::default();
 
         let bound = {
-            let mut binder = Binder::new(&session);
+            let mut binder = Binder::new_for_batch(&session);
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {

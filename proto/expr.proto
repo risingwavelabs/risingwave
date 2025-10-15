@@ -202,10 +202,15 @@ message ExprNode {
     QUOTE_NULLABLE = 331;
     HMAC = 332;
     SECURE_COMPARE = 333;
-    PGP_SYM_ENCRYPT = 334;
-    PGP_SYM_DECRYPT = 335;
-    PGP_PUB_ENCRYPT = 336;
-    PGP_PUB_DECRYPT = 337;
+    GET_BIT = 334;
+    GET_BYTE = 335;
+    SET_BIT = 336;
+    SET_BYTE = 337;
+    BIT_COUNT = 338;
+    PGP_SYM_ENCRYPT = 339;
+    PGP_SYM_DECRYPT = 340;
+    PGP_PUB_ENCRYPT = 341;
+    PGP_PUB_DECRYPT = 342;
 
     // Constraints Check
     CHECK_NOT_NULL = 350;
