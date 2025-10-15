@@ -223,8 +223,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node: Some(source_node),
         fragment_type_mask: FragmentTypeFlag::Source as u32,
         requires_singleton: false,
-        table_ids_cnt: 0,
-        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -293,8 +291,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node: Some(simple_agg_node),
         fragment_type_mask: 0,
         requires_singleton: false,
-        table_ids_cnt: 0,
-        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -381,8 +377,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node: Some(mview_node),
         fragment_type_mask: FragmentTypeFlag::Mview as u32,
         requires_singleton: true,
-        table_ids_cnt: 0,
-        upstream_table_ids: vec![],
     });
 
     fragments
