@@ -33,13 +33,24 @@ pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
             for record in chunk.records() {
                 // `chunk.records()` will check U-/U+ pairing
                 if let Record::Update { old_row, new_row } = record {
-                    debug_assert!(
-                        old_row.project(&info.pk_indices) == new_row.project(&info.pk_indices),
-                        "U- and U+ should have same stream key, U- row: {:?}, U+ row: {:?}, stream key: {:?}, executor: {}",
-                        old_row,
-                        new_row,
+                    let old_pk = old_row.project(&info.pk_indices);
+                    let new_pk = new_row.project(&info.pk_indices);
+                    debug_assert_eq!(
+                        old_pk,
+                        new_pk,
+                        "U- and U+ should have same stream key
+U- row: {}
+U- key: {}
+U+ row: {}
+U+ key: {}
+stream key indices: {:?}
+executor: {}",
+                        old_row.display(),
+                        old_pk.display(),
+                        new_row.display(),
+                        new_pk.display(),
                         info.pk_indices,
-                        info.identity,
+                        info.identity
                     )
                 }
             }
