@@ -56,7 +56,6 @@ async fn scale_test_inner(is_decouple: bool, test_type: TestSinkType) -> Result<
     init_logger();
     let mut cluster = start_sink_test_cluster().await?;
 
-    // todo, make it configurable
     let total_cores = 6;
 
     let source_parallelism = 6;

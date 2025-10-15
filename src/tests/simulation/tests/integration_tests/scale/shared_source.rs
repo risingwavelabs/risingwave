@@ -132,17 +132,6 @@ async fn test_shared_source() -> Result<()> {
         8 CREATED ADAPTIVE 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
-    // SourceBackfill cannot be scaled because of NoShuffle.
-    // NOTE: We don't support low level rescheduling now, so the test is commented out.
-    // assert!(
-    //     &cluster
-    //         .reschedule(
-    //             source_backfill_fragment
-    //                 .reschedule([WorkerSlotId::new(source_backfill_workers[0], 0)], []),
-    //         )
-    //         .await.unwrap_err().to_string().contains("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is forbidden, please use NoShuffle upstream fragment (like Materialized fragment) to scale"),
-    // );
-
     // hash agg can be scaled independently
     cluster
         .run(format!(
