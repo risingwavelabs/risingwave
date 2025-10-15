@@ -32,13 +32,13 @@ use risingwave_meta_model::actor::{ActorModel, ActorStatus};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, Fragment as FragmentModel, FragmentRelation, FragmentSplits, Sink, StreamingJob,
+    Fragment as FragmentModel, FragmentRelation, FragmentSplits, Sink, StreamingJob,
 };
 use risingwave_meta_model::{
     ActorId, ConnectorSplits, DatabaseId, DispatcherType, ExprContext, FragmentId, I32Array,
     JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
-    VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, fragment_splits, object,
-    sink, source, streaming_job, table,
+    VnodeBitmap, WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink,
+    source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{ExprTrait, OnConflict, SimpleExpr};
 use risingwave_pb::catalog::PbTable;

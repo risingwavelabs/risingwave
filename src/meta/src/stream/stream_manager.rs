@@ -344,7 +344,7 @@ impl GlobalStreamManager {
             tracing::debug!(?streaming_job, "stream job finish");
             Ok(version)
         }
-            .in_current_span();
+        .in_current_span();
 
         let create_fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
