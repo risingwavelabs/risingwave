@@ -145,11 +145,11 @@ impl<S> TracedStateStore<S, TableSnapshot> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for TracedStateStore<S, TableSnapshot> {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'static>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         if let Some((key, value)) = self
             .traced_get_keyed_row(

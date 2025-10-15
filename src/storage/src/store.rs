@@ -257,16 +257,16 @@ pub trait StateStoreReadLog: StaticSendSync {
     ) -> impl StorageFuture<'_, Self::ChangeLogIter>;
 }
 
-pub trait KeyValueFn<O> =
-    for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'static;
+pub trait KeyValueFn<'a, O> =
+    for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'a;
 
 pub trait StateStoreGet: StaticSendSync {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'static>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>>;
+        on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>>;
 }
 
 pub trait StateStoreRead: StateStoreGet + StaticSendSync {

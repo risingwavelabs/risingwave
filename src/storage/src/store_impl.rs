@@ -331,11 +331,11 @@ pub mod verify {
     }
 
     impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
-        async fn on_key_value<O: Send + 'static>(
-            &self,
+        async fn on_key_value<'a, O: Send + 'static>(
+            &'a self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
-            on_key_value_fn: impl KeyValueFn<O>,
+            on_key_value_fn: impl KeyValueFn<'a, O>,
         ) -> StorageResult<Option<O>> {
             let actual: Option<(FullKey<Bytes>, Bytes)> = self
                 .actual
@@ -1421,11 +1421,11 @@ mod dyn_state_store {
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreGet> + StaticSendSync,
     {
-        async fn on_key_value<O: Send + 'static>(
-            &self,
+        async fn on_key_value<'a, O: Send + 'static>(
+            &'a self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
-            on_key_value_fn: impl KeyValueFn<O>,
+            on_key_value_fn: impl KeyValueFn<'a, O>,
         ) -> StorageResult<Option<O>> {
             let option = self.as_ref().get_keyed_row(key, read_options).await?;
             option
