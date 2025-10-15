@@ -58,10 +58,9 @@ pub async fn handle_query(
         let context = OptimizerContext::from_handler_args(handler_args);
         let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
         // Time zone is used by Hummock time travel query.
-        risingwave_expr::expr_context::TIME_ZONE::sync_scope(
-            session.config().timezone(),
-            || gen_batch_plan_fragmenter(&session, plan_result),
-        )?
+        risingwave_expr::expr_context::TIME_ZONE::sync_scope(session.config().timezone(), || {
+            gen_batch_plan_fragmenter(&session, plan_result)
+        })?
     };
     execute(session, plan_fragmenter_result, formats).await
 }
