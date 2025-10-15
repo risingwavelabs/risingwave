@@ -18,12 +18,7 @@ use std::fmt::{Debug, Formatter};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
-
-
-use risingwave_connector::source::SplitImpl;
-
-use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId, fragment};
-
+use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -673,16 +668,6 @@ impl MetadataManager {
             .into_iter()
             .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
             .collect())
-    }
-
-    #[await_tree::instrument]
-    pub async fn update_actor_splits_by_split_assignment(
-        &self,
-        split_assignment: &SplitAssignment,
-    ) -> MetaResult<()> {
-        self.catalog_controller
-            .update_actor_splits(split_assignment)
-            .await
     }
 
     #[await_tree::instrument]

@@ -237,11 +237,6 @@ impl CommandContext {
             }) => {
                 barrier_manager_context
                     .metadata_manager
-                    .update_actor_splits_by_split_assignment(assignment)
-                    .await?;
-
-                barrier_manager_context
-                    .metadata_manager
                     .update_fragment_splits(assignment)
                     .await?;
             }
