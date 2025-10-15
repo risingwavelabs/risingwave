@@ -2012,13 +2012,6 @@ pub async fn create_iceberg_engine_table(
     } = gen_sink_plan(sink_handler_args, create_sink_stmt, None, true).await?;
     let sink_graph = build_graph(sink_plan, Some(GraphJobType::Sink))?;
 
-    // Create iceberg sink table.
-    {
-        let sink_param = SinkParam::try_from_sink_catalog(sink_catalog.clone())?;
-        let iceberg_sink = IcebergSink::try_from(sink_param)?;
-        iceberg_sink.create_table_if_not_exists().await?;
-    }
-
     let mut source_name = table_name.clone();
     *source_name.0.last_mut().unwrap() = Ident::from(
         (ICEBERG_SOURCE_PREFIX.to_owned() + &source_name.0.last().unwrap().real_value()).as_str(),
@@ -2044,6 +2037,14 @@ pub async fn create_iceberg_engine_table(
     let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
     let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
     let with_properties = bind_connector_props(&source_handler_args, &format_encode, true)?;
+
+    // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
+    // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
+    {
+        let sink_param = SinkParam::try_from_sink_catalog(sink_catalog.clone())?;
+        let iceberg_sink = IcebergSink::try_from(sink_param)?;
+        iceberg_sink.create_table_if_not_exists().await?;
+    }
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
