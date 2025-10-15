@@ -228,6 +228,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub streaming_job: StreamingJob,
     pub fragment_backfill_ordering: FragmentBackfillOrder,
     pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+    pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
 }
 
 impl StreamJobFragments {
