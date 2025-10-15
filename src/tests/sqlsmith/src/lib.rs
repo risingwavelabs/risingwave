@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![feature(if_let_guard)]
 #![feature(box_patterns)]
 #![feature(register_tool)]
@@ -176,7 +175,7 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
                 columns.iter().map(|c| c.clone().into()).collect(),
                 pk_indices,
                 *append_only,
-                source_watermarks.to_vec(),
+                source_watermarks.clone(),
             )
         }
         _ => panic!(

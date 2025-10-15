@@ -855,7 +855,7 @@ impl StageGraph {
                 .as_ref()
                 .unwrap()
                 .clone()
-                .complete(self.batch_parallelism, timezone.to_owned())
+                .complete(self.batch_parallelism, timezone.clone())
                 .await?;
 
             // For batch reading file source, the number of files involved is typically large.
@@ -930,7 +930,7 @@ impl StageGraph {
                 complete_stages,
                 catalog_reader,
                 worker_node_manager,
-                timezone.to_owned(),
+                timezone.clone(),
             )
             .await?;
         }
@@ -1027,7 +1027,7 @@ impl BatchPlanFragmenter {
             .complete(
                 &self.catalog_reader,
                 &self.worker_node_manager,
-                self.timezone.to_owned(),
+                self.timezone.clone(),
             )
             .await?;
         Ok(Query {
@@ -1311,7 +1311,7 @@ impl BatchPlanFragmenter {
             Ok(Some(TableScanInfo::system_table(name)))
         } else if let Some(scan_node) = node.as_batch_log_seq_scan() {
             build_table_scan_info(
-                scan_node.core().table_name.to_owned(),
+                scan_node.core().table_name.clone(),
                 &scan_node.core().table,
                 &[],
             )

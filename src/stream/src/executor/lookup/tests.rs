@@ -141,7 +141,7 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
 /// | -  | 6     | 1    | 3       |
 /// | b  |       |      | 3 -> 4  |
 fn create_source() -> Executor {
-    let columns = vec![
+    let columns = [
         ColumnDesc::named("join_column", 1.into(), DataType::Int64),
         ColumnDesc::named("rowid_column", 2.into(), DataType::Int64),
     ];

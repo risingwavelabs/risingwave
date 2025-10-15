@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![feature(coverage_attribute)]
 
 mod server;
@@ -327,7 +326,7 @@ pub fn start(
             });
 
         let add_info = AddressInfo {
-            advertise_addr: opts.advertise_addr.to_owned(),
+            advertise_addr: opts.advertise_addr.clone(),
             listen_addr,
             prometheus_addr,
             dashboard_addr,

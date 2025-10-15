@@ -769,7 +769,7 @@ pub mod tests {
             },
         ];
 
-        let levels_handlers = vec![
+        let levels_handlers = [
             LevelHandler::new(0),
             LevelHandler::new(1),
             LevelHandler::new(2),
@@ -878,7 +878,7 @@ pub mod tests {
             },
         ];
 
-        let levels_handlers = vec![
+        let levels_handlers = [
             LevelHandler::new(0),
             LevelHandler::new(1),
             LevelHandler::new(2),
@@ -1072,7 +1072,7 @@ pub mod tests {
             },
         ];
 
-        let levels_handlers = vec![
+        let levels_handlers = [
             LevelHandler::new(0),
             LevelHandler::new(1),
             LevelHandler::new(2),

@@ -670,7 +670,7 @@ impl Cluster {
         let rand_nodes = worker_nodes
             .iter()
             .choose_multiple(&mut rand::rng(), n)
-            .to_vec();
+            .clone();
         Ok(rand_nodes.iter().cloned().cloned().collect_vec())
     }
 

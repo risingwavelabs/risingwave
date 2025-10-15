@@ -90,7 +90,7 @@ impl BitmapBuilder {
     pub fn filled(len: usize) -> BitmapBuilder {
         let vec_len = Bitmap::vec_len(len);
         let mut data = vec![usize::MAX; vec_len];
-        if vec_len >= 1 && len % BITS != 0 {
+        if vec_len >= 1 && !len.is_multiple_of(BITS) {
             data[vec_len - 1] = (1 << (len % BITS)) - 1;
         }
         BitmapBuilder { len, data }
@@ -119,7 +119,7 @@ impl BitmapBuilder {
 
     /// Appends a single bit to the back.
     pub fn append(&mut self, bit_set: bool) -> &mut Self {
-        if self.len % BITS == 0 {
+        if self.len.is_multiple_of(BITS) {
             self.data.push(0);
         }
         self.data[self.len / BITS] |= (bit_set as usize) << (self.len % BITS);
@@ -129,7 +129,7 @@ impl BitmapBuilder {
 
     /// Appends `n` bits to the back.
     pub fn append_n(&mut self, mut n: usize, bit_set: bool) -> &mut Self {
-        while n != 0 && self.len % BITS != 0 {
+        while n != 0 && !self.len.is_multiple_of(BITS) {
             self.append(bit_set);
             n -= 1;
         }
@@ -138,7 +138,7 @@ impl BitmapBuilder {
             Bitmap::vec_len(self.len),
             if bit_set { usize::MAX } else { 0 },
         );
-        if bit_set && self.len % BITS != 0 {
+        if bit_set && !self.len.is_multiple_of(BITS) {
             // remove tailing 1s
             *self.data.last_mut().unwrap() &= (1 << (self.len % BITS)) - 1;
         }
@@ -152,7 +152,7 @@ impl BitmapBuilder {
         }
         self.len -= 1;
         self.data.truncate(Bitmap::vec_len(self.len));
-        if self.len % BITS != 0 {
+        if !self.len.is_multiple_of(BITS) {
             *self.data.last_mut().unwrap() &= (1 << (self.len % BITS)) - 1;
         }
         Some(())
@@ -160,7 +160,7 @@ impl BitmapBuilder {
 
     /// Appends a bitmap to the back.
     pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
-        if self.len % BITS == 0 {
+        if self.len.is_multiple_of(BITS) {
             // fast path: self is aligned
             self.len += other.len();
             if let Some(bits) = &other.bits {
@@ -172,7 +172,7 @@ impl BitmapBuilder {
             } else {
                 // append 1s
                 self.data.resize(Bitmap::vec_len(self.len), usize::MAX);
-                if self.len % BITS != 0 {
+                if !self.len.is_multiple_of(BITS) {
                     // remove tailing 1s
                     *self.data.last_mut().unwrap() = (1 << (self.len % BITS)) - 1;
                 }
@@ -305,16 +305,16 @@ impl Bitmap {
     /// Creates a new bitmap from a slice of `bool`.
     pub fn from_bool_slice(bools: &[bool]) -> Self {
         // use SIMD to speed up
-        let mut iter = bools.array_chunks::<BITS>();
+        let mut iter = bools.iter().copied().array_chunks::<BITS>();
         let mut bits = Vec::with_capacity(Self::vec_len(bools.len()));
         for chunk in iter.by_ref() {
-            let bitmask = std::simd::Mask::<i8, BITS>::from_array(*chunk).to_bitmask() as usize;
+            let bitmask = std::simd::Mask::<i8, BITS>::from_array(chunk).to_bitmask() as usize;
             bits.push(bitmask);
         }
-        if !iter.remainder().is_empty() {
+        if let Some(remainder_iter) = iter.into_remainder() {
             let mut bitmask = 0;
-            for (i, b) in iter.remainder().iter().enumerate() {
-                bitmask |= (*b as usize) << i;
+            for (i, b) in remainder_iter.enumerate() {
+                bitmask |= (b as usize) << i;
             }
             bits.push(bitmask);
         }
@@ -624,7 +624,7 @@ impl Not for &Bitmap {
             Some(bits) => bits,
         };
         let mut bits: Box<[usize]> = bits.iter().map(|b| !b).collect();
-        if self.num_bits % BITS != 0 {
+        if !self.num_bits.is_multiple_of(BITS) {
             bits[self.num_bits / BITS] &= (1 << (self.num_bits % BITS)) - 1;
         }
         Bitmap {
@@ -645,7 +645,7 @@ impl Not for Bitmap {
             Some(bits) => bits,
         };
         bits.iter_mut().for_each(|x| *x = !*x);
-        if self.num_bits % BITS != 0 {
+        if !self.num_bits.is_multiple_of(BITS) {
             bits[self.num_bits / BITS] &= (1 << (self.num_bits % BITS)) - 1;
         }
         self.count_ones = self.num_bits - self.count_ones;
@@ -675,7 +675,7 @@ impl Bitmap {
             None if self.count_ones == 0 => body.resize(body_len, 0),
             None => {
                 body.resize(body_len, u8::MAX);
-                if self.num_bits % 8 != 0 {
+                if !self.num_bits.is_multiple_of(8) {
                     body[body_len - 1] = (1 << (self.num_bits % 8)) - 1;
                 }
             }

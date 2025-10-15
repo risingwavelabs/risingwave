@@ -2282,7 +2282,7 @@ impl GrpcMetaClient {
         let members = match strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
             MetaAddressStrategy::List(addrs) => {
-                let mut members = LruCache::new(20);
+                let mut members = LruCache::new(20.try_into().unwrap());
                 for addr in addrs {
                     members.put(addr.clone(), None);
                 }

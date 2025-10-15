@@ -91,7 +91,7 @@ impl OptimizerContext {
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
     pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
         let session_timezone = RefCell::new(SessionTimezone::new(
-            handler_args.session.config().timezone().to_owned(),
+            handler_args.session.config().timezone().clone(),
         ));
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
         Self {

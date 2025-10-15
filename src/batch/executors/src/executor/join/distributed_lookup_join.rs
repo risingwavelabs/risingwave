@@ -108,7 +108,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         let table_desc = distributed_lookup_join_node.get_inner_side_table_desc()?;
         let inner_side_column_ids = distributed_lookup_join_node
             .get_inner_side_column_ids()
-            .to_vec();
+            .clone();
 
         let inner_side_schema = Schema {
             fields: inner_side_column_ids
@@ -163,7 +163,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .map(|&i| inner_side_schema.fields[i].data_type.clone())
             .collect_vec();
 
-        let null_safe = distributed_lookup_join_node.get_null_safe().to_vec();
+        let null_safe = distributed_lookup_join_node.get_null_safe().clone();
 
         let chunk_size = source.context().get_config().developer.chunk_size;
 

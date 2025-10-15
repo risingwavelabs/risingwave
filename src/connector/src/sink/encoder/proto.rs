@@ -143,11 +143,11 @@ impl MessageIndexes {
         const TAG_MESSAGE_NESTED: i32 = 3;
 
         let mut indexes = vec![];
-        let mut path = desc.path().array_chunks();
-        let &[tag, idx] = path.next().unwrap();
+        let mut path = desc.path().iter().copied().array_chunks();
+        let [tag, idx] = path.next().unwrap();
         assert_eq!(tag, TAG_FILE_MESSAGE);
         indexes.push(idx);
-        for &[tag, idx] in path {
+        for [tag, idx] in path {
             assert_eq!(tag, TAG_MESSAGE_NESTED);
             indexes.push(idx);
         }

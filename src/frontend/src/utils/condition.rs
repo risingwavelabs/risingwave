@@ -468,9 +468,9 @@ impl Condition {
 
                         let bound = {
                             if (cmp.is_le() && left_bound) || (cmp.is_ge() && !left_bound) {
-                                left_scan_range.to_vec()
+                                left_scan_range.clone()
                             } else {
-                                right_scan_range.to_vec()
+                                right_scan_range.clone()
                             }
                         };
 
