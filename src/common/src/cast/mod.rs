@@ -22,7 +22,7 @@ pub const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
 /// Parse a string into a bool.
 ///
-/// See [`https://www.postgresql.org/docs/9.5/datatype-boolean.html`]
+/// See `https://www.postgresql.org/docs/9.5/datatype-boolean.html`
 pub fn str_to_bool(input: &str) -> Result<bool> {
     /// String literals for bool type.
     const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes", "ye", "y"];

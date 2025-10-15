@@ -311,7 +311,9 @@ impl Bitmap {
             let bitmask = std::simd::Mask::<i8, BITS>::from_array(chunk).to_bitmask() as usize;
             bits.push(bitmask);
         }
-        if let Some(remainder_iter) = iter.into_remainder() {
+        if let Some(remainder_iter) = iter.into_remainder()
+            && !remainder_iter.is_empty()
+        {
             let mut bitmask = 0;
             for (i, b) in remainder_iter.enumerate() {
                 bitmask |= (b as usize) << i;

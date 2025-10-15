@@ -50,9 +50,9 @@ const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
     #[serde(alias = "disable")]
-    #[default]
     Disabled,
     #[serde(alias = "prefer")]
+    #[default]
     Preferred,
     #[serde(alias = "require")]
     Required,
