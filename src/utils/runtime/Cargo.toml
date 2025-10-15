@@ -49,7 +49,7 @@ tracing-subscriber = { version = "0.3", features = [
 
 [target.'cfg(not(madsim))'.dependencies]
 fastrace = "0.7"
-fastrace-opentelemetry = "0.10"
+fastrace-opentelemetry = "0.14"
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
