@@ -1422,9 +1422,9 @@ impl DdlService for DdlServiceImpl {
         let mut fragment_graph = fragment_graph.unwrap();
 
         assert_eq!(fragment_graph.dependent_table_ids.len(), 1);
-        assert_eq!(
-            fragment_graph.dependent_table_ids[0],
-            risingwave_common::catalog::TableId::placeholder().table_id
+        assert!(
+            risingwave_common::catalog::TableId::from(fragment_graph.dependent_table_ids[0])
+                .is_placeholder()
         );
         fragment_graph.dependent_table_ids[0] = table_catalog.id;
         for fragment in fragment_graph.fragments.values_mut() {
@@ -1432,26 +1432,25 @@ impl DdlService for DdlServiceImpl {
                 NodeBody::StreamScan(scan) => {
                     scan.table_id = table_catalog.id;
                     if let Some(table_desc) = &mut scan.table_desc {
-                        assert_eq!(
-                            table_desc.table_id,
-                            risingwave_common::catalog::TableId::placeholder().table_id
+                        assert!(
+                            risingwave_common::catalog::TableId::from(table_desc.table_id)
+                                .is_placeholder()
                         );
                         table_desc.table_id = table_catalog.id;
                         table_desc.maybe_vnode_count = table_catalog.maybe_vnode_count;
                     }
                     if let Some(table) = &mut scan.arrangement_table {
-                        assert_eq!(
-                            table.id,
-                            risingwave_common::catalog::TableId::placeholder().table_id
+                        assert!(
+                            risingwave_common::catalog::TableId::from(table.id).is_placeholder()
                         );
                         *table = table_catalog.clone();
                     }
                 }
                 NodeBody::BatchPlan(plan) => {
                     if let Some(table_desc) = &mut plan.table_desc {
-                        assert_eq!(
-                            table_desc.table_id,
-                            risingwave_common::catalog::TableId::placeholder().table_id
+                        assert!(
+                            risingwave_common::catalog::TableId::from(table_desc.table_id)
+                                .is_placeholder()
                         );
                         table_desc.table_id = table_catalog.id;
                         table_desc.maybe_vnode_count = table_catalog.maybe_vnode_count;
