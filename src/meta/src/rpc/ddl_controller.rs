@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
-use await_tree::{InstrumentAwait, span};
+use await_tree::InstrumentAwait;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -65,7 +65,7 @@ use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage}
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -1117,50 +1117,12 @@ impl DdlController {
             .await?;
 
         // create streaming jobs.
-        let stream_job_id = streaming_job.id();
-        match streaming_job.create_type() {
-            CreateType::Unspecified | CreateType::Foreground => {
-                let version = self
-                    .stream_manager
-                    .create_streaming_job(stream_job_fragments, ctx, None)
-                    .await?;
-                Ok(version)
-            }
-            CreateType::Background => {
-                let await_tree_key = format!("Background DDL Worker ({})", stream_job_id);
-                let await_tree_span =
-                    span!("{:?}({})", streaming_job.job_type(), streaming_job.name());
+        let version = self
+            .stream_manager
+            .create_streaming_job(stream_job_fragments, ctx, permit)
+            .await?;
 
-                let ctrl = self.clone();
-                let (tx, rx) = oneshot::channel();
-                let fut = async move {
-                    let _ = ctrl
-                        .stream_manager
-                        .create_streaming_job(stream_job_fragments, ctx, Some(tx))
-                        .await
-                        .inspect_err(|err| {
-                            tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
-                        });
-                    // drop the permit to release the semaphore
-                    drop(permit);
-                };
-
-                let fut = (self.env.await_tree_reg())
-                    .register(await_tree_key, await_tree_span)
-                    .instrument(fut);
-                tokio::spawn(fut);
-
-                rx.instrument_await("wait_background_streaming_job_creation_started")
-                    .await
-                    .map_err(|_| {
-                        anyhow!(
-                            "failed to receive create streaming job result of job: {}",
-                            stream_job_id
-                        )
-                    })??;
-                Ok(IGNORED_NOTIFICATION_VERSION)
-            }
-        }
+        Ok(version)
     }
 
     /// `target_replace_info`: when dropping a sink into table, we need to replace the table.

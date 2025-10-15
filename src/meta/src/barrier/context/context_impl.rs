@@ -84,7 +84,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
-        job.finish(&self.metadata_manager).await
+        job.finish(&self.metadata_manager, &self.source_manager)
+            .await
     }
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]

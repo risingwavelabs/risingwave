@@ -30,6 +30,7 @@ use crate::barrier::info::BarrierInfo;
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, CreateStreamingJobType};
 use crate::manager::MetadataManager;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
+use crate::stream::{SourceChange, SourceManagerRef};
 
 type ConsumedRows = u64;
 
@@ -227,72 +228,76 @@ impl Progress {
 }
 
 /// There are two kinds of `TrackingJobs`:
-/// 1. `New`. This refers to the "New" type of tracking job.
+/// 1. if `is_recovered` is false, it is a "New" tracking job.
 ///    It is instantiated and managed by the stream manager.
 ///    On recovery, the stream manager will stop managing the job.
-/// 2. `Recovered`. This refers to the "Recovered" type of tracking job.
+/// 2. if `is_recovered` is true, it is a "Recovered" tracking job.
 ///    On recovery, the barrier manager will recover and start managing the job.
-pub enum TrackingJob {
-    New(TrackingCommand),
-    Recovered(RecoveredTrackingJob),
+pub struct TrackingJob {
+    job_id: ObjectId,
+    is_recovered: bool,
+    source_change: Option<SourceChange>,
 }
 
 impl std::fmt::Display for TrackingJob {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TrackingJob::New(command) => write!(f, "{}", command.job_id),
-            TrackingJob::Recovered(recovered) => write!(f, "{}<recovered>", recovered.id),
-        }
+        write!(
+            f,
+            "{}{}",
+            self.job_id,
+            if self.is_recovered { "<recovered>" } else { "" }
+        )
     }
 }
 
 impl TrackingJob {
-    /// Notify the metadata manager that the job is finished.
-    pub(crate) async fn finish(self, metadata_manager: &MetadataManager) -> MetaResult<()> {
-        match self {
-            TrackingJob::New(command) => {
-                metadata_manager
-                    .catalog_controller
-                    .finish_streaming_job(command.job_id.table_id as i32)
-                    .await?;
-                Ok(())
-            }
-            TrackingJob::Recovered(recovered) => {
-                metadata_manager
-                    .catalog_controller
-                    .finish_streaming_job(recovered.id)
-                    .await?;
-                Ok(())
-            }
+    /// Create a new tracking job.
+    pub(crate) fn new(job_id: ObjectId, source_change: Option<SourceChange>) -> Self {
+        Self {
+            job_id,
+            is_recovered: false,
+            source_change,
         }
     }
 
-    pub(crate) fn table_to_create(&self) -> TableId {
-        match self {
-            TrackingJob::New(command) => command.job_id,
-            TrackingJob::Recovered(recovered) => (recovered.id as u32).into(),
+    /// Create a recovered tracking job.
+    pub(crate) fn recovered(job_id: ObjectId, source_change: Option<SourceChange>) -> Self {
+        Self {
+            job_id,
+            is_recovered: true,
+            source_change,
         }
+    }
+
+    /// Notify the metadata manager that the job is finished.
+    pub(crate) async fn finish(
+        self,
+        metadata_manager: &MetadataManager,
+        source_manager: &SourceManagerRef,
+    ) -> MetaResult<()> {
+        metadata_manager
+            .catalog_controller
+            .finish_streaming_job(self.job_id)
+            .await?;
+        if let Some(source_change) = self.source_change {
+            source_manager.apply_source_change(source_change).await;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn table_to_create(&self) -> TableId {
+        (self.job_id as u32).into()
     }
 }
 
 impl std::fmt::Debug for TrackingJob {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TrackingJob::New(command) => write!(f, "TrackingJob::New({:?})", command.job_id),
-            TrackingJob::Recovered(recovered) => {
-                write!(f, "TrackingJob::Recovered({:?})", recovered.id)
-            }
+        if !self.is_recovered {
+            write!(f, "TrackingJob::New({})", self.job_id)
+        } else {
+            write!(f, "TrackingJob::Recovered({})", self.job_id)
         }
     }
-}
-
-pub struct RecoveredTrackingJob {
-    pub id: ObjectId,
-}
-
-/// The command tracking by the [`CreateMviewProgressTracker`].
-pub(super) struct TrackingCommand {
-    pub job_id: TableId,
 }
 
 pub(super) enum UpdateProgressResult {
@@ -343,6 +348,7 @@ impl CreateMviewProgressTracker {
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
                 backfill_upstream_types.insert(actor, backfill_upstream_type);
             }
+            let source_backfill_fragments = table_fragments.source_backfill_fragments();
 
             let progress = Self::recover_progress(
                 states,
@@ -352,9 +358,15 @@ impl CreateMviewProgressTracker {
                 version_stats,
                 backfill_order_state,
             );
-            let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
-                id: creating_table_id.table_id as i32,
-            });
+            let source_change = if source_backfill_fragments.is_empty() {
+                None
+            } else {
+                Some(SourceChange::CreateJobFinished {
+                    finished_backfill_fragments: source_backfill_fragments,
+                })
+            };
+            let tracking_job =
+                TrackingJob::recovered(creating_table_id.table_id as _, source_change);
             progress_map.insert(creating_table_id, (progress, tracking_job));
         }
         Self {
@@ -555,9 +567,13 @@ impl CreateMviewProgressTracker {
             let actors = stream_job_fragments.tracking_progress_actor_ids();
             if actors.is_empty() {
                 // The command can be finished immediately.
-                return Some(TrackingJob::New(TrackingCommand {
-                    job_id: info.stream_job_fragments.stream_job_id,
-                }));
+                return Some(TrackingJob::new(
+                    info.stream_job_fragments.stream_job_id.table_id as _,
+                    Some(SourceChange::CreateJobFinished {
+                        finished_backfill_fragments: stream_job_fragments
+                            .source_backfill_fragments(),
+                    }),
+                ));
             }
             (info.clone(), actors)
         };
@@ -593,9 +609,12 @@ impl CreateMviewProgressTracker {
             creating_job_id,
             (
                 progress,
-                TrackingJob::New(TrackingCommand {
-                    job_id: creating_job_id,
-                }),
+                TrackingJob::new(
+                    creating_job_id.table_id as _,
+                    Some(SourceChange::CreateJobFinished {
+                        finished_backfill_fragments: table_fragments.source_backfill_fragments(),
+                    }),
+                ),
             ),
         );
         assert!(old.is_none());
