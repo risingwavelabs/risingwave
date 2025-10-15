@@ -1146,14 +1146,14 @@ impl CursorManager {
     }
 
     pub async fn get_periodic_cursor_metrics(&self) -> PeriodicCursorMetrics {
-        let mut subsription_cursor_nums = 0;
-        let mut invalid_subsription_cursor_nums = 0;
+        let mut subscription_cursor_nums = 0;
+        let mut invalid_subscription_cursor_nums = 0;
         let mut subscription_cursor_last_fetch_duration = HashMap::new();
         for (_, cursor) in self.cursor_map.lock().await.iter() {
             if let Cursor::Subscription(subscription_cursor) = cursor {
-                subsription_cursor_nums += 1;
+                subscription_cursor_nums += 1;
                 if matches!(subscription_cursor.state, State::Invalid) {
-                    invalid_subsription_cursor_nums += 1;
+                    invalid_subscription_cursor_nums += 1;
                 } else {
                     let fetch_duration =
                         subscription_cursor.last_fetch.elapsed().as_millis() as f64;
@@ -1165,8 +1165,8 @@ impl CursorManager {
             }
         }
         PeriodicCursorMetrics {
-            subsription_cursor_nums,
-            invalid_subsription_cursor_nums,
+            subscription_cursor_nums,
+            invalid_subscription_cursor_nums,
             subscription_cursor_last_fetch_duration,
         }
     }

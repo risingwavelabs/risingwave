@@ -37,7 +37,7 @@ static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::
 #[derive(Debug)]
 pub struct LocalSecretManager {
     secrets: RwLock<HashMap<SecretId, Vec<u8>>>,
-    /// The local directory used to write secrets into file, so that it can be passed into some libararies
+    /// The local directory used to write secrets into file, so that it can be passed into some libraries
     secret_file_dir: PathBuf,
 }
 

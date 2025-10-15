@@ -1013,10 +1013,10 @@ where
             Some(mut result_cache) => {
                 assert!(self.portal_store.contains_key(&portal_name));
 
-                let is_cosume_completed =
+                let is_consume_completed =
                     result_cache.consume::<S>(row_max, &mut self.stream).await?;
 
-                if !is_cosume_completed {
+                if !is_consume_completed {
                     self.result_cache.insert(portal_name, result_cache);
                 }
             }

@@ -136,7 +136,7 @@ pub mod memory {
 
     use super::runtime::get_resource;
 
-    /// Default paths for memory limtiations and usage for cgroup v1 and cgroup v2.
+    /// Default paths for memory limitations and usage for cgroup v1 and cgroup v2.
     const V1_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
     const V1_MEMORY_CURRENT_PATH: &str = "/sys/fs/cgroup/memory/memory.usage_in_bytes";
     const V2_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory.max";
