@@ -1516,7 +1516,7 @@ pub async fn create_iceberg_engine_table(
     table: TableCatalog,
     graph: StreamFragmentGraph,
     table_name: ObjectName,
-    _job_type: PbTableJobType,
+    job_type: PbTableJobType,
     if_not_exists: bool,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
@@ -2088,6 +2088,7 @@ pub async fn create_iceberg_engine_table(
                 source,
                 table: Some(table.to_prost()),
                 fragment_graph: Some(graph),
+                job_type: job_type as _,
             },
             PbSinkJobInfo {
                 sink: Some(sink_catalog.to_proto()),

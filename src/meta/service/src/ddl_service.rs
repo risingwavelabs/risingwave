@@ -1386,13 +1386,15 @@ impl DdlService for DdlServiceImpl {
             source,
             table,
             fragment_graph,
+            job_type,
         } = table_info.unwrap();
         let table = table.unwrap();
         let database_id = table.get_database_id();
         let schema_id = table.get_schema_id();
         let table_name = table.get_name().to_owned();
 
-        let stream_job = StreamingJob::Table(source, table, PbTableJobType::General);
+        let stream_job =
+            StreamingJob::Table(source, table, PbTableJobType::try_from(job_type).unwrap());
         let _ = self
             .ddl_controller
             .run_command(DdlCommand::CreateStreamingJob {

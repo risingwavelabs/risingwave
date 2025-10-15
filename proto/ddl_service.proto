@@ -232,6 +232,7 @@ message CreateIcebergTableRequest {
     catalog.Source source = 1;
     catalog.Table table = 2;
     stream_plan.StreamFragmentGraph fragment_graph = 3;
+    TableJobType job_type = 4;
   }
 
   message SinkJobInfo {
