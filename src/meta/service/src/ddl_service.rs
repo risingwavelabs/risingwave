@@ -1390,7 +1390,7 @@ impl DdlService for DdlServiceImpl {
         let table = table.unwrap();
         let database_id = table.get_database_id();
         let schema_id = table.get_schema_id();
-        let table_name = table.get_name().to_string();
+        let table_name = table.get_name().to_owned();
 
         let stream_job = StreamingJob::Table(source, table, PbTableJobType::General);
         let _ = self
