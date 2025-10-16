@@ -112,7 +112,7 @@ pub async fn load_fragment_info<C>(
     database_id: Option<DatabaseId>,
     worker_nodes: &ActiveStreamingWorkerNodes,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+) -> MetaResult<FragmentRenderMap>
 where
     C: ConnectionTrait,
 {
@@ -173,8 +173,11 @@ pub struct WorkerInfo {
     pub resource_group: Option<String>,
 }
 
+pub type FragmentRenderMap =
+    HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>;
+
 pub struct RenderedGraph {
-    pub fragments: HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>,
+    pub fragments: FragmentRenderMap,
     pub ensembles: Vec<NoShuffleEnsemble>,
 }
 
@@ -200,17 +203,14 @@ impl RenderedGraph {
 pub async fn render_fragments<C>(
     txn: &C,
     id_gen: &IdGeneratorManagerRef,
-    fragment_ids: Vec<ObjectId>,
+    fragment_ids: Vec<FragmentId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
 ) -> MetaResult<RenderedGraph>
 where
     C: ConnectionTrait,
 {
-    let requested_fragments: HashSet<FragmentId> = fragment_ids
-        .into_iter()
-        .map(|id| id as FragmentId)
-        .collect();
+    let requested_fragments: HashSet<FragmentId> = fragment_ids.into_iter().collect();
 
     if requested_fragments.is_empty() {
         return Ok(RenderedGraph::empty());
@@ -405,7 +405,7 @@ async fn render_no_shuffle_ensembles<C>(
     jobs: &HashMap<ObjectId, streaming_job::Model>,
     workers: &BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+) -> MetaResult<FragmentRenderMap>
 where
     C: ConnectionTrait,
 {
@@ -441,10 +441,7 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
-    let mut all_fragments: HashMap<
-        DatabaseId,
-        HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
-    > = HashMap::new();
+    let mut all_fragments: FragmentRenderMap = HashMap::new();
 
     for NoShuffleEnsemble {
         entries,
