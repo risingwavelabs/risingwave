@@ -176,19 +176,12 @@ pub struct WorkerInfo {
 pub type FragmentRenderMap =
     HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>;
 
+#[derive(Default)]
 pub struct RenderedGraph {
     pub fragments: FragmentRenderMap,
     pub ensembles: Vec<NoShuffleEnsemble>,
 }
 
-impl Default for RenderedGraph {
-    fn default() -> Self {
-        Self {
-            fragments: HashMap::new(),
-            ensembles: Vec::new(),
-        }
-    }
-}
 
 impl RenderedGraph {
     pub fn empty() -> Self {
