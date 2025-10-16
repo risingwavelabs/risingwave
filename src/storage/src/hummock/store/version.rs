@@ -1201,13 +1201,13 @@ impl HummockVersionReader {
         .await
     }
 
-    pub async fn nearest<M: MeasureDistanceBuilder, O: Send>(
-        &self,
+    pub async fn nearest<'a, M: MeasureDistanceBuilder, O: Send>(
+        &'a self,
         version: PinnedVersion,
         table_id: TableId,
         target: Vector,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> HummockResult<Vec<O>> {
         let Some(index) = version.vector_indexes.get(&table_id) else {
             return Ok(vec![]);

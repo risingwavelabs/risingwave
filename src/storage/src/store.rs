@@ -437,15 +437,15 @@ pub struct VectorNearestOptions {
     pub hnsw_ef_search: usize,
 }
 
-pub trait OnNearestItemFn<O> = OnNearestItem<O> + Send + Sync + 'static;
+pub trait OnNearestItemFn<'a, O> = OnNearestItem<O> + Send + Sync + 'a;
 
 pub trait StateStoreReadVector: StaticSendSync {
-    fn nearest<O: Send + 'static>(
-        &self,
+    fn nearest<'a, O: Send + 'static>(
+        &'a self,
         vec: Vector,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
-    ) -> impl StorageFuture<'_, Vec<O>>;
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<O>>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory

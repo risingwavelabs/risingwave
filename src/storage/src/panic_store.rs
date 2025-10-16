@@ -152,11 +152,11 @@ impl StateStoreWriteVector for PanicStateStore {
 }
 
 impl StateStoreReadVector for PanicStateStore {
-    async fn nearest<O: Send + 'static>(
-        &self,
+    async fn nearest<'a, O: Send + 'static>(
+        &'a self,
         _vec: Vector,
         _options: VectorNearestOptions,
-        _on_nearest_item_fn: impl OnNearestItemFn<O>,
+        _on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
         panic!()
     }

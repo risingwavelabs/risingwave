@@ -368,12 +368,12 @@ pub mod verify {
     impl<A: StateStoreReadVector, E: StateStoreReadVector> StateStoreReadVector
         for VerifyStateStore<A, E>
     {
-        fn nearest<O: Send + 'static>(
-            &self,
+        fn nearest<'a, O: Send + 'static>(
+            &'a self,
             vec: Vector,
             options: VectorNearestOptions,
-            on_nearest_item_fn: impl OnNearestItemFn<O>,
-        ) -> impl StorageFuture<'_, Vec<O>> {
+            on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+        ) -> impl StorageFuture<'a, Vec<O>> {
             self.actual.nearest(vec, options, on_nearest_item_fn)
         }
     }
@@ -1296,11 +1296,11 @@ mod dyn_state_store {
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreReadVector> + StaticSendSync,
     {
-        async fn nearest<O: Send + 'static>(
-            &self,
+        async fn nearest<'a, O: Send + 'static>(
+            &'a self,
             vec: Vector,
             options: VectorNearestOptions,
-            on_nearest_item_fn: impl OnNearestItemFn<O>,
+            on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
         ) -> StorageResult<Vec<O>> {
             let output = self.as_ref().nearest(vec, options).await?;
             Ok(output
