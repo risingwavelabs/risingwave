@@ -261,7 +261,7 @@ pub trait KeyValueFn<'a, O> =
     for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'a;
 
 pub trait StateStoreGet: StaticSendSync {
-    fn on_key_value<'a, O: Send + 'static>(
+    fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
@@ -440,7 +440,7 @@ pub struct VectorNearestOptions {
 pub trait OnNearestItemFn<'a, O> = OnNearestItem<O> + Send + Sync + 'a;
 
 pub trait StateStoreReadVector: StaticSendSync {
-    fn nearest<'a, O: Send + 'static>(
+    fn nearest<'a, O: Send + 'a>(
         &'a self,
         vec: Vector,
         options: VectorNearestOptions,

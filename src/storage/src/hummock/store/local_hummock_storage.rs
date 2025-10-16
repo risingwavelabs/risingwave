@@ -266,7 +266,7 @@ pub struct LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockFlushedSnapshotReader {
-    async fn on_key_value<'a, O: Send + 'static>(
+    async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
@@ -308,7 +308,7 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockStorage {
-    async fn on_key_value<'a, O: Send + 'static>(
+    async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,

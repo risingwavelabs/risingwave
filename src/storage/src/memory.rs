@@ -687,7 +687,7 @@ pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
-    async fn on_key_value<'a, O: Send + 'static>(
+    async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,
@@ -728,7 +728,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
 }
 
 impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
-    async fn nearest<'a, O: Send + 'static>(
+    async fn nearest<'a, O: Send + 'a>(
         &'a self,
         vec: Vector,
         options: VectorNearestOptions,
@@ -1007,7 +1007,7 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvLocalStateStore<R> {
-    async fn on_key_value<'a, O: Send + 'static>(
+    async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,

@@ -139,7 +139,7 @@ impl<S, E> MonitoredStateStore<S, E> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for MonitoredTableStateStore<S> {
-    fn on_key_value<'a, O: Send + 'static>(
+    fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
@@ -207,7 +207,7 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
 }
 
 impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<S> {
-    fn nearest<'a, O: Send + 'static>(
+    fn nearest<'a, O: Send + 'a>(
         &'a self,
         vec: Vector,
         options: VectorNearestOptions,
