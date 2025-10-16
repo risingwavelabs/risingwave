@@ -762,7 +762,7 @@ impl Binder {
         static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
             let mut tree = BKTree::new(metrics::Levenshtein);
 
-            // TODO: Also hint other functinos, e.g., Agg or UDF.
+            // TODO: Also hint other functions, e.g., Agg or UDF.
             for k in HANDLES.keys() {
                 tree.add(*k);
             }

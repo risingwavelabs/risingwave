@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::pin_mut;
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
@@ -47,7 +48,7 @@ pub struct VectorIndexNearestExecutor<S: StateStore> {
 
     state_store: S,
     table_id: TableId,
-    epoch: BatchQueryEpoch,
+    query_epoch: BatchQueryEpoch,
     vector_column_idx: usize,
     top_n: usize,
     measure: DistanceMeasurement,
@@ -100,7 +101,6 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
             DataType::list(DataType::Struct(vector_info_struct_type.clone())),
         ));
 
-        let epoch = source.epoch();
         dispatch_state_store!(source.context().state_store(), state_store, {
             Ok(Box::new(VectorIndexNearestExecutor {
                 identity: source.plan_node().get_identity().clone(),
@@ -109,7 +109,9 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
                 input,
                 state_store,
                 table_id: vector_index_nearest_node.table_id.into(),
-                epoch,
+                query_epoch: vector_index_nearest_node.query_epoch.ok_or_else(|| {
+                    anyhow!("vector_index_query not set in distributed lookup join")
+                })?,
                 vector_column_idx: vector_index_nearest_node.vector_column_idx as usize,
                 top_n: vector_index_nearest_node.top_n as usize,
                 measure: PbDistanceType::try_from(vector_index_nearest_node.distance_type)
@@ -141,7 +143,7 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
         let Self {
             state_store,
             table_id,
-            epoch,
+            query_epoch: epoch,
             vector_info_struct_type,
             input,
             vector_column_idx,

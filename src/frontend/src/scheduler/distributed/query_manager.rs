@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
@@ -32,7 +32,6 @@ use tokio::sync::OwnedSemaphorePermit;
 
 use super::QueryExecution;
 use super::stats::DistributedQueryMetrics;
-use crate::catalog::TableId;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::{ExecutionContextRef, SchedulerResult};
@@ -137,7 +136,7 @@ pub struct QueryManager {
     query_execution_info: QueryExecutionInfoRef,
     pub query_metrics: Arc<DistributedQueryMetrics>,
     /// Limit per session.
-    disrtibuted_query_limit: Option<u64>,
+    distributed_query_limit: Option<u64>,
     /// Limits the number of concurrent distributed queries.
     distributed_query_semaphore: Option<Arc<tokio::sync::Semaphore>>,
     /// Total permitted distributed query number.
@@ -150,7 +149,7 @@ impl QueryManager {
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_metrics: Arc<DistributedQueryMetrics>,
-        disrtibuted_query_limit: Option<u64>,
+        distributed_query_limit: Option<u64>,
         total_distributed_query_limit: Option<u64>,
     ) -> Self {
         let distributed_query_semaphore = total_distributed_query_limit
@@ -161,7 +160,7 @@ impl QueryManager {
             catalog_reader,
             query_execution_info: Arc::new(RwLock::new(QueryExecutionInfo::default())),
             query_metrics,
-            disrtibuted_query_limit,
+            distributed_query_limit,
             distributed_query_semaphore,
             total_distributed_query_limit,
         }
@@ -190,10 +189,13 @@ impl QueryManager {
     pub async fn schedule(
         &self,
         context: ExecutionContextRef,
-        query: Query,
-        read_storage_tables: HashSet<TableId>,
+        mut query: Query,
     ) -> SchedulerResult<DistributedQueryStream> {
-        if let Some(query_limit) = self.disrtibuted_query_limit
+        // TODO: if there's no table scan, we don't need to acquire snapshot.
+        let pinned_snapshot = context.session().pinned_snapshot();
+        pinned_snapshot.fill_batch_query_epoch(&mut query)?;
+
+        if let Some(query_limit) = self.distributed_query_limit
             && self.query_metrics.running_query_num.get() as u64 == query_limit
         {
             self.query_metrics.rejected_query_counter.inc();
@@ -213,19 +215,16 @@ impl QueryManager {
             .query_manager()
             .add_query(query_id.clone(), query_execution.clone());
 
-        // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let pinned_snapshot = context.session().pinned_snapshot();
-
         let worker_node_manager_reader = WorkerNodeSelector::new(
             self.worker_node_manager.clone(),
             pinned_snapshot.support_barrier_read(),
         );
+
         // Starts the execution of the query.
         let query_result_fetcher = query_execution
             .start(
                 context.clone(),
                 worker_node_manager_reader,
-                pinned_snapshot.batch_query_epoch(&read_storage_tables)?,
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),
                 self.query_execution_info.clone(),

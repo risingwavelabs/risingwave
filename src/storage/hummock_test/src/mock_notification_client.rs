@@ -67,6 +67,7 @@ impl NotificationClient for MockNotificationClient {
             hummock_write_limits: Some(WriteLimits {
                 write_limits: HashMap::new(),
             }),
+            cluster_resource: Some(Default::default()),
             ..Default::default()
         };
 

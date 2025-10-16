@@ -84,7 +84,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
-        job.finish(&self.metadata_manager).await
+        job.finish(&self.metadata_manager, &self.source_manager)
+            .await
     }
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]
@@ -232,16 +233,11 @@ impl CommandContext {
 
             Command::SourceChangeSplit(SplitState {
                 split_assignment: assignment,
-                discovered_source_splits: source_splits,
+                ..
             }) => {
                 barrier_manager_context
                     .metadata_manager
                     .update_actor_splits_by_split_assignment(assignment)
-                    .await?;
-
-                barrier_manager_context
-                    .metadata_manager
-                    .update_source_splits(source_splits)
                     .await?;
 
                 barrier_manager_context

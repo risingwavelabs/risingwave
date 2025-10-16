@@ -490,14 +490,14 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         // Check for StartFragmentBackfill mutation
                         if let Some(mutation) = barrier.mutation.as_deref() {
                             use crate::executor::Mutation;
-                            if let Mutation::StartFragmentBackfill { fragment_ids } = mutation {
+                            if let Mutation::StartFragmentBackfill { fragment_ids } = mutation
+                                && fragment_ids.contains(&self.fragment_id)
+                            {
                                 tracing::info!(
                                     "Start backfill of locality provider with fragment id: {:?}",
                                     &self.fragment_id
                                 );
-                                if fragment_ids.contains(&self.fragment_id) {
-                                    start_backfill = true;
-                                }
+                                start_backfill = true;
                             }
                         }
 
@@ -788,8 +788,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 }
             }
         }
-
-        // TODO: truncate the state table after backfill.
 
         // After backfill completion, forward messages directly
         #[for_await]

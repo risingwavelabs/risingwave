@@ -92,7 +92,7 @@ ryu = "1.0"
 serde = { workspace = true }
 serde_bytes = "0.11"
 serde_default = "0.2"
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 serde_with = "3"
 smallbitset = "0.7.1"
 smallvec = { workspace = true }

@@ -2756,7 +2756,7 @@ impl Parser<'_> {
                 if wildcard_idx.is_none() {
                     wildcard_idx = Some(columns.len());
                 } else {
-                    parser_err!("At most 1 wildcard is allowed in source definetion");
+                    parser_err!("At most 1 wildcard is allowed in source definition");
                 }
             } else if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
