@@ -38,7 +38,7 @@ use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
     BatchPlanRoot, ExecutionModeDecider, OptimizerContext, OptimizerContextRef,
-    ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor,
+    RelationCollectorVisitor, SysTableVisitor,
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -248,7 +248,6 @@ pub struct BatchQueryPlanResult {
     // subset of the final one. i.e. the final one may contain more implicit dependencies on
     // indices.
     pub(crate) dependent_relations: Vec<TableId>,
-    pub(crate) read_storage_tables: HashSet<TableId>,
 }
 
 fn gen_batch_query_plan(
@@ -276,8 +275,6 @@ fn gen_batch_query_plan(
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());
-
-    let read_storage_tables = ReadStorageTableVisitor::collect(&batch_plan);
 
     let must_local = must_run_in_local_mode(&batch_plan);
 
@@ -309,7 +306,6 @@ fn gen_batch_query_plan(
         schema,
         stmt_type,
         dependent_relations: dependent_relations.into_iter().collect_vec(),
-        read_storage_tables,
     })
 }
 
@@ -361,7 +357,6 @@ pub struct BatchPlanFragmenterResult {
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
-    pub(crate) read_storage_tables: HashSet<TableId>,
 }
 
 pub fn gen_batch_plan_fragmenter(
@@ -373,7 +368,6 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
-        read_storage_tables,
         ..
     } = plan_result;
 
@@ -399,7 +393,6 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
-        read_storage_tables,
     })
 }
 
@@ -413,7 +406,7 @@ pub async fn create_stream(
         query_mode,
         schema,
         stmt_type,
-        read_storage_tables,
+        ..
     } = plan_fragmenter_result;
 
     let mut can_timeout_cancel = true;
@@ -444,13 +437,7 @@ pub async fn create_stream(
     let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-            local_execute(
-                session.clone(),
-                query,
-                can_timeout_cancel,
-                &read_storage_tables,
-            )
-            .await?,
+            local_execute(session.clone(), query, can_timeout_cancel).await?,
             column_types,
             formats,
             session.clone(),
@@ -458,13 +445,7 @@ pub async fn create_stream(
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                distribute_execute(
-                    session.clone(),
-                    query,
-                    can_timeout_cancel,
-                    read_storage_tables,
-                )
-                .await?,
+                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
                 column_types,
                 formats,
                 session.clone(),
@@ -544,7 +525,6 @@ pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
-    read_storage_tables: HashSet<TableId>,
 ) -> Result<DistributedQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -558,16 +538,15 @@ pub async fn distribute_execute(
     let query_manager = session.env().query_manager().clone();
 
     query_manager
-        .schedule(execution_context, query, read_storage_tables)
+        .schedule(execution_context, query)
         .await
         .map_err(|err| err.into())
 }
 
 pub async fn local_execute(
     session: Arc<SessionImpl>,
-    query: Query,
+    mut query: Query,
     can_timeout_cancel: bool,
-    read_storage_tables: &HashSet<TableId>,
 ) -> Result<LocalQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -580,11 +559,12 @@ pub async fn local_execute(
 
     let snapshot = session.pinned_snapshot();
 
+    snapshot.fill_batch_query_epoch(&mut query)?;
+
     let execution = LocalQueryExecution::new(
         query,
         front_env.clone(),
         snapshot.support_barrier_read(),
-        snapshot.batch_query_epoch(read_storage_tables)?,
         session,
         timeout,
     );
