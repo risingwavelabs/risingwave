@@ -7636,13 +7636,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5e54036fe321fd421e10d732f155734c4e4afd610dd556d9a82833ab3ee0bed"
 
 [[package]]
-name = "local_stats_alloc"
-version = "2.7.0-alpha"
-dependencies = [
- "workspace-hack",
-]
-
-[[package]]
 name = "lock_api"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12921,7 +12914,6 @@ dependencies = [
  "iceberg",
  "itertools 0.14.0",
  "jsonbb",
- "local_stats_alloc",
  "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",

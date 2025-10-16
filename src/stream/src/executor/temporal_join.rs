@@ -20,7 +20,6 @@ use either::Either;
 use futures::TryStreamExt;
 use futures::stream::{self, PollNext};
 use itertools::Itertools;
-use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -109,7 +108,7 @@ struct TemporalSide<K: HashKey, S: StateStore> {
     source: BatchTable<S>,
     table_stream_key_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
-    cache: ManagedLruCache<K, JoinEntry, DefaultHasher, SharedStatsAlloc<Global>>,
+    cache: ManagedLruCache<K, JoinEntry, DefaultHasher>,
     join_key_data_types: Vec<DataType>,
 }
 
@@ -613,8 +612,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
         join_key_data_types: Vec<DataType>,
         memo_table: Option<StateTable<S>>,
     ) -> Self {
-        let alloc = StatsAlloc::new(Global).shared();
-
         let metrics_info = MetricsInfo::new(
             metrics.clone(),
             table.table_id().table_id,
@@ -622,11 +619,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
             "temporal join",
         );
 
-        let cache = ManagedLruCache::unbounded_with_hasher_in(
+        let cache = ManagedLruCache::unbounded_with_hasher(
             watermark_sequence,
             metrics_info,
             DefaultHasher::default(),
-            alloc,
         );
 
         let metrics = metrics.new_temporal_join_metrics(table.table_id(), ctx.id, ctx.fragment_id);

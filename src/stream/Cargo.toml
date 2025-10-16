@@ -33,7 +33,6 @@ hytra = "0.1.2"
 iceberg = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { workspace = true }
 maplit = "1.0.2"
 memcomparable = "0.2"
