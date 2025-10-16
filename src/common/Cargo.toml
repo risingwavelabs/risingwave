@@ -56,7 +56,6 @@ jiff = "0.1.15"
 jni = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
-lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -144,6 +143,7 @@ mach2 = "0.4"
 coarsetime = "0.1"
 criterion = { workspace = true }
 expect-test = "1"
+lru = { workspace = true }
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = { workspace = true }
