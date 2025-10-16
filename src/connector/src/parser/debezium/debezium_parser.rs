@@ -273,7 +273,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_additional_columns() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
             ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
             ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),

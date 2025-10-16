@@ -46,6 +46,7 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { workspace = true }
 hashbrown = { workspace = true }
+hashbrown0_14 = { workspace = true }
 hex = "0.4.3"
 http = "1"
 humantime = "2.2"

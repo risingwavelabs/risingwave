@@ -118,7 +118,7 @@ impl HummockManager {
 
         let created_tables = if let Some(created_tables) = created_tables {
             // if the created_tables is provided, use it directly, most for test
-            assert!(cfg!(debug_assertions));
+            const { assert!(cfg!(debug_assertions)) };
             created_tables
         } else {
             match self.metadata_manager.get_created_table_ids().await {

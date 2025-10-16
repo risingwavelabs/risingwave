@@ -319,7 +319,7 @@ impl ToBatch for LogicalSource {
         let mut plan = BatchSource::new(self.core.clone()).into();
 
         if let Some(exprs) = &self.output_exprs {
-            let logical_project = generic::Project::new(exprs.to_vec(), plan);
+            let logical_project = generic::Project::new(exprs.clone(), plan);
             plan = BatchProject::new(logical_project).into();
         }
 
@@ -353,7 +353,7 @@ impl ToStream for LogicalSource {
                 }
 
                 if let Some(exprs) = &self.output_exprs {
-                    let logical_project = generic::Project::new(exprs.to_vec(), plan);
+                    let logical_project = generic::Project::new(exprs.clone(), plan);
                     plan = StreamProject::new(logical_project).into();
                 }
 

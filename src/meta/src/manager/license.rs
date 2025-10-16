@@ -68,7 +68,7 @@ impl MetaSrvEnv {
 
         let updater = {
             let mgr = self.system_params_manager_impl_ref();
-            let path = path.to_path_buf();
+            let path = path.clone();
 
             async move {
                 // Let the watcher live until the end of the updater to prevent dropping (then stopping).

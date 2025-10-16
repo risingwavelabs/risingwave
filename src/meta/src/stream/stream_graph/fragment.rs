@@ -103,7 +103,7 @@ impl BuildingFragment {
 
     /// Extract the internal tables from the fragment.
     fn extract_internal_tables(&self) -> Vec<Table> {
-        let mut fragment = self.inner.to_owned();
+        let mut fragment = self.inner.clone();
         let mut tables = Vec::new();
         stream_graph_visitor::visit_internal_tables(&mut fragment, |table, _| {
             tables.push(table.clone());

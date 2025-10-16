@@ -308,7 +308,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let outer_side_data_types = outer_side_input.schema().data_types();
 
         let table_desc = lookup_join_node.get_inner_side_table_desc()?;
-        let inner_side_column_ids = lookup_join_node.get_inner_side_column_ids().to_vec();
+        let inner_side_column_ids = lookup_join_node.get_inner_side_column_ids().clone();
 
         let inner_side_schema = Schema {
             fields: inner_side_column_ids
@@ -362,7 +362,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             .map(|&i| inner_side_schema.fields[i].data_type.clone())
             .collect_vec();
 
-        let null_safe = lookup_join_node.get_null_safe().to_vec();
+        let null_safe = lookup_join_node.get_null_safe().clone();
 
         let vnode_mapping = lookup_join_node
             .get_inner_side_vnode_mapping()

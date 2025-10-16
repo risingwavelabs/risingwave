@@ -34,7 +34,7 @@ pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
             for ((op1, row1), (op2, row2)) in once(None)
                 .chain(chunk.rows().map(Some))
                 .chain(once(None))
-                .map(|r| (r.unzip()))
+                .map(|r| r.unzip())
                 .tuple_windows()
             {
                 if (op1.is_none() && op2 == Some(Op::UpdateInsert)) // the first row is U+

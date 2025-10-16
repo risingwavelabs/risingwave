@@ -91,7 +91,7 @@ impl StreamClient {
                 init_request,
             )),
         };
-        let mut client = self.0.to_owned();
+        let mut client = self.0.clone();
         let (handle, first_rsp) =
             UnboundedBidiStreamHandle::initialize(first_request, |rx| async move {
                 client

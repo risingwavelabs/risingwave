@@ -31,7 +31,7 @@ fn test_func_sig_map() {
         new_map
             .entry(sig.name.clone())
             .or_default()
-            .entry(sig.inputs_type.to_vec())
+            .entry(sig.inputs_type.clone())
             .or_default()
             .push(sig.clone());
     }

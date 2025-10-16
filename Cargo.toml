@@ -162,6 +162,9 @@ hashbrown = { version = "0.16", features = [
     "inline-more",
     "nightly",
 ] }
+hashbrown0_14 = { package = "hashbrown", version = "0.14", features = [
+    "nightly",
+] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
 iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8c4a29f2f6ed6f713ffb4b0406cd49c52e0efb6f", features = [
@@ -177,7 +180,7 @@ itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = "0.1.4"
 linkme = { version = "0.3.32", features = ["used_linker"] }
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
+lru = "0.14"
 madsim = "0.2.34"
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = ["native-tls-tls", "rust_decimal"] }
@@ -322,10 +325,12 @@ new_without_default = "allow"
 # TODO: remove later https://github.com/rust-lang/rust-clippy/issues/12537
 # duplicated_attributes = "allow"
 # TODO: remove later https://github.com/rust-lang/rust-clippy/issues/12436
-mixed_attributes_style = "allow"
+#mixed_attributes_style = "allow"
 too_long_first_doc_paragraph = "allow"
+# TODO: remove later when EnumAsInner, bitfield and EnumTryAs does not fire this warning
+double_parens = "allow"
 str_to_string = "warn"
-string_to_string = "warn"
+implicit_clone = "warn"
 
 # TODO: this makes sense, but it's too noisy for now (2025-03-10)
 large_enum_variant = "allow"

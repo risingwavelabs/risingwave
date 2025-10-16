@@ -149,13 +149,13 @@ fn construct_no_shuffle_traverse_query_helper(
         )
         .to_owned();
 
-    let common_table_expr = CommonTableExpression::new()
+    let mut common_table_expr = CommonTableExpression::new();
+    common_table_expr
         .query(base_query.union(UnionType::All, cte_referencing).to_owned())
         .column(fragment_relation::Column::SourceFragmentId)
         .column(fragment_relation::Column::DispatcherType)
         .column(fragment_relation::Column::TargetFragmentId)
-        .table_name(cte_alias.clone())
-        .to_owned();
+        .table_name(cte_alias.clone());
 
     SelectStatement::new()
         .column(fragment_relation::Column::SourceFragmentId)
@@ -170,7 +170,6 @@ fn construct_no_shuffle_traverse_query_helper(
                 .cte(common_table_expr)
                 .to_owned(),
         )
-        .to_owned()
 }
 
 #[derive(Debug, Clone)]

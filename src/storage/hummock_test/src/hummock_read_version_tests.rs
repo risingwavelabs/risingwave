@@ -73,8 +73,8 @@ async fn test_read_version_basic() {
 
         let key = iterator_test_table_key_of(1_usize);
         let key_range = map_table_key_range((
-            Bound::Included(Bytes::from(key.to_vec())),
-            Bound::Included(Bytes::from(key.to_vec())),
+            Bound::Included(Bytes::from(key.clone())),
+            Bound::Included(Bytes::from(key.clone())),
         ));
 
         let (staging_imm_iter, staging_sst_iter) =
@@ -111,8 +111,8 @@ async fn test_read_version_basic() {
             let epoch = test_epoch(e);
             let key = iterator_test_table_key_of(e as usize);
             let key_range = map_table_key_range((
-                Bound::Included(Bytes::from(key.to_vec())),
-                Bound::Included(Bytes::from(key.to_vec())),
+                Bound::Included(Bytes::from(key.clone())),
+                Bound::Included(Bytes::from(key.clone())),
             ));
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
