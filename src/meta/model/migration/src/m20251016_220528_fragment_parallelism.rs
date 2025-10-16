@@ -10,11 +10,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Fragment::Table)
-                    .add_column(
-                        ColumnDef::new(Fragment::Parallelism)
-                            .json_binary()
-                            .null(),
-                    )
+                    .add_column(ColumnDef::new(Fragment::Parallelism).json_binary().null())
                     .to_owned(),
             )
             .await
