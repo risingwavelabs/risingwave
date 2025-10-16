@@ -505,6 +505,7 @@ pub async fn start_service_as_election_leader(
 
     sub_tasks.push(IcebergCompactionManager::gc_loop(
         iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_gc_interval_sec,
     ));
 
     let scale_controller = Arc::new(ScaleController::new(
@@ -736,7 +737,9 @@ pub async fn start_service_as_election_leader(
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
-        .add_service(EventLogServiceServer::new(event_log_srv))
+        .add_service(
+            EventLogServiceServer::new(event_log_srv).max_decoding_message_size(usize::MAX),
+        )
         .add_service(ClusterLimitServiceServer::new(cluster_limit_srv))
         .add_service(HostedIcebergCatalogServiceServer::new(
             hosted_iceberg_catalog_srv,
