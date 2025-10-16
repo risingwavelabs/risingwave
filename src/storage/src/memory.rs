@@ -728,19 +728,19 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
 }
 
 impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
-    async fn nearest<O: Send + 'static>(
-        &self,
+    async fn nearest<'a, O: Send + 'static>(
+        &'a self,
         vec: Vector,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
-        fn nearest_impl<M: MeasureDistanceBuilder, O>(
-            store: &InMemVectorStore,
+        fn nearest_impl<'a, M: MeasureDistanceBuilder, O>(
+            store: &'a InMemVectorStore,
             epoch: u64,
             table_id: TableId,
             vec: Vector,
             options: VectorNearestOptions,
-            on_nearest_item_fn: impl OnNearestItemFn<O>,
+            on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
         ) -> Vec<O> {
             let mut builder = NearestBuilder::<'_, O, M>::new(vec.to_ref(), options.top_n);
             builder.add(

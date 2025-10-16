@@ -207,12 +207,12 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
 }
 
 impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<S> {
-    fn nearest<O: Send + 'static>(
-        &self,
+    fn nearest<'a, O: Send + 'static>(
+        &'a self,
         vec: Vector,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
-    ) -> impl StorageFuture<'_, Vec<O>> {
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<O>> {
         // TODO: monitor
         self.inner.nearest(vec, options, on_nearest_item_fn)
     }

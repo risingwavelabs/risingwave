@@ -687,11 +687,11 @@ impl StateStoreRead for HummockStorageReadSnapshot {
 }
 
 impl StateStoreReadVector for HummockStorageReadSnapshot {
-    async fn nearest<O: Send + 'static>(
-        &self,
+    async fn nearest<'a, O: Send + 'static>(
+        &'a self,
         vec: Vector,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
         let version = match self.epoch {
             HummockReadEpoch::Committed(epoch)

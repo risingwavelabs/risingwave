@@ -178,7 +178,6 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             let vector_column = columns[vector_column_idx].as_vector();
             for (idx, vis) in vis.iter().enumerate() {
                 if vis && let Some(vector) = vector_column.value_at(idx) {
-                    let deserializer = deserializer.clone();
                     let row_results: Vec<Result<StructValue>> = read_snapshot
                         .nearest(
                             vector.to_owned_scalar(),
@@ -187,7 +186,7 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
                                 measure,
                                 hnsw_ef_search,
                             },
-                            move |_vec, distance, value| {
+                            |_vec, distance, value| {
                                 let mut values =
                                     Vec::with_capacity(deserializer.data_types().len() + 1);
                                 deserializer.deserialize_to(value, &mut values)?;
