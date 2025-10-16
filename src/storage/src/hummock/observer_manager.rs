@@ -55,7 +55,7 @@ impl ObserverState for HummockObserverNode {
                         PbObjectInfo::Table(table_catalog) => {
                             self.handle_catalog_notification(resp.operation(), table_catalog);
                         }
-                        _ => panic!("error type notification"),
+                        info => panic!("invalid notification info: {info}"),
                     };
                 }
                 assert!(
@@ -94,8 +94,8 @@ impl ObserverState for HummockObserverNode {
                 LicenseManager::get().update_cluster_resource(resource);
             }
 
-            _ => {
-                panic!("error type notification");
+            info => {
+                panic!("invalid notification info: {info}");
             }
         }
     }

@@ -535,7 +535,7 @@ impl FrontendObserverNode {
                 LocalSecretManager::global().update_secret(secret.id, secret.value);
             }
             _ => {
-                panic!("error type notification");
+                panic!("invalid notification operation: {resp_op:?}");
             }
         }
     }
