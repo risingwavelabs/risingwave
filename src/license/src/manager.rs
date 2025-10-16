@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroUsize;
+use std::num::NonZeroU64;
 use std::sync::{LazyLock, RwLock};
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
+use risingwave_pb::common::ClusterResource;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -115,7 +116,7 @@ pub struct License {
     pub tier: Tier,
 
     /// Maximum number of compute-node CPU cores allowed to use.
-    pub cpu_core_limit: Option<NonZeroUsize>,
+    pub cpu_core_limit: Option<NonZeroU64>,
 
     /// Expiration time in seconds since UNIX epoch.
     ///
@@ -149,12 +150,12 @@ pub enum LicenseError {
         ({actual}) exceeds the maximum allowed by the license key ({limit}); \
         consider removing some nodes or acquiring a new license key with a higher limit"
     )]
-    CpuCoreLimitExceeded { limit: NonZeroUsize, actual: usize },
+    CpuCoreLimitExceeded { limit: NonZeroU64, actual: u64 },
 }
 
 struct Inner {
     license: Result<License, LicenseError>,
-    cached_cpu_core_count: usize,
+    cached_cluster_resource: ClusterResource,
 }
 
 /// The singleton license manager.
@@ -173,7 +174,10 @@ impl LicenseManager {
         Self {
             inner: RwLock::new(Inner {
                 license: Ok(License::default()),
-                cached_cpu_core_count: 0,
+                cached_cluster_resource: ClusterResource {
+                    total_cpu_cores: 0,
+                    total_memory_bytes: 0,
+                },
             }),
         }
     }
@@ -216,10 +220,10 @@ impl LicenseManager {
         }
     }
 
-    /// Update the cached CPU core count.
-    pub fn update_cpu_core_count(&self, cpu_core_count: usize) {
+    /// Update the cached cluster resource.
+    pub fn update_cluster_resource(&self, resource: ClusterResource) {
         let mut inner = self.inner.write().unwrap();
-        inner.cached_cpu_core_count = cpu_core_count;
+        inner.cached_cluster_resource = resource;
     }
 
     /// Get the current license if it is valid.
@@ -240,7 +244,7 @@ impl LicenseManager {
         }
 
         // Check the CPU core limit.
-        let actual_cpu_core = inner.cached_cpu_core_count;
+        let actual_cpu_core = inner.cached_cluster_resource.total_cpu_cores;
         if let Some(limit) = license.cpu_core_limit
             && actual_cpu_core > limit.get()
         {

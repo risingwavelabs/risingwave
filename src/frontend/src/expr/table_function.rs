@@ -569,6 +569,7 @@ impl TableFunction {
                             | MySqlColumnType::MYSQL_TYPE_ENUM
                             | MySqlColumnType::MYSQL_TYPE_SET
                             | MySqlColumnType::MYSQL_TYPE_GEOMETRY
+                            | MySqlColumnType::MYSQL_TYPE_VECTOR
                             | MySqlColumnType::MYSQL_TYPE_NULL => {
                                 return Err(crate::error::ErrorCode::BindError(format!(
                                     "unsupported column type: {:?}",

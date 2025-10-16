@@ -990,8 +990,9 @@ impl SubscriptionCursor {
         );
         let schema = plan_root.schema().clone();
         let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
-            QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
-            QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
+            QueryMode::Auto | QueryMode::Local => {
+                (plan_root.gen_batch_local_plan()?, QueryMode::Local)
+            }
             QueryMode::Distributed => (
                 plan_root.gen_batch_distributed_plan()?,
                 QueryMode::Distributed,
@@ -1003,7 +1004,6 @@ impl SubscriptionCursor {
             schema,
             stmt_type: StatementType::SELECT,
             dependent_relations: vec![],
-            read_storage_tables: HashSet::from_iter([table_catalog.id]),
         })
     }
 

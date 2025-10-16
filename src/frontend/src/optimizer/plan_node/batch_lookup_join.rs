@@ -22,7 +22,7 @@ use risingwave_pb::plan_common::AsOfJoinDesc;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
-use super::utils::{Distill, childless_record, to_pb_time_travel_as_of};
+use super::utils::{Distill, childless_record, to_batch_query_epoch};
 use super::{BatchPlanRef as PlanRef, BatchSeqScan, ExprRewritable, generic};
 use crate::TableCatalog;
 use crate::error::Result;
@@ -244,7 +244,7 @@ impl TryToBatchPb for BatchLookupJoin {
                 output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
                 null_safe: self.eq_join_predicate.null_safes(),
                 lookup_prefix_len: self.lookup_prefix_len as u32,
-                as_of: to_pb_time_travel_as_of(&self.as_of)?,
+                query_epoch: to_batch_query_epoch(&self.as_of)?,
                 asof_desc: self.asof_desc,
             })
         } else {
@@ -278,7 +278,7 @@ impl TryToBatchPb for BatchLookupJoin {
                 worker_nodes: vec![], // To be filled in at local.rs
                 null_safe: self.eq_join_predicate.null_safes(),
                 lookup_prefix_len: self.lookup_prefix_len as u32,
-                as_of: to_pb_time_travel_as_of(&self.as_of)?,
+                query_epoch: to_batch_query_epoch(&self.as_of)?,
                 asof_desc: self.asof_desc,
             })
         })
