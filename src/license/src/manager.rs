@@ -136,8 +136,11 @@ impl License {
 
     /// Return the memory limit (in bytes) based on the RWU limit in the license.
     pub fn memory_limit(&self) -> Option<u64> {
+        // 4GB per RWU
+        const MEMORY_PER_RWU: u64 = 4 * 1024 * 1024 * 1024;
+
         self.rwu_limit.map(
-            |limit| limit.get() * 4 * 1024 * 1024 * 1024, // 4GB per RWU
+            |limit| (limit.get() + 1) * MEMORY_PER_RWU - 1, // allow some margin
         )
     }
 
@@ -156,6 +159,8 @@ impl License {
                 actual: total_cpu_cores,
             });
         }
+
+        #[cfg(not(madsim))] // skip checking memory limit in simulation tests
         if let Some(limit) = self.memory_limit()
             && total_memory_bytes > limit
         {
