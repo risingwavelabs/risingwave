@@ -32,8 +32,7 @@ mod plan_rewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
-    SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
 
 pub mod backfill_order_strategy;
@@ -362,8 +361,9 @@ impl BatchOptimizedLogicalPlanRoot {
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
-        assert!(
-            *plan.distribution() == Distribution::Single,
+        assert_eq!(
+            *plan.distribution(),
+            Distribution::Single,
             "{}",
             plan.explain_to_string()
         );
@@ -392,12 +392,6 @@ impl BatchPlanRoot {
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
 
-        // Add Project if the any position of `self.out_fields` is set to zero.
-        if self.out_fields.count_ones(..) != self.out_fields.len() {
-            plan =
-                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
-        }
-
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:");
@@ -406,6 +400,12 @@ impl BatchPlanRoot {
         if require_additional_exchange_on_root_in_distributed_mode(plan.clone()) {
             plan =
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
+        }
+
+        // Add Project if the any position of `self.out_fields` is set to zero.
+        if self.out_fields.count_ones(..) != self.out_fields.len() {
+            plan =
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
         }
 
         // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
@@ -1223,69 +1223,55 @@ fn exist_and_no_exchange_before(
             .any(|input| exist_and_no_exchange_before(input, is_candidate))
 }
 
+impl BatchPlanRef {
+    fn is_user_table_scan(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchSeqScan
+            || self.node_type() == BatchPlanNodeType::BatchLogSeqScan
+            || self.node_type() == BatchPlanNodeType::BatchVectorSearch
+    }
+
+    fn is_source_scan(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchSource
+            || self.node_type() == BatchPlanNodeType::BatchKafkaScan
+            || self.node_type() == BatchPlanNodeType::BatchIcebergScan
+    }
+
+    fn is_insert(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchInsert
+    }
+
+    fn is_update(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchUpdate
+    }
+
+    fn is_delete(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchDelete
+    }
+}
+
 /// As we always run the root stage locally, for some plan in root stage which need to execute in
 /// compute node we insert an additional exhchange before it to avoid to include it in the root
 /// stage.
 ///
 /// Returns `true` if we must insert an additional exchange to ensure this.
 fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -> bool {
-    fn is_user_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSeqScan
-    }
-
-    fn is_log_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchLogSeqScan
-    }
-
-    fn is_source(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSource
-            || plan.node_type() == BatchPlanNodeType::BatchKafkaScan
-            || plan.node_type() == BatchPlanNodeType::BatchIcebergScan
-    }
-
-    fn is_insert(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchInsert
-    }
-
-    fn is_update(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchUpdate
-    }
-
-    fn is_delete(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchDelete
-    }
-
     assert_eq!(plan.distribution(), &Distribution::Single);
-    exist_and_no_exchange_before(&plan, is_user_table)
-        || exist_and_no_exchange_before(&plan, is_source)
-        || exist_and_no_exchange_before(&plan, is_insert)
-        || exist_and_no_exchange_before(&plan, is_update)
-        || exist_and_no_exchange_before(&plan, is_delete)
-        || exist_and_no_exchange_before(&plan, is_log_table)
+    exist_and_no_exchange_before(&plan, |plan| {
+        plan.is_user_table_scan()
+            || plan.is_source_scan()
+            || plan.is_insert()
+            || plan.is_update()
+            || plan.is_delete()
+    })
 }
 
 /// The purpose is same as `require_additional_exchange_on_root_in_distributed_mode`. We separate
 /// them for the different requirement of plan node in different execute mode.
 fn require_additional_exchange_on_root_in_local_mode(plan: BatchPlanRef) -> bool {
-    fn is_user_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSeqScan
-            || plan.node_type() == BatchPlanNodeType::BatchVectorSearch
-    }
-
-    fn is_source(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSource
-            || plan.node_type() == BatchPlanNodeType::BatchKafkaScan
-            || plan.node_type() == BatchPlanNodeType::BatchIcebergScan
-    }
-
-    fn is_insert(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchInsert
-    }
-
     assert_eq!(plan.distribution(), &Distribution::Single);
-    exist_and_no_exchange_before(&plan, is_user_table)
-        || exist_and_no_exchange_before(&plan, is_source)
-        || exist_and_no_exchange_before(&plan, is_insert)
+    exist_and_no_exchange_before(&plan, |plan| {
+        plan.is_user_table_scan() || plan.is_source_scan() || plan.is_insert()
+    })
 }
 
 #[cfg(test)]

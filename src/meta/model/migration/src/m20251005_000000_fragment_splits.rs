@@ -12,19 +12,19 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(SourceSplits::Table)
+                    .table(FragmentSplits::Table)
                     .col(
-                        ColumnDef::new(SourceSplits::SourceId)
+                        ColumnDef::new(FragmentSplits::FragmentId)
                             .integer()
                             .primary_key()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(SourceSplits::Splits).rw_binary(manager))
+                    .col(ColumnDef::new(FragmentSplits::Splits).rw_binary(manager))
                     .foreign_key(
                         &mut ForeignKey::create()
-                            .name("FK_source_splits_source_oid")
-                            .from(SourceSplits::Table, SourceSplits::SourceId)
-                            .to(Source::Table, Source::SourceId)
+                            .name("FK_fragment_splits_fragment_oid")
+                            .from(FragmentSplits::Table, FragmentSplits::FragmentId)
+                            .to(Fragment::Table, Fragment::FragmentId)
                             .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
                     )
@@ -36,20 +36,20 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        drop_tables!(manager, SourceSplits);
+        drop_tables!(manager, FragmentSplits);
         Ok(())
     }
 }
 
 #[derive(DeriveIden)]
-enum SourceSplits {
+enum FragmentSplits {
     Table,
-    SourceId,
+    FragmentId,
     Splits,
 }
 
 #[derive(DeriveIden)]
-enum Source {
+enum Fragment {
     Table,
-    SourceId,
+    FragmentId,
 }

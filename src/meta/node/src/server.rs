@@ -505,6 +505,7 @@ pub async fn start_service_as_election_leader(
 
     sub_tasks.push(IcebergCompactionManager::gc_loop(
         iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_gc_interval_sec,
     ));
 
     let scale_controller = Arc::new(ScaleController::new(
@@ -561,6 +562,8 @@ pub async fn start_service_as_election_leader(
         iceberg_compaction_mgr.clone(),
     )
     .await;
+
+    sub_tasks.push(ddl_srv.start_migrate_table_fragments());
 
     let user_srv = UserServiceImpl::new(metadata_manager.clone());
 

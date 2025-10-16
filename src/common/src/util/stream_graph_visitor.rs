@@ -309,6 +309,10 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.table, "StreamVectorIndexWrite");
             }
 
+            NodeBody::LocalityProvider(node) => {
+                always!(node.state_table, "LocalityProviderState");
+                always!(node.progress_table, "LocalityProviderProgress");
+            }
             _ => {}
         }
     };

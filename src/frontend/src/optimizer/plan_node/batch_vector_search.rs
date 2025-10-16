@@ -23,13 +23,13 @@ use crate::OptimizerContextRef;
 use crate::catalog::TableId;
 use crate::expr::{ExprDisplay, ExprImpl, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
     Batch, BatchPlanRef as PlanRef, BatchPlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary,
     ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 
 #[derive(Debug, Clone, educe::Educe)]
 #[educe(Hash, PartialEq, Eq)]
@@ -87,17 +87,9 @@ pub struct BatchVectorSearch {
 
 impl BatchVectorSearch {
     pub(super) fn with_core(core: BatchVectorSearchCore) -> Self {
-        Self::with_core_inner(core, Distribution::Single)
-    }
-
-    fn with_core_someshard(core: BatchVectorSearchCore) -> Self {
-        Self::with_core_inner(core, Distribution::SomeShard)
-    }
-
-    fn with_core_inner(core: BatchVectorSearchCore, distribution: Distribution) -> Self {
         // TODO: support specifying order in nested struct to avoid unnecessary sort
         let order = Order::any();
-        let base = PlanBase::new_batch_with_core(&core, distribution, order);
+        let base = PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), order);
         Self { base, core }
     }
 }
@@ -161,19 +153,24 @@ impl ToBatchPb for BatchVectorSearch {
             top_n: self.core.top_n as _,
             distance_type: self.core.distance_type as _,
             hnsw_ef_search: self.core.hnsw_ef_search.unwrap_or(0) as _,
+            query_epoch: None,
         })
     }
 }
 
 impl ToLocalBatch for BatchVectorSearch {
     fn to_local(&self) -> crate::error::Result<PlanRef> {
-        Ok(Self::with_core_someshard(self.core.clone()).into())
+        let mut core = self.core.clone();
+        core.input = core.input.to_local()?;
+        Ok(Self::with_core(core).into())
     }
 }
 
 impl ToDistributedBatch for BatchVectorSearch {
     fn to_distributed(&self) -> crate::error::Result<PlanRef> {
-        Ok(Self::with_core_someshard(self.core.clone()).into())
+        let mut core = self.core.clone();
+        core.input = core.input.to_distributed()?;
+        Ok(Self::with_core(core).into())
     }
 }
 

@@ -15,31 +15,31 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectorSplits, SourceId, source_splits};
+use crate::{ConnectorSplits, FragmentId, fragment_splits};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "source_splits")]
+#[sea_orm(table_name = "fragment_splits")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub source_id: SourceId,
+    pub fragment_id: FragmentId,
     pub splits: Option<ConnectorSplits>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::source::Entity",
-        from = "Column::SourceId",
-        to = "super::source::Column::SourceId",
+        belongs_to = "super::fragment::Entity",
+        from = "Column::FragmentId",
+        to = "super::fragment::Column::FragmentId",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    SourceId,
+    FragmentId,
 }
 
-impl Related<super::source::Entity> for source_splits::Entity {
+impl Related<super::fragment::Entity> for fragment_splits::Entity {
     fn to() -> RelationDef {
-        source_splits::Relation::SourceId.def()
+        fragment_splits::Relation::FragmentId.def()
     }
 }
 

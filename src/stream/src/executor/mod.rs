@@ -14,8 +14,9 @@
 
 mod prelude;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
+use std::future::pending;
 use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -24,8 +25,9 @@ use std::vec;
 
 use await_tree::InstrumentAwait;
 use enum_as_inner::EnumAsInner;
+use futures::future::try_join_all;
 use futures::stream::{BoxStream, FusedStream, FuturesUnordered, StreamFuture};
-use futures::{Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use prometheus::Histogram;
 use prometheus::core::{AtomicU64, GenericCounter};
@@ -56,12 +58,17 @@ use risingwave_pb::stream_plan::{
     SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
+use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::error::StreamResult;
-use crate::executor::exchange::input::BoxedInput;
+use crate::executor::exchange::input::{
+    BoxedActorInput, BoxedInput, apply_dispatcher_barrier, assert_equal_dispatcher_barrier,
+    new_input,
+};
+use crate::executor::prelude::StreamingMetrics;
 use crate::executor::watermark::BufferedWatermarks;
-use crate::task::{ActorId, FragmentId};
+use crate::task::{ActorId, FragmentId, LocalBarrierManager};
 
 mod actor;
 mod barrier_align;
@@ -86,6 +93,7 @@ mod filter;
 pub mod hash_join;
 mod hop_window;
 mod join;
+pub mod locality_provider;
 mod lookup;
 mod lookup_union;
 mod merge;
@@ -1711,5 +1719,186 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
 
     pub fn is_empty(&self) -> bool {
         self.blocked.is_empty() && self.active.is_empty()
+    }
+}
+
+// Explanation of why we need `DispatchBarrierBuffer`:
+//
+// When we need to create or replace an upstream fragment for the current fragment, the `Merge` operator must
+// add some new upstream actor inputs. However, the `Merge` operator may still have old upstreams. We must wait
+// for these old upstreams to completely process their barriers and align before we can safely update the
+// `upstream-input-set`.
+//
+// Meanwhile, the creation of a new upstream actor can only succeed after the channel to the downstream `Merge`
+// operator has been established. This creates a potential dependency chain: [new_actor_creation ->
+// downstream_merge_update -> old_actor_processing]
+//
+// To address this, we split the application of a barrier's `Mutation` into two steps:
+// 1. Parse the `Mutation`. If there is an addition on the upstream-set, establish a channel with the upstream
+//    and cache it.
+// 2. When the upstream barrier actually arrives, apply the cached upstream changes to the upstream-set
+//
+// Additionally, since receiving a barrier from current upstream input and from the `barrier_rx` are
+// asynchronous, we cannot determine which will arrive first. Therefore, when a barrier is received from an
+// upstream: if a cached mutation is present, we apply it. Otherwise, we must fetch a new barrier from
+// `barrier_rx`.
+pub(crate) struct DispatchBarrierBuffer {
+    buffer: VecDeque<(Barrier, Option<Vec<BoxedActorInput>>)>,
+    barrier_rx: mpsc::UnboundedReceiver<Barrier>,
+    recv_state: BarrierReceiverState,
+    curr_upstream_fragment_id: FragmentId,
+    actor_id: ActorId,
+    // read-only context for building new inputs
+    build_input_ctx: Arc<BuildInputContext>,
+}
+
+struct BuildInputContext {
+    pub actor_id: ActorId,
+    pub local_barrier_manager: LocalBarrierManager,
+    pub metrics: Arc<StreamingMetrics>,
+    pub fragment_id: FragmentId,
+}
+
+type BoxedNewInputsFuture =
+    Pin<Box<dyn Future<Output = StreamExecutorResult<Vec<BoxedActorInput>>> + Send>>;
+
+enum BarrierReceiverState {
+    ReceivingBarrier,
+    CreatingNewInput(Barrier, BoxedNewInputsFuture),
+}
+
+impl DispatchBarrierBuffer {
+    pub fn new(
+        barrier_rx: mpsc::UnboundedReceiver<Barrier>,
+        actor_id: ActorId,
+        curr_upstream_fragment_id: FragmentId,
+        local_barrier_manager: LocalBarrierManager,
+        metrics: Arc<StreamingMetrics>,
+        fragment_id: FragmentId,
+    ) -> Self {
+        Self {
+            buffer: VecDeque::new(),
+            barrier_rx,
+            recv_state: BarrierReceiverState::ReceivingBarrier,
+            curr_upstream_fragment_id,
+            actor_id,
+            build_input_ctx: Arc::new(BuildInputContext {
+                actor_id,
+                local_barrier_manager,
+                metrics,
+                fragment_id,
+            }),
+        }
+    }
+
+    pub async fn await_next_message(
+        &mut self,
+        stream: &mut (impl Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin),
+    ) -> StreamExecutorResult<DispatcherMessage> {
+        tokio::select! {
+            biased;
+
+            msg = stream.try_next() => {
+                msg?.ok_or_else(
+                    || StreamExecutorError::channel_closed("upstream executor closed unexpectedly")
+                )
+            }
+
+            e = self.continuously_fetch_barrier_rx() => {
+                Err(e)
+            }
+        }
+    }
+
+    pub async fn pop_barrier_with_inputs(
+        &mut self,
+        barrier: DispatcherBarrier,
+    ) -> StreamExecutorResult<(Barrier, Option<Vec<BoxedActorInput>>)> {
+        while self.buffer.is_empty() {
+            self.try_fetch_barrier_rx(false).await?;
+        }
+        let (mut recv_barrier, inputs) = self.buffer.pop_front().unwrap();
+        apply_dispatcher_barrier(&mut recv_barrier, barrier);
+
+        Ok((recv_barrier, inputs))
+    }
+
+    async fn continuously_fetch_barrier_rx(&mut self) -> StreamExecutorError {
+        loop {
+            if let Err(e) = self.try_fetch_barrier_rx(true).await {
+                return e;
+            }
+        }
+    }
+
+    async fn try_fetch_barrier_rx(&mut self, pending_on_end: bool) -> StreamExecutorResult<()> {
+        match &mut self.recv_state {
+            BarrierReceiverState::ReceivingBarrier => {
+                let Some(barrier) = self.barrier_rx.recv().await else {
+                    if pending_on_end {
+                        return pending().await;
+                    } else {
+                        return Err(StreamExecutorError::channel_closed(
+                            "barrier channel closed unexpectedly",
+                        ));
+                    }
+                };
+                if let Some(fut) = self.pre_apply_barrier(&barrier) {
+                    self.recv_state = BarrierReceiverState::CreatingNewInput(barrier, fut);
+                } else {
+                    self.buffer.push_back((barrier, None));
+                }
+            }
+            BarrierReceiverState::CreatingNewInput(barrier, fut) => {
+                let new_inputs = fut.await?;
+                self.buffer.push_back((barrier.clone(), Some(new_inputs)));
+                self.recv_state = BarrierReceiverState::ReceivingBarrier;
+            }
+        }
+        Ok(())
+    }
+
+    fn pre_apply_barrier(&mut self, barrier: &Barrier) -> Option<BoxedNewInputsFuture> {
+        if let Some(update) = barrier.as_update_merge(self.actor_id, self.curr_upstream_fragment_id)
+            && !update.added_upstream_actors.is_empty()
+        {
+            // When update upstream fragment, added_actors will not be empty.
+            let upstream_fragment_id =
+                if let Some(new_upstream_fragment_id) = update.new_upstream_fragment_id {
+                    self.curr_upstream_fragment_id = new_upstream_fragment_id;
+                    new_upstream_fragment_id
+                } else {
+                    self.curr_upstream_fragment_id
+                };
+            let ctx = self.build_input_ctx.clone();
+            let added_upstream_actors = update.added_upstream_actors.clone();
+            let barrier = barrier.clone();
+            let fut = async move {
+                try_join_all(added_upstream_actors.iter().map(|upstream_actor| async {
+                    let mut new_input = new_input(
+                        &ctx.local_barrier_manager,
+                        ctx.metrics.clone(),
+                        ctx.actor_id,
+                        ctx.fragment_id,
+                        upstream_actor,
+                        upstream_fragment_id,
+                    )
+                    .await?;
+
+                    // Poll the first barrier from the new upstreams. It must be the same as the one we polled from
+                    // original upstreams.
+                    let first_barrier = expect_first_barrier(&mut new_input).await?;
+                    assert_equal_dispatcher_barrier(&barrier, &first_barrier);
+
+                    StreamExecutorResult::Ok(new_input)
+                }))
+                .await
+            }
+            .boxed();
+
+            Some(fut)
+        } else {
+            None
+        }
     }
 }

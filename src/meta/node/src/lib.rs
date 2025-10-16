@@ -336,7 +336,7 @@ pub fn start(
         const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
         let compaction_task_max_progress_interval_secs = {
             let retry_config = &config.storage.object_store.retry;
-            let max_streming_read_timeout_ms = (retry_config.streaming_read_attempt_timeout_ms
+            let max_streaming_read_timeout_ms = (retry_config.streaming_read_attempt_timeout_ms
                 + retry_config.req_backoff_max_delay_ms)
                 * retry_config.streaming_read_retry_attempts as u64;
             let max_streaming_upload_timeout_ms = (retry_config
@@ -349,7 +349,7 @@ pub fn start(
             let max_read_timeout_ms = (retry_config.read_attempt_timeout_ms
                 + retry_config.req_backoff_max_delay_ms)
                 * retry_config.read_retry_attempts as u64;
-            let max_timeout_ms = max_streming_read_timeout_ms
+            let max_timeout_ms = max_streaming_read_timeout_ms
                 .max(max_upload_timeout_ms)
                 .max(max_streaming_upload_timeout_ms)
                 .max(max_read_timeout_ms)
@@ -384,6 +384,7 @@ pub fn start(
                     .developer
                     .time_travel_vacuum_interval_sec,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
+                iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,

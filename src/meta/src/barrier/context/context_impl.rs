@@ -84,7 +84,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
-        job.finish(&self.metadata_manager).await
+        job.finish(&self.metadata_manager, &self.source_manager)
+            .await
     }
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]
@@ -232,7 +233,7 @@ impl CommandContext {
 
             Command::SourceChangeSplit(SplitState {
                 split_assignment: assignment,
-                discovered_source_splits: source_splits,
+                ..
             }) => {
                 barrier_manager_context
                     .metadata_manager
@@ -241,7 +242,7 @@ impl CommandContext {
 
                 barrier_manager_context
                     .metadata_manager
-                    .update_source_splits(source_splits)
+                    .update_fragment_splits(assignment)
                     .await?;
             }
 
@@ -364,6 +365,11 @@ impl CommandContext {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(&info.init_split_assignment)
+                    .await?;
             }
             Command::RescheduleFragment {
                 reschedules,
@@ -374,6 +380,18 @@ impl CommandContext {
                     .scale_controller
                     .post_apply_reschedule(reschedules, post_updates)
                     .await?;
+
+                let fragment_splits = reschedules
+                    .iter()
+                    .map(|(fragment_id, reschedule)| {
+                        (*fragment_id, reschedule.actor_splits.clone())
+                    })
+                    .collect();
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(&fragment_splits)
+                    .await?;
             }
 
             Command::ReplaceStreamJob(
@@ -381,9 +399,9 @@ impl CommandContext {
                     old_fragments,
                     new_fragments,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
                     to_drop_state_table_ids,
                     auto_refresh_schema_sinks,
+                    init_split_assignment,
                     ..
                 },
             ) => {
@@ -428,6 +446,11 @@ impl CommandContext {
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
+                    .await?;
+
+                barrier_manager_context
+                    .metadata_manager
+                    .update_fragment_splits(init_split_assignment)
                     .await?;
             }
 

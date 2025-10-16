@@ -20,7 +20,7 @@ use std::iter;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ActorMapping;
+use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
@@ -228,6 +228,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub streaming_job: StreamingJob,
     pub fragment_backfill_ordering: FragmentBackfillOrder,
     pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+    pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
 }
 
 impl StreamJobFragments {
@@ -246,6 +247,8 @@ impl StreamJobFragments {
                 InflightFragmentInfo {
                     fragment_id: fragment.fragment_id,
                     distribution_type: fragment.distribution_type.into(),
+                    fragment_type_mask: fragment.fragment_type_mask,
+                    vnode_count: fragment.vnode_count(),
                     nodes: fragment.nodes.clone(),
                     actors: fragment
                         .actors

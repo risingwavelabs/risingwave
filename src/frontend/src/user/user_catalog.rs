@@ -172,6 +172,10 @@ impl UserCatalog {
             .is_some_and(|acl_set| acl_set.has_mode(mode))
     }
 
+    pub fn has_schema_usage_privilege(&self, schema_id: SchemaId) -> bool {
+        self.has_privilege(&GrantObject::SchemaId(schema_id), AclMode::Usage)
+    }
+
     pub fn check_privilege_with_grant_option(
         &self,
         object: &GrantObject,
@@ -208,8 +212,11 @@ impl UserCatalog {
 
         // `Select` and `Execute` are the minimum required privileges for object visibility.
         // `Execute` is required for functions.
+        // `Usage` is required for connections and secrets.
         self.object_acls.get(&obj_id).is_some_and(|acl_set| {
-            acl_set.has_mode(AclMode::Select) || acl_set.has_mode(AclMode::Execute)
+            acl_set.has_mode(AclMode::Select)
+                || acl_set.has_mode(AclMode::Execute)
+                || acl_set.has_mode(AclMode::Usage)
         })
     }
 }

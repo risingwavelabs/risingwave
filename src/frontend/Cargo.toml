@@ -36,12 +36,10 @@ itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
 maplit = "1"
-md5 = "0.7.0"
+md5 = { package = "md-5", version = "0.10.6" }
 memcomparable = "0.2"
-mysql_async = { version = "0.34", default-features = false, features = [
-    "default",
-] }
-mysql_common = { version = "0.32", default-features = false, features = [
+mysql_async = { workspace = true }
+mysql_common = { version = "0.35", default-features = false, features = [
     "chrono",
 ] }
 num-integer = "0.1"
@@ -56,6 +54,7 @@ postgres-types = { version = "0.2.6" }
 pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.14", features = ["process"] }
+prometheus-http-query = "0.8"
 prost = { workspace = true }
 quick-xml = { version = "0.38", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }

@@ -25,7 +25,7 @@ use pgwire::pg_server::SessionId;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as PbTaskId, TaskOutputId as PbTaskOutputId};
-use risingwave_pb::common::{BatchQueryEpoch, HostAddress};
+use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
@@ -125,7 +125,6 @@ impl QueryExecution {
         self: Arc<Self>,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
-        batch_query_epoch: BatchQueryEpoch,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -138,7 +137,6 @@ impl QueryExecution {
         // reference of `pinned_snapshot`. Its ownership will be moved into `QueryRunner` so that it
         // can control when to release the snapshot.
         let stage_executions = self.gen_stage_executions(
-            batch_query_epoch,
             context.clone(),
             worker_node_manager,
             compute_client_pool.clone(),
@@ -180,11 +178,8 @@ impl QueryExecution {
                     timeout_abort_task_handle,
                 };
 
-                let span = tracing::info_span!(
-                    "distributed_execute",
-                    query_id = self.query.query_id.id,
-                    epoch = ?batch_query_epoch,
-                );
+                let span =
+                    tracing::info_span!("distributed_execute", query_id = self.query.query_id.id,);
 
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
@@ -226,7 +221,6 @@ impl QueryExecution {
 
     fn gen_stage_executions(
         &self,
-        epoch: BatchQueryEpoch,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
         compute_client_pool: ComputeClientPoolRef,
@@ -245,8 +239,8 @@ impl QueryExecution {
                 .collect::<Vec<Arc<StageExecution>>>();
 
             let stage_exec = Arc::new(StageExecution::new(
-                epoch,
-                self.query.stage_graph.stages[&stage_id].clone(),
+                stage_id,
+                self.query.clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
                 children_stages,
@@ -392,7 +386,7 @@ impl QueryRunner {
         let root_task_output_id = {
             let root_task_id_prost = PbTaskId {
                 query_id: self.query.query_id.clone().id,
-                stage_id: self.query.root_stage_id(),
+                stage_id: self.query.root_stage_id().into(),
                 task_id: ROOT_TASK_ID,
             };
 
@@ -466,7 +460,7 @@ impl QueryRunner {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
@@ -497,9 +491,7 @@ pub(crate) mod tests {
     use crate::optimizer::property::{Cardinality, Distribution, Order};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
-    use crate::scheduler::{
-        DistributedQueryMetrics, ExecutionContext, QueryExecutionInfo, ReadSnapshot,
-    };
+    use crate::scheduler::{DistributedQueryMetrics, ExecutionContext, QueryExecutionInfo};
     use crate::session::SessionImpl;
     use crate::utils::Condition;
 
@@ -522,9 +514,6 @@ pub(crate) mod tests {
                 .start(
                     ExecutionContext::new(SessionImpl::mock().into(), None).into(),
                     worker_node_selector,
-                    ReadSnapshot::ReadUncommitted
-                        .batch_query_epoch(&HashSet::from_iter([0.into()]))
-                        .unwrap(),
                     compute_client_pool,
                     catalog_reader,
                     query_execution_info,

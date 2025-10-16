@@ -66,7 +66,7 @@ pub async fn handle_create_as(
 
     // Generate catalog descs from query
     let mut columns: Vec<_> = {
-        let mut binder = Binder::new(&session);
+        let mut binder = Binder::new_for_batch(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
             // Create ColumnCatelog by Field
@@ -96,7 +96,7 @@ pub async fn handle_create_as(
         .into());
     }
 
-    // Override column name if it specified in creaet statement.
+    // Override column name if it specified in create statement.
     column_defs.iter().enumerate().for_each(|(idx, column)| {
         columns[idx].column_desc.name = column.name.real_value();
     });
