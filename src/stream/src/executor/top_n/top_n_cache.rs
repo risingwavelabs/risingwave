@@ -18,7 +18,8 @@ use std::fmt::Debug;
 use std::future::Future;
 
 use itertools::Itertools;
-use risingwave_common::array::{Op, RowRef};
+use risingwave_common::array::RowRef;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common_estimate_size::EstimateSize;
@@ -869,7 +870,7 @@ impl TopNStaging {
     }
 
     /// Iterate over the changes in the staging.
-    pub fn into_changes(self) -> impl Iterator<Item = (Op, CompactedRow)> {
+    pub fn into_changes(self) -> impl Iterator<Item = Record<CompactedRow>> {
         #[cfg(debug_assertions)]
         {
             let keys = self
@@ -892,20 +893,31 @@ impl TopNStaging {
         // before `Insert`s, so that we can avoid temporary violation of the `LIMIT` constraint.
         self.to_update
             .into_values()
-            .flat_map(|(old_row, new_row)| {
-                [(Op::UpdateDelete, old_row), (Op::UpdateInsert, new_row)]
-            })
-            .chain(self.to_delete.into_values().map(|row| (Op::Delete, row)))
-            .chain(self.to_insert.into_values().map(|row| (Op::Insert, row)))
+            .map(|(old_row, new_row)| Record::Update { old_row, new_row })
+            .chain(
+                self.to_delete
+                    .into_values()
+                    .map(|old_row| Record::Delete { old_row }),
+            )
+            .chain(
+                self.to_insert
+                    .into_values()
+                    .map(|new_row| Record::Insert { new_row }),
+            )
     }
 
     /// Iterate over the changes in the staging, and deserialize the rows.
     pub fn into_deserialized_changes(
         self,
         deserializer: &RowDeserializer,
-    ) -> impl Iterator<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_ {
-        self.into_changes()
-            .map(|(op, row)| Ok((op, deserializer.deserialize(row.row.as_ref())?)))
+    ) -> impl Iterator<Item = StreamExecutorResult<Record<OwnedRow>>> + '_ {
+        self.into_changes().map(move |record| {
+            record.try_map(|row: CompactedRow| {
+                deserializer
+                    .deserialize(row.row.as_ref())
+                    .map_err(Into::into)
+            })
+        })
     }
 }
 

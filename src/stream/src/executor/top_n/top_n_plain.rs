@@ -170,8 +170,7 @@ where
         }
         let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(staging.len()));
         for res in staging.into_deserialized_changes(&deserializer) {
-            let (op, row) = res?;
-            let _none = chunk_builder.append_row(op, row);
+            let _none = chunk_builder.append_record(res?);
         }
         Ok(chunk_builder.take())
     }
