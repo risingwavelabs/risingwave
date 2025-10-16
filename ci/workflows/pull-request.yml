@@ -89,7 +89,7 @@ steps:
           <<: *docker-compose
           environment:
           - GITHUB_TOKEN
-    timeout_in_minutes: 14
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "build (deterministic simulation)"
