@@ -72,4 +72,4 @@ select array_sort(array[3, 2, NULL, 1, NULL], false, true);
 query I
 select array_sort(array[3, 2, NULL, 1, NULL], true, true);
 ----
-{NULL,NULL,3,2,1} 
+{NULL,NULL,3,2,1}
