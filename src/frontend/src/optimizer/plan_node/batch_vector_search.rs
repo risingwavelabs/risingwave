@@ -18,12 +18,13 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{PhysicalPlanRef, VectorIndexLookupJoin};
-use crate::optimizer::plan_node::utils::{Distill, childless_record};
+use crate::optimizer::plan_node::utils::{Distill, childless_record, to_batch_query_epoch};
 use crate::optimizer::plan_node::{
     Batch, BatchPlanRef as PlanRef, BatchPlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary,
-    ToBatchPb, ToDistributedBatch, ToLocalBatch,
+    ToDistributedBatch, ToLocalBatch, TryToBatchPb,
 };
 use crate::optimizer::property::Order;
+use crate::scheduler::SchedulerResult;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchVectorSearch {
@@ -61,13 +62,13 @@ impl PlanTreeNodeUnary<Batch> for BatchVectorSearch {
 
 impl_plan_tree_node_for_unary!(Batch, BatchVectorSearch);
 
-impl ToBatchPb for BatchVectorSearch {
-    fn to_batch_prost_body(&self) -> NodeBody {
-        NodeBody::VectorIndexNearest(PbVectorIndexNearestNode {
+impl TryToBatchPb for BatchVectorSearch {
+    fn try_to_batch_prost_body(&self) -> SchedulerResult<NodeBody> {
+        Ok(NodeBody::VectorIndexNearest(PbVectorIndexNearestNode {
             reader_desc: Some(self.core.to_reader_desc()),
             vector_column_idx: self.core.vector_column_idx as _,
-            query_epoch: None,
-        })
+            query_epoch: to_batch_query_epoch(&self.core.as_of)?,
+        }))
     }
 }
 
