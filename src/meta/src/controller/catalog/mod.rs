@@ -748,6 +748,68 @@ impl CatalogController {
         let tables = inner.dropped_tables.drain().map(|(_, t)| t).collect();
         self.notify_hummock_dropped_tables(tables).await;
     }
+
+    /// Update CDC schema change failure policy for a table
+    pub async fn update_table_cdc_schema_change_policy(
+        &self,
+        table_id: TableId,
+        policy: &risingwave_connector::source::cdc::SchemaChangeFailurePolicy,
+    ) -> MetaResult<()> {
+        use risingwave_meta_model::table::SchemaChangeFailurePolicy as ModelPolicy;
+        
+        let policy_value = match policy {
+            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Block => ModelPolicy::Block,
+            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Skip => ModelPolicy::Skip,
+        };
+        
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        
+        table::ActiveModel {
+            table_id: Set(table_id),
+            cdc_schema_change_failure_policy: Set(Some(policy_value)),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+        
+        txn.commit().await?;
+        
+        Ok(())
+    }
+
+    /// Update source with_properties field by adding/updating a key-value pair
+    pub async fn update_source_with_properties(
+        &self,
+        source_id: SourceId,
+        key: &str,
+        value: &str,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        
+        // Get current source
+        let source = Source::find_by_id(source_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+        
+        // Update with_properties
+        let mut props_map = source.with_properties.0.clone();
+        props_map.insert(key.to_string(), value.to_string());
+        
+        source::ActiveModel {
+            source_id: Set(source_id),
+            with_properties: Set(Property(props_map)),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+        
+        txn.commit().await?;
+        
+        Ok(())
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.

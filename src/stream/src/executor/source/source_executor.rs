@@ -145,33 +145,64 @@ impl<S: StateStore> SourceExecutor<S> {
 
     /// Handle CDC table schema change policies from `ConnectorPropsChange`
     fn handle_cdc_table_schema_policies_change(&mut self, new_props: &HashMap<String, String>) {
+        tracing::info!(
+            actor_id = self.actor_ctx.id,
+            source_id = self.stream_source_core.source_id.table_id,
+            "CN: Handling CDC table schema change policies update"
+        );
+        
         if let Some(table_policies_json) = new_props.get("cdc_table_schema_change_policies") {
             tracing::info!(
-                "Received CDC table schema change policies: {}",
-                table_policies_json
+                actor_id = self.actor_ctx.id,
+                source_id = self.stream_source_core.source_id.table_id,
+                policies_json = table_policies_json,
+                "CN: Received CDC table schema change policies JSON from Meta"
             );
 
+            // Store old policies for comparison
+            let old_policies = self.cdc_table_schema_change_policies.clone();
+            
             match serde_json::from_str::<HashMap<String, SchemaChangeFailurePolicy>>(
                 table_policies_json,
             ) {
                 Ok(table_policies) => {
                     tracing::info!(
-                        "Successfully parsed CDC table schema change policies: {:?}",
-                        table_policies
+                        actor_id = self.actor_ctx.id,
+                        source_id = self.stream_source_core.source_id.table_id,
+                        old_policies = ?old_policies,
+                        new_policies = ?table_policies,
+                        policies_count = table_policies.len(),
+                        "CN: Successfully parsed CDC table schema change policies, updating..."
                     );
+                    
                     self.cdc_table_schema_change_policies = table_policies;
+                    
+                    tracing::info!(
+                        actor_id = self.actor_ctx.id,
+                        source_id = self.stream_source_core.source_id.table_id,
+                        current_policies = ?self.cdc_table_schema_change_policies,
+                        "CN: CDC table schema change policies UPDATED SUCCESSFULLY"
+                    );
+                    
                     self.debug_print_cdc_table_schema_policies();
                 }
                 Err(e) => {
                     tracing::error!(
-                        "Failed to parse CDC table schema change policies: {}, error: {}",
-                        table_policies_json,
-                        e
+                        actor_id = self.actor_ctx.id,
+                        source_id = self.stream_source_core.source_id.table_id,
+                        policies_json = table_policies_json,
+                        error = %e,
+                        "CN: Failed to parse CDC table schema change policies JSON"
                     );
                 }
             }
         } else {
-            tracing::debug!("No cdc_table_schema_change_policies found in new properties");
+            tracing::warn!(
+                actor_id = self.actor_ctx.id,
+                source_id = self.stream_source_core.source_id.table_id,
+                all_props_keys = ?new_props.keys().collect::<Vec<_>>(),
+                "CN: No cdc_table_schema_change_policies found in props from Meta"
+            );
         }
     }
 
@@ -683,16 +714,30 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
 
                             Mutation::ConnectorPropsChange(maybe_mutation) => {
+                                tracing::info!(
+                                    actor_id = self.actor_ctx.id,
+                                    source_id = source_id.table_id(),
+                                    mutation_keys = ?maybe_mutation.keys().collect::<Vec<_>>(),
+                                    "CN: Received ConnectorPropsChange mutation"
+                                );
+                                
                                 if let Some(new_props) = maybe_mutation.get(&source_id.table_id()) {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
-                                        "updating source properties from {:?} to {:?}",
+                                        actor_id = self.actor_ctx.id,
+                                        source_id = source_id.table_id(),
+                                        "CN: Received ConnectorPropsChange mutation, updating source properties from {:?} to {:?}",
                                         source_desc.source.config,
                                         new_props
                                     );
                                     source_desc.update_reader(new_props.clone())?;
 
                                     // Handle CDC table schema change policies
+                                    tracing::info!(
+                                        actor_id = self.actor_ctx.id,
+                                        source_id = source_id.table_id(),
+                                        "CN: About to handle CDC table schema change policies"
+                                    );
                                     self.handle_cdc_table_schema_policies_change(new_props);
 
                                     // suppose the connector props change will not involve state change
@@ -701,6 +746,13 @@ impl<S: StateStore> SourceExecutor<S> {
                                         &mut stream,
                                         ApplyMutationAfterBarrier::ConnectorPropsChange,
                                     ));
+                                } else {
+                                    tracing::warn!(
+                                        actor_id = self.actor_ctx.id,
+                                        source_id = source_id.table_id(),
+                                        mutation_keys = ?maybe_mutation.keys().collect::<Vec<_>>(),
+                                        "CN: ConnectorPropsChange mutation does not contain props for this source_id"
+                                    );
                                 }
                             }
 

@@ -548,6 +548,11 @@ message Table {
   // Current refresh state of the table for refreshable tables
   optional RefreshState refresh_state = 48;
 
+  // CDC schema change failure policy for this table.
+  // Only applicable for CDC tables.
+  // If not set, will fallback to source-level policy.
+  optional SchemaChangeFailurePolicy cdc_schema_change_failure_policy = 49;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
@@ -568,6 +573,13 @@ enum RefreshState {
   REFRESH_STATE_IDLE = 1;
   REFRESH_STATE_REFRESHING = 2;
   REFRESH_STATE_FINISHING = 3;
+}
+
+// CDC schema change failure policy for auto schema change
+enum SchemaChangeFailurePolicy {
+  SCHEMA_CHANGE_FAILURE_POLICY_UNSPECIFIED = 0;
+  SCHEMA_CHANGE_FAILURE_POLICY_BLOCK = 1;
+  SCHEMA_CHANGE_FAILURE_POLICY_SKIP = 2;
 }
 
 message View {

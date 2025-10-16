@@ -122,6 +122,36 @@ pub enum RefreshState {
     Finishing,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum SchemaChangeFailurePolicy {
+    /// Block source execution when encountering unsupported schema changes (default)
+    #[sea_orm(string_value = "BLOCK")]
+    Block,
+    /// Skip unsupported schema changes and continue processing
+    #[sea_orm(string_value = "SKIP")]
+    Skip,
+}
+
+impl From<SchemaChangeFailurePolicy> for risingwave_pb::catalog::SchemaChangeFailurePolicy {
+    fn from(policy: SchemaChangeFailurePolicy) -> Self {
+        match policy {
+            SchemaChangeFailurePolicy::Block => Self::Block,
+            SchemaChangeFailurePolicy::Skip => Self::Skip,
+        }
+    }
+}
+
+impl From<risingwave_pb::catalog::SchemaChangeFailurePolicy> for SchemaChangeFailurePolicy {
+    fn from(policy: risingwave_pb::catalog::SchemaChangeFailurePolicy) -> Self {
+        match policy {
+            risingwave_pb::catalog::SchemaChangeFailurePolicy::Block => Self::Block,
+            risingwave_pb::catalog::SchemaChangeFailurePolicy::Skip => Self::Skip,
+            risingwave_pb::catalog::SchemaChangeFailurePolicy::Unspecified => Self::Block,
+        }
+    }
+}
+
 impl From<RefreshState> for risingwave_pb::catalog::RefreshState {
     fn from(refresh_state: RefreshState) -> Self {
         match refresh_state {
@@ -267,6 +297,7 @@ pub struct Model {
     pub vector_index_info: Option<VectorIndexInfo>,
     pub cdc_table_type: Option<CdcTableType>,
     pub refresh_state: Option<RefreshState>,
+    pub cdc_schema_change_failure_policy: Option<SchemaChangeFailurePolicy>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -426,6 +457,13 @@ impl From<PbTable> for ActiveModel {
                 }
             })),
             refresh_state: Set(Some(refresh_state.into())),
+            cdc_schema_change_failure_policy: Set(pb_table
+                .cdc_schema_change_failure_policy
+                .and_then(|policy| {
+                    risingwave_pb::catalog::SchemaChangeFailurePolicy::try_from(policy)
+                        .ok()
+                        .map(SchemaChangeFailurePolicy::from)
+                })),
         }
     }
 }

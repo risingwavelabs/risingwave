@@ -97,17 +97,33 @@ impl StreamReaderBuilder {
                                     .first()
                                     .map(|tc| tc.cdc_table_id.as_str())
                                     .unwrap_or("");
+                                    
+                                tracing::info!(
+                                    target: "auto_schema_change",
+                                    cdc_table_id = cdc_table_id,
+                                    available_policies = ?table_policies,
+                                    source_level_policy = ?source_level_policy,
+                                    "CN Reader: Looking up schema change failure policy for table"
+                                );
+                                
                                 // Use table-level policy if available, otherwise fallback to source-level
                                 let policy = table_policies
                                     .get(cdc_table_id)
                                     .cloned()
-                                    .unwrap_or(source_level_policy.clone());
+                                    .unwrap_or_else(|| {
+                                        tracing::info!(
+                                            target: "auto_schema_change",
+                                            cdc_table_id = cdc_table_id,
+                                            "CN Reader: No table-level policy found, using source-level"
+                                        );
+                                        source_level_policy.clone()
+                                    });
 
                                 tracing::info!(
                                     target: "auto_schema_change",
                                     cdc_table_id = cdc_table_id,
                                     policy = ?policy,
-                                    "Using schema change failure policy");
+                                    "CN Reader: Using schema change failure policy");
 
                                 match policy {
                                     risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Block => {

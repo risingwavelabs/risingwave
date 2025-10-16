@@ -432,20 +432,166 @@ impl SourceManager {
             })
             .collect();
 
-        let core = Mutex::new(SourceManagerCore::new(
+        // Recover CDC table schema change policies from catalog
+        let cdc_table_schema_change_policies =
+            Self::recover_cdc_table_policies_from_catalog(&metadata_manager).await?;
+
+        tracing::info!(
+            policies_count = cdc_table_schema_change_policies.len(),
+            "Recovered CDC table schema change policies from catalog"
+        );
+
+        let mut core = SourceManagerCore::new(
             metadata_manager,
             managed_sources,
             source_fragments,
             backfill_fragments,
             env,
-        ));
+        );
+        
+        // Set recovered policies
+        core.cdc_table_schema_change_policies = cdc_table_schema_change_policies.clone();
 
-        Ok(Self {
+        let source_manager = Self {
             barrier_scheduler,
-            core,
+            core: Mutex::new(core),
             paused: Mutex::new(()),
             metrics,
-        })
+        };
+
+        // After recovery, update source catalog with recovered policies
+        if !cdc_table_schema_change_policies.is_empty() {
+            tracing::info!(
+                policies_count = cdc_table_schema_change_policies.len(),
+                policies = ?cdc_table_schema_change_policies,
+                "META: Updating source catalog with recovered CDC table policies"
+            );
+            source_manager.update_source_catalog_with_policies().await?;
+        }
+
+        Ok(source_manager)
+    }
+
+    /// Update source catalog with recovered CDC table schema change policies
+    async fn update_source_catalog_with_policies(&self) -> MetaResult<()> {
+        let core = self.core.lock().await;
+        let policies = core.cdc_table_schema_change_policies.clone();
+        
+        // Group policies by source_id
+        let mut policies_by_source: HashMap<SourceId, HashMap<String, SchemaChangeFailurePolicy>> = HashMap::new();
+        for (cdc_table_id, policy) in policies {
+            if let Some(source_id_str) = cdc_table_id.split('.').next() {
+                if let Ok(source_id) = source_id_str.parse::<i32>() {
+                    policies_by_source
+                        .entry(source_id)
+                        .or_default()
+                        .insert(cdc_table_id, policy);
+                }
+            }
+        }
+        
+        tracing::info!(
+            sources_to_update = policies_by_source.len(),
+            "META: Updating source catalogs with recovered policies for {} sources",
+            policies_by_source.len()
+        );
+        
+        // For each source, update its catalog properties
+        for (source_id, source_policies) in policies_by_source {
+            let policies_json = serde_json::to_string(&source_policies)
+                .map_err(|e| MetaError::invalid_parameter(format!("Failed to serialize policies: {}", e)))?;
+            
+            tracing::info!(
+                source_id = source_id,
+                policies = ?source_policies,
+                "META: Updating source catalog with policies"
+            );
+            
+            // Update source properties in catalog
+            core.metadata_manager
+                .catalog_controller
+                .update_source_with_properties(
+                    source_id,
+                    "cdc_table_schema_change_policies",
+                    &policies_json,
+                )
+                .await?;
+        }
+        
+        Ok(())
+    }
+
+    /// Recover CDC table schema change policies from catalog on Meta startup
+    async fn recover_cdc_table_policies_from_catalog(
+        metadata_manager: &MetadataManager,
+    ) -> MetaResult<HashMap<String, SchemaChangeFailurePolicy>> {
+        tracing::info!("Starting recovery of CDC table schema change policies from catalog");
+        
+        let tables = metadata_manager.catalog_controller.list_all_state_tables().await?;
+        tracing::info!(
+            total_tables = tables.len(),
+            "Loaded all state tables from catalog for recovery"
+        );
+
+        let mut policies = HashMap::new();
+        let mut cdc_tables_count = 0;
+        let mut cdc_tables_with_policy_count = 0;
+        
+        for table in &tables {
+            // Only process CDC tables with cdc_table_id and policy set
+            if let Some(ref cdc_table_id) = table.cdc_table_id {
+                cdc_tables_count += 1;
+                
+                if let Some(pb_policy) = table.cdc_schema_change_failure_policy {
+                    cdc_tables_with_policy_count += 1;
+                    
+                    // Convert from proto enum to connector enum
+                    use risingwave_pb::catalog::SchemaChangeFailurePolicy as PbPolicy;
+                    let policy = match PbPolicy::try_from(pb_policy) {
+                        Ok(PbPolicy::Block) | Ok(PbPolicy::Unspecified) => {
+                            SchemaChangeFailurePolicy::Block
+                        }
+                        Ok(PbPolicy::Skip) => SchemaChangeFailurePolicy::Skip,
+                        Err(_) => {
+                            tracing::warn!(
+                                cdc_table_id = cdc_table_id,
+                                pb_policy = pb_policy,
+                                "Invalid CDC schema change failure policy in catalog, using Block"
+                            );
+                            SchemaChangeFailurePolicy::Block
+                        }
+                    };
+
+                    tracing::info!(
+                        table_id = table.id,
+                        table_name = &table.name,
+                        cdc_table_id = cdc_table_id,
+                        policy = ?policy,
+                        "Recovered CDC table schema change policy from catalog"
+                    );
+
+                    policies.insert(cdc_table_id.clone(), policy);
+                } else {
+                    tracing::debug!(
+                        table_id = table.id,
+                        table_name = &table.name,
+                        cdc_table_id = cdc_table_id,
+                        "CDC table has no schema change failure policy set, will use source-level or default"
+                    );
+                }
+            }
+        }
+
+        tracing::info!(
+            total_tables = tables.len(),
+            cdc_tables = cdc_tables_count,
+            cdc_tables_with_policy = cdc_tables_with_policy_count,
+            recovered_policies = policies.len(),
+            policies = ?policies,
+            "这里Completed recovery of CDC table schema change policies from catalog"
+        );
+
+        Ok(policies)
     }
 
     pub async fn validate_source_once(
@@ -592,6 +738,13 @@ impl SourceManager {
         source_id: SourceId,
         policy: SchemaChangeFailurePolicy,
     ) -> MetaResult<()> {
+        tracing::info!(
+            cdc_table_id = cdc_table_id,
+            source_id = source_id,
+            policy = ?policy,
+            "META: add_cdc_table_schema_policy called"
+        );
+        
         // First, add the policy to the mapping
         {
             let mut core = self.core.lock().await;
@@ -636,14 +789,35 @@ impl SourceManager {
             };
 
             // Send ConnectorPropsChange command directly to propagate to CN
-            let command = Command::ConnectorPropsChange(HashMap::from([(source_id as u32, props)]));
-            tracing::info!(command = ?command, "pushing down connector props change command");
-            if let Err(e) = self
+            let command = Command::ConnectorPropsChange(HashMap::from([(source_id as u32, props.clone())]));
+            tracing::info!(
+                source_id = source_id,
+                database_id = database_id,
+                props_keys = ?props.keys().collect::<Vec<_>>(),
+                cdc_policies = props.get("cdc_table_schema_change_policies"),
+                "META: Sending ConnectorPropsChange command to barrier scheduler"
+            );
+            
+            match self
                 .barrier_scheduler
                 .run_command(DatabaseId::new(database_id as u32), command)
                 .await
             {
-                tracing::error!("Failed to send ConnectorPropsChange command: {}", e);
+                Ok(_) => {
+                    tracing::info!(
+                        source_id = source_id,
+                        database_id = database_id,
+                        "META: Successfully sent ConnectorPropsChange command"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        source_id = source_id,
+                        database_id = database_id,
+                        error = %e,
+                        "META: Failed to send ConnectorPropsChange command"
+                    );
+                }
             }
         } else {
             tracing::warn!(
@@ -666,6 +840,12 @@ impl SourceManager {
         cdc_table_id: String,
         source_id: SourceId,
     ) -> MetaResult<()> {
+        tracing::info!(
+            cdc_table_id = cdc_table_id,
+            source_id = source_id,
+            "META: remove_cdc_table_schema_policy called"
+        );
+        
         // First, remove the policy from the mapping
         {
             let mut core = self.core.lock().await;
@@ -710,14 +890,35 @@ impl SourceManager {
             };
 
             // Send ConnectorPropsChange command directly to propagate to CN
-            let command = Command::ConnectorPropsChange(HashMap::from([(source_id as u32, props)]));
-            tracing::info!(command = ?command, "pushing down connector props change command");
-            if let Err(e) = self
+            let command = Command::ConnectorPropsChange(HashMap::from([(source_id as u32, props.clone())]));
+            tracing::info!(
+                source_id = source_id,
+                database_id = database_id,
+                props_keys = ?props.keys().collect::<Vec<_>>(),
+                cdc_policies = props.get("cdc_table_schema_change_policies"),
+                "META: Sending ConnectorPropsChange command to barrier scheduler"
+            );
+            
+            match self
                 .barrier_scheduler
                 .run_command(DatabaseId::new(database_id as u32), command)
                 .await
             {
-                tracing::error!("Failed to send ConnectorPropsChange command: {}", e);
+                Ok(_) => {
+                    tracing::info!(
+                        source_id = source_id,
+                        database_id = database_id,
+                        "META: Successfully sent ConnectorPropsChange command"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        source_id = source_id,
+                        database_id = database_id,
+                        error = %e,
+                        "META: Failed to send ConnectorPropsChange command"
+                    );
+                }
             }
         } else {
             tracing::warn!(

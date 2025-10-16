@@ -606,6 +606,7 @@ impl TableCatalog {
                 .clone()
                 .map(|t| PbCdcTableType::from(t) as i32),
             refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
+            cdc_schema_change_failure_policy: None,  // Frontend doesn't track this, Meta will fill it
         }
     }
 

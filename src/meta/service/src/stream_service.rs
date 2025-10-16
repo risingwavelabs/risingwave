@@ -585,14 +585,36 @@ impl StreamManagerService for StreamServiceImpl {
                                     Status::invalid_argument(format!("Invalid policy: {}", e))
                                 })?;
 
+                            // Extract table_id from hidden field
+                            let table_id = changed_props_map
+                                .get("__rw_table_id")
+                                .and_then(|s| s.parse::<i32>().ok())
+                                .ok_or_else(|| {
+                                    Status::invalid_argument("Missing or invalid __rw_table_id")
+                                })?;
+
                             tracing::info!(
                                 cdc_table_id = cdc_table_id,
+                                table_id = table_id,
                                 source_id = request.object_id,
                                 new_policy = ?new_policy,
                                 "Updating CDC table-level schema change policy via ALTER TABLE"
                             );
 
-                            // Update the table-level policy mapping
+                            // Dual-write: update catalog (persistent) and hashmap (cache)
+                            // First, update catalog
+                            self.metadata_manager
+                                .catalog_controller
+                                .update_table_cdc_schema_change_policy(table_id, &new_policy)
+                                .await
+                                .map_err(|e| {
+                                    Status::internal(format!(
+                                        "Failed to update table catalog: {}",
+                                        e
+                                    ))
+                                })?;
+                            
+                            // Then, update the in-memory hashmap and propagate to CN
                             self.stream_manager
                                 .source_manager
                                 .add_cdc_table_schema_policy(
@@ -603,7 +625,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 .await
                                 .map_err(|e| {
                                     Status::internal(format!(
-                                        "Failed to update CDC table policy: {}",
+                                        "Failed to update CDC table policy mapping: {}",
                                         e
                                     ))
                                 })?;

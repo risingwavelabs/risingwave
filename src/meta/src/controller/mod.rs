@@ -288,6 +288,10 @@ impl From<ObjectModel<table::Model>> for PbTable {
                     .refresh_state
                     .unwrap_or(risingwave_meta_model::table::RefreshState::Idle),
             ) as i32),
+            cdc_schema_change_failure_policy: value
+                .0
+                .cdc_schema_change_failure_policy
+                .map(|policy| risingwave_pb::catalog::SchemaChangeFailurePolicy::from(policy) as i32),
         }
     }
 }

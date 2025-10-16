@@ -39,7 +39,7 @@ pub async fn handle_alter_table_connector_props(
     let with_options = WithOptions::try_from(alter_props.as_ref() as &[SqlOption])?;
     let is_cdc_policy_change = with_options.contains_key("schema.change.failure.policy");
 
-    let (source_id, cdc_table_id) = {
+    let (source_id, cdc_table_id, table_id) = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
@@ -69,21 +69,29 @@ pub async fn handle_alter_table_connector_props(
             is_cdc_policy_change
         );
 
-        (associate_source_id.table_id, table.cdc_table_id.clone())
+        (associate_source_id.table_id, table.cdc_table_id.clone(), table.id)
     };
 
-    // If this is a CDC table policy change, add a special marker
+    // If this is a CDC table policy change, add special markers
     let mut final_alter_props = alter_props.clone();
     if is_cdc_policy_change
         && let Some(cdc_table_id) = cdc_table_id
     {
-        // Add special marker for meta to recognize this is a table-level policy update
+        // Add special markers for meta to recognize this is a table-level policy update
         final_alter_props.push(risingwave_sqlparser::ast::SqlOption {
             name: risingwave_sqlparser::ast::ObjectName(vec![
                 risingwave_sqlparser::ast::Ident::new_unchecked("__rw_cdc_table_id"),
             ]),
             value: risingwave_sqlparser::ast::SqlOptionValue::Value(
                 risingwave_sqlparser::ast::Value::SingleQuotedString(cdc_table_id),
+            ),
+        });
+        final_alter_props.push(risingwave_sqlparser::ast::SqlOption {
+            name: risingwave_sqlparser::ast::ObjectName(vec![
+                risingwave_sqlparser::ast::Ident::new_unchecked("__rw_table_id"),
+            ]),
+            value: risingwave_sqlparser::ast::SqlOptionValue::Value(
+                risingwave_sqlparser::ast::Value::Number(table_id.to_string()),
             ),
         });
     }

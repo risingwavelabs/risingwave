@@ -1127,21 +1127,54 @@ impl DdlController {
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
+                tracing::info!(
+                    table_id = table.id,
+                    table_name = &table.name,
+                    "DDL: Processing SharedCdcSource table"
+                );
+                
                 self.validate_cdc_table(table, &stream_job_fragments)
                     .await?;
 
                 // Check if this is a CDC table and add schema change policy
                 if let Some(cdc_table_type) = table.cdc_table_type.as_ref() {
+                    tracing::info!(
+                        table_id = table.id,
+                        cdc_table_type = ?cdc_table_type,
+                        "DDL: Table has cdc_table_type, checking..."
+                    );
                     let pb_cdc_table_type =
                         PbCdcTableType::try_from(*cdc_table_type).map_err(|e| {
                                 MetaError::invalid_parameter(format!("Invalid CDC table type: {}", e))
                         })?;
                     let cdc_table_type = CdcTableType::from(pb_cdc_table_type);
+                    tracing::info!(
+                        table_id = table.id,
+                        cdc_table_type = ?cdc_table_type,
+                        "DDL: Converted cdc_table_type"
+                    );
+                    
                     if cdc_table_type != CdcTableType::Unspecified {
+                        tracing::info!(
+                            table_id = table.id,
+                            "DDL: cdc_table_type is not Unspecified, processing..."
+                        );
+                        
                         // Extract source ID from cdc_table_id (format: "source_id.schema.table_name")
                         if let Some(cdc_table_id) = table.cdc_table_id.as_ref() {
+                            tracing::info!(
+                                table_id = table.id,
+                                cdc_table_id = cdc_table_id,
+                                "DDL: Found cdc_table_id, parsing source_id..."
+                            );
+                            
                             if let Some(source_id_str) = cdc_table_id.split('.').next() {
                                 if let Ok(source_id) = source_id_str.parse::<u32>() {
+                                    tracing::info!(
+                                        table_id = table.id,
+                                        source_id = source_id,
+                                        "DDL: Successfully parsed source_id from cdc_table_id"
+                                    );
                                     // Extract policy from table's cdc_table_desc connect_properties
                                     let schema_change_failure_policy = self
                                         .extract_cdc_table_policy_from_fragments(
@@ -1158,7 +1191,17 @@ impl DdlController {
                                         "Adding CDC table schema change policy for SharedCdcSource"
                                     );
 
-                                    // Add CDC table schema change policy
+                                    // Add CDC table schema change policy (dual-write: catalog + hashmap)
+                                    // First, update catalog (persistent)
+                                    self.metadata_manager
+                                        .catalog_controller
+                                        .update_table_cdc_schema_change_policy(
+                                            table.id as i32,
+                                            &schema_change_failure_policy,
+                                        )
+                                        .await?;
+                                    
+                                    // Then, add to in-memory hashmap and propagate to CN
                                     self.source_manager
                                         .add_cdc_table_schema_policy(
                                             cdc_table_id.clone(),
@@ -1184,10 +1227,21 @@ impl DdlController {
                             tracing::warn!(
                                 table_id = table.id,
                                 cdc_table_type = ?cdc_table_type,
-                                "CDC table has no cdc_table_id"
+                                "DDL: CDC table has no cdc_table_id"
                             );
                         }
+                    } else {
+                        tracing::info!(
+                            table_id = table.id,
+                            cdc_table_type = ?cdc_table_type,
+                            "DDL: cdc_table_type is Unspecified, skipping"
+                        );
                     }
+                } else {
+                    tracing::info!(
+                        table_id = table.id,
+                        "DDL: Table has no cdc_table_type"
+                    );
                 }
             }
             StreamingJob::Table(Some(source), table, ..) => {
@@ -1217,7 +1271,17 @@ impl DdlController {
                                 "Adding CDC table schema change policy for dedicated source"
                             );
 
-                            // Add CDC table schema change policy
+                            // Add CDC table schema change policy (dual-write: catalog + hashmap)
+                            // First, update catalog (persistent)
+                            self.metadata_manager
+                                .catalog_controller
+                                .update_table_cdc_schema_change_policy(
+                                    table.id as i32,
+                                    &schema_change_failure_policy,
+                                )
+                                .await?;
+                            
+                            // Then, add to in-memory hashmap and propagate to CN
                             self.source_manager
                                 .add_cdc_table_schema_policy(
                                     cdc_table_id.clone(),
