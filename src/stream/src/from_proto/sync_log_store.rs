@@ -40,16 +40,10 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
         let metrics = {
             let streaming_metrics = actor_context.streaming_metrics.as_ref();
             let actor_id = actor_context.id;
-            let join_fragment_id = 0;
+            let fragment_id = params.fragment_id;
             let name = "sync_log_store";
             let target = "unaligned_hash_join";
-            SyncedKvLogStoreMetrics::new(
-                streaming_metrics,
-                actor_id,
-                join_fragment_id,
-                name,
-                target,
-            )
+            SyncedKvLogStoreMetrics::new(streaming_metrics, actor_id, fragment_id, name, target)
         };
 
         let serde = LogStoreRowSerde::new(
