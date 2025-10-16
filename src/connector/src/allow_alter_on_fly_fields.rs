@@ -96,6 +96,17 @@ mod sink_properties {
 pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     use source_properties::*;
     let mut map = HashMap::new();
+
+    // CDC Properties - added for schema.change.failure.policy
+    map.try_insert(
+        std::any::type_name::<MysqlCdcProperties>().to_owned(),
+        ["schema.change.failure.policy".to_owned()].into_iter().collect(),
+    ).unwrap();
+    map.try_insert(
+        std::any::type_name::<PostgresCdcProperties>().to_owned(),
+        ["schema.change.failure.policy".to_owned()].into_iter().collect(),
+    ).unwrap();
+
     // CDC Properties - added for schema.change.failure.policy
     map.try_insert(
         std::any::type_name::<MysqlCdcProperties>().to_owned(),

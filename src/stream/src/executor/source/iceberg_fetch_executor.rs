@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::Bound;
 
 use either::Either;
@@ -408,6 +409,8 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             },
             source_desc.source.config.clone(),
             None,
+            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::default(),
+            HashMap::new(), // empty table-level policies for iceberg fetch executor
         )
     }
 

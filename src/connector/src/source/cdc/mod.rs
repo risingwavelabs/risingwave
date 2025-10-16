@@ -39,6 +39,45 @@ use crate::error::ConnectorResult;
 use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
+/// Policy for handling schema change failures
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SchemaChangeFailurePolicy {
+    /// Block source execution when encountering unsupported schema changes (default)
+    Block,
+    /// Skip unsupported schema changes and continue processing
+    Skip,
+}
+
+impl Default for SchemaChangeFailurePolicy {
+    fn default() -> Self {
+        Self::Block
+    }
+}
+
+impl std::str::FromStr for SchemaChangeFailurePolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "block" => Ok(Self::Block),
+            "skip" => Ok(Self::Skip),
+            _ => Err(format!(
+                "Invalid schema change failure policy: '{}'. Valid values: 'block', 'skip'",
+                s
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for SchemaChangeFailurePolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Block => write!(f, "block"),
+            Self::Skip => write!(f, "skip"),
+        }
+    }
+}
+
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
 pub const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
 pub const CDC_SNAPSHOT_BACKFILL: &str = "rw_cdc_backfill";
@@ -54,6 +93,8 @@ pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_i
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
+pub const CDC_AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
+pub const CDC_SCHEMA_CHANGE_FAILURE_POLICY_KEY: &str = "schema.change.failure.policy";
 pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 
 // User can set strong-schema='true' to enable strong schema for mongo cdc source
@@ -117,6 +158,9 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// For validation purpose, mark if the table is a backfill cdc table
     pub is_backfill_table: bool,
 
+    /// Policy for handling schema change failures
+    pub schema_change_failure_policy: SchemaChangeFailurePolicy,
+
     pub _phantom: PhantomData<T>,
 }
 
@@ -144,12 +188,21 @@ impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
         let is_share_source: bool = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");
+
+        // Parse schema change failure policy
+        let schema_change_failure_policy = properties
+            .get(CDC_SCHEMA_CHANGE_FAILURE_POLICY_KEY)
+            .map(|s| s.parse::<SchemaChangeFailurePolicy>())
+            .transpose()
+            .unwrap_or_default();
+
         Ok(CdcProperties {
             properties,
             table_schema: Default::default(),
             // TODO(siyuan): use serde to deserialize input hashmap
             is_cdc_source_job: is_share_source,
             is_backfill_table: false,
+            schema_change_failure_policy: schema_change_failure_policy.unwrap_or_default(),
             _phantom: PhantomData,
         })
     }

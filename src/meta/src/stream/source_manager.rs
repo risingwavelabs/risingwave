@@ -27,6 +27,7 @@ use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::error::ConnectorResult;
+use risingwave_connector::source::cdc::SchemaChangeFailurePolicy;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitId, SplitImpl,
     SplitMetaData, fill_adaptive_split,
@@ -34,6 +35,7 @@ use risingwave_connector::source::{
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use serde_json;
 pub use split_assignment::{SplitDiffOptions, SplitState, reassign_splits};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -46,6 +48,7 @@ use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
 
 use crate::MetaResult;
 use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan, SharedActorInfos};
+use crate::error::MetaError;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
@@ -77,6 +80,10 @@ pub struct SourceManagerCore {
     /// `source_id` -> `(fragment_id, upstream_fragment_id)`
     backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
 
+    /// Table ID -> Schema Change Failure Policy mapping
+    /// Key: `TableId`, Value: `SchemaChangeFailurePolicy`
+    cdc_table_schema_change_policies: HashMap<String, SchemaChangeFailurePolicy>,
+
     env: MetaSrvEnv,
 }
 
@@ -98,8 +105,93 @@ impl SourceManagerCore {
             managed_sources,
             source_fragments,
             backfill_fragments,
+            cdc_table_schema_change_policies: HashMap::new(),
             env,
         }
+    }
+
+    /// Get the current table schema change policies mapping
+    pub fn get_cdc_table_schema_change_policies(
+        &self,
+    ) -> &HashMap<String, SchemaChangeFailurePolicy> {
+        &self.cdc_table_schema_change_policies
+    }
+
+    /// Print current table schema change policies for debugging
+    pub fn debug_print_table_schema_policies(&self) {
+        tracing::info!(
+            "SourceManagerCore cdc_table_schema_change_policies count: {}, policies: {:?}",
+            self.cdc_table_schema_change_policies.len(),
+            self.cdc_table_schema_change_policies
+        );
+    }
+
+    /// Add a table schema change policy for a CDC table
+    pub fn add_table_schema_policy(
+        &mut self,
+        cdc_table_id: String,
+        source_id: SourceId,
+        policy: SchemaChangeFailurePolicy,
+    ) -> Result<(), String> {
+        tracing::info!(
+            "Adding CDC table schema change policy: cdc_table_id={}, source_id={}, policy={:?}",
+            cdc_table_id,
+            source_id,
+            policy
+        );
+        self.cdc_table_schema_change_policies
+            .insert(cdc_table_id, policy);
+        self.debug_print_table_schema_policies();
+
+        // Serialize the policies mapping to JSON
+        let policies_json = serde_json::to_string(&self.cdc_table_schema_change_policies)
+            .map_err(|e| format!("Failed to serialize policies: {}", e))?;
+
+        tracing::info!(
+            "Serialized CDC table schema change policies for source_id={}: {}",
+            source_id,
+            policies_json
+        );
+
+        Ok(())
+    }
+
+    /// Remove a table schema change policy for a CDC table
+    pub fn remove_table_schema_policy(
+        &mut self,
+        cdc_table_id: String,
+        source_id: SourceId,
+    ) -> Result<(), String> {
+        tracing::info!(
+            "Removing CDC table schema change policy: cdc_table_id={}, source_id={}",
+            cdc_table_id,
+            source_id
+        );
+        let removed = self.cdc_table_schema_change_policies.remove(&cdc_table_id);
+        if removed.is_some() {
+            tracing::info!(
+                "Successfully removed policy for cdc_table_id={}",
+                cdc_table_id
+            );
+        } else {
+            tracing::warn!(
+                "No policy found for cdc_table_id={}, nothing to remove",
+                cdc_table_id
+            );
+        }
+        self.debug_print_table_schema_policies();
+
+        // Serialize the updated policies mapping to JSON
+        let policies_json = serde_json::to_string(&self.cdc_table_schema_change_policies)
+            .map_err(|e| format!("Failed to serialize policies: {}", e))?;
+
+        tracing::info!(
+            "Serialized CDC table schema change policies for source_id={}: {}",
+            source_id,
+            policies_json
+        );
+
+        Ok(())
     }
 
     /// Updates states after all kinds of source change.
@@ -476,6 +568,155 @@ impl SourceManager {
                 );
             }
         }
+    }
+
+    /// Add a CDC table schema change policy and trigger `ConnectorPropsChange`
+    pub async fn add_cdc_table_schema_policy(
+        &self,
+        cdc_table_id: String,
+        source_id: SourceId,
+        policy: SchemaChangeFailurePolicy,
+    ) -> MetaResult<()> {
+        // First, add the policy to the mapping
+        {
+            let mut core = self.core.lock().await;
+            core.add_table_schema_policy(cdc_table_id.clone(), source_id, policy)
+                .map_err(|e| {
+                MetaError::invalid_parameter(format!(
+                    "Failed to add table schema policy: {}",
+                    e
+                ))
+                })?;
+        }
+        // Get the existing source properties and add the policies
+        let sources = {
+            let core = self.core.lock().await;
+            core.metadata_manager.list_sources().await?
+        };
+        let source = sources.iter().find(|s| s.id == source_id as u32);
+        if let Some(source) = source {
+            // Get the policies JSON
+            let policies_json = {
+                let core = self.core.lock().await;
+                serde_json::to_string(core.get_cdc_table_schema_change_policies()).map_err(|e| {
+                    MetaError::invalid_parameter(format!("Failed to serialize policies: {}", e))
+                })?
+            };
+            // Get existing source properties
+            let mut props: HashMap<String, String> =
+                source.with_properties.clone().into_iter().collect();
+            // Add the CDC table schema change policies
+            props.insert(
+                "cdc_table_schema_change_policies".to_owned(),
+                policies_json,
+            );
+
+            // Get the database_id for this source
+            let database_id = {
+                let core = self.core.lock().await;
+                core.metadata_manager
+                    .catalog_controller
+                    .get_object_database_id(source_id)
+                    .await?
+            };
+
+            // Send ConnectorPropsChange command directly to propagate to CN
+            let command = Command::ConnectorPropsChange(HashMap::from([(source_id as u32, props)]));
+            tracing::info!(command = ?command, "pushing down connector props change command");
+            if let Err(e) = self
+                .barrier_scheduler
+                .run_command(DatabaseId::new(database_id as u32), command)
+                .await
+            {
+                tracing::error!("Failed to send ConnectorPropsChange command: {}", e);
+            }
+        } else {
+            tracing::warn!(
+                "Source {} not found when trying to propagate CDC table schema change policies",
+                source_id
+            );
+        }
+
+        tracing::info!(
+            "CDC table schema change policies updated for source_id={} and propagated via ConnectorPropsChange",
+            source_id
+        );
+
+        Ok(())
+    }
+
+    /// Remove a CDC table schema change policy and trigger `ConnectorPropsChange`
+    pub async fn remove_cdc_table_schema_policy(
+        &self,
+        cdc_table_id: String,
+        source_id: SourceId,
+    ) -> MetaResult<()> {
+        // First, remove the policy from the mapping
+        {
+            let mut core = self.core.lock().await;
+            core.remove_table_schema_policy(cdc_table_id.clone(), source_id)
+                .map_err(|e| {
+                MetaError::invalid_parameter(format!(
+                    "Failed to remove table schema policy: {}",
+                    e
+                ))
+                })?;
+        }
+
+        // Get the existing source properties and add the updated policies
+        let sources = {
+            let core = self.core.lock().await;
+            core.metadata_manager.list_sources().await?
+        };
+        let source = sources.iter().find(|s| s.id == source_id as u32);
+
+        if let Some(source) = source {
+            // Get the updated policies JSON
+            let policies_json = {
+                let core = self.core.lock().await;
+                serde_json::to_string(core.get_cdc_table_schema_change_policies()).map_err(|e| {
+                    MetaError::invalid_parameter(format!("Failed to serialize policies: {}", e))
+                })?
+            };
+
+            // Get existing source properties
+            let mut props: HashMap<String, String> =
+                source.with_properties.clone().into_iter().collect();
+            // Add the updated CDC table schema change policies
+            props.insert("cdc_table_schema_change_policies".to_owned(), policies_json);
+
+            // Get the database_id for this source
+            let database_id = {
+                let core = self.core.lock().await;
+                core.metadata_manager
+                    .catalog_controller
+                    .get_object_database_id(source_id)
+                    .await?
+            };
+
+            // Send ConnectorPropsChange command directly to propagate to CN
+            let command = Command::ConnectorPropsChange(HashMap::from([(source_id as u32, props)]));
+            tracing::info!(command = ?command, "pushing down connector props change command");
+            if let Err(e) = self
+                .barrier_scheduler
+                .run_command(DatabaseId::new(database_id as u32), command)
+                .await
+            {
+                tracing::error!("Failed to send ConnectorPropsChange command: {}", e);
+            }
+        } else {
+            tracing::warn!(
+                "Source {} not found when trying to propagate updated CDC table schema change policies",
+                source_id
+            );
+        }
+
+        tracing::info!(
+            "CDC table schema change policies updated for source_id={} and propagated via ConnectorPropsChange",
+            source_id
+        );
+
+        Ok(())
     }
 
     /// Pause the tick loop in source manager until the returned guard is dropped.

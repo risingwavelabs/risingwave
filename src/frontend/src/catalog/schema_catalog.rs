@@ -236,10 +236,12 @@ impl SchemaCatalog {
                 .or_insert(vec![source_ref.id]);
         }
 
-        self.source_by_name
-            .try_insert(name, source_ref.clone())
-            .unwrap();
-        self.source_by_id.try_insert(id, source_ref).unwrap();
+        // For shared CDC sources, the source may already exist when creating a table from it
+        // In this case, we skip inserting to avoid OccupiedError
+        self.source_by_name.entry(name).or_insert_with(|| {
+            self.source_by_id.insert(id, source_ref.clone());
+            source_ref
+        });
     }
 
     pub fn drop_source(&mut self, id: SourceId) {

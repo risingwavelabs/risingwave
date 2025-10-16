@@ -46,6 +46,7 @@ use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryConfig;
+use crate::source::cdc::CdcMessageType;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
@@ -323,8 +324,83 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
                     if let Err(error) = res {
-                        // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                        //       see #13105
+                        if let SourceMeta::DebeziumCdc(cdc_meta) = &msg.meta
+                            && matches!(cdc_meta.msg_type, CdcMessageType::SchemaChange)
+                        {
+                            // Extract table info from error and build cdc_table_id
+                            let source_id = parser.source_ctx().source_id.table_id;
+                            let source_name = &parser.source_ctx().source_name;
+
+                            let cdc_table_id =
+                                if let Some(AccessError::CdcAutoSchemaChangeError {
+                                    table_name,
+                                    ..
+                                }) = error.0.downcast_ref::<AccessError>()
+                                {
+                                    // table_name format: "source_name.schema\".\"table" or "source_name.schema.table"
+                                    // We need to extract "schema.table" part
+                                    let processed = table_name
+                                        // Remove source_name prefix if present
+                                        .strip_prefix(&format!("{}.", source_name))
+                                        .unwrap_or(table_name)
+                                        // Remove escape characters \"
+                                        .replace("\\\"", "")
+                                        // Remove remaining quotes
+                                        .replace("\"", "");
+
+                                    // Build cdc_table_id: "source_id.schema.table"
+                                    format!("{}.{}", source_id, processed)
+                                } else {
+                                    // Fallback: empty cdc_table_id
+                                    String::new()
+                                };
+
+                            // Use table-level policy if available, otherwise fallback to source-level
+                            let policy = if !cdc_table_id.is_empty() {
+                                parser
+                                    .source_ctx()
+                                    .cdc_table_schema_change_policies
+                                    .get(&cdc_table_id)
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        parser.source_ctx().schema_change_failure_policy.clone()
+                                    })
+                            } else {
+                                parser.source_ctx().schema_change_failure_policy.clone()
+                            };
+
+                            tracing::info!(
+                                source_id = source_id,
+                                source_name = source_name,
+                                cdc_table_id = cdc_table_id,
+                                policy = ?policy,
+                                "Using schema change failure policy in parser"
+                            );
+
+                            // Check the schema change failure policy
+                            match policy {
+                                crate::source::cdc::SchemaChangeFailurePolicy::Block => {
+                                    tracing::error!(
+                                        error = %error.as_report(),
+                                        split_id = &*msg.split_id,
+                                        offset = msg.offset,
+                                        cdc_table_id = cdc_table_id,
+                                        "Schema change message parsing failed, blocking source."
+                                    );
+                                    return Err(error);
+                                }
+                                crate::source::cdc::SchemaChangeFailurePolicy::Skip => {
+                                    // Continue processing, don't return error
+                                    tracing::warn!(
+                                        error = %error.as_report(),
+                                        split_id = &*msg.split_id,
+                                        offset = msg.offset,
+                                        cdc_table_id = cdc_table_id,
+                                        "Schema change message parsing failed, skipping due to policy."
+                                    );
+                                }
+                            }
+                        }
                         static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
                             LazyLock::new(LogSuppresser::default);
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
@@ -390,6 +466,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                             Ok(()) => {}
                             Err(e) => {
                                 tracing::error!(error = %e.as_report(), "failed to wait for schema change");
+                                return Err(anyhow::Error::from(e).into());
                             }
                         }
                     }

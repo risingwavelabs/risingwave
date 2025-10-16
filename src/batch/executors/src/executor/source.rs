@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -154,6 +155,8 @@ impl SourceExecutor {
             },
             ConnectorProperties::default(),
             None,
+            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::default(),
+            HashMap::new(), // empty table-level policies for batch executor
         ));
         let (stream, _) = self
             .source

@@ -34,16 +34,18 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, bail_not_implemented, catalog};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
-use risingwave_connector::source::cdc::CdcScanOptions;
+use risingwave_connector::source::cdc::{CdcScanOptions, SchemaChangeFailurePolicy};
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
 use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::table::CdcTableType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId, WorkerId,
 };
+use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
     Subscription, Table, View,
@@ -835,6 +837,66 @@ impl DdlController {
         Ok(())
     }
 
+    /// Extract schema change failure policy from CDC table's `connect_properties`
+    fn extract_cdc_table_policy_from_fragments(
+        &self,
+        table_fragments: &StreamJobFragments,
+        table_id: u32,
+    ) -> MetaResult<risingwave_connector::source::cdc::SchemaChangeFailurePolicy> {
+        use risingwave_connector::source::cdc::SchemaChangeFailurePolicy;
+
+        let stream_scan_fragment = table_fragments
+            .fragments
+            .values()
+            .filter(|f| {
+                f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
+                    || f.fragment_type_mask
+                        .contains(FragmentTypeFlag::StreamCdcScan)
+            })
+            .exactly_one()
+            .ok()
+            .with_context(|| {
+                format!(
+                    "expect exactly one stream cdc scan fragment for table {}",
+                    table_id
+                )
+            })?;
+
+        // Find the StreamCdcScan node
+        let node_body = match &stream_scan_fragment.nodes.node_body {
+            Some(NodeBody::StreamCdcScan(_)) => &stream_scan_fragment.nodes.node_body,
+            Some(NodeBody::Project(_)) => stream_scan_fragment
+                .nodes
+                .input
+                .first()
+                .map(|n| &n.node_body)
+                .unwrap_or(&None),
+            _ => &None,
+        };
+
+        if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
+            && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
+        {
+            // Extract policy from connect_properties
+            let policy = cdc_table_desc
+                .connect_properties
+                .get("schema.change.failure.policy")
+                .and_then(|s| s.parse::<SchemaChangeFailurePolicy>().ok())
+                .unwrap_or_default();
+
+            tracing::debug!(
+                table_id = table_id,
+                policy = ?policy,
+                "Extracted schema change failure policy from cdc_table_desc"
+            );
+
+            return Ok(policy);
+        }
+
+        // Default policy if not found
+        Ok(SchemaChangeFailurePolicy::default())
+    }
+
     async fn validate_cdc_table_inner(
         &self,
         node_body: &Option<NodeBody>,
@@ -889,6 +951,29 @@ impl DdlController {
         } else {
             Ok(())
         }
+    }
+
+    /// Extract schema change failure policy from source properties
+    fn extract_schema_change_failure_policy(
+        &self,
+        source: &Source,
+    ) -> MetaResult<SchemaChangeFailurePolicy> {
+        let properties = source.get_with_properties();
+
+        // Parse schema change failure policy from properties
+        let schema_change_failure_policy = properties
+            .get("schema.change.failure.policy")
+            .map(|s| s.parse::<SchemaChangeFailurePolicy>())
+            .transpose()
+            .map_err(|e| {
+                MetaError::invalid_parameter(format!(
+                    "Invalid schema change failure policy: {}",
+                    e
+                ))
+            })?
+            .unwrap_or_default();
+
+        Ok(schema_change_failure_policy)
     }
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
@@ -1044,10 +1129,106 @@ impl DdlController {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
                 self.validate_cdc_table(table, &stream_job_fragments)
                     .await?;
+
+                // Check if this is a CDC table and add schema change policy
+                if let Some(cdc_table_type) = table.cdc_table_type.as_ref() {
+                    let pb_cdc_table_type =
+                        PbCdcTableType::try_from(*cdc_table_type).map_err(|e| {
+                                MetaError::invalid_parameter(format!("Invalid CDC table type: {}", e))
+                        })?;
+                    let cdc_table_type = CdcTableType::from(pb_cdc_table_type);
+                    if cdc_table_type != CdcTableType::Unspecified {
+                        // Extract source ID from cdc_table_id (format: "source_id.schema.table_name")
+                        if let Some(cdc_table_id) = table.cdc_table_id.as_ref() {
+                            if let Some(source_id_str) = cdc_table_id.split('.').next() {
+                                if let Ok(source_id) = source_id_str.parse::<u32>() {
+                                    // Extract policy from table's cdc_table_desc connect_properties
+                                    let schema_change_failure_policy = self
+                                        .extract_cdc_table_policy_from_fragments(
+                                            &stream_job_fragments,
+                                            table.id,
+                                        )?;
+
+                                    tracing::info!(
+                                        table_id = table.id,
+                                        source_id = source_id,
+                                        cdc_table_id = cdc_table_id,
+                                        cdc_table_type = ?cdc_table_type,
+                                        schema_change_failure_policy = ?schema_change_failure_policy,
+                                        "Adding CDC table schema change policy for SharedCdcSource"
+                                    );
+
+                                    // Add CDC table schema change policy
+                                    self.source_manager
+                                        .add_cdc_table_schema_policy(
+                                            cdc_table_id.clone(),
+                                            source_id as i32,
+                                            schema_change_failure_policy,
+                                        )
+                                        .await?;
+                                } else {
+                                    tracing::warn!(
+                                        table_id = table.id,
+                                        cdc_table_id = cdc_table_id,
+                                        "Failed to parse source ID from cdc_table_id"
+                                    );
+                                }
+                            } else {
+                                tracing::warn!(
+                                    table_id = table.id,
+                                    cdc_table_id = cdc_table_id,
+                                    "Invalid cdc_table_id format"
+                                );
+                            }
+                        } else {
+                            tracing::warn!(
+                                table_id = table.id,
+                                cdc_table_type = ?cdc_table_type,
+                                "CDC table has no cdc_table_id"
+                            );
+                        }
+                    }
+                }
             }
-            StreamingJob::Table(Some(source), ..) => {
+            StreamingJob::Table(Some(source), table, ..) => {
                 // Register the source on the connector node.
                 self.source_manager.register_source(source).await?;
+
+                // Check if this is a CDC table and add schema change policy
+                if let Some(cdc_table_type) = table.cdc_table_type.as_ref() {
+                    let pb_cdc_table_type =
+                        PbCdcTableType::try_from(*cdc_table_type).map_err(|e| {
+                                MetaError::invalid_parameter(format!("Invalid CDC table type: {}", e))
+                        })?;
+                    let cdc_table_type = CdcTableType::from(pb_cdc_table_type);
+                    if cdc_table_type != CdcTableType::Unspecified {
+                        // Extract schema change failure policy from source properties
+                        let schema_change_failure_policy =
+                            self.extract_schema_change_failure_policy(source)?;
+
+                        // Get cdc_table_id from table
+                        if let Some(cdc_table_id) = table.cdc_table_id.as_ref() {
+                            tracing::info!(
+                                table_id = table.id,
+                                source_id = source.id,
+                                cdc_table_id = cdc_table_id,
+                                cdc_table_type = ?cdc_table_type,
+                                schema_change_failure_policy = ?schema_change_failure_policy,
+                                "Adding CDC table schema change policy for dedicated source"
+                            );
+
+                            // Add CDC table schema change policy
+                            self.source_manager
+                                .add_cdc_table_schema_policy(
+                                    cdc_table_id.clone(),
+                                    source.id as i32,
+                                    schema_change_failure_policy,
+                                )
+                                .await?;
+                        }
+                    }
+                }
+
                 let connector_name = source
                     .get_with_properties()
                     .get(UPSTREAM_SOURCE_KEY)
@@ -1498,6 +1679,32 @@ impl DdlController {
             StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
             StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
         };
+
+        // For CDC tables, remove the table schema policy before dropping
+        if matches!(object_type, ObjectType::Table)
+            && let Ok(table) = self
+                .metadata_manager
+                .catalog_controller
+                .get_table_by_id(object_id)
+                .await
+            && let Some(cdc_table_id) = table.cdc_table_id
+            && let Some(risingwave_pb::catalog::table::OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+                table.optional_associated_source_id
+        {
+            tracing::info!(
+                table_id = object_id,
+                cdc_table_id = cdc_table_id,
+                source_id = source_id,
+                "Removing CDC table schema policy on drop"
+            );
+            // Remove CDC table schema change policy
+            self.source_manager
+                .remove_cdc_table_schema_policy(
+                    cdc_table_id,
+                    source_id as i32,
+                )
+                .await?;
+        }
 
         let job_status = self
             .metadata_manager

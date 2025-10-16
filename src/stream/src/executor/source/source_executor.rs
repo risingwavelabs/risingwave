@@ -20,29 +20,27 @@ use either::Either;
 use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::ArrayRef;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
+use risingwave_connector::source::cdc::SchemaChangeFailurePolicy;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState, WaitCheckpointTask,
+    ConnectorState, SplitId, SplitImpl, SplitMetaData, StreamChunkWithState, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde_json;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
 use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
-use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
@@ -98,6 +96,10 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Local barrier manager for reporting source load finished events
     barrier_manager: LocalBarrierManager,
+
+    /// Table ID -> Schema Change Failure Policy mapping for CDC tables
+    /// Key: `TableId`, Value: `SchemaChangeFailurePolicy`
+    cdc_table_schema_change_policies: HashMap<String, SchemaChangeFailurePolicy>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -121,6 +123,55 @@ impl<S: StateStore> SourceExecutor<S> {
             rate_limit_rps,
             is_shared_non_cdc,
             barrier_manager,
+            cdc_table_schema_change_policies: HashMap::new(),
+        }
+    }
+
+    /// Get the current CDC table schema change policies mapping
+    pub fn get_cdc_table_schema_change_policies(
+        &self,
+    ) -> &HashMap<String, SchemaChangeFailurePolicy> {
+        &self.cdc_table_schema_change_policies
+    }
+
+    /// Print current CDC table schema change policies for debugging
+    pub fn debug_print_cdc_table_schema_policies(&self) {
+        tracing::info!(
+            "SourceExecutor cdc_table_schema_change_policies count: {}, policies: {:?}",
+            self.cdc_table_schema_change_policies.len(),
+            self.cdc_table_schema_change_policies
+        );
+    }
+
+    /// Handle CDC table schema change policies from `ConnectorPropsChange`
+    fn handle_cdc_table_schema_policies_change(&mut self, new_props: &HashMap<String, String>) {
+        if let Some(table_policies_json) = new_props.get("cdc_table_schema_change_policies") {
+            tracing::info!(
+                "Received CDC table schema change policies: {}",
+                table_policies_json
+            );
+
+            match serde_json::from_str::<HashMap<String, SchemaChangeFailurePolicy>>(
+                table_policies_json,
+            ) {
+                Ok(table_policies) => {
+                    tracing::info!(
+                        "Successfully parsed CDC table schema change policies: {:?}",
+                        table_policies
+                    );
+                    self.cdc_table_schema_change_policies = table_policies;
+                    self.debug_print_cdc_table_schema_policies();
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to parse CDC table schema change policies: {}, error: {}",
+                        table_policies_json,
+                        e
+                    );
+                }
+            }
+        } else {
+            tracing::debug!("No cdc_table_schema_change_policies found in new properties");
         }
     }
 
@@ -133,6 +184,7 @@ impl<S: StateStore> SourceExecutor<S> {
             is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
             actor_ctx: self.actor_ctx.clone(),
             reader_stream: None,
+            cdc_table_schema_change_policies: self.cdc_table_schema_change_policies.clone(),
         }
     }
 
@@ -157,72 +209,6 @@ impl<S: StateStore> SourceExecutor<S> {
             source_reader,
             building_task: initial_task,
         }))
-    }
-
-    /// build the source column ids and the source context which will be used to build the source stream
-    pub fn prepare_source_stream_build(
-        &self,
-        source_desc: &SourceDesc,
-    ) -> (Vec<ColumnId>, SourceContext) {
-        let column_ids = source_desc
-            .columns
-            .iter()
-            .map(|column_desc| column_desc.column_id)
-            .collect_vec();
-
-        let (schema_change_tx, mut schema_change_rx) =
-            mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
-        let schema_change_tx = if self.is_auto_schema_change_enable() {
-            let meta_client = self.actor_ctx.meta_client.clone();
-            // spawn a task to handle schema change event from source parser
-            let _join_handle = tokio::task::spawn(async move {
-                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
-                    let table_ids = schema_change.table_ids();
-                    tracing::info!(
-                        target: "auto_schema_change",
-                        "recv a schema change event for tables: {:?}", table_ids);
-                    // TODO: retry on rpc error
-                    if let Some(ref meta_client) = meta_client {
-                        match meta_client
-                            .auto_schema_change(schema_change.to_protobuf())
-                            .await
-                        {
-                            Ok(_) => {
-                                tracing::info!(
-                                    target: "auto_schema_change",
-                                    "schema change success for tables: {:?}", table_ids);
-                                finish_tx.send(()).unwrap();
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    target: "auto_schema_change",
-                                    error = ?e.as_report(), "schema change error");
-                                finish_tx.send(()).unwrap();
-                            }
-                        }
-                    }
-                }
-            });
-            Some(schema_change_tx)
-        } else {
-            info!("auto schema change is disabled in config");
-            None
-        };
-        let source_ctx = SourceContext::new(
-            self.actor_ctx.id,
-            self.stream_source_core.source_id,
-            self.actor_ctx.fragment_id,
-            self.stream_source_core.source_name.clone(),
-            source_desc.metrics.clone(),
-            SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
-            },
-            source_desc.source.config.clone(),
-            schema_change_tx,
-        );
-
-        (column_ids, source_ctx)
     }
 
     /// Check if this is a batch refreshable source.
@@ -303,7 +289,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 self.rebuild_stream_reader(source_desc, stream)?;
             }
         }
-
         Ok(())
     }
 
@@ -706,6 +691,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                         new_props
                                     );
                                     source_desc.update_reader(new_props.clone())?;
+
+                                    // Handle CDC table schema change policies
+                                    self.handle_cdc_table_schema_policies_change(new_props);
+
                                     // suppose the connector props change will not involve state change
                                     split_change = Some((
                                         &source_desc,

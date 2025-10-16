@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Bound;
 
@@ -210,6 +211,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             },
             source_desc.source.config.clone(),
             None,
+            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::default(),
+            HashMap::new(), // empty table-level policies for fs fetch executor
         )
     }
 

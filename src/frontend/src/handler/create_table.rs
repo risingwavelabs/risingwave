@@ -859,6 +859,19 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
         .collect();
 
+    // Merge table-level schema change policy from context.with_options() into cdc_with_options
+    let mut cdc_with_options = cdc_with_options;
+    if let Some(table_policy) = context.with_options().get("schema.change.failure.policy") {
+        cdc_with_options.insert(
+            "schema.change.failure.policy".to_owned(),
+            table_policy.clone(),
+        );
+        tracing::info!(
+            "Extracted table-level schema.change.failure.policy: {}",
+            table_policy
+        );
+    }
+
     let (options, secret_refs) = cdc_with_options.into_parts();
 
     let non_generated_column_descs = columns
@@ -927,6 +940,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
     table.cdc_table_type = Some(cdc_table_type);
+    // Set the associated source ID for CDC table
+    table.associated_source_id = Some(TableId::new(source.id));
     Ok((materialize.into(), table))
 }
 
