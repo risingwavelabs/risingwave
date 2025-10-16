@@ -123,6 +123,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::vacuum_spin_interval_ms")]
     pub vacuum_spin_interval_ms: u64,
 
+    /// Interval of invoking iceberg garbage collection, to expire old snapshots.
+    #[serde(default = "default::meta::iceberg_gc_interval_sec")]
+    pub iceberg_gc_interval_sec: u64,
+
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
@@ -552,6 +556,10 @@ pub mod default {
 
         pub fn vacuum_spin_interval_ms() -> u64 {
             100
+        }
+
+        pub fn iceberg_gc_interval_sec() -> u64 {
+            3600
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
