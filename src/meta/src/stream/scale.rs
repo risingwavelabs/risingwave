@@ -583,15 +583,17 @@ impl ScaleController {
             all_related_fragment_ids
                 .iter()
                 .map(|&fragment_id| {
-                    (
-                        fragment_id,
-                        read_guard
-                            .get_fragment(fragment_id as FragmentId)
-                            .cloned()
-                            .unwrap(),
-                    )
+                    read_guard
+                        .get_fragment(fragment_id as FragmentId)
+                        .cloned()
+                        .map(|fragment| (fragment_id, fragment))
+                        .ok_or_else(|| {
+                            MetaError::from(anyhow!(
+                                "previous fragment info for {fragment_id} not found"
+                            ))
+                        })
                 })
-                .collect()
+                .collect::<MetaResult<_>>()?
         };
 
         let all_rendered_fragments: HashMap<_, _> = render_result
@@ -625,13 +627,22 @@ impl ScaleController {
                     .copied()
                     .chain(downstream_fragments.keys().copied())
                     .map(|fragment_id| {
-                        let fragment = all_prev_fragments.get(&(fragment_id as i32)).unwrap();
-                        (
-                            fragment_id,
-                            fragment.actors.keys().copied().collect::<HashSet<_>>(),
-                        )
+                        all_prev_fragments
+                            .get(&(fragment_id as i32))
+                            .map(|fragment| {
+                                (
+                                    fragment_id,
+                                    fragment.actors.keys().copied().collect::<HashSet<_>>(),
+                                )
+                            })
+                            .ok_or_else(|| {
+                                MetaError::from(anyhow!(
+                                    "fragment {} not found in previous state",
+                                    fragment_id
+                                ))
+                            })
                     })
-                    .collect();
+                    .collect::<MetaResult<_>>()?;
 
                 all_fragment_actors.extend(fragment_actors);
 
@@ -648,7 +659,12 @@ impl ScaleController {
                             None => {
                                 let external_fragment = all_prev_fragments
                                     .get(&(*downstream_fragment_id as i32))
-                                    .unwrap();
+                                    .ok_or_else(|| {
+                                        MetaError::from(anyhow!(
+                                            "fragment {} not found in previous state",
+                                            downstream_fragment_id
+                                        ))
+                                    })?;
 
                                 external_fragment
                                     .actors
@@ -677,7 +693,13 @@ impl ScaleController {
                             *fragment_id as FragmentId,
                             *downstream_fragment_id as FragmentId,
                         ))
-                        .expect("downstream relation should exist");
+                        .ok_or_else(|| {
+                            MetaError::from(anyhow!(
+                                "downstream relation missing for {} -> {}",
+                                fragment_id,
+                                downstream_fragment_id
+                            ))
+                        })?;
 
                     let pb_mapping = PbDispatchOutputMapping {
                         indices: output_indices.into_u32_array(),
@@ -703,7 +725,12 @@ impl ScaleController {
                     }
                 }
 
-                let prev_fragment = all_prev_fragments.get(&{ *fragment_id }).unwrap();
+                let prev_fragment = all_prev_fragments.get(&{ *fragment_id }).ok_or_else(|| {
+                    MetaError::from(anyhow!(
+                        "fragment {} not found in previous state",
+                        fragment_id
+                    ))
+                })?;
 
                 // NOTE: diff fragment does not handle split reassignment currently because we can't fetch stream node from inflight info.
                 // So we need to manually handle later.
