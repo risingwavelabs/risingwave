@@ -30,7 +30,7 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreGet for PanicStateStore {
-    fn on_key_value<'a, O: Send + 'static>(
+    fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         _key: TableKey<Bytes>,
         _read_options: ReadOptions,
@@ -152,7 +152,7 @@ impl StateStoreWriteVector for PanicStateStore {
 }
 
 impl StateStoreReadVector for PanicStateStore {
-    async fn nearest<'a, O: Send + 'static>(
+    async fn nearest<'a, O: Send + 'a>(
         &'a self,
         _vec: Vector,
         _options: VectorNearestOptions,

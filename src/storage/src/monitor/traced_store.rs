@@ -145,7 +145,7 @@ impl<S> TracedStateStore<S, TableSnapshot> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for TracedStateStore<S, TableSnapshot> {
-    async fn on_key_value<'a, O: Send + 'static>(
+    async fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
@@ -336,7 +336,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreReadVector> StateStoreReadVector for TracedStateStore<S, TableSnapshot> {
-    fn nearest<'a, O: Send + 'static>(
+    fn nearest<'a, O: Send + 'a>(
         &'a self,
         vec: Vector,
         options: VectorNearestOptions,

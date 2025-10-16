@@ -639,7 +639,7 @@ pub struct HummockStorageReadSnapshot {
 }
 
 impl StateStoreGet for HummockStorageReadSnapshot {
-    fn on_key_value<'a, O: Send + 'static>(
+    fn on_key_value<'a, O: Send + 'a>(
         &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
@@ -687,7 +687,7 @@ impl StateStoreRead for HummockStorageReadSnapshot {
 }
 
 impl StateStoreReadVector for HummockStorageReadSnapshot {
-    async fn nearest<'a, O: Send + 'static>(
+    async fn nearest<'a, O: Send + 'a>(
         &'a self,
         vec: Vector,
         options: VectorNearestOptions,

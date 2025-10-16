@@ -331,7 +331,7 @@ pub mod verify {
     }
 
     impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
-        async fn on_key_value<'a, O: Send + 'static>(
+        async fn on_key_value<'a, O: Send + 'a>(
             &'a self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
@@ -368,7 +368,7 @@ pub mod verify {
     impl<A: StateStoreReadVector, E: StateStoreReadVector> StateStoreReadVector
         for VerifyStateStore<A, E>
     {
-        fn nearest<'a, O: Send + 'static>(
+        fn nearest<'a, O: Send + 'a>(
             &'a self,
             vec: Vector,
             options: VectorNearestOptions,
@@ -1296,7 +1296,7 @@ mod dyn_state_store {
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreReadVector> + StaticSendSync,
     {
-        async fn nearest<'a, O: Send + 'static>(
+        async fn nearest<'a, O: Send + 'a>(
             &'a self,
             vec: Vector,
             options: VectorNearestOptions,
@@ -1421,7 +1421,7 @@ mod dyn_state_store {
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreGet> + StaticSendSync,
     {
-        async fn on_key_value<'a, O: Send + 'static>(
+        async fn on_key_value<'a, O: Send + 'a>(
             &'a self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
