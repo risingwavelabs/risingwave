@@ -42,7 +42,8 @@ use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
 use crate::controller::scale::{
-    RenderedGraph, WorkerInfo, find_fragment_no_shuffle_dags_detailed, render_jobs,
+    FragmentRenderMap, RenderedGraph, WorkerInfo, find_fragment_no_shuffle_dags_detailed,
+    render_fragments, render_jobs,
 };
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
@@ -433,6 +434,40 @@ impl ScaleController {
         self.rerender_inner(&inner.db, jobs, workers).await
     }
 
+    async fn rerender_fragment_inner(
+        &self,
+        txn: &impl ConnectionTrait,
+        fragments: HashSet<risingwave_meta_model::FragmentId>,
+        workers: BTreeMap<WorkerId, WorkerInfo>,
+    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if fragments.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let adaptive_parallelism_strategy = {
+            let system_params_reader = self.env.system_params_reader().await;
+            system_params_reader.adaptive_parallelism_strategy()
+        };
+
+        let id_gen = self.env.id_gen_manager();
+
+        let fragment_ids = fragments.into_iter().collect_vec();
+
+        let RenderedGraph {
+            fragments: render_result,
+            ..
+        } = render_fragments(
+            txn,
+            id_gen,
+            fragment_ids,
+            workers,
+            adaptive_parallelism_strategy,
+        )
+        .await?;
+
+        self.build_reschedule_commands(txn, render_result).await
+    }
+
     async fn rerender_inner(
         &self,
         txn: &impl ConnectionTrait,
@@ -450,6 +485,18 @@ impl ScaleController {
             fragments: render_result,
             ..
         } = render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy).await?;
+
+        self.build_reschedule_commands(txn, render_result).await
+    }
+
+    async fn build_reschedule_commands(
+        &self,
+        txn: &impl ConnectionTrait,
+        render_result: FragmentRenderMap,
+    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if render_result.is_empty() {
+            return Ok(HashMap::new());
+        }
 
         // for (db, jobs) in &render_result {
         //     println!("\tdb: {db}");
@@ -492,8 +539,7 @@ impl ScaleController {
             .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids.clone()))
             .into_tuple()
             .all(txn)
-            .await
-            .unwrap();
+            .await?;
 
         let downstreams = FragmentRelation::find()
             .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids.clone()))

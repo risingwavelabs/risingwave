@@ -70,7 +70,9 @@ use tracing::debug;
 
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
-use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
+use crate::controller::scale::{
+    FragmentRenderMap, load_fragment_info, resolve_streaming_job_definition,
+};
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
     get_sink_fragment_by_ids, has_table_been_migrated, rebuild_fragment_mapping,
@@ -1252,8 +1254,7 @@ impl CatalogController {
         &self,
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
-    {
+    ) -> MetaResult<FragmentRenderMap> {
         let adaptive_parallelism_strategy = {
             let system_params_reader = self.env.system_params_reader().await;
             system_params_reader.adaptive_parallelism_strategy()
