@@ -193,6 +193,10 @@ impl RenderedGraph {
     }
 }
 
+/// Fragment-scoped rendering entry point used by operational tooling.
+/// It validates that the requested fragments are roots of their no-shuffle ensembles,
+/// resolves only the metadata required for those components, and then reuses the shared
+/// rendering pipeline to materialize actor assignments.
 pub async fn render_fragments<C>(
     txn: &C,
     id_gen: &IdGeneratorManagerRef,
@@ -316,6 +320,8 @@ where
     })
 }
 
+/// Job-scoped rendering entry point that walks every no-shuffle root belonging to the
+/// provided streaming jobs before delegating to the shared rendering backend.
 pub async fn render_jobs<C>(
     txn: &C,
     id_gen: &IdGeneratorManagerRef,
@@ -386,6 +392,11 @@ where
     })
 }
 
+/// Core rendering routine that consumes no-shuffle ensembles and produces
+/// `InflightFragmentInfo`s by:
+///   * determining the eligible worker pools and effective parallelism,
+///   * generating actor→worker assignments plus vnode bitmaps and source splits,
+///   * grouping the rendered fragments by database and streaming job.
 async fn render_no_shuffle_ensembles<C>(
     txn: &C,
     id_gen: &IdGeneratorManagerRef,
