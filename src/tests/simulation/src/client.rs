@@ -103,7 +103,7 @@ impl RisingWave {
         });
         // replay all SET statements
         for stmt in set_stmts.replay_iter() {
-            client.simple_query(&stmt).await?;
+            client.simple_query(stmt).await?;
         }
         Ok((client, task))
     }
