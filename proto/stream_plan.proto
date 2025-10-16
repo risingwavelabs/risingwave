@@ -251,6 +251,10 @@ message ActorMapping {
   repeated uint32 data = 2;
 }
 
+message Columns {
+  repeated plan_common.ColumnCatalog columns = 1;
+}
+
 message StreamSource {
   uint32 source_id = 1;
   catalog.Table state_table = 2;
@@ -264,6 +268,8 @@ message StreamSource {
   // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  // Downstream columns are used by list node to know which columns are needed.
+  optional Columns downstream_columns = 11;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
