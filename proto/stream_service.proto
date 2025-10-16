@@ -82,7 +82,7 @@ message BarrierCompleteResponse {
   uint32 database_id = 10;
   // Used for refreshable batch source.
   // SourceExecutor reports the source load is finished, and then
-  // meta will issue a LoadFinished barrier to notify MaterializeExecutor to start diff calculation.
+  // meta will issue a LoadFinish barrier to notify MaterializeExecutor to start diff calculation.
   repeated uint32 load_finished_source_ids = 11;
   map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
   repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
@@ -94,6 +94,9 @@ message BarrierCompleteResponse {
   // MaterializeExecutor reports when refresh has finished, and then
   // meta will update the table's refresh state to Finished.
   repeated uint32 refresh_finished_tables = 15;
+  // SourceExecutor reports the source list is finished, and then
+  // meta will issue a ListFinish barrier to notify the source to start loading.
+  repeated uint32 list_finished_source_ids = 16;
 }
 
 message StreamingControlStreamRequest {

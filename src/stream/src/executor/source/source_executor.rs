@@ -650,6 +650,8 @@ impl<S: StateStore> SourceExecutor<S> {
                     // NOTE: We rely on CompleteBarrierTask, which is only for checkpoint barrier,
                     // so we wait for a checkpoint barrier here.
                     if barrier.is_checkpoint() && self.is_batch_source() && is_refreshing {
+                        // the executor can skip the list finish barrier step
+                        // it directly reports the load finish barrier
                         let batch_split = self.stream_source_core.get_batch_split();
                         if batch_split.finished() {
                             tracing::info!(?epoch, "emitting load finish");
