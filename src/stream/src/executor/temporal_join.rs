@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{HashKey, NullBitmap};
-use risingwave_common::lru::RandomState;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
