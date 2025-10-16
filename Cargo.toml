@@ -61,7 +61,6 @@ members = [
     "src/utils/delta_btree_map",
     "src/utils/futures_util",
     "src/utils/iter_util",
-    "src/utils/local_stats_alloc",
     "src/utils/openai_embedding_service",
     "src/utils/pgwire",
     "src/utils/resource_util",
