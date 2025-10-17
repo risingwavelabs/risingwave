@@ -22,7 +22,7 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
-use risingwave_common::array::Op;
+use risingwave_common::array::{Op, VectorRef};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
@@ -428,7 +428,7 @@ pub trait StateStoreWriteEpochControl: StaticSendSync {
 }
 
 pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()>;
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()>;
 }
 
 pub struct VectorNearestOptions {
@@ -442,7 +442,7 @@ pub trait OnNearestItemFn<'a, O> = OnNearestItem<O> + Send + Sync + 'a;
 pub trait StateStoreReadVector: StaticSendSync {
     fn nearest<'a, O: Send + 'a>(
         &'a self,
-        vec: Vector,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> impl StorageFuture<'a, Vec<O>>;

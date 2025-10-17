@@ -26,7 +26,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::row::RowDeserializer;
-use risingwave_common::types::{DataType, ScalarImpl, ScalarRef, StructType};
+use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_common::util::value_encoding::BasicDeserializer;
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -180,7 +180,7 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
                 if vis && let Some(vector) = vector_column.value_at(idx) {
                     let row_results: Vec<Result<StructValue>> = read_snapshot
                         .nearest(
-                            vector.to_owned_scalar(),
+                            vector,
                             VectorNearestOptions {
                                 top_n,
                                 measure,

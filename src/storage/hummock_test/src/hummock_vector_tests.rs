@@ -82,7 +82,7 @@ async fn test_flat_vector() {
 
     let epoch1_vectors = (0..100).map(|_| next_input()).collect_vec();
     for (vec, info) in &epoch1_vectors {
-        vector_writer.insert(vec.clone(), info.clone()).unwrap();
+        vector_writer.insert(vec.to_ref(), info.clone()).unwrap();
         vector_writer.try_flush().await.unwrap();
     }
 
@@ -95,7 +95,7 @@ async fn test_flat_vector() {
 
     let epoch2_vectors = (0..100).map(|_| next_input()).collect_vec();
     for (vec, info) in &epoch2_vectors {
-        vector_writer.insert(vec.clone(), info.clone()).unwrap();
+        vector_writer.insert(vec.to_ref(), info.clone()).unwrap();
         vector_writer.try_flush().await.unwrap();
     }
 
@@ -152,7 +152,7 @@ async fn test_flat_vector() {
 
         let output = read_snapshot_epoch
             .nearest(
-                query.clone(),
+                query.to_ref(),
                 VectorNearestOptions {
                     top_n,
                     measure: DistanceMeasurement::InnerProduct,
@@ -189,7 +189,7 @@ async fn test_flat_vector() {
     vector_writer.init_for_test(epoch3).await.unwrap();
     let epoch3_vectors = (0..100).map(|_| next_input()).collect_vec();
     for (vec, info) in &epoch3_vectors {
-        vector_writer.insert(vec.clone(), info.clone()).unwrap();
+        vector_writer.insert(vec.to_ref(), info.clone()).unwrap();
         vector_writer.try_flush().await.unwrap();
     }
 
@@ -264,7 +264,7 @@ async fn test_hnsw_vector() {
 
     let epoch1_vectors = (0..100).map(|_| next_input()).collect_vec();
     for (vec, info) in &epoch1_vectors {
-        vector_writer.insert(vec.clone(), info.clone()).unwrap();
+        vector_writer.insert(vec.to_ref(), info.clone()).unwrap();
         vector_writer.try_flush().await.unwrap();
     }
 
@@ -277,7 +277,7 @@ async fn test_hnsw_vector() {
 
     let epoch2_vectors = (0..100).map(|_| next_input()).collect_vec();
     for (vec, info) in &epoch2_vectors {
-        vector_writer.insert(vec.clone(), info.clone()).unwrap();
+        vector_writer.insert(vec.to_ref(), info.clone()).unwrap();
         vector_writer.try_flush().await.unwrap();
     }
 
@@ -334,7 +334,7 @@ async fn test_hnsw_vector() {
             let top_n = 10;
             let output = read_snapshot_epoch
                 .nearest(
-                    query.clone(),
+                    query.to_ref(),
                     VectorNearestOptions {
                         top_n,
                         measure: DistanceMeasurement::InnerProduct,
@@ -374,7 +374,7 @@ async fn test_hnsw_vector() {
     vector_writer.init_for_test(epoch3).await.unwrap();
     let epoch3_vectors = (0..100).map(|_| next_input()).collect_vec();
     for (vec, info) in &epoch3_vectors {
-        vector_writer.insert(vec.clone(), info.clone()).unwrap();
+        vector_writer.insert(vec.to_ref(), info.clone()).unwrap();
         vector_writer.try_flush().await.unwrap();
     }
 

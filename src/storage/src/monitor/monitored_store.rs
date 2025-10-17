@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{Instrument, error};
-
+use risingwave_common::types::VectorRef;
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -209,7 +209,7 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
 impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<S> {
     fn nearest<'a, O: Send + 'a>(
         &'a self,
-        vec: Vector,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> impl StorageFuture<'a, Vec<O>> {
@@ -300,7 +300,7 @@ impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl for MonitoredTa
 }
 
 impl<S: StateStoreWriteVector> StateStoreWriteVector for MonitoredTableStateStore<S> {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
         // TODO: monitor
         self.inner.insert(vec, info)
     }

@@ -16,6 +16,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -146,7 +147,7 @@ impl StateStoreWriteEpochControl for PanicStateStore {
 }
 
 impl StateStoreWriteVector for PanicStateStore {
-    fn insert(&mut self, _vec: Vector, _info: Bytes) -> StorageResult<()> {
+    fn insert(&mut self, _vec: VectorRef<'_>, _info: Bytes) -> StorageResult<()> {
         panic!()
     }
 }
@@ -154,7 +155,7 @@ impl StateStoreWriteVector for PanicStateStore {
 impl StateStoreReadVector for PanicStateStore {
     async fn nearest<'a, O: Send + 'a>(
         &'a self,
-        _vec: Vector,
+        _vec: VectorRef<'a>,
         _options: VectorNearestOptions,
         _on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {

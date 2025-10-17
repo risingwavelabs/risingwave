@@ -28,7 +28,7 @@ use risingwave_hummock_trace::{
     TracedBytes, TracedSealCurrentEpochOptions, init_collector, should_use_trace,
 };
 use thiserror_ext::AsReport;
-
+use risingwave_common::array::VectorRef;
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, ObjectIdManagerRef};
@@ -338,7 +338,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 impl<S: StateStoreReadVector> StateStoreReadVector for TracedStateStore<S, TableSnapshot> {
     fn nearest<'a, O: Send + 'a>(
         &'a self,
-        vec: Vector,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> impl StorageFuture<'a, Vec<O>> {

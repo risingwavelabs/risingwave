@@ -35,7 +35,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
-
+use risingwave_common::array::VectorRef;
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{CommittedVersion, HummockVersionReader, read_filter_for_version};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
@@ -689,7 +689,7 @@ impl StateStoreRead for HummockStorageReadSnapshot {
 impl StateStoreReadVector for HummockStorageReadSnapshot {
     async fn nearest<'a, O: Send + 'a>(
         &'a self,
-        vec: Vector,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
