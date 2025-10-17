@@ -376,7 +376,7 @@ impl<S: StateStore> SourceExecutor<S> {
         e: StreamExecutorError,
     ) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
-        tracing::warn!(
+        tracing::error!(
             error = ?e.as_report(),
             actor_id = self.actor_ctx.id,
             source_id = %core.source_id,
