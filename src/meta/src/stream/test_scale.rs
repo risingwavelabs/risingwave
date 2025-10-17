@@ -120,12 +120,7 @@ mod tests {
 
         let bitmaps: HashMap<_, _> = actors
             .into_iter()
-            .map(|actor| {
-                (
-                    actor.actor_id as ActorId,
-                    actor.vnode_bitmap.unwrap(),
-                )
-            })
+            .map(|actor| (actor.actor_id as ActorId, actor.vnode_bitmap.unwrap()))
             .collect();
 
         (ActorMapping::from_bitmaps(&bitmaps), bitmaps)

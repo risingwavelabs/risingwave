@@ -433,8 +433,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Replace the source reader with a new one of the new state.
         let reader_stream_builder = self.stream_reader_builder(source_desc.clone());
-        let reader_stream =
-            reader_stream_builder.into_retry_stream(Some(target_state), false);
+        let reader_stream = reader_stream_builder.into_retry_stream(Some(target_state), false);
 
         stream.replace_data_stream(reader_stream);
 

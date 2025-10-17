@@ -224,10 +224,8 @@ pub fn construct_sink_cycle_check_query(
         )
         .inner_join(
             cte_alias.clone(),
-            Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy)).eq(Expr::col((
-                depend_alias,
-                object_dependency::Column::Oid,
-            ))),
+            Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy))
+                .eq(Expr::col((depend_alias, object_dependency::Column::Oid))),
         )
         .and_where(
             Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy)).ne(Expr::col((
@@ -250,8 +248,7 @@ pub fn construct_sink_cycle_check_query(
         .expr(Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy)).count())
         .from(cte_alias.clone())
         .and_where(
-            Expr::col((cte_alias, object_dependency::Column::UsedBy))
-                .is_in(dependent_objects),
+            Expr::col((cte_alias, object_dependency::Column::UsedBy)).is_in(dependent_objects),
         )
         .to_owned()
         .with(

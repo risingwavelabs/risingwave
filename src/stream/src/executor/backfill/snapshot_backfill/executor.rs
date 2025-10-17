@@ -406,9 +406,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     if let Some(new_vnode_bitmap) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
                     {
-                        let _prev_vnode_bitmap = self
-                            .upstream_table
-                            .update_vnode_bitmap(new_vnode_bitmap);
+                        let _prev_vnode_bitmap =
+                            self.upstream_table.update_vnode_bitmap(new_vnode_bitmap);
                         backfill_state
                             .latest_progress()
                             .for_each(|(vnode, progress)| {

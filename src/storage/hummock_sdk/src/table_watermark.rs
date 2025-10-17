@@ -843,10 +843,7 @@ mod tests {
         let watermark_type = WatermarkSerdeType::PkPrefix;
         let mut table_watermarks = TableWatermarks::single_epoch(
             epoch1,
-            vec![VnodeWatermark::new(
-                build_bitmap(vec![0, 1, 2]),
-                watermark1,
-            )],
+            vec![VnodeWatermark::new(build_bitmap(vec![0, 1, 2]), watermark1)],
             direction,
             watermark_type,
         );
@@ -898,11 +895,7 @@ mod tests {
         );
         second_table_watermark.add_new_epoch_watermarks(
             epoch5,
-            vec![VnodeWatermark::new(
-                build_bitmap(vec![0, 3, 4]),
-                watermark4,
-            )]
-            .into(),
+            vec![VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4)].into(),
             direction,
             watermark_type,
         );
@@ -922,10 +915,7 @@ mod tests {
         let watermark_type = WatermarkSerdeType::PkPrefix;
         let mut table_watermarks = TableWatermarks::single_epoch(
             epoch1,
-            vec![VnodeWatermark::new(
-                build_bitmap(vec![0, 1, 2]),
-                watermark1,
-            )],
+            vec![VnodeWatermark::new(build_bitmap(vec![0, 1, 2]), watermark1)],
             direction,
             watermark_type,
         );

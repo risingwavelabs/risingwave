@@ -131,10 +131,7 @@ fn compile_pb_subject(
     dependency_subjects: Vec<Subject>,
 ) -> Result<FileDescriptorSet, SchemaFetchError> {
     compile_pb(
-        (
-            primary_subject.name.clone(),
-            primary_subject.schema.content,
-        ),
+        (primary_subject.name.clone(), primary_subject.schema.content),
         dependency_subjects
             .into_iter()
             .map(|s| (s.name.clone(), s.schema.content)),

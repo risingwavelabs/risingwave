@@ -140,8 +140,7 @@ impl BackfillStage {
 
     fn debug_assert_consistent(&self) {
         if cfg!(debug_assertions) {
-            let all_splits: HashSet<_> =
-                self.splits.iter().map(|split| split.id()).collect();
+            let all_splits: HashSet<_> = self.splits.iter().map(|split| split.id()).collect();
             assert_eq!(
                 self.states.keys().cloned().collect::<HashSet<_>>(),
                 all_splits

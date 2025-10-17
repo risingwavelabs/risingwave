@@ -2289,8 +2289,7 @@ fn get_source_and_resolved_table_name(
     let db_name = &session.database();
     let (schema_name, resolved_table_name) =
         Binder::resolve_schema_qualified_name(db_name, &table_name)?;
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name)?;
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let (format_encode, source_name) =
         Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;
