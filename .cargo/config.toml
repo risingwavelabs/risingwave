@@ -33,6 +33,9 @@ rustflags = [
 [target.'cfg(all())']
 rustflags = ["--cfg", "tokio_unstable", "-Zhigher-ranked-assumptions"]
 
+[build]
+rustdocflags = ["-Zhigher-ranked-assumptions"]
+
 # We have large git dependencies. This can make cloning faster.
 # https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#git
 # Actually we also want to prevent submodule cloning completely
