@@ -623,8 +623,6 @@ impl<S: StateStore> SourceExecutor<S> {
             .source_split_change_count
             .with_guarded_label_values(&self.get_metric_labels());
 
-        let mut is_refreshing = false;
-
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -646,25 +644,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let epoch = barrier.epoch;
-
-                    // NOTE: We rely on CompleteBarrierTask, which is only for checkpoint barrier,
-                    // so we wait for a checkpoint barrier here.
-                    if barrier.is_checkpoint() && self.is_batch_source() && is_refreshing {
-                        // The executor can skip the list finish barrier step.
-                        // It directly reports the load finish barrier.
-                        let batch_split = self.stream_source_core.get_batch_split();
-                        if batch_split.finished() {
-                            tracing::info!(?epoch, "emitting load finish");
-                            self.barrier_manager.report_source_load_finished(
-                                epoch,
-                                self.actor_ctx.id,
-                                source_id.table_id(),
-                                source_id.table_id(),
-                            );
-                            is_refreshing = false;
-                        }
-                    }
-
                     let mut split_change = None;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
@@ -744,36 +723,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                     self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
-                                }
-                            }
-                            Mutation::RefreshStart {
-                                table_id: _,
-                                associated_source_id,
-                            } if *associated_source_id == source_id => {
-                                debug_assert!(self.is_batch_source());
-                                is_refreshing = true;
-
-                                // Similar to split_change, we need to update the split info, and rebuild source reader.
-
-                                // For batch sources, trigger re-enumeration of splits to detect file changes
-                                if let Ok(new_splits) = self.refresh_batch_splits() {
-                                    tracing::info!(
-                                        actor_id = self.actor_ctx.id,
-                                         %associated_source_id,
-                                        new_splits_count = new_splits.len(),
-                                        "RefreshStart triggered split re-enumeration"
-                                    );
-                                    split_change = Some((
-                                        &source_desc,
-                                        &mut stream,
-                                        ApplyMutationAfterBarrier::RefreshBatchSplits(new_splits),
-                                    ));
-                                } else {
-                                    tracing::warn!(
-                                        actor_id = self.actor_ctx.id,
-                                        %associated_source_id,
-                                        "Failed to refresh splits during RefreshStart"
-                                    );
                                 }
                             }
                             _ => {}

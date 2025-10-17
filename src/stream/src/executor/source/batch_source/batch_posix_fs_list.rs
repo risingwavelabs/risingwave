@@ -100,10 +100,11 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
         let mut files = Vec::new();
         Self::collect_files_recursive(root_path, root_path, &glob_pattern, &mut files).await?;
 
-        tracing::info!(
-            "BatchPosixFsListExecutor listed {} files from {}",
+        tracing::debug!(
+            "BatchPosixFsListExecutor listed {} files from {}: {:?}",
             files.len(),
-            root
+            root,
+            files
         );
 
         // Convert files to stream chunks with (utf8, jsonb) schema
@@ -274,13 +275,6 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                                                     futures::stream::iter(file_iter);
                                                 stream.replace_data_stream(new_file_stream);
                                                 list_finished = false;
-
-                                                tracing::info!(
-                                                    ?barrier.epoch,
-                                                    actor_id = self.actor_ctx.id,
-                                                    source_id = %self.stream_source_core.source_id,
-                                                    "Successfully re-listed files on RefreshStart"
-                                                );
                                             }
                                             Err(e) => {
                                                 tracing::error!(

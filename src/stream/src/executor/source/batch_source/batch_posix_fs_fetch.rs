@@ -306,33 +306,20 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                             list_finished = true;
                                         }
                                     }
-                                    Mutation::Throttle(actor_to_apply) => {
-                                        if let Some(new_rate_limit) =
-                                            actor_to_apply.get(&actor_ctx.id)
-                                            && *new_rate_limit != *rate_limit_rps
-                                        {
-                                            tracing::debug!(
-                                                "updating rate limit from {:?} to {:?}",
-                                                *rate_limit_rps,
-                                                *new_rate_limit
-                                            );
-                                            *rate_limit_rps = *new_rate_limit;
-                                            need_rebuild_reader = true;
-                                        }
-                                    }
                                     _ => (),
                                 }
                             }
 
                             let epoch = barrier.epoch;
 
-                            // Propagate the barrier.
-                            yield Message::Barrier(barrier);
-
                             // Report load finished when:
                             // 1. All files have been processed (files_in_progress == 0 and file_queue is empty)
                             // 2. ListFinish mutation has been received
-                            if files_in_progress == 0 && file_queue.is_empty() && list_finished {
+                            if files_in_progress == 0
+                                && file_queue.is_empty()
+                                && list_finished
+                                && barrier.is_checkpoint()
+                            {
                                 tracing::info!(
                                     ?epoch,
                                     actor_id = actor_ctx.id,
@@ -348,8 +335,10 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 // Reset the flag to avoid duplicate reports
                                 list_finished = false;
                             }
+                            // Propagate the barrier.
+                            yield Message::Barrier(barrier);
 
-                            // Rebuild reader when all current files are processed or rate limit changed
+                            // Rebuild reader when all current files are processed
                             if files_in_progress == 0 || need_rebuild_reader {
                                 let source_ctx = SourceContext::new(
                                     actor_ctx.id,
@@ -397,13 +386,6 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                         // Decrement counter after processing a file
                         files_in_progress -= 1;
 
-                        tracing::debug!(
-                            actor_id = actor_ctx.id,
-                            file_path = %file_path,
-                            files_remaining = files_in_progress,
-                            "Finished processing file"
-                        );
-
                         // Yield all chunks from the file
                         for chunk in chunks {
                             let chunk = prune_additional_cols(
@@ -411,6 +393,11 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 split_idx,
                                 offset_idx,
                                 &source_desc.columns,
+                            );
+                            tracing::info!(
+                                actor_id = actor_ctx.id,
+                                file_path = %file_path,
+                                "Yielding chunk {}", chunk.to_pretty()
                             );
                             yield Message::Chunk(chunk);
                         }
