@@ -12,42 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::io::BufRead;
-use std::ops::Bound;
 use std::path::Path;
 
 use either::Either;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::{JsonbVal, ScalarRef};
 use risingwave_connector::parser::{ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig};
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::OpendalPosixFs;
-use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     ConnectorProperties, SourceContext, SourceCtrlOpts, SourceMessage, SourceMeta, SplitMetaData,
 };
-use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 use tokio::fs;
 
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
-use crate::executor::source::{SourceStateTableHandler, StreamSourceCore};
+use crate::executor::source::StreamSourceCore;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
 
-const SPLIT_BATCH_SIZE: usize = 1000;
+/// Maximum number of files to process in a single batch
+const BATCH_SIZE: usize = 1000;
 
+/// Executor for fetching and processing files in batch mode for refreshable tables.
+///
+/// This executor receives file assignments from an upstream list executor,
+/// reads the files, parses their contents, and emits stream chunks.
+///
+/// Key characteristics:
+/// - Uses **ephemeral in-memory state** (no persistent state table)
+/// - State is cleared on recovery and `RefreshStart` mutations
+/// - Suitable for refreshable materialized views
 pub struct BatchPosixFsFetchExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     /// Core component for managing external streaming source state
     stream_source_core: Option<StreamSourceCore<S>>,
 
-    /// Upstream list executor that provides the list of files to read.
+    /// Upstream list executor that provides the list of files to read
     upstream: Option<Executor>,
 
     /// Optional rate limit in rows/s to control data ingestion speed
@@ -55,14 +61,18 @@ pub struct BatchPosixFsFetchExecutor<S: StateStore> {
 
     /// Local barrier manager for reporting load finished
     barrier_manager: LocalBarrierManager,
+
+    /// In-memory queue of file assignments to process (`file_path`, `split_json`).
+    /// This is ephemeral and cleared on recovery and `RefreshStart` mutations.
+    file_queue: VecDeque<(String, JsonbVal)>,
 }
 
-/// Fetched data from a file, along with file path for state tracking
+/// Fetched data from a file, along with file path for logging
 struct FileData {
     /// The actual data chunks read from the file
     chunks: Vec<StreamChunk>,
 
-    /// Path to the data file, used for deletion from state table
+    /// Path to the data file, used for logging
     file_path: String,
 }
 
@@ -80,54 +90,37 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             upstream: Some(upstream),
             rate_limit_rps,
             barrier_manager,
+            file_queue: VecDeque::new(),
         }
     }
 
-    /// Replace the current batch reader with a new one that reads files from the state table
-    async fn replace_with_new_batch_reader<const BIASED: bool>(
-        splits_on_fetch: &mut usize,
-        state_store_handler: &SourceStateTableHandler<S>,
-        _source_desc: &SourceDesc,
+    /// Pop files from the in-memory queue and create a batch reader for them.
+    /// Processes up to `BATCH_SIZE` files in parallel.
+    fn replace_with_new_batch_reader<const BIASED: bool>(
+        files_in_progress: &mut usize,
+        file_queue: &mut VecDeque<(String, JsonbVal)>,
         stream: &mut StreamReaderWithPause<BIASED, FileData>,
         properties: ConnectorProperties,
         parser_config: ParserConfig,
         source_ctx: SourceContext,
     ) -> StreamExecutorResult<()> {
-        let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
-        let state_table = state_store_handler.state_table();
+        // Pop up to BATCH_SIZE files from the queue to process
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
 
-        'vnodes: for vnode in state_table.vnodes().iter_vnodes() {
-            let table_iter = state_table
-                .iter_with_vnode(
-                    vnode,
-                    &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                    PrefetchOptions::prefetch_for_small_range_scan(),
-                )
-                .await?;
-            pin_mut!(table_iter);
-
-            while let Some(item) = table_iter.next().await {
-                let row = item?;
-                let split = match row.datum_at(1) {
-                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                        OpendalFsSplit::<OpendalPosixFs>::restore_from_json(
-                            jsonb_ref.to_owned_scalar(),
-                        )?
-                    }
-                    _ => unreachable!(),
-                };
+        for _ in 0..BATCH_SIZE {
+            if let Some((_file_path, split_json)) = file_queue.pop_front() {
+                let split = OpendalFsSplit::<OpendalPosixFs>::restore_from_json(split_json)?;
                 batch.push(split);
-
-                if batch.len() >= SPLIT_BATCH_SIZE {
-                    break 'vnodes;
-                }
+            } else {
+                break;
             }
         }
 
         if batch.is_empty() {
+            // No files to process, set stream to pending
             stream.replace_data_stream(stream::pending().boxed());
         } else {
-            *splits_on_fetch += batch.len();
+            *files_in_progress += batch.len();
             let batch_reader =
                 Self::build_batched_stream_reader(batch, properties, parser_config, source_ctx);
             stream.replace_data_stream(batch_reader.boxed());
@@ -168,7 +161,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             };
 
             if content.is_empty() {
-                // Empty file, just delete it from state
+                // Empty file, skip it
                 yield FileData {
                     chunks: vec![],
                     file_path,
@@ -178,11 +171,11 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
 
             let mut chunks = vec![];
 
-            // Process the file line by line (similar to BatchPosixFsReader)
+            // Process the file line by line
             for line in content.lines() {
                 let line =
                     line.map_err(|e| StreamExecutorError::connector_error(anyhow::Error::from(e)))?;
-                // Create a message for each line
+
                 let message = SourceMessage {
                     key: None,
                     payload: Some(line.as_bytes().to_vec()),
@@ -191,12 +184,13 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                     meta: SourceMeta::Empty,
                 };
 
-                // Parse the content
+                // Parser is created per line because it's consumed by parse_stream
                 let parser = ByteStreamSourceParserImpl::create(
                     parser_config.clone(),
                     Arc::new(source_ctx.clone()),
                 )
                 .await?;
+
                 let chunk_stream = parser
                     .parse_stream(Box::pin(futures::stream::once(async { Ok(vec![message]) })));
 
@@ -210,37 +204,14 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         }
     }
 
-    fn build_source_ctx(
-        &self,
-        source_desc: &SourceDesc,
-        source_id: TableId,
-        source_name: &str,
-    ) -> SourceContext {
-        SourceContext::new(
-            self.actor_ctx.id,
-            source_id,
-            self.actor_ctx.fragment_id,
-            source_name.to_owned(),
-            source_desc.metrics.clone(),
-            SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(),
-            },
-            source_desc.source.config.clone(),
-            None,
-        )
-    }
-
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut upstream = self.upstream.take().unwrap().execute();
         let barrier = expect_first_barrier(&mut upstream).await?;
-        let first_epoch = barrier.epoch;
         let is_pause_on_startup = barrier.is_pause_on_startup();
         yield Message::Barrier(barrier);
 
         let mut core = self.stream_source_core.take().unwrap();
-        let mut state_store_handler = core.split_state_store;
 
         // Build source description from the builder.
         let source_desc_builder = core.source_desc_builder.take().unwrap();
@@ -257,10 +228,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             specific: source_desc.source.parser_config.clone(),
         };
 
-        // Initialize state table.
-        state_store_handler.init_epoch(first_epoch).await?;
-
-        let mut splits_on_fetch: usize = 0;
+        let mut files_in_progress: usize = 0;
         let mut stream =
             StreamReaderWithPause::<true, FileData>::new(upstream, stream::pending().boxed());
 
@@ -268,29 +236,25 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             stream.pause_stream();
         }
 
-        // If it is a recovery startup, there can be file assignments in the state table.
-        // Hence we try building a reader first.
-        Self::replace_with_new_batch_reader(
-            &mut splits_on_fetch,
-            &state_store_handler,
-            &source_desc,
-            &mut stream,
-            properties.clone(),
-            parser_config.clone(),
-            self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
-        )
-        .await?;
+        // For refreshable tables, always start fresh on recovery - no state restoration
+        // File queue is empty by default (no restoration from persistent state)
 
         let mut list_finished = false;
+        let mut file_queue = self.file_queue;
+
+        // Extract fields we'll need later
+        let actor_ctx = self.actor_ctx.clone();
+        let barrier_manager = self.barrier_manager.clone();
+        let rate_limit_rps = &mut self.rate_limit_rps;
 
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
-                    splits_on_fetch = 0;
+                    files_in_progress = 0;
                 }
                 Ok(msg) => match msg {
-                    // This branch will be preferred.
+                    // Barrier messages from upstream
                     Either::Left(msg) => match msg {
                         Message::Barrier(barrier) => {
                             let mut need_rebuild_reader = false;
@@ -299,6 +263,29 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 match mutation {
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
+                                    Mutation::RefreshStart {
+                                        associated_source_id,
+                                        ..
+                                    } if associated_source_id.table_id()
+                                        == core.source_id.table_id() =>
+                                    {
+                                        tracing::info!(
+                                            ?barrier.epoch,
+                                            actor_id = actor_ctx.id,
+                                            source_id = %core.source_id,
+                                            queue_len = file_queue.len(),
+                                            files_in_progress,
+                                            "RefreshStart: clearing state and aborting workload"
+                                        );
+
+                                        // Clear all in-memory state
+                                        file_queue.clear();
+                                        files_in_progress = 0;
+                                        list_finished = false;
+
+                                        // Abort current file reader
+                                        stream.replace_data_stream(stream::pending().boxed());
+                                    }
                                     Mutation::ListFinish {
                                         associated_source_id,
                                     } => {
@@ -308,7 +295,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                         {
                                             tracing::info!(
                                                 ?barrier.epoch,
-                                                actor_id = self.actor_ctx.id,
+                                                actor_id = actor_ctx.id,
                                                 source_id = %core.source_id,
                                                 "received ListFinish mutation"
                                             );
@@ -317,15 +304,15 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     }
                                     Mutation::Throttle(actor_to_apply) => {
                                         if let Some(new_rate_limit) =
-                                            actor_to_apply.get(&self.actor_ctx.id)
-                                            && *new_rate_limit != self.rate_limit_rps
+                                            actor_to_apply.get(&actor_ctx.id)
+                                            && *new_rate_limit != *rate_limit_rps
                                         {
                                             tracing::debug!(
                                                 "updating rate limit from {:?} to {:?}",
-                                                self.rate_limit_rps,
+                                                *rate_limit_rps,
                                                 *new_rate_limit
                                             );
-                                            self.rate_limit_rps = *new_rate_limit;
+                                            *rate_limit_rps = *new_rate_limit;
                                             need_rebuild_reader = true;
                                         }
                                     }
@@ -334,37 +321,23 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                             }
 
                             let epoch = barrier.epoch;
-                            let post_commit = state_store_handler
-                                .commit_may_update_vnode_bitmap(epoch)
-                                .await?;
 
-                            let update_vnode_bitmap =
-                                barrier.as_update_vnode_bitmap(self.actor_ctx.id);
                             // Propagate the barrier.
                             yield Message::Barrier(barrier);
 
-                            if let Some((_, cache_may_stale)) =
-                                post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                            {
-                                // if cache_may_stale, we must rebuild the stream to adjust vnode mappings
-                                if cache_may_stale {
-                                    splits_on_fetch = 0;
-                                }
-                            }
-
                             // Report load finished when:
-                            // 1. All files have been read (splits_on_fetch == 0)
+                            // 1. All files have been processed (files_in_progress == 0 and file_queue is empty)
                             // 2. ListFinish mutation has been received
-                            if splits_on_fetch == 0 && list_finished {
+                            if files_in_progress == 0 && file_queue.is_empty() && list_finished {
                                 tracing::info!(
                                     ?epoch,
-                                    actor_id = self.actor_ctx.id,
+                                    actor_id = actor_ctx.id,
                                     source_id = %core.source_id,
-                                    "reporting source load finished"
+                                    "Reporting source load finished"
                                 );
-                                self.barrier_manager.report_source_load_finished(
+                                barrier_manager.report_source_load_finished(
                                     epoch,
-                                    self.actor_ctx.id,
+                                    actor_ctx.id,
                                     core.source_id.table_id(),
                                     core.source_id.table_id(),
                                 );
@@ -372,49 +345,62 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 list_finished = false;
                             }
 
-                            if splits_on_fetch == 0 || need_rebuild_reader {
+                            // Rebuild reader when all current files are processed or rate limit changed
+                            if files_in_progress == 0 || need_rebuild_reader {
+                                let source_ctx = SourceContext::new(
+                                    actor_ctx.id,
+                                    core.source_id,
+                                    actor_ctx.fragment_id,
+                                    core.source_name.clone(),
+                                    source_desc.metrics.clone(),
+                                    SourceCtrlOpts {
+                                        chunk_size: limited_chunk_size(*rate_limit_rps),
+                                        split_txn: rate_limit_rps.is_some(),
+                                    },
+                                    source_desc.source.config.clone(),
+                                    None,
+                                );
+
                                 Self::replace_with_new_batch_reader(
-                                    &mut splits_on_fetch,
-                                    &state_store_handler,
-                                    &source_desc,
+                                    &mut files_in_progress,
+                                    &mut file_queue,
                                     &mut stream,
                                     properties.clone(),
                                     parser_config.clone(),
-                                    self.build_source_ctx(
-                                        &source_desc,
-                                        core.source_id,
-                                        &core.source_name,
-                                    ),
-                                )
-                                .await?;
+                                    source_ctx,
+                                )?;
                             }
                         }
                         // Receiving file assignments from upstream list executor,
-                        // store into state table.
+                        // store into in-memory queue (no persistent state).
                         Message::Chunk(chunk) => {
-                            let file_assignments: Vec<(String, JsonbVal)> = chunk
-                                .data_chunk()
-                                .rows()
-                                .map(|row| {
-                                    let file_name = row.datum_at(0).unwrap().into_utf8();
-                                    let split = row.datum_at(1).unwrap().into_jsonb();
-                                    (file_name.to_owned(), split.to_owned_scalar())
-                                })
-                                .collect();
-                            state_store_handler
-                                .set_states_json(file_assignments)
-                                .await?;
-                            state_store_handler.try_flush().await?;
+                            for row in chunk.data_chunk().rows() {
+                                let file_name = row.datum_at(0).unwrap().into_utf8().to_owned();
+                                let split = row.datum_at(1).unwrap().into_jsonb().to_owned_scalar();
+                                file_queue.push_back((file_name, split));
+                            }
+
+                            tracing::debug!(
+                                actor_id = actor_ctx.id,
+                                queue_len = file_queue.len(),
+                                "Added file assignments to queue"
+                            );
                         }
                         Message::Watermark(_) => unreachable!(),
                     },
                     // Data from file reader
                     Either::Right(FileData { chunks, file_path }) => {
-                        // Delete the file from state table after reading
-                        splits_on_fetch -= 1;
-                        state_store_handler.delete(&file_path).await?;
+                        // Decrement counter after processing a file
+                        files_in_progress -= 1;
 
-                        // Yield all chunks
+                        tracing::debug!(
+                            actor_id = actor_ctx.id,
+                            file_path = %file_path,
+                            files_remaining = files_in_progress,
+                            "Finished processing file"
+                        );
+
+                        // Yield all chunks from the file
                         for chunk in chunks {
                             yield Message::Chunk(chunk);
                         }
