@@ -38,4 +38,3 @@ enum TableEnum {
     Table,
     CdcSchemaChangeFailurePolicy,
 }
-

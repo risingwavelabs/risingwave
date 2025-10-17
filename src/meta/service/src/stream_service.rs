@@ -613,7 +613,7 @@ impl StreamManagerService for StreamServiceImpl {
                                         e
                                     ))
                                 })?;
-                            
+
                             // Then, update the in-memory hashmap and propagate to CN
                             self.stream_manager
                                 .source_manager

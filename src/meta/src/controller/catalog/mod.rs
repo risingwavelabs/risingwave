@@ -756,15 +756,17 @@ impl CatalogController {
         policy: &risingwave_connector::source::cdc::SchemaChangeFailurePolicy,
     ) -> MetaResult<()> {
         use risingwave_meta_model::table::SchemaChangeFailurePolicy as ModelPolicy;
-        
+
         let policy_value = match policy {
-            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Block => ModelPolicy::Block,
+            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Block => {
+                ModelPolicy::Block
+            }
             risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Skip => ModelPolicy::Skip,
         };
-        
+
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        
+
         table::ActiveModel {
             table_id: Set(table_id),
             cdc_schema_change_failure_policy: Set(Some(policy_value)),
@@ -772,13 +774,13 @@ impl CatalogController {
         }
         .update(&txn)
         .await?;
-        
+
         txn.commit().await?;
-        
+
         Ok(())
     }
 
-    /// Update source with_properties field by adding/updating a key-value pair
+    /// Update source `with_properties` field by adding/updating a key-value pair
     pub async fn update_source_with_properties(
         &self,
         source_id: SourceId,
@@ -787,17 +789,17 @@ impl CatalogController {
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        
+
         // Get current source
         let source = Source::find_by_id(source_id)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
-        
+
         // Update with_properties
         let mut props_map = source.with_properties.0.clone();
-        props_map.insert(key.to_string(), value.to_string());
-        
+        props_map.insert(key.to_owned(), value.to_owned());
+
         source::ActiveModel {
             source_id: Set(source_id),
             with_properties: Set(Property(props_map)),
@@ -805,13 +807,13 @@ impl CatalogController {
         }
         .update(&txn)
         .await?;
-        
+
         txn.commit().await?;
-        
+
         Ok(())
     }
-    
-    /// Update fragments' StreamNode.with_properties for a source
+
+    /// Update fragments' `StreamNode.with_properties` for a source
     /// This is used to ensure CN recovery can read the latest policies from fragments
     pub async fn update_source_props_fragments_by_source_id(
         &self,
@@ -819,13 +821,14 @@ impl CatalogController {
         new_props: std::collections::BTreeMap<String, String>,
         is_shared_source: bool,
     ) -> MetaResult<()> {
-        use risingwave_pb::stream_plan::stream_node::NodeBody as PbNodeBody;
         use risingwave_common::catalog::FragmentTypeFlag;
+        use risingwave_pb::stream_plan::stream_node::NodeBody as PbNodeBody;
+
         use crate::controller::streaming_job::update_connector_props_fragments;
-        
+
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        
+
         update_connector_props_fragments(
             &txn,
             vec![source_id],
@@ -841,7 +844,7 @@ impl CatalogController {
             is_shared_source,
         )
         .await?;
-        
+
         txn.commit().await?;
         Ok(())
     }

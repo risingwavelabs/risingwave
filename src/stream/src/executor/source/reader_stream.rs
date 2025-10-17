@@ -97,7 +97,7 @@ impl StreamReaderBuilder {
                                     .first()
                                     .map(|tc| tc.cdc_table_id.as_str())
                                     .unwrap_or("");
-                                    
+
                                 tracing::info!(
                                     target: "auto_schema_change",
                                     cdc_table_id = cdc_table_id,
@@ -105,7 +105,7 @@ impl StreamReaderBuilder {
                                     source_level_policy = ?source_level_policy,
                                     "CN Reader: Looking up schema change failure policy for table"
                                 );
-                                
+
                                 // Use table-level policy if available, otherwise fallback to source-level
                                 let policy = table_policies
                                     .get(cdc_table_id)

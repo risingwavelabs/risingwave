@@ -69,14 +69,16 @@ pub async fn handle_alter_table_connector_props(
             is_cdc_policy_change
         );
 
-        (associate_source_id.table_id, table.cdc_table_id.clone(), table.id)
+        (
+            associate_source_id.table_id,
+            table.cdc_table_id.clone(),
+            table.id,
+        )
     };
 
     // If this is a CDC table policy change, add special markers
     let mut final_alter_props = alter_props.clone();
-    if is_cdc_policy_change
-        && let Some(cdc_table_id) = cdc_table_id
-    {
+    if is_cdc_policy_change && let Some(cdc_table_id) = cdc_table_id {
         // Add special markers for meta to recognize this is a table-level policy update
         final_alter_props.push(risingwave_sqlparser::ast::SqlOption {
             name: risingwave_sqlparser::ast::ObjectName(vec![
