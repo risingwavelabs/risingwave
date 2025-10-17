@@ -303,6 +303,7 @@ impl CatalogController {
             state_table_ids,
             upstream_fragment_id: Default::default(),
             vnode_count: vnode_count as _,
+            parallelism: None,
         };
 
         Ok((fragment, actors))
