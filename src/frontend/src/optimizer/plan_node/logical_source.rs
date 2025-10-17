@@ -193,6 +193,7 @@ impl LogicalSource {
 
     /// `StreamSource` (list) -> shuffle -> (optional) `StreamDedup`
     fn create_list_plan(core: generic::Source, dedup: bool) -> Result<StreamPlanRef> {
+        let downstream_columns = core.column_catalog.clone();
         let logical_source = generic::Source::file_list_node(core);
         let mut list_plan: StreamPlanRef = StreamSource {
             base: PlanBase::new_stream_with_core(
@@ -204,6 +205,7 @@ impl LogicalSource {
                 MonotonicityMap::new(),
             ),
             core: logical_source,
+            downstream_columns: Some(downstream_columns),
         }
         .into();
         list_plan = RequiredDist::shard_by_key(list_plan.schema().len(), &[0])
