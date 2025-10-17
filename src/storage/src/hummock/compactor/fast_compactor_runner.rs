@@ -452,7 +452,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             left,
             right,
             task_id: task.task_id,
-            metrics: context.compactor_metrics.clone(),
+            metrics: context.compactor_metrics,
             compression_algorithm,
         }
     }

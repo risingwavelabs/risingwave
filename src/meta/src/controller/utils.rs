@@ -150,7 +150,7 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
         .from(cte_alias.clone())
         .inner_join(
             Object,
-            Expr::col((cte_alias, cte_return_alias.clone())).equals(object::Column::Oid),
+            Expr::col((cte_alias, cte_return_alias)).equals(object::Column::Oid),
         )
         .order_by(object::Column::Oid, Order::Desc)
         .to_owned()
@@ -225,7 +225,7 @@ pub fn construct_sink_cycle_check_query(
         .inner_join(
             cte_alias.clone(),
             Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy)).eq(Expr::col((
-                depend_alias.clone(),
+                depend_alias,
                 object_dependency::Column::Oid,
             ))),
         )
@@ -250,7 +250,7 @@ pub fn construct_sink_cycle_check_query(
         .expr(Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy)).count())
         .from(cte_alias.clone())
         .and_where(
-            Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy))
+            Expr::col((cte_alias, object_dependency::Column::UsedBy))
                 .is_in(dependent_objects),
         )
         .to_owned()
@@ -928,7 +928,7 @@ pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery 
 
     SelectStatement::new()
         .columns([cte_return_privilege_alias, cte_return_user_alias])
-        .from(cte_alias.clone())
+        .from(cte_alias)
         .to_owned()
         .with(
             WithClause::new()
@@ -1359,7 +1359,7 @@ pub fn compose_dispatchers(
         DispatcherType::Hash => {
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
-                dist_key_indices: dist_key_indices.clone(),
+                dist_key_indices,
                 output_mapping: output_mapping.into(),
                 hash_mapping: Some(
                     ActorMapping::from_bitmaps(
@@ -1391,7 +1391,7 @@ pub fn compose_dispatchers(
         DispatcherType::Broadcast | DispatcherType::Simple => {
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
-                dist_key_indices: dist_key_indices.clone(),
+                dist_key_indices,
                 output_mapping: output_mapping.into(),
                 hash_mapping: None,
                 dispatcher_id: target_fragment_id as _,

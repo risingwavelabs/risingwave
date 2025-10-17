@@ -330,6 +330,7 @@ too_long_first_doc_paragraph = "allow"
 # TODO: remove later when EnumAsInner, bitfield and EnumTryAs does not fire this warning
 double_parens = "allow"
 str_to_string = "warn"
+redundant_clone = "warn"
 implicit_clone = "warn"
 
 # TODO: this makes sense, but it's too noisy for now (2025-03-10)

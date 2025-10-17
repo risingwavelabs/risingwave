@@ -627,7 +627,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
         let metrics = metrics.new_temporal_join_metrics(table.table_id(), ctx.id, ctx.fragment_id);
 
         Self {
-            ctx: ctx.clone(),
+            ctx,
             info,
             left,
             right,

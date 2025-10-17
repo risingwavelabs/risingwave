@@ -126,7 +126,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                         agg_call.args.clone(),
                         false, // we don't support `IGNORE NULLS` for these functions now
                         partition_by.clone(),
-                        agg_call.order_by.clone(),
+                        agg_call.order_by,
                         frame.clone(),
                     )?,
                 ))

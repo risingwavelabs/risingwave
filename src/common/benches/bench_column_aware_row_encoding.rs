@@ -173,7 +173,7 @@ fn bench_column_aware_encoding_struct(c: &mut Criterion) {
             [outer_struct].into(),
             std::iter::empty(),
         );
-        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value))]);
 
         (serializer, deserializer, row)
     };
@@ -238,7 +238,7 @@ fn bench_column_aware_encoding_composite(c: &mut Criterion) {
             [outer_struct].into(),
             std::iter::empty(),
         );
-        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value))]);
 
         (serializer, deserializer, row)
     };

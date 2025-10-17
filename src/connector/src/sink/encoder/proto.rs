@@ -580,8 +580,7 @@ mod tests {
             },
         ]);
 
-        let encoder =
-            ProtoEncoder::new(schema, None, descriptor.clone(), ProtoHeader::None).unwrap();
+        let encoder = ProtoEncoder::new(schema, None, descriptor, ProtoHeader::None).unwrap();
         let m = encoder.encode(row).unwrap();
         expect_test::expect![[r#"
             field: FieldDescriptor {

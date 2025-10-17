@@ -336,9 +336,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
 
         // If pk is contained in join key.
         let pk_contained_in_jk_l =
-            is_subset(state_pk_indices_l.clone(), state_join_key_indices_l.clone());
+            is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
         let pk_contained_in_jk_r =
-            is_subset(state_pk_indices_r.clone(), state_join_key_indices_r.clone());
+            is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;

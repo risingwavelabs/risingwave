@@ -66,7 +66,7 @@ impl CursorDataChunkStream {
         formats: &Vec<Format>,
         session: Arc<SessionImpl>,
     ) {
-        let columns_type = fields.iter().map(|f| f.data_type().clone()).collect();
+        let columns_type = fields.iter().map(|f| f.data_type()).collect();
         match self {
             CursorDataChunkStream::LocalDataChunk(data_chunk) => {
                 let data_chunk = mem::take(data_chunk).unwrap();
@@ -129,7 +129,7 @@ impl Cursor {
 
     pub fn get_fields(&mut self) -> Vec<Field> {
         match self {
-            Cursor::Subscription(cursor) => cursor.fields_manager.get_output_fields().clone(),
+            Cursor::Subscription(cursor) => cursor.fields_manager.get_output_fields(),
             Cursor::Query(cursor) => cursor.fields.clone(),
         }
     }
@@ -762,7 +762,7 @@ impl SubscriptionCursor {
     ) -> Result<BatchQueryPlanResult> {
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
-        let context = OptimizerContext::from_handler_args(handler_args.clone());
+        let context = OptimizerContext::from_handler_args(handler_args);
         let version_id = {
             let version = session.env.hummock_snapshot_manager.acquire();
             let version = version.version();
@@ -988,7 +988,7 @@ impl SubscriptionCursor {
             out_fields,
             out_names,
         );
-        let schema = plan_root.schema().clone();
+        let schema = plan_root.schema();
         let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
             QueryMode::Auto | QueryMode::Local => {
                 (plan_root.gen_batch_local_plan()?, QueryMode::Local)

@@ -720,7 +720,7 @@ impl StageRunner {
 
     async fn schedule_tasks_for_all(&mut self, shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
         let expr_context = ExprContext {
-            time_zone: self.ctx.session().config().timezone().clone(),
+            time_zone: self.ctx.session().config().timezone(),
             strict_mode: self.ctx.session().config().batch_expr_strict_mode(),
         };
         // If root, we execute it locally.

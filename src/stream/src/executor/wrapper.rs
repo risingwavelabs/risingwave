@@ -91,7 +91,7 @@ impl WrapperExecutor {
             info.clone(),
             enable_explain_analyze_stats,
             stream,
-            actor_ctx.clone(),
+            actor_ctx,
         );
 
         if cfg!(debug_assertions) {

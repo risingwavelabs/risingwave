@@ -1094,7 +1094,7 @@ impl LocalBarrierWorker {
         };
 
         let actor_manager = Arc::new(StreamActorManager {
-            env: env.clone(),
+            env,
             streaming_metrics,
             watermark_epoch,
             await_tree_reg,

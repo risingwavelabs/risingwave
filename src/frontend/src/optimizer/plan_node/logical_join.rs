@@ -987,7 +987,7 @@ impl LogicalJoin {
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
 
-            let mut core = core.clone();
+            let mut core = core;
             core.output_indices = default_indices.clone();
             // Temporarily remove output indices.
             let eq_cond = EqJoinPredicate::new(

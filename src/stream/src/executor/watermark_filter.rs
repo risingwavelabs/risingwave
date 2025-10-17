@@ -497,7 +497,7 @@ mod tests {
         );
         let eval_error_report = ActorEvalErrorReport {
             actor_context: ctx.clone(),
-            identity: info.identity.clone().into(),
+            identity: info.identity.into(),
         };
 
         (

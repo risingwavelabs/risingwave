@@ -436,6 +436,6 @@ pub fn explain_backfill_order_in_dot_format(
 ) -> Result<String> {
     let order = plan_backfill_order(session, backfill_order_strategy, plan)?;
     let dot_formatted_backfill_order =
-        display::print_backfill_order_in_dot_format(session, order.clone())?;
+        display::print_backfill_order_in_dot_format(session, order)?;
     Ok(dot_formatted_backfill_order)
 }

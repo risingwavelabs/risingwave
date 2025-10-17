@@ -181,12 +181,12 @@ impl LogicalSource {
         let mut plan;
         if core.is_new_fs_connector() {
             plan = Self::create_list_plan(core.clone(), true)?;
-            plan = StreamFsFetch::new(plan, core.clone()).into();
+            plan = StreamFsFetch::new(plan, core).into();
         } else if core.is_iceberg_connector() {
             plan = Self::create_list_plan(core.clone(), false)?;
-            plan = StreamFsFetch::new(plan, core.clone()).into();
+            plan = StreamFsFetch::new(plan, core).into();
         } else {
-            plan = StreamSource::new(core.clone()).into()
+            plan = StreamSource::new(core).into()
         }
         Ok(plan)
     }

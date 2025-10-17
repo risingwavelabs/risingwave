@@ -235,7 +235,7 @@ impl StreamCdcTableScan {
             stream_key: vec![], // not used
             stream_kind: PbStreamKind::AppendOnly as _,
             identity: "Exchange".to_owned(),
-            fields: cdc_source_schema.clone(),
+            fields: cdc_source_schema,
             node_body: Some(PbNodeBody::Exchange(Box::new(ExchangeNode {
                 strategy: Some(strategy),
             }))),

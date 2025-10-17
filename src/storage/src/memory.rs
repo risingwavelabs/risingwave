@@ -1266,7 +1266,7 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
                         .map(move |vnode| {
                             let (start, end) =
                                 prefixed_range_with_vnode(inner_range.clone(), vnode);
-                            (start.map(|key| key.0.clone()), end.map(|key| key.0.clone()))
+                            (start.map(|key| key.0), end.map(|key| key.0))
                         })
                 })
                 .collect_vec();

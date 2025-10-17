@@ -196,18 +196,18 @@ impl TableFunction {
                             ),
                         };
                         new_s3_operator(
-                            s3_region.clone(),
+                            s3_region,
                             eval_args[3].clone(),
                             eval_args[4].clone(),
-                            bucket.clone(),
-                            s3_endpoint.clone(),
+                            bucket,
+                            s3_endpoint,
                         )?
                     }
                     FileScanBackend::Gcs => {
                         let (bucket, _) =
                             extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
 
-                        new_gcs_operator(eval_args[2].clone(), bucket.clone())?
+                        new_gcs_operator(eval_args[2].clone(), bucket)?
                     }
                     FileScanBackend::Azblob => {
                         let (bucket, _) =
@@ -217,7 +217,7 @@ impl TableFunction {
                             eval_args[2].clone(),
                             eval_args[3].clone(),
                             eval_args[4].clone(),
-                            bucket.clone(),
+                            bucket,
                         )?
                     }
                 };

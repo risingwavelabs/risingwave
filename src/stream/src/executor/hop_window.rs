@@ -256,7 +256,7 @@ mod tests {
                 .replace('^', "2022-02-02T"),
         );
         let input =
-            MockSource::with_chunks(vec![chunk]).into_executor(schema.clone(), pk_indices.clone());
+            MockSource::with_chunks(vec![chunk]).into_executor(schema, pk_indices);
         let window_slide = Interval::from_minutes(15);
         let window_size = Interval::from_minutes(30);
         let window_offset = Interval::from_minutes(0);

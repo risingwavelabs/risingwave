@@ -1421,7 +1421,7 @@ mod tests {
 
         let cond = Condition::with_expr(other.clone())
             .and(Condition::with_expr(right.clone()))
-            .and(Condition::with_expr(left.clone()));
+            .and(Condition::with_expr(left));
 
         let res = cond.split(left_col_num, right_col_num);
 

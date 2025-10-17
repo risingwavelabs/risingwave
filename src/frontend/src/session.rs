@@ -261,7 +261,7 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             frontend_client_pool,
-            sessions_map: sessions_map.clone(),
+            sessions_map,
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
@@ -861,7 +861,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
+            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics)),
             temporary_source_manager: Default::default(),
         }
     }

@@ -335,7 +335,7 @@ impl HummockEventHandler {
         };
 
         let uploader = HummockUploader::new(
-            state_store_metrics.clone(),
+            state_store_metrics,
             recent_versions.latest_version().clone(),
             spawn_upload_task,
             buffer_tracker,
@@ -868,7 +868,7 @@ impl SyncedData {
             SyncResult {
                 sync_size,
                 uncommitted_ssts,
-                table_watermarks: table_watermarks.clone(),
+                table_watermarks,
                 old_value_ssts,
                 vector_index_adds,
             }

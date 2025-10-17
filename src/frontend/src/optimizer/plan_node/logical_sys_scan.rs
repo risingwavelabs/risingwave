@@ -94,7 +94,7 @@ impl LogicalSysScan {
         generic::SysScan::new_inner(
             output_col_idx,
             self.table().clone(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.table_cardinality(),
         )
         .into()

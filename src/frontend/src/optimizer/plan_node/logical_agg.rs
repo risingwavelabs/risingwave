@@ -84,7 +84,7 @@ impl LogicalAgg {
             approx_percentile_col_mapping,
             approx_percentile,
             core,
-        ) = self.prepare_approx_percentile(stream_input.clone())?;
+        ) = self.prepare_approx_percentile(stream_input)?;
 
         if core.agg_calls.is_empty() {
             if let Some(approx_percentile) = approx_percentile {
@@ -349,7 +349,7 @@ impl LogicalAgg {
             || approx_percentile_agg_calls.len() >= 2;
         let input = if needs_row_merge {
             // If there's row merge, we need to share the input.
-            StreamShare::new_from_input(stream_input.clone()).into()
+            StreamShare::new_from_input(stream_input).into()
         } else {
             stream_input
         };
@@ -641,7 +641,7 @@ impl LogicalAggBuilder {
                     agg_call.distinct,
                     agg_call.order_by.clone(),
                     agg_call.filter.clone(),
-                    agg_call.direct_args.clone(),
+                    agg_call.direct_args,
                 )?)?);
 
                 Ok(FunctionCall::new(ExprType::Divide, Vec::from([sum, count]))?.into())

@@ -106,7 +106,7 @@ impl TableFunctionToInternalGetChannelDeltaStatsRule {
 
         // Create a LogicalGetChannelDeltaStats node with the extracted parameters
         let plan = LogicalGetChannelDeltaStats::new(
-            ctx.clone(),
+            ctx,
             Schema::new(fields),
             at_time,
             time_offset,

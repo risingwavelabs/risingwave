@@ -1212,7 +1212,7 @@ mod tests {
                     Preceding(2i64),
                 ),
                 create_range_frame(
-                    order_data_type.clone(),
+                    order_data_type,
                     order_type,
                     Preceding(1i64),
                     Following(2i64),
@@ -1254,7 +1254,7 @@ mod tests {
             let order_type = OrderType::descending_nulls_first();
 
             let range_frames = [create_range_frame(
-                order_data_type.clone(),
+                order_data_type,
                 order_type,
                 Preceding(Interval::from_month_day_usec(1, 2, 3 * 1000 * 1000)),
                 Following(Interval::from_month_day_usec(0, 1, 0)),
@@ -1323,7 +1323,7 @@ mod tests {
         ) {
             let range_frames = if matches!(order_data_type, DataType::Int32) {
                 [create_range_frame(
-                    order_data_type.clone(),
+                    order_data_type,
                     order_type,
                     Preceding(0), // this doesn't matter here
                     Following(0), // this doesn't matter here
@@ -1395,7 +1395,7 @@ mod tests {
             );
 
             assert_find_left_right_result_eq(
-                order_data_type.clone(),
+                order_data_type,
                 order_type,
                 part_with_delta,
                 ScalarImpl::from(6),
@@ -1435,7 +1435,7 @@ mod tests {
             );
 
             assert_find_left_right_result_eq(
-                order_data_type.clone(),
+                order_data_type,
                 order_type,
                 part_with_delta,
                 ScalarImpl::from(3),
@@ -1481,7 +1481,7 @@ mod tests {
             );
 
             assert_find_left_right_result_eq(
-                order_data_type.clone(),
+                order_data_type,
                 order_type,
                 part_with_delta,
                 ScalarImpl::from(3),
@@ -1526,7 +1526,7 @@ mod tests {
             );
 
             assert_find_left_right_result_eq(
-                order_data_type.clone(),
+                order_data_type,
                 order_type,
                 part_with_delta,
                 ScalarImpl::from(5),
@@ -1571,7 +1571,7 @@ mod tests {
             );
 
             assert_find_left_right_result_eq(
-                order_data_type.clone(),
+                order_data_type,
                 order_type,
                 part_with_delta,
                 ScalarImpl::from(5),

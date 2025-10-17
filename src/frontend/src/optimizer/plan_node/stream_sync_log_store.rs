@@ -38,7 +38,7 @@ pub struct StreamSyncLogStore {
 impl StreamSyncLogStore {
     pub fn new(input: PlanRef) -> Self {
         let base = PlanBase::new_stream(
-            input.ctx().clone(),
+            input.ctx(),
             input.schema().clone(),
             input.stream_key().map(|keys| keys.to_vec()),
             input.functional_dependency().clone(),

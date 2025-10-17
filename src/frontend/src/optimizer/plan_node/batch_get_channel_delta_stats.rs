@@ -87,7 +87,7 @@ impl Distill for BatchGetChannelDeltaStats {
 impl ToDistributedBatch for BatchGetChannelDeltaStats {
     fn to_distributed(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.base.schema().clone(),
             self.at_time,
             self.time_offset,
@@ -111,7 +111,7 @@ impl ToBatchPb for BatchGetChannelDeltaStats {
 impl ToLocalBatch for BatchGetChannelDeltaStats {
     fn to_local(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.base.schema().clone(),
             self.at_time,
             self.time_offset,

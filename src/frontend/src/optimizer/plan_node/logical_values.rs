@@ -152,7 +152,7 @@ impl ColPrunable for LogicalValues {
             .iter()
             .map(|i| self.schema().fields[*i].clone())
             .collect();
-        Self::new(rows, Schema { fields }, self.base.ctx().clone()).into()
+        Self::new(rows, Schema { fields }, self.base.ctx()).into()
     }
 }
 

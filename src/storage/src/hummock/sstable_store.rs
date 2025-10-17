@@ -801,7 +801,7 @@ impl SstableStore {
     ) -> HummockResult<BlockDataStream> {
         fail_point!("get_stream_err");
         let data_path = self.get_sst_data_path(object_id);
-        let store = self.store().clone();
+        let store = self.store();
         let block_meta = &metas[0];
         let start_pos = block_meta.offset as usize;
         let end_pos = metas.iter().map(|meta| meta.len as usize).sum::<usize>() + start_pos;

@@ -392,7 +392,7 @@ impl StreamTableScan {
                 PbStreamNode {
                     node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
-                    fields: upstream_schema.clone(),
+                    fields: upstream_schema,
                     stream_key: vec![], // not used
                     ..Default::default()
                 },

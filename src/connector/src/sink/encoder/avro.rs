@@ -1044,7 +1044,7 @@ mod tests {
         let input_json = JsonbVal::from_str(complex_json).unwrap();
         let result = on_field(
             &DataType::Jsonb,
-            Some(ScalarImpl::Jsonb(input_json.clone())).to_datum_ref(),
+            Some(ScalarImpl::Jsonb(input_json)).to_datum_ref(),
             &AvroSchema::parse_str(r#""string""#).unwrap(),
             &NamesRef::new(&AvroSchema::parse_str(r#""string""#).unwrap()).unwrap(),
         )
@@ -1156,7 +1156,7 @@ mod tests {
             Field::with_name(DataType::Int32, "req"),
             Field::with_name(DataType::Varchar, "extra"),
         ]);
-        let Err(err) = AvroEncoder::new(schema, None, avro_schema.clone(), header) else {
+        let Err(err) = AvroEncoder::new(schema, None, avro_schema, header) else {
             panic!()
         };
         assert_eq!(
@@ -1293,7 +1293,7 @@ mod tests {
 
         test_ok(
             t,
-            datum.clone(),
+            datum,
             right,
             Value::Union(0, Value::TimestampMillis(1).into()),
         );

@@ -408,7 +408,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     {
                         let _prev_vnode_bitmap = self
                             .upstream_table
-                            .update_vnode_bitmap(new_vnode_bitmap.clone());
+                            .update_vnode_bitmap(new_vnode_bitmap);
                         backfill_state
                             .latest_progress()
                             .for_each(|(vnode, progress)| {

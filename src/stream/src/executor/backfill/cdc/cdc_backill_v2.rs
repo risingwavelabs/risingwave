@@ -892,7 +892,7 @@ mod tests {
             OwnedRow::new(vec![Some(ScalarImpl::Int64(7))]),
             OwnedRow::new(vec![None]),
         ));
-        let c = filter_stream_chunk(chunk.clone(), &bound, 1);
+        let c = filter_stream_chunk(chunk, &bound, 1);
         assert_eq!(
             c.unwrap().compact(),
             StreamChunk::from_pretty(
