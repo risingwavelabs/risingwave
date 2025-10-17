@@ -45,7 +45,7 @@ explain(verbose) select * from query_view;
 ----
 <slt:ignore>BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
   └─BatchProjectSet { select_list: [Unnest($1)] }
-    └─BatchVectorSearch { schema: [query_vector:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector }
+    └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, lookup_output: [("text", Varchar), ("items.id", Int32)], include_distance: true }
       └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
 
 
@@ -76,7 +76,7 @@ explain(verbose) select * from query_view;
 <slt:ignore>└─BatchLookupJoin { type: Inner, predicate: $expr2 IS NOT DISTINCT FROM items.id, output: [$expr2, items.extra, $expr1, $expr3], lookup table: items }
 <slt:ignore>  └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
 <slt:ignore>    └─BatchProjectSet { select_list: [Unnest($1)] }
-<slt:ignore>      └─BatchVectorSearch { schema: [query_vector:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector }
+<slt:ignore>      └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, lookup_output: [("text", Varchar), ("items.id", Int32)], include_distance: true }
 <slt:ignore>        └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
 
 query T
@@ -110,7 +110,7 @@ explain(verbose) select * from query_view;
 ----
 <slt:ignore>BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
   └─BatchProjectSet { select_list: [Unnest($1)] }
-    └─BatchVectorSearch { schema: [query_vector:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector }
+    └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, lookup_output: [("text", Varchar), ("items.id", Int32)], include_distance: true }
       └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
 
 
@@ -141,7 +141,7 @@ explain(verbose) select * from query_view;
 <slt:ignore>└─BatchLookupJoin { type: Inner, predicate: $expr2 IS NOT DISTINCT FROM items.id, output: [$expr2, items.extra, $expr1, $expr3], lookup table: items }
 <slt:ignore>  └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
 <slt:ignore>    └─BatchProjectSet { select_list: [Unnest($1)] }
-<slt:ignore>      └─BatchVectorSearch { schema: [query_vector:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector }
+<slt:ignore>      └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, lookup_output: [("text", Varchar), ("items.id", Int32)], include_distance: true }
 <slt:ignore>        └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
 
 query T
@@ -194,7 +194,7 @@ explain(verbose) select * from query_view;
 ----
 <slt:ignore>BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
 <slt:ignore>└─BatchProjectSet { select_list: [Unnest($1)] }
-<slt:ignore>  └─BatchVectorSearch { schema: [query_vector:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, hnsw_ef_search: 40 }
+<slt:ignore>  └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, lookup_output: [("text", Varchar), ("items.id", Int32)], include_distance: true, hnsw_ef_search: 40 }
 <slt:ignore>    └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }<slt:ignore>
 
 statement ok
@@ -206,7 +206,7 @@ explain(verbose) select * from query_view;
 ----
 <slt:ignore>BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
 <slt:ignore>└─BatchProjectSet { select_list: [Unnest($1)] }
-<slt:ignore>  └─BatchVectorSearch { schema: [query_vector:Vector(3), vector_info:List(Struct(StructType { fields: [("text", Varchar), ("items.id", Int32), ("__distance", Float64)] }))], top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, hnsw_ef_search: 20 }
+<slt:ignore>  └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, lookup_output: [("text", Varchar), ("items.id", Int32)], include_distance: true, hnsw_ef_search: 20 }
 <slt:ignore>    └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
 
 query T
