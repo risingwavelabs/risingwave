@@ -12,17 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cast_regclass;
-mod col_description;
-pub mod context;
-mod has_privilege;
-mod pg_get_indexdef;
-mod pg_get_userbyid;
-mod pg_get_viewdef;
-mod pg_index_column_has_property;
-mod pg_indexes_size;
-mod pg_relation_size;
-mod pg_table_is_visible;
-mod rw_cluster_id;
-mod rw_epoch_to_ts;
-mod rw_recovery_status;
+use std::fmt::Write;
+use std::sync::Arc;
+
+use risingwave_expr::{Result, capture_context, function};
+
+use super::context::META_CLIENT;
+use crate::meta_client::FrontendMetaClient;
+
+#[function("rw_cluster_id() -> varchar", volatile)]
+async fn rw_cluster_id(writer: &mut impl Write) -> Result<()> {
+    writer
+        .write_str(&rw_cluster_id_impl_captured().await?)
+        .unwrap();
+    Ok(())
+}
+
+#[capture_context(META_CLIENT)]
+async fn rw_cluster_id_impl(meta_client: &Arc<dyn FrontendMetaClient>) -> Result<String> {
+    Ok(meta_client.cluster_id().to_owned())
+}
