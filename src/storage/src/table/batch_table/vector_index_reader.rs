@@ -21,7 +21,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::TableId;
 use risingwave_common::row::RowDeserializer;
-use risingwave_common::types::{DataType, ScalarImpl, ScalarRef, StructType};
+use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_common::util::value_encoding::BasicDeserializer;
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -164,7 +164,7 @@ impl<S: StateStore> VectorIndexSnapshot<'_, S> {
                 let row_results: Vec<StorageResult<StructValue>> = self
                     .snapshot
                     .nearest(
-                        vector.to_owned_scalar(),
+                        vector,
                         VectorNearestOptions {
                             top_n: self.reader.top_n,
                             measure: self.reader.measure,

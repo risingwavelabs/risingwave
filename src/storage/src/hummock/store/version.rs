@@ -39,7 +39,7 @@ use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
 use tracing::warn;
-
+use risingwave_common::array::VectorRef;
 use crate::error::StorageResult;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::change_log::ChangeLogIterator;
@@ -67,7 +67,7 @@ use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
 };
 use crate::store::{
-    OnNearestItemFn, ReadLogOptions, ReadOptions, Vector, VectorNearestOptions, gen_min_epoch,
+    OnNearestItemFn, ReadLogOptions, ReadOptions, VectorNearestOptions, gen_min_epoch,
 };
 use crate::vector::hnsw::nearest;
 use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
@@ -1205,7 +1205,7 @@ impl HummockVersionReader {
         &'a self,
         version: PinnedVersion,
         table_id: TableId,
-        target: Vector,
+        target: VectorRef<'a>,
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> HummockResult<Vec<O>> {
@@ -1221,7 +1221,7 @@ impl HummockVersionReader {
         }
         match &index.inner {
             VectorIndexImpl::Flat(flat) => {
-                let mut builder = NearestBuilder::<'_, O, M>::new(target.to_ref(), options.top_n);
+                let mut builder = NearestBuilder::<'_, O, M>::new(target, options.top_n);
                 for vector_file in &flat.vector_store_info.vector_files {
                     let meta = self.sstable_store.get_vector_file_meta(vector_file).await?;
                     for (i, block_meta) in meta.block_metas.iter().enumerate() {
@@ -1246,7 +1246,7 @@ impl HummockVersionReader {
                 let (items, _stats) = nearest::<O, M>(
                     &vector_store,
                     &*graph,
-                    target.to_ref(),
+                    target,
                     on_nearest_item_fn,
                     options.hnsw_ef_search,
                     options.top_n,

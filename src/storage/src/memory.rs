@@ -35,7 +35,8 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use thiserror_ext::AsReport;
 use tokio::task::yield_now;
 use tracing::error;
-
+use risingwave_common::array::VectorRef;
+use risingwave_common::types::ScalarRef;
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::hummock::utils::{
@@ -730,7 +731,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
 impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
     async fn nearest<'a, O: Send + 'a>(
         &'a self,
-        vec: Vector,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
         on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
@@ -738,11 +739,11 @@ impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
             store: &'a InMemVectorStore,
             epoch: u64,
             table_id: TableId,
-            vec: Vector,
+            vec: VectorRef<'a>,
             options: VectorNearestOptions,
             on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
         ) -> Vec<O> {
-            let mut builder = NearestBuilder::<'_, O, M>::new(vec.to_ref(), options.top_n);
+            let mut builder = NearestBuilder::<'_, O, M>::new(vec, options.top_n);
             builder.add(
                 store
                     .read()
@@ -1285,8 +1286,8 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreWriteVector for RangeKvLocalStateStore<R> {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
-        self.vectors.push((vec, info));
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
+        self.vectors.push((vec.to_owned_scalar(), info));
         Ok(())
     }
 }

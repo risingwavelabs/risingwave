@@ -291,7 +291,7 @@ pub mod verify {
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
     use tracing::log::warn;
-
+    use risingwave_common::array::VectorRef;
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
     use crate::store::*;
@@ -370,7 +370,7 @@ pub mod verify {
     {
         fn nearest<'a, O: Send + 'a>(
             &'a self,
-            vec: Vector,
+            vec: VectorRef<'a>,
             options: VectorNearestOptions,
             on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
         ) -> impl StorageFuture<'a, Vec<O>> {
@@ -932,6 +932,7 @@ mod dyn_state_store {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use risingwave_common::array::VectorRef;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -1244,12 +1245,12 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     pub trait DynStateStoreWriteVector: DynStateStoreWriteEpochControl + StaticSendSync {
-        fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()>;
+        fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
     impl<S: StateStoreWriteVector> DynStateStoreWriteVector for S {
-        fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+        fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
             self.insert(vec, info)
         }
     }
@@ -1257,7 +1258,7 @@ mod dyn_state_store {
     pub type BoxDynStateStoreWriteVector = StateStorePointer<Box<dyn DynStateStoreWriteVector>>;
 
     impl StateStoreWriteVector for BoxDynStateStoreWriteVector {
-        fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+        fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
             self.0.insert(vec, info)
         }
     }
@@ -1268,7 +1269,7 @@ mod dyn_state_store {
     pub trait DynStateStoreReadVector: StaticSendSync {
         async fn nearest(
             &self,
-            vec: Vector,
+            vec: VectorRef<'_>,
             options: VectorNearestOptions,
         ) -> StorageResult<Vec<(Vector, VectorDistance, Bytes)>>;
     }
@@ -1277,7 +1278,7 @@ mod dyn_state_store {
     impl<S: StateStoreReadVector> DynStateStoreReadVector for S {
         async fn nearest(
             &self,
-            vec: Vector,
+            vec: VectorRef<'_>,
             options: VectorNearestOptions,
         ) -> StorageResult<Vec<(Vector, VectorDistance, Bytes)>> {
             use risingwave_common::types::ScalarRef;
@@ -1298,7 +1299,7 @@ mod dyn_state_store {
     {
         async fn nearest<'a, O: Send + 'a>(
             &'a self,
-            vec: Vector,
+            vec: VectorRef<'a>,
             options: VectorNearestOptions,
             on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
         ) -> StorageResult<Vec<O>> {
