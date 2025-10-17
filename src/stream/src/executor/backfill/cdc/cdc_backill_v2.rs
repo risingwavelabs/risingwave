@@ -23,7 +23,9 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
-use risingwave_connector::parser::{TimeHandling, TimestampHandling, TimestamptzHandling};
+use risingwave_connector::parser::{
+    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+};
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
@@ -153,6 +155,12 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             .map(|v| v == "connect")
             .unwrap_or(false)
             .then_some(TimeHandling::Milli);
+        let bigint_unsigned_handling: Option<BigintUnsignedHandlingMode> = self
+            .properties
+            .get("debezium.bigint.unsigned.handling.mode")
+            .map(|v| v == "precise")
+            .unwrap_or(false)
+            .then_some(BigintUnsignedHandlingMode::Precise);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
@@ -162,6 +170,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            bigint_unsigned_handling,
             handle_toast_columns,
         )
         .boxed();
