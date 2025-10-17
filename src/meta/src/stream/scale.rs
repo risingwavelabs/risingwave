@@ -425,6 +425,68 @@ impl ScaleController {
         Ok(command)
     }
 
+    pub async fn reschedule_fragment_inplace(
+        &self,
+        policy: HashMap<risingwave_meta_model::FragmentId, ParallelismPolicy>,
+        workers: HashMap<WorkerId, PbWorkerNode>,
+    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let fragment_ids: HashSet<_> = policy.keys().copied().collect();
+        let fragment_id_list = fragment_ids.iter().copied().collect_vec();
+
+        let existing_fragment_ids: HashSet<_> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::FragmentId.is_in(fragment_id_list.clone()))
+            .into_tuple::<risingwave_meta_model::FragmentId>()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .collect();
+
+        if let Some(missing_fragment_id) = fragment_ids
+            .iter()
+            .find(|fragment_id| !existing_fragment_ids.contains(fragment_id))
+        {
+            return Err(MetaError::catalog_id_not_found(
+                "fragment",
+                *missing_fragment_id,
+            ));
+        }
+
+        for (fragment_id, target) in &policy {
+            let mut fragment = fragment::ActiveModel {
+                fragment_id: Set(*fragment_id),
+                parallelism: Set(Some(target.parallelism.clone())),
+                ..Default::default()
+            };
+            fragment.update(&txn).await?;
+        }
+
+        let workers = workers
+            .into_iter()
+            .map(|(id, worker)| {
+                (
+                    id,
+                    WorkerInfo {
+                        weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
+                )
+            })
+            .collect();
+
+        let command = self
+            .rerender_fragment_inner(&txn, fragment_ids, workers)
+            .await?;
+
+        txn.commit().await?;
+
+        Ok(command)
+    }
+
     async fn rerender(
         &self,
         jobs: HashSet<ObjectId>,
