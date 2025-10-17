@@ -145,7 +145,7 @@ aws-smithy-types = { version = "1.3", default-features = false, features = [
     "hyper-0-14-x", # required by aws sdk
 ] }
 aws-types = "1.3"
-axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
+axum = "=0.8.6" # TODO: 0.7.5+ does not work with current toolchain
 axum-extra = "0.9"
 chrono = { version = "0.4.40", default-features = false }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
