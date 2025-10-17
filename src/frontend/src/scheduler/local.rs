@@ -105,8 +105,7 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        let executor =
-            ExecutorBuilder::new(&plan_node, &task_id, context, self.shutdown_rx());
+        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.shutdown_rx());
         let executor = executor.build().await?;
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.

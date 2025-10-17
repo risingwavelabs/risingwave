@@ -185,8 +185,7 @@ impl SpecificParserConfig {
                         url: info.row_schema_location,
                         aws_auth_props: Some(
                             serde_json::from_value::<AwsAuthProps>(
-                                serde_json::to_value(format_encode_options_with_secret)
-                                    .unwrap(),
+                                serde_json::to_value(format_encode_options_with_secret).unwrap(),
                             )
                             .map_err(|e| anyhow::anyhow!(e))?,
                         ),
@@ -229,8 +228,7 @@ impl SpecificParserConfig {
                         url: info.row_schema_location,
                         aws_auth_props: Some(
                             serde_json::from_value::<AwsAuthProps>(
-                                serde_json::to_value(format_encode_options_with_secret)
-                                    .unwrap(),
+                                serde_json::to_value(format_encode_options_with_secret).unwrap(),
                             )
                             .map_err(|e| anyhow::anyhow!(e))?,
                         ),
