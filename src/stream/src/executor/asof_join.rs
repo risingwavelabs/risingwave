@@ -1286,8 +1286,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I I I
-                + 3 8 1 . . .
-                - 3 8 1 . . ."
+                + 3 8 1 . . . D
+                - 3 8 1 . . . D"
             )
         );
 
