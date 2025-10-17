@@ -12821,6 +12821,7 @@ dependencies = [
  "foyer",
  "futures",
  "futures-async-stream",
+ "glob",
  "hytra",
  "iceberg",
  "itertools 0.14.0",
