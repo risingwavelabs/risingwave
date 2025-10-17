@@ -131,11 +131,34 @@ where
             },
         }
     }
+
+    pub fn apply_record(&mut self, record: Record<R>, key_fn: impl Fn(&R) -> K) {
+        match record {
+            Record::Insert { new_row } => self.insert(key_fn(&new_row), new_row),
+            Record::Delete { old_row } => self.delete(key_fn(&old_row), old_row),
+            Record::Update { old_row, new_row } => {
+                let old_key = key_fn(&old_row);
+                let new_key = key_fn(&new_row);
+                if old_key != new_key {
+                    self.ib
+                        .report("inconsistent changes: mismatched key in update");
+                }
+                self.update(old_key, old_row, new_row);
+            }
+        }
+    }
 }
 
 impl<K, R> ChangeBuffer<K, R> {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            buffer: IndexMap::with_capacity(capacity),
+            ..Default::default()
+        }
     }
 
     pub fn with_inconsistency_behavior(mut self, ib: InconsistencyBehavior) -> Self {
@@ -164,5 +187,17 @@ impl<K, R: Row> ChangeBuffer<K, R> {
             debug_assert!(none.is_none());
         }
         builder.take()
+    }
+
+    pub fn into_chunks(self, data_types: Vec<DataType>, chunk_size: usize) -> Vec<StreamChunk> {
+        let mut res = Vec::new();
+        let mut builder = StreamChunkBuilder::new(chunk_size, data_types);
+        for record in self.into_records() {
+            if let Some(chunk) = builder.append_record_eliminate_noop_update(record) {
+                res.push(chunk);
+            }
+        }
+        res.extend(builder.take());
+        res
     }
 }

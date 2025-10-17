@@ -20,8 +20,6 @@ use std::mem;
 use itertools::Itertools;
 use prehash::{Passthru, Prehashed, new_prehashed_map_with_capacity};
 use risingwave_common::array::stream_chunk::{OpRowMutRef, StreamChunkMut};
-use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::row::{Project, RowExt};
 use risingwave_common::types::DataType;
@@ -39,6 +37,7 @@ use risingwave_common::util::hash_util::Crc32FastBuilder;
 //   of the same key, construct new chunks. A combination of `into_compacted_chunks`, `compact`,
 //   and `StreamChunkBuilder`.
 pub use super::change_buffer::InconsistencyBehavior;
+use crate::common::change_buffer::ChangeBuffer;
 
 /// A helper to compact the stream chunks by modifying the `Ops` and visibility of the chunk.
 pub struct StreamChunkCompactor {
@@ -109,107 +108,6 @@ impl<'a> OpRowMutRefTuple<'a> {
 
 type OpRowMap<'a, 'b> =
     HashMap<Prehashed<Project<'b, RowRef<'a>>>, OpRowMutRefTuple<'a>, BuildHasherDefault<Passthru>>;
-
-#[derive(Clone, Debug)]
-pub enum RowOp<'a> {
-    Insert(RowRef<'a>),
-    Delete(RowRef<'a>),
-    /// (`old_value`, `new_value`)
-    Update((RowRef<'a>, RowRef<'a>)),
-}
-
-pub struct RowOpMap<'a, 'b> {
-    map: HashMap<Prehashed<Project<'b, RowRef<'a>>>, RowOp<'a>, BuildHasherDefault<Passthru>>,
-    ib: InconsistencyBehavior,
-}
-
-impl<'a, 'b> RowOpMap<'a, 'b> {
-    fn with_capacity(estimate_size: usize, ib: InconsistencyBehavior) -> Self {
-        Self {
-            map: new_prehashed_map_with_capacity(estimate_size),
-            ib,
-        }
-    }
-
-    pub fn insert(&mut self, k: Prehashed<Project<'b, RowRef<'a>>>, v: RowRef<'a>) {
-        let entry = self.map.entry(k);
-        match entry {
-            Entry::Vacant(e) => {
-                e.insert(RowOp::Insert(v));
-            }
-            Entry::Occupied(mut e) => match e.get() {
-                RowOp::Delete(old_v) => {
-                    e.insert(RowOp::Update((*old_v, v)));
-                }
-                RowOp::Insert(_) => {
-                    self.ib
-                        .report("double insert for the same pk, breaking the sink's pk constraint");
-                    e.insert(RowOp::Insert(v));
-                }
-                RowOp::Update((old_v, _)) => {
-                    self.ib
-                        .report("double insert for the same pk, breaking the sink's pk constraint");
-                    e.insert(RowOp::Update((*old_v, v)));
-                }
-            },
-        }
-    }
-
-    pub fn delete(&mut self, k: Prehashed<Project<'b, RowRef<'a>>>, v: RowRef<'a>) {
-        let entry = self.map.entry(k);
-        match entry {
-            Entry::Vacant(e) => {
-                e.insert(RowOp::Delete(v));
-            }
-            Entry::Occupied(mut e) => match e.get() {
-                RowOp::Insert(_) => {
-                    e.remove();
-                }
-                RowOp::Update((prev, _)) => {
-                    e.insert(RowOp::Delete(*prev));
-                }
-                RowOp::Delete(_) => {
-                    self.ib.report("double delete for the same pk");
-                    e.insert(RowOp::Delete(v));
-                }
-            },
-        }
-    }
-
-    pub fn into_chunks(self, chunk_size: usize, data_types: Vec<DataType>) -> Vec<StreamChunk> {
-        let mut ret = vec![];
-        let mut builder = StreamChunkBuilder::new(chunk_size, data_types);
-        for (_, row_op) in self.map {
-            match row_op {
-                RowOp::Insert(row) => {
-                    if let Some(c) = builder.append_record(Record::Insert { new_row: row }) {
-                        ret.push(c)
-                    }
-                }
-                RowOp::Delete(row) => {
-                    if let Some(c) = builder.append_record(Record::Delete { old_row: row }) {
-                        ret.push(c)
-                    }
-                }
-                RowOp::Update((old, new)) => {
-                    if old == new {
-                        continue;
-                    }
-                    if let Some(c) = builder.append_record(Record::Update {
-                        old_row: old,
-                        new_row: new,
-                    }) {
-                        ret.push(c)
-                    }
-                }
-            }
-        }
-        if let Some(c) = builder.take() {
-            ret.push(c);
-        }
-        ret
-    }
-}
 
 impl StreamChunkCompactor {
     pub fn new(key: Vec<usize>, chunks: Vec<StreamChunk>) -> Self {
@@ -293,32 +191,15 @@ impl StreamChunkCompactor {
         let (chunks, key_indices) = self.into_inner();
 
         let estimate_size = chunks.iter().map(|c| c.cardinality()).sum();
-        let chunks: Vec<(_, _, _)> = chunks
-            .into_iter()
-            .map(|c| {
-                let (c, ops) = c.into_parts();
-                let hash_values = c
-                    .get_hash_values(&key_indices, Crc32FastBuilder)
-                    .into_iter()
-                    .map(|hash| hash.value())
-                    .collect_vec();
-                (hash_values, ops, c)
-            })
-            .collect_vec();
-        let mut map = RowOpMap::with_capacity(estimate_size, ib);
-        for (hash_values, ops, c) in &chunks {
-            for row in c.rows() {
-                let hash = hash_values[row.index()];
-                let op = ops[row.index()];
-                let key = row.project(&key_indices);
-                let k = Prehashed::new(key, hash);
-                match op {
-                    Op::Insert | Op::UpdateInsert => map.insert(k, row),
-                    Op::Delete | Op::UpdateDelete => map.delete(k, row),
-                }
+        let mut cb = ChangeBuffer::with_capacity(estimate_size).with_inconsistency_behavior(ib);
+
+        for chunk in chunks.iter() {
+            for record in chunk.records() {
+                cb.apply_record(record, |&row| row.project(&key_indices));
             }
         }
-        map.into_chunks(chunk_size, data_types)
+
+        cb.into_chunks(data_types, chunk_size)
     }
 }
 
