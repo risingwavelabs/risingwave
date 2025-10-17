@@ -43,6 +43,9 @@ SELECT COUNT(*) FROM test_struct;
 ----
 2
 
+statement error null value in column "info" of relation "test_struct" violates not-null constraint
+INSERT INTO test_struct (id) VALUES (2);
+
 statement ok
 DROP TABLE test_struct;
 
