@@ -255,6 +255,8 @@ message AdditionalColumnHeaders {}
 
 message AdditionalSubject {}
 
+message AdditionalColumnPulsarMessageIdData {}
+
 message AdditionalColumn {
   oneof column_type {
     AdditionalColumnKey key = 1;
@@ -270,6 +272,7 @@ message AdditionalColumn {
     AdditionalCollectionName collection_name = 11;
     AdditionalColumnPayload payload = 12;
     AdditionalSubject subject = 13;
+    AdditionalColumnPulsarMessageIdData pulsar_message_id_data = 14;
   }
 }
 
@@ -283,4 +286,5 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
   ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
   ADDITIONAL_COLUMN_TYPE_PAYLOAD = 8;
+  ADDITIONAL_COLUMN_TYPE_PULSAR_MESSAGE_ID_DATA = 9; // for pulsar source, used for ack message
 }
