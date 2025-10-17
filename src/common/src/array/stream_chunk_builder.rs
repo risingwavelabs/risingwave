@@ -157,6 +157,20 @@ impl StreamChunkBuilder {
         }
     }
 
+    /// Append a record to the builder if it's not a no-op update, return a chunk if the builder is full.
+    #[must_use]
+    pub fn append_record_unless_noop_update(
+        &mut self,
+        record: Record<impl Row>,
+    ) -> Option<StreamChunk> {
+        if let Record::Update { old_row, new_row } = &record
+            && Row::eq(old_row, new_row)
+        {
+            return None;
+        }
+        self.append_record(record)
+    }
+
     /// Take all the pending data and return a chunk. If there is no pending data, return `None`.
     /// Note that if this is an unlimited chunk builder, the only way to get a chunk is to call
     /// `take`.

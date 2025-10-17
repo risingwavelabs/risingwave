@@ -3,7 +3,10 @@ use std::sync::LazyLock;
 use indexmap::IndexMap;
 use indexmap::map::Entry;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::array::{StreamChunk, StreamChunkBuilder};
 use risingwave_common::log::LogSuppresser;
+use risingwave_common::row::Row;
+use risingwave_common::types::DataType;
 
 use crate::consistency::consistency_panic;
 
@@ -141,5 +144,16 @@ impl<K, R> ChangeBuffer<K, R> {
 
     pub fn into_records(self) -> impl ExactSizeIterator<Item = Record<R>> {
         self.buffer.into_values()
+    }
+}
+
+impl<K, R: Row> ChangeBuffer<K, R> {
+    pub fn into_chunk(self, data_types: Vec<DataType>) -> Option<StreamChunk> {
+        let mut builder = StreamChunkBuilder::unlimited(data_types, Some(self.buffer.len()));
+        for record in self.into_records() {
+            let none = builder.append_record_unless_noop_update(record);
+            debug_assert!(none.is_none());
+        }
+        builder.take()
     }
 }
