@@ -466,6 +466,13 @@ impl ColumnCatalog {
     pub fn is_row_id_column(&self) -> bool {
         self.column_desc.column_id == ROW_ID_COLUMN_ID
     }
+
+    pub fn is_iceberg_hidden_column(&self) -> bool {
+        let name = &self.column_desc.name;
+        name == ICEBERG_SEQUENCE_NUM_COLUMN_NAME
+            || name == ICEBERG_FILE_PATH_COLUMN_NAME
+            || name == ICEBERG_FILE_POS_COLUMN_NAME
+    }
 }
 
 impl From<PbColumnCatalog> for ColumnCatalog {

@@ -362,7 +362,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                 task,
                 IcebergScanOpts {
                     chunk_size: streaming_config.developer.chunk_size,
-                    need_seq_num: true, /* TODO: this column is not needed. But need to support col pruning in frontend to remove it. */
+                    need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
                     need_file_path_and_pos: true,
                 },
                 None,
