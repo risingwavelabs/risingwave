@@ -115,7 +115,6 @@ impl Strong {
             | ExprType::VecConcat
             | ExprType::L2Norm
             | ExprType::L2Normalize
-            | ExprType::VectorDims
             | ExprType::Subvector
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),

@@ -522,27 +522,6 @@ fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
     vector.normalized()
 }
 
-/// ```slt
-/// query R
-/// SELECT vector_dims('[1,2,3]'::vector(3));
-/// ----
-/// 3
-///
-/// query R
-/// SELECT vector_dims('[10,20,30,40]'::vector(4));
-/// ----
-/// 4
-///
-/// query error dimensions
-/// SELECT vector_dims('[]'::vector(0));
-/// ```
-#[function("vector_dims(vector) -> int4")]
-fn vector_dim(v: VectorRef<'_>) -> Result<i32> {
-    let vector = v.into_slice();
-    check_dim("vector_dim", vector.len() as i32)?;
-    Ok(vector.len() as i32)
-}
-
 fn check_dim(name: &'static str, dim: i32) -> Result<()> {
     if dim < 1 {
         return Err(ExprError::InvalidParam {
@@ -581,25 +560,19 @@ fn check_dim(name: &'static str, dim: i32) -> Result<()> {
 /// [3,4,5]
 ///
 /// query R
-/// SELECT subvector('[1,2,3,4,5]'::vector, -2147483644, 2147483647);
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), -2147483644, 2147483647);
 /// ----
 /// [1,2]
 ///
 /// query R
-/// SELECT subvector('[1,2,3,4,5]'::vector, 3, 2147483647);
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 3, 2147483647);
 /// ----
 /// [3,4,5]
 /// ```
 #[function("subvector(vector, int4, int4) -> vector", type_infer = "unreachable")]
 fn subvector(v: VectorRef<'_>, start: i32, count: i32) -> Result<VectorVal> {
-    let vector = v.into_slice();
+    let vector = v.as_slice();
     let length = vector.len() as i32;
-    if count < 1 {
-        return Err(ExprError::InvalidParam {
-            name: "count",
-            reason: "vector must have at least 1 dimension".into(),
-        });
-    }
     let mut start = start;
     let end = if start > length - count {
         length + 1
@@ -609,18 +582,13 @@ fn subvector(v: VectorRef<'_>, start: i32, count: i32) -> Result<VectorVal> {
 
     if start < 1 {
         start = 1
-    } else if start > length {
-        return Err(ExprError::InvalidParam {
-            name: "start",
-            reason: "vector must have at least 1 dimension".into(),
-        });
     }
     check_dim("subvector", end - start)?;
 
     let result = vector[(start - 1) as usize..(end - 1) as usize]
         .iter()
         .copied()
-        .map(|v| Finite32::try_from(v as f32))
+        .map(|v| Finite32::try_from(f32::from(v)))
         .try_collect()
         .map_err(|_| ExprError::NumericOverflow)?;
     Ok(result)
