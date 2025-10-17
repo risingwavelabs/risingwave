@@ -19,5 +19,6 @@ pub mod compact_chunk;
 pub mod log_store_impl;
 pub mod metrics;
 pub mod rate_limit;
+pub mod change_buffer;
 pub mod state_cache;
 pub mod table;

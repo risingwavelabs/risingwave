@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
+
 use auto_enums::auto_enum;
 
 use super::StreamChunk;
@@ -40,13 +42,13 @@ impl RecordType {
 
 /// Generic type to represent a row change.
 #[derive(Debug, Clone, Copy)]
-pub enum Record<R: Row> {
+pub enum Record<R> {
     Insert { new_row: R },
     Delete { old_row: R },
     Update { old_row: R, new_row: R },
 }
 
-impl<R: Row> Record<R> {
+impl<R> Record<R> {
     /// Convert this stream record to one or two rows with corresponding ops.
     #[auto_enum(Iterator)]
     pub fn into_rows(self) -> impl Iterator<Item = (Op, R)> {
@@ -68,6 +70,39 @@ impl<R: Row> Record<R> {
         }
     }
 
+    /// Convert from `&Record<R>` to `Record<&R>`.
+    pub fn as_ref(&self) -> Record<&R> {
+        match self {
+            Record::Insert { new_row } => Record::Insert { new_row },
+            Record::Delete { old_row } => Record::Delete { old_row },
+            Record::Update { old_row, new_row } => Record::Update { old_row, new_row },
+        }
+    }
+
+    /// Try mapping the row in the record to another row, returning error if any of the mapping fails.
+    pub fn try_map<R2, E>(self, f: impl Fn(R) -> Result<R2, E>) -> Result<Record<R2>, E> {
+        Ok(match self {
+            Record::Insert { new_row } => Record::Insert {
+                new_row: f(new_row)?,
+            },
+            Record::Delete { old_row } => Record::Delete {
+                old_row: f(old_row)?,
+            },
+            Record::Update { old_row, new_row } => Record::Update {
+                old_row: f(old_row)?,
+                new_row: f(new_row)?,
+            },
+        })
+    }
+
+    /// Map the row in the record to another row.
+    pub fn map<R2>(self, f: impl Fn(R) -> R2) -> Record<R2> {
+        let Ok(record) = self.try_map::<R2, Infallible>(|row| Ok(f(row)));
+        record
+    }
+}
+
+impl<R: Row> Record<R> {
     /// Convert this stream record to a stream chunk containing only 1 or 2 rows.
     pub fn to_stream_chunk(&self, data_types: &[DataType]) -> StreamChunk {
         match self {
@@ -81,15 +116,6 @@ impl<R: Row> Record<R> {
                 &[(Op::UpdateDelete, old_row), (Op::UpdateInsert, new_row)],
                 data_types,
             ),
-        }
-    }
-
-    /// Convert from `&Record<R>` to `Record<&R>`.
-    pub fn as_ref(&self) -> Record<&R> {
-        match self {
-            Record::Insert { new_row } => Record::Insert { new_row },
-            Record::Delete { old_row } => Record::Delete { old_row },
-            Record::Update { old_row, new_row } => Record::Update { old_row, new_row },
         }
     }
 }
