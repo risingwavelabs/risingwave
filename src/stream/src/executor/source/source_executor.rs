@@ -113,6 +113,7 @@ impl<S: StateStore> SourceExecutor<S> {
         rate_limit_rps: Option<u32>,
         is_shared_non_cdc: bool,
         barrier_manager: LocalBarrierManager,
+        cdc_table_schema_change_policies: HashMap<String, SchemaChangeFailurePolicy>,
     ) -> Self {
         Self {
             actor_ctx,
@@ -123,7 +124,7 @@ impl<S: StateStore> SourceExecutor<S> {
             rate_limit_rps,
             is_shared_non_cdc,
             barrier_manager,
-            cdc_table_schema_change_policies: HashMap::new(),
+            cdc_table_schema_change_policies,
         }
     }
 

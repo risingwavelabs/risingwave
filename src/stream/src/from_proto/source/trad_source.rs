@@ -223,6 +223,47 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .boxed()
                 } else {
                     let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
+                    
+                    tracing::info!(
+                        actor_id = params.actor_context.id,
+                        source_id = source.source_id,
+                        has_cdc_policies_key = source.with_properties.contains_key("cdc_table_schema_change_policies"),
+                        "CN: SourceExecutor construction - checking for policies"
+                    );
+                    
+                    // Parse CDC table schema change policies from source properties
+                    let cdc_table_schema_change_policies = source
+                        .with_properties
+                        .get("cdc_table_schema_change_policies")
+                        .and_then(|policies_json| {
+                            match serde_json::from_str::<std::collections::HashMap<
+                                String,
+                                risingwave_connector::source::cdc::SchemaChangeFailurePolicy,
+                            >>(policies_json)
+                            {
+                                Ok(policies) => {
+                                    tracing::info!(
+                                        actor_id = params.actor_context.id,
+                                        source_id = source.source_id,
+                                        policies = ?policies,
+                                        "CN: Initializing SourceExecutor with policies from source catalog"
+                                    );
+                                    Some(policies)
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        actor_id = params.actor_context.id,
+                                        source_id = source.source_id,
+                                        policies_json = policies_json,
+                                        error = %e,
+                                        "CN: Failed to parse cdc_table_schema_change_policies from source catalog"
+                                    );
+                                    None
+                                }
+                            }
+                        })
+                        .unwrap_or_default();
+                    
                     SourceExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
@@ -232,6 +273,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         source.rate_limit,
                         is_shared && !source.with_properties.is_cdc_connector(),
                         params.local_barrier_manager.clone(),
+                        cdc_table_schema_change_policies,
                     )
                     .boxed()
                 }

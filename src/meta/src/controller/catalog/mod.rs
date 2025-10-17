@@ -810,6 +810,41 @@ impl CatalogController {
         
         Ok(())
     }
+    
+    /// Update fragments' StreamNode.with_properties for a source
+    /// This is used to ensure CN recovery can read the latest policies from fragments
+    pub async fn update_source_props_fragments_by_source_id(
+        &self,
+        source_id: SourceId,
+        new_props: std::collections::BTreeMap<String, String>,
+        is_shared_source: bool,
+    ) -> MetaResult<()> {
+        use risingwave_pb::stream_plan::stream_node::NodeBody as PbNodeBody;
+        use risingwave_common::catalog::FragmentTypeFlag;
+        use crate::controller::streaming_job::update_connector_props_fragments;
+        
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        
+        update_connector_props_fragments(
+            &txn,
+            vec![source_id],
+            FragmentTypeFlag::Source,
+            |node, found| {
+                if let PbNodeBody::Source(node) = node
+                    && let Some(source_inner) = &mut node.source_inner
+                {
+                    source_inner.with_properties = new_props.clone();
+                    *found = true;
+                }
+            },
+            is_shared_source,
+        )
+        .await?;
+        
+        txn.commit().await?;
+        Ok(())
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.

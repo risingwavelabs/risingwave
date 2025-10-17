@@ -448,7 +448,7 @@ impl SourceManager {
             backfill_fragments,
             env,
         );
-        
+
         // Set recovered policies
         core.cdc_table_schema_change_policies = cdc_table_schema_change_policies.clone();
 
@@ -497,7 +497,7 @@ impl SourceManager {
         );
         
         // For each source, update its catalog properties
-        for (source_id, source_policies) in policies_by_source {
+        for (source_id, source_policies) in policies_by_source.clone() {
             let policies_json = serde_json::to_string(&source_policies)
                 .map_err(|e| MetaError::invalid_parameter(format!("Failed to serialize policies: {}", e)))?;
             
@@ -517,6 +517,12 @@ impl SourceManager {
                 )
                 .await?;
         }
+        
+        tracing::info!("META: Successfully updated source catalogs with recovered policies");
+        
+        // Note: We don't send ConnectorPropsChange during recovery because cluster is not ready yet.
+        // Instead, we should update fragment table's StreamNode.with_properties during CREATE/ALTER TABLE
+        // so that CN recovery can read the latest policies from fragments.
         
         Ok(())
     }
@@ -779,6 +785,26 @@ impl SourceManager {
                 policies_json,
             );
 
+            // Update fragment table's StreamNode.with_properties
+            // This ensures CN recovery can read the latest policies from fragments
+            {
+                let core = self.core.lock().await;
+                let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
+                core.metadata_manager
+                    .catalog_controller
+                    .update_source_props_fragments_by_source_id(
+                        source_id,
+                        props.clone().into_iter().collect(),
+                        is_shared,
+                    )
+                    .await?;
+            }
+            
+            tracing::info!(
+                source_id = source_id,
+                "META: Updated fragment table's StreamNode.with_properties for add_cdc_table_schema_policy"
+            );
+
             // Get the database_id for this source
             let database_id = {
                 let core = self.core.lock().await;
@@ -879,6 +905,26 @@ impl SourceManager {
                 source.with_properties.clone().into_iter().collect();
             // Add the updated CDC table schema change policies
             props.insert("cdc_table_schema_change_policies".to_owned(), policies_json);
+
+            // Update fragment table's StreamNode.with_properties
+            // This ensures CN recovery can read the latest policies from fragments
+            {
+                let core = self.core.lock().await;
+                let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
+                core.metadata_manager
+                    .catalog_controller
+                    .update_source_props_fragments_by_source_id(
+                        source_id,
+                        props.clone().into_iter().collect(),
+                        is_shared,
+                    )
+                    .await?;
+            }
+            
+            tracing::info!(
+                source_id = source_id,
+                "META: Updated fragment table's StreamNode.with_properties for remove_cdc_table_schema_policy"
+            );
 
             // Get the database_id for this source
             let database_id = {

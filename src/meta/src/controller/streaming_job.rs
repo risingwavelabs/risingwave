@@ -2637,7 +2637,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
     pub new_log_store_table: Option<(ObjectId, Vec<PbColumnCatalog>)>,
 }
 
-async fn update_connector_props_fragments<F>(
+pub(crate) async fn update_connector_props_fragments<F>(
     txn: &DatabaseTransaction,
     job_ids: Vec<i32>,
     expect_flag: FragmentTypeFlag,
