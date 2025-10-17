@@ -395,6 +395,7 @@ impl Connection for IcebergConnection {
             endpoint: self.endpoint.clone(),
             access_key: self.access_key.clone(),
             secret_key: self.secret_key.clone(),
+            ssl_verify: None, // Default SSL verification behavior for testing
             gcs_credential: self.gcs_credential.clone(),
             azblob_account_name: self.azblob_account_name.clone(),
             azblob_account_key: self.azblob_account_key.clone(),
