@@ -214,6 +214,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     IcebergListExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
+                        source
+                            .downstream_columns
+                            .as_ref()
+                            .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
