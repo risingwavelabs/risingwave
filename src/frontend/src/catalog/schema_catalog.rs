@@ -568,7 +568,7 @@ impl SchemaCatalog {
             .try_insert(id, secret_ref.clone())
             .unwrap();
         self.secret_by_name
-            .try_insert(name, secret_ref.clone())
+            .try_insert(name, secret_ref)
             .unwrap();
     }
 

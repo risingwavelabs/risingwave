@@ -514,7 +514,7 @@ impl CatalogController {
                 job_mapping.remove(&(
                     info.database_id as _,
                     info.schema_id as _,
-                    info.name.clone(),
+                    info.name,
                 ))
             })
             .collect())

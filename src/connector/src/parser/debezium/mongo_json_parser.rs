@@ -86,7 +86,7 @@ impl DebeziumMongoJsonParser {
         }
 
         // encodings are fixed to MongoJson
-        let encoding = EncodingProperties::MongoJson(props.clone());
+        let encoding = EncodingProperties::MongoJson(props);
         // for key, it doesn't matter if strong schema is enabled or not
         let key_builder = build_accessor_builder(encoding.clone())?;
 

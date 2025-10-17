@@ -123,7 +123,7 @@ mod tests {
             .map(|actor| {
                 (
                     actor.actor_id as ActorId,
-                    actor.vnode_bitmap.unwrap().clone(),
+                    actor.vnode_bitmap.unwrap(),
                 )
             })
             .collect();

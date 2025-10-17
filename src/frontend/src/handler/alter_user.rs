@@ -49,7 +49,7 @@ fn alter_prost_user_info(
             .any(|option| matches!(option, UserOption::Admin | UserOption::NoAdmin));
     if !change_self_password_only && require_admin && !session_user.is_admin {
         return Err(PermissionDenied(
-            format!("{} cannot be altered with admin option", user_info.name).to_owned(),
+            format!("{} cannot be altered with admin option", user_info.name),
         )
         .into());
     }
@@ -184,13 +184,13 @@ fn alter_rename_prost_user_info(
     let new_name = Binder::resolve_user_name(new_name)?;
     if is_reserved_admin_user(&new_name) {
         return Err(PermissionDenied(
-            format!("{} is reserved for admin", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
+            format!("{} is reserved for admin", DEFAULT_SUPER_USER_FOR_ADMIN),
         )
         .into());
     }
     if is_reserved_admin_user(&user_info.name) {
         return Err(PermissionDenied(
-            format!("{} cannot be renamed", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
+            format!("{} cannot be renamed", DEFAULT_SUPER_USER_FOR_ADMIN),
         )
         .into());
     }

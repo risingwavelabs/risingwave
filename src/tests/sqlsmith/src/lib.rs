@@ -74,7 +74,7 @@ pub fn mview_sql_gen<R: Rng>(
     name: &str,
     config: &Configuration,
 ) -> (String, Table) {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables, config.clone());
     let (mview, table) = r#gen.gen_mview_stmt(name);
     (mview.to_string(), table)
 }
@@ -85,7 +85,7 @@ pub fn differential_sql_gen<R: Rng>(
     name: &str,
     config: &Configuration,
 ) -> Result<(String, String, Table)> {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables, config.clone());
     let (stream, table) = r#gen.gen_mview_stmt(name);
     let batch = match stream {
         Statement::CreateView { ref query, .. } => query.to_string(),

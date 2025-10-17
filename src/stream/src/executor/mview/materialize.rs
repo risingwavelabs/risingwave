@@ -1355,7 +1355,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         version_column_indices: Vec<u32>,
     ) -> Self {
         let lru_cache: ManagedLruCache<Vec<u8>, CacheValue> =
-            ManagedLruCache::unbounded(watermark_sequence, metrics_info.clone());
+            ManagedLruCache::unbounded(watermark_sequence, metrics_info);
         Self {
             lru_cache,
             row_serde,

@@ -144,7 +144,7 @@ pub async fn do_handle_explain(
                         ..
                     } => gen_create_mv_plan(
                         &session,
-                        context.clone(),
+                        context,
                         *query,
                         name,
                         columns,
@@ -180,7 +180,7 @@ pub async fn do_handle_explain(
                             resolve_index_schema(&session, name, table_name)?;
                         gen_create_index_plan(
                             &session,
-                            context.clone(),
+                            context,
                             schema_name,
                             table,
                             index_table_name,

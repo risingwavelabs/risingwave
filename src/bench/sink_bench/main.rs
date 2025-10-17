@@ -542,7 +542,7 @@ async fn main() {
 
         let connector = properties.get("connector").unwrap().clone();
         let format_desc = mock_from_legacy_type(
-            &connector.clone(),
+            &connector,
             properties.get("type").unwrap_or(&"append-only".to_owned()),
         )
         .unwrap();
