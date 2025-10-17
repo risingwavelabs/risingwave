@@ -61,6 +61,7 @@ pub struct IcebergListExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> IcebergListExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
@@ -117,7 +118,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
                     if col.is_hidden() {
                         None
                     } else {
-                        Some(col.name().to_string())
+                        Some(col.name().to_owned())
                     }
                 })
                 .collect::<Vec<_>>()
