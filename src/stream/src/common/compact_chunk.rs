@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::hash::BuildHasherDefault;
 use std::mem;
-use std::sync::LazyLock;
 
 use itertools::Itertools;
 use prehash::{Passthru, Prehashed, new_prehashed_map_with_capacity};
@@ -24,12 +23,9 @@ use risingwave_common::array::stream_chunk::{OpRowMutRef, StreamChunkMut};
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::{Project, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
-
-use crate::consistency::consistency_panic;
 
 // XXX(bugen): This utility seems confusing. It's doing different things with different methods,
 // while all of them are named "compact" (also note `StreamChunk::compact`). We should consider
@@ -42,33 +38,7 @@ use crate::consistency::consistency_panic;
 // - `StreamChunkCompactor::reconstructed_compacted_chunks`: filter out intermediate operations
 //   of the same key, construct new chunks. A combination of `into_compacted_chunks`, `compact`,
 //   and `StreamChunkBuilder`.
-
-/// Behavior when inconsistency is detected during compaction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InconsistencyBehavior {
-    Panic,
-    Warn,
-    Tolerate,
-}
-
-impl InconsistencyBehavior {
-    /// Report an inconsistency.
-    #[track_caller]
-    fn report(self, msg: &str) {
-        match self {
-            InconsistencyBehavior::Panic => consistency_panic!("{}", msg),
-            InconsistencyBehavior::Warn => {
-                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                    LazyLock::new(LogSuppresser::default);
-
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                    tracing::warn!(suppressed_count, "{}", msg);
-                }
-            }
-            InconsistencyBehavior::Tolerate => {}
-        }
-    }
-}
+pub use super::change_buffer::InconsistencyBehavior;
 
 /// A helper to compact the stream chunks by modifying the `Ops` and visibility of the chunk.
 pub struct StreamChunkCompactor {
