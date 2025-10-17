@@ -159,7 +159,7 @@ impl StreamChunkBuilder {
 
     /// Append a record to the builder if it's not a no-op update, return a chunk if the builder is full.
     #[must_use]
-    pub fn append_record_unless_noop_update(
+    pub fn append_record_eliminate_noop_update(
         &mut self,
         record: Record<impl Row>,
     ) -> Option<StreamChunk> {

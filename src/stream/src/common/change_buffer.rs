@@ -46,6 +46,7 @@ mod private {
     impl<R> Row for R where R: Default {}
 }
 
+#[derive(Debug)]
 pub struct ChangeBuffer<K, R> {
     buffer: IndexMap<K, Record<R>>,
     ib: InconsistencyBehavior,
@@ -142,6 +143,14 @@ impl<K, R> ChangeBuffer<K, R> {
         self
     }
 
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
     pub fn into_records(self) -> impl ExactSizeIterator<Item = Record<R>> {
         self.buffer.into_values()
     }
@@ -151,7 +160,7 @@ impl<K, R: Row> ChangeBuffer<K, R> {
     pub fn into_chunk(self, data_types: Vec<DataType>) -> Option<StreamChunk> {
         let mut builder = StreamChunkBuilder::unlimited(data_types, Some(self.buffer.len()));
         for record in self.into_records() {
-            let none = builder.append_record_unless_noop_update(record);
+            let none = builder.append_record_eliminate_noop_update(record);
             debug_assert!(none.is_none());
         }
         builder.take()
