@@ -134,7 +134,7 @@ impl Source {
 
     /// The output is [`risingwave_connector::source::filesystem::FsPageItem`] / [`iceberg::scan::FileScanTask`]
     pub fn file_list_node(core: Self) -> Self {
-        let column_catalog = if core.is_iceberg_connector() {
+        let column_catalog = if core.is_iceberg_connector() || core.is_batch_connector() {
             vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(

@@ -31,7 +31,7 @@ use tokio::fs;
 
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
-use crate::executor::source::StreamSourceCore;
+use crate::executor::source::{StreamSourceCore, get_split_offset_col_idx, prune_additional_cols};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
 
@@ -219,6 +219,10 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
+        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        else {
+            unreachable!("Partition and offset columns must be set.");
+        };
 
         let properties = source_desc.source.config.clone();
         let parser_config = ParserConfig {
@@ -402,6 +406,12 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
 
                         // Yield all chunks from the file
                         for chunk in chunks {
+                            let chunk = prune_additional_cols(
+                                &chunk,
+                                split_idx,
+                                offset_idx,
+                                &source_desc.columns,
+                            );
                             yield Message::Chunk(chunk);
                         }
                     }
