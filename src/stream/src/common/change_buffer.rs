@@ -1,3 +1,17 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::sync::LazyLock;
 
 use indexmap::IndexMap;
@@ -10,10 +24,9 @@ use risingwave_common::types::DataType;
 
 use crate::consistency::consistency_panic;
 
-/// Behavior when inconsistency is detected during compaction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+/// Behavior when inconsistency is detected when applying changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InconsistencyBehavior {
-    #[default]
     Panic,
     Warn,
     Tolerate,
@@ -46,19 +59,11 @@ mod private {
     impl<R> Row for R where R: Default {}
 }
 
+/// A buffer that accumulates changes and produce compacted changes.
 #[derive(Debug)]
 pub struct ChangeBuffer<K, R> {
     buffer: IndexMap<K, Record<R>>,
     ib: InconsistencyBehavior,
-}
-
-impl<K, R> Default for ChangeBuffer<K, R> {
-    fn default() -> Self {
-        Self {
-            buffer: IndexMap::new(),
-            ib: InconsistencyBehavior::default(),
-        }
-    }
 }
 
 impl<K, R> ChangeBuffer<K, R>
@@ -66,6 +71,7 @@ where
     K: private::Key,
     R: private::Row,
 {
+    /// Apply an insertion of a row with the given key.
     pub fn insert(&mut self, key: K, new_row: R) {
         let entry = self.buffer.entry(key);
         match entry {
@@ -89,6 +95,7 @@ where
         }
     }
 
+    /// Apply a deletion of a row with the given key.
     pub fn delete(&mut self, key: K, old_row: R) {
         let entry = self.buffer.entry(key);
         match entry {
@@ -111,6 +118,7 @@ where
         }
     }
 
+    /// Apply an update of a row with the given key.
     pub fn update(&mut self, key: K, old_row: R, new_row: R) {
         let entry = self.buffer.entry(key);
         match entry {
@@ -132,6 +140,10 @@ where
         }
     }
 
+    /// Apply a change record, with the key extracted by the given function.
+    ///
+    /// For `Record::Update`, inconsistency is reported if the old key and the new key are different.
+    /// Further behavior is determined by the `InconsistencyBehavior`.
     pub fn apply_record(&mut self, record: Record<R>, key_fn: impl Fn(&R) -> K) {
         match record {
             Record::Insert { new_row } => self.insert(key_fn(&new_row), new_row),
@@ -150,36 +162,43 @@ where
 }
 
 impl<K, R> ChangeBuffer<K, R> {
+    /// Create a new `ChangeBuffer` that panics on inconsistency.
     pub fn new() -> Self {
-        Self::default()
+        Self::with_capacity(0)
     }
 
+    /// Create a new `ChangeBuffer` with the given capacity that panics on inconsistency.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             buffer: IndexMap::with_capacity(capacity),
-            ..Default::default()
+            ib: InconsistencyBehavior::Panic,
         }
     }
 
+    /// Set the inconsistency behavior.
     pub fn with_inconsistency_behavior(mut self, ib: InconsistencyBehavior) -> Self {
         self.ib = ib;
         self
     }
 
+    /// Get the number of keys that have pending changes in the buffer.
     pub fn len(&self) -> usize {
         self.buffer.len()
     }
 
+    /// Check if the buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()
     }
 
+    /// Consume the buffer and produce a list of change records.
     pub fn into_records(self) -> impl ExactSizeIterator<Item = Record<R>> {
         self.buffer.into_values()
     }
 }
 
 impl<K, R: Row> ChangeBuffer<K, R> {
+    /// Consume the buffer and produce a single compacted chunk.
     pub fn into_chunk(self, data_types: Vec<DataType>) -> Option<StreamChunk> {
         let mut builder = StreamChunkBuilder::unlimited(data_types, Some(self.buffer.len()));
         for record in self.into_records() {
@@ -189,6 +208,7 @@ impl<K, R: Row> ChangeBuffer<K, R> {
         builder.take()
     }
 
+    /// Consume the buffer and produce a list of compacted chunks with the given size at most.
     pub fn into_chunks(self, data_types: Vec<DataType>, chunk_size: usize) -> Vec<StreamChunk> {
         let mut res = Vec::new();
         let mut builder = StreamChunkBuilder::new(chunk_size, data_types);
