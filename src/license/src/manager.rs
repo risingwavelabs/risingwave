@@ -115,13 +115,63 @@ pub struct License {
     /// Tier of the license.
     pub tier: Tier,
 
-    /// Maximum number of compute-node CPU cores allowed to use.
-    pub cpu_core_limit: Option<NonZeroU64>,
+    /// Maximum number of RWU allowed to use.
+    ///
+    /// 1 RWU corresponds to 4 GiB memory and 1 CPU core.
+    /// See <https://docs.risingwave.com/cloud/pricing#risingwave-unit-rwu> for more details.
+    #[serde(alias = "cpu_core_limit")]
+    pub rwu_limit: Option<NonZeroU64>,
 
     /// Expiration time in seconds since UNIX epoch.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.4>.
     pub exp: u64,
+}
+
+impl License {
+    /// Return the CPU core limit based on the RWU limit in the license.
+    pub fn cpu_core_limit(&self) -> Option<u64> {
+        self.rwu_limit.map(|limit| limit.get())
+    }
+
+    /// Return the memory limit (in bytes) based on the RWU limit in the license.
+    pub fn memory_limit(&self) -> Option<u64> {
+        // 4GB per RWU
+        const MEMORY_PER_RWU: u64 = 4 * 1024 * 1024 * 1024;
+
+        self.rwu_limit.map(
+            |limit| (limit.get() + 1) * MEMORY_PER_RWU - 1, // allow some margin
+        )
+    }
+
+    /// Check whether the given cluster resource exceeds the limit in the license.
+    pub fn check_cluster_resource(&self, resource: ClusterResource) -> Result<(), LicenseError> {
+        let ClusterResource {
+            total_memory_bytes,
+            total_cpu_cores,
+        } = resource;
+
+        if let Some(limit) = self.cpu_core_limit()
+            && total_cpu_cores > limit
+        {
+            return Err(LicenseError::CpuLimitExceeded {
+                limit,
+                actual: total_cpu_cores,
+            });
+        }
+
+        #[cfg(not(madsim))] // skip checking memory limit in simulation tests
+        if let Some(limit) = self.memory_limit()
+            && total_memory_bytes > limit
+        {
+            return Err(LicenseError::MemoryLimitExceeded {
+                limit,
+                actual: total_memory_bytes,
+            });
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for License {
@@ -133,7 +183,7 @@ impl Default for License {
             sub: "default".to_owned(),
             tier: Tier::Free,
             iss: Issuer::Prod,
-            cpu_core_limit: None,
+            rwu_limit: None,
             exp: u64::MAX,
         }
     }
@@ -150,7 +200,16 @@ pub enum LicenseError {
         ({actual}) exceeds the maximum allowed by the license key ({limit}); \
         consider removing some nodes or acquiring a new license key with a higher limit"
     )]
-    CpuCoreLimitExceeded { limit: NonZeroU64, actual: u64 },
+    CpuLimitExceeded { limit: u64, actual: u64 },
+
+    #[error(
+        "a valid license key is set, but it is currently not effective because the memory in the cluster \
+        ({actual}) exceeds the maximum allowed by the license key ({limit}); \
+        consider removing some nodes or acquiring a new license key with a higher limit",
+        actual = humansize::format_size(*actual, humansize::BINARY),
+        limit = humansize::format_size(*limit, humansize::BINARY),
+    )]
+    MemoryLimitExceeded { limit: u64, actual: u64 },
 }
 
 struct Inner {
@@ -243,16 +302,8 @@ impl LicenseManager {
             ));
         }
 
-        // Check the CPU core limit.
-        let actual_cpu_core = inner.cached_cluster_resource.total_cpu_cores;
-        if let Some(limit) = license.cpu_core_limit
-            && actual_cpu_core > limit.get()
-        {
-            return Err(LicenseError::CpuCoreLimitExceeded {
-                limit,
-                actual: actual_cpu_core,
-            });
-        }
+        // Check the resource limit.
+        license.check_cluster_resource(inner.cached_cluster_resource)?;
 
         Ok(license)
     }
@@ -288,7 +339,7 @@ mod tests {
                     sub: "rw-test-all",
                     iss: Test,
                     tier: All,
-                    cpu_core_limit: None,
+                    rwu_limit: None,
                     exp: 10000627200,
                 }
             "#]],
@@ -304,7 +355,7 @@ mod tests {
                     sub: "rw-default-all-4-core",
                     iss: Prod,
                     tier: All,
-                    cpu_core_limit: Some(
+                    rwu_limit: Some(
                         4,
                     ),
                     exp: 10000627200,
@@ -326,7 +377,7 @@ mod tests {
                     sub: "rw-test",
                     iss: Test,
                     tier: Free,
-                    cpu_core_limit: None,
+                    rwu_limit: None,
                     exp: 9999999999,
                 }
             "#]],
@@ -343,7 +394,7 @@ mod tests {
                     sub: "default",
                     iss: Prod,
                     tier: Free,
-                    cpu_core_limit: None,
+                    rwu_limit: None,
                     exp: 18446744073709551615,
                 }
             "#]],
@@ -370,7 +421,7 @@ mod tests {
                             ),
                         ],
                     },
-                    cpu_core_limit: None,
+                    rwu_limit: None,
                     exp: 10000627200,
                 }
             "#]],
