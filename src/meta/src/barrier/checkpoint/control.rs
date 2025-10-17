@@ -855,6 +855,20 @@ impl DatabaseCheckpointControl {
                 assert!(node.state.creating_jobs_to_wait.is_empty());
                 assert!(node.state.node_to_collect.is_empty());
 
+                // Process list_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
+                let list_finished_source_ids: Vec<_> = node
+                    .state
+                    .resps
+                    .iter()
+                    .flat_map(|resp| &resp.list_finished_source_ids)
+                    .cloned()
+                    .collect();
+                if !list_finished_source_ids.is_empty() {
+                    // Add list_finished_source_ids to the task for processing
+                    let task = task.get_or_insert_default();
+                    task.list_finished_source_ids
+                        .extend(list_finished_source_ids);
+                }
                 // Process load_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
                 let load_finished_source_ids: Vec<_> = node
                     .state
