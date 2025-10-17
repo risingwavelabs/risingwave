@@ -50,7 +50,7 @@ pub enum SchemaChangeFailurePolicy {
 
 impl Default for SchemaChangeFailurePolicy {
     fn default() -> Self {
-        Self::Block
+        Self::Skip
     }
 }
 

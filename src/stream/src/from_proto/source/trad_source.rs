@@ -224,14 +224,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 } else {
                     let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
 
-                    tracing::info!(
-                        actor_id = params.actor_context.id,
-                        source_id = source.source_id,
-                        has_cdc_policies_key = source
-                            .with_properties
-                            .contains_key("cdc_table_schema_change_policies"),
-                        "CN: SourceExecutor construction - checking for policies"
-                    );
 
                     // Parse CDC table schema change policies from source properties
                     let cdc_table_schema_change_policies = source
@@ -248,7 +240,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                         actor_id = params.actor_context.id,
                                         source_id = source.source_id,
                                         policies = ?policies,
-                                        "CN: Initializing SourceExecutor with policies from source catalog"
+                                        "Initializing SourceExecutor with policies from source catalog"
                                     );
                                     Some(policies)
                                 }
@@ -258,7 +250,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                         source_id = source.source_id,
                                         policies_json = policies_json,
                                         error = %e,
-                                        "CN: Failed to parse cdc_table_schema_change_policies from source catalog"
+                                        "Failed to parse cdc_table_schema_change_policies from source catalog"
                                     );
                                     None
                                 }

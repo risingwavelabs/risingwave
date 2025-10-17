@@ -489,17 +489,17 @@ impl SourceManager {
                     // Convert from proto enum to connector enum
                     use risingwave_pb::catalog::SchemaChangeFailurePolicy as PbPolicy;
                     let policy = match PbPolicy::try_from(pb_policy) {
-                        Ok(PbPolicy::Block) | Ok(PbPolicy::Unspecified) => {
-                            SchemaChangeFailurePolicy::Block
+                        Ok(PbPolicy::Block) => SchemaChangeFailurePolicy::Block,
+                        Ok(PbPolicy::Skip) | Ok(PbPolicy::Unspecified) => {
+                            SchemaChangeFailurePolicy::Skip
                         }
-                        Ok(PbPolicy::Skip) => SchemaChangeFailurePolicy::Skip,
                         Err(_) => {
                             tracing::warn!(
                                 cdc_table_id = cdc_table_id,
                                 pb_policy = pb_policy,
-                                "Invalid CDC schema change failure policy in catalog, using default policy."
+                                "Invalid CDC schema change failure policy in catalog, using default policy (Skip)."
                             );
-                            SchemaChangeFailurePolicy::Block
+                            SchemaChangeFailurePolicy::Skip
                         }
                     };
 

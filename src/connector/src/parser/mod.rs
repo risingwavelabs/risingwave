@@ -324,50 +324,41 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
                     if let Err(error) = res {
+                        // Check if this is a CDC auto schema change error
                         if let SourceMeta::DebeziumCdc(cdc_meta) = &msg.meta
                             && matches!(cdc_meta.msg_type, CdcMessageType::SchemaChange)
+                            && let Some(AccessError::CdcAutoSchemaChangeError {
+                                table_name,
+                                ..
+                            }) = error.0.downcast_ref::<AccessError>()
                         {
-                            // Extract table info from error and build cdc_table_id
+                            // This is a CDC auto schema change error, check policy
                             let source_id = parser.source_ctx().source_id.table_id;
                             let source_name = &parser.source_ctx().source_name;
 
-                            let cdc_table_id =
-                                if let Some(AccessError::CdcAutoSchemaChangeError {
-                                    table_name,
-                                    ..
-                                }) = error.0.downcast_ref::<AccessError>()
-                                {
-                                    // table_name format: "source_name.schema\".\"table" or "source_name.schema.table"
-                                    // We need to extract "schema.table" part
-                                    let processed = table_name
-                                        // Remove source_name prefix if present
-                                        .strip_prefix(&format!("{}.", source_name))
-                                        .unwrap_or(table_name)
-                                        // Remove escape characters \"
-                                        .replace("\\\"", "")
-                                        // Remove remaining quotes
-                                        .replace("\"", "");
+                            // table_name format: "source_name.schema\".\"table" or "source_name.schema.table"
+                            // We need to extract "schema.table" part
+                            let processed = table_name
+                                // Remove source_name prefix if present
+                                .strip_prefix(&format!("{}.", source_name))
+                                .unwrap_or(table_name)
+                                // Remove escape characters \"
+                                .replace("\\\"", "")
+                                // Remove remaining quotes
+                                .replace("\"", "");
 
-                                    // Build cdc_table_id: "source_id.schema.table"
-                                    format!("{}.{}", source_id, processed)
-                                } else {
-                                    // Fallback: empty cdc_table_id
-                                    String::new()
-                                };
+                            // Build cdc_table_id: "source_id.schema.table"
+                            let cdc_table_id = format!("{}.{}", source_id, processed);
 
                             // Use table-level policy if available, otherwise fallback to source-level
-                            let policy = if !cdc_table_id.is_empty() {
-                                parser
-                                    .source_ctx()
-                                    .cdc_table_schema_change_policies
-                                    .get(&cdc_table_id)
-                                    .cloned()
-                                    .unwrap_or_else(|| {
-                                        parser.source_ctx().schema_change_failure_policy.clone()
-                                    })
-                            } else {
-                                parser.source_ctx().schema_change_failure_policy.clone()
-                            };
+                            let policy = parser
+                                .source_ctx()
+                                .cdc_table_schema_change_policies
+                                .get(&cdc_table_id)
+                                .cloned()
+                                .unwrap_or_else(|| {
+                                    parser.source_ctx().schema_change_failure_policy.clone()
+                                });
 
                             tracing::info!(
                                 source_id = source_id,
@@ -398,6 +389,8 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                                         cdc_table_id = cdc_table_id,
                                         "Schema change message parsing failed, skipping due to policy."
                                     );
+                                    // Skip this message and continue to next
+                                    continue;
                                 }
                             }
                         }

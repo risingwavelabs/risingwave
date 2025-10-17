@@ -147,7 +147,7 @@ impl From<risingwave_pb::catalog::SchemaChangeFailurePolicy> for SchemaChangeFai
         match policy {
             risingwave_pb::catalog::SchemaChangeFailurePolicy::Block => Self::Block,
             risingwave_pb::catalog::SchemaChangeFailurePolicy::Skip => Self::Skip,
-            risingwave_pb::catalog::SchemaChangeFailurePolicy::Unspecified => Self::Block,
+            risingwave_pb::catalog::SchemaChangeFailurePolicy::Unspecified => Self::Skip,
         }
     }
 }

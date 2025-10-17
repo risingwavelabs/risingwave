@@ -111,19 +111,8 @@ impl StreamReaderBuilder {
                                     .get(cdc_table_id)
                                     .cloned()
                                     .unwrap_or_else(|| {
-                                        tracing::info!(
-                                            target: "auto_schema_change",
-                                            cdc_table_id = cdc_table_id,
-                                            "CN Reader: No table-level policy found, using source-level"
-                                        );
                                         source_level_policy.clone()
                                     });
-
-                                tracing::info!(
-                                    target: "auto_schema_change",
-                                    cdc_table_id = cdc_table_id,
-                                    policy = ?policy,
-                                    "CN Reader: Using schema change failure policy");
 
                                 match policy {
                                     risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Block => {
