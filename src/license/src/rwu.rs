@@ -93,7 +93,7 @@ mod tests {
             0,
             33 * 4 * GB,
             expect![
-                "feature TestDummy is not available due to license error: a valid license key is set, but it is currently not effective because the memory in the cluster (132 GiB) exceeds the maximum allowed by the license key (128 GiB); consider removing some nodes or acquiring a new license key with a higher limit"
+                "feature TestDummy is not available due to license error: a valid license key is set, but it is currently not effective because the memory in the cluster (132 GiB) exceeds the maximum allowed by the license key (132.00 GiB); consider removing some nodes or acquiring a new license key with a higher limit"
             ],
         );
     }
