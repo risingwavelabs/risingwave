@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::future::Future;
 
 use itertools::Itertools;
-use risingwave_common::array::{Op, RowRef};
+use risingwave_common::array::RowRef;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common_estimate_size::EstimateSize;
@@ -26,6 +26,7 @@ use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_storage::StateStore;
 
 use super::{GroupKey, ManagedTopNState};
+use crate::common::change_buffer::ChangeBuffer;
 use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
 
@@ -824,9 +825,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
 /// It should be maintained when an entry is inserted or deleted from the `middle` cache.
 #[derive(Debug, Default)]
 pub struct TopNStaging {
-    to_delete: BTreeMap<CacheKey, CompactedRow>,
-    to_insert: BTreeMap<CacheKey, CompactedRow>,
-    to_update: BTreeMap<CacheKey, (CompactedRow, CompactedRow)>,
+    inner: ChangeBuffer<CacheKey, CompactedRow>,
 }
 
 impl TopNStaging {
@@ -837,75 +836,37 @@ impl TopNStaging {
     /// Insert a row into the staging changes. This method must be called when a row is
     /// added to the `middle` cache.
     fn insert(&mut self, cache_key: CacheKey, row: CompactedRow) {
-        if let Some(old_row) = self.to_delete.remove(&cache_key) {
-            if old_row != row {
-                self.to_update.insert(cache_key, (old_row, row));
-            }
-        } else {
-            self.to_insert.insert(cache_key, row);
-        }
+        self.inner.insert(cache_key, row);
     }
 
     /// Delete a row from the staging changes. This method must be called when a row is
     /// removed from the `middle` cache.
     fn delete(&mut self, cache_key: CacheKey, row: CompactedRow) {
-        if self.to_insert.remove(&cache_key).is_some() {
-            // do nothing more
-        } else if let Some((old_row, _)) = self.to_update.remove(&cache_key) {
-            self.to_delete.insert(cache_key, old_row);
-        } else {
-            self.to_delete.insert(cache_key, row);
-        }
+        self.inner.delete(cache_key, row);
     }
 
     /// Get the count of effective changes in the staging.
     pub fn len(&self) -> usize {
-        self.to_delete.len() + self.to_insert.len() + self.to_update.len()
+        self.inner.len()
     }
 
     /// Check if the staging is empty.
     pub fn is_empty(&self) -> bool {
-        self.to_delete.is_empty() && self.to_insert.is_empty() && self.to_update.is_empty()
-    }
-
-    /// Iterate over the changes in the staging.
-    pub fn into_changes(self) -> impl Iterator<Item = (Op, CompactedRow)> {
-        #[cfg(debug_assertions)]
-        {
-            let keys = self
-                .to_delete
-                .keys()
-                .chain(self.to_insert.keys())
-                .chain(self.to_update.keys())
-                .unique()
-                .count();
-            assert_eq!(
-                keys,
-                self.to_delete.len() + self.to_insert.len() + self.to_update.len(),
-                "should not have duplicate keys with different operations",
-            );
-        }
-
-        // We expect one `CacheKey` to appear at most once in the staging, and, the order of
-        // the outputs of `TopN` doesn't really matter, so we can simply chain the three maps.
-        // Although the output order is not important, we still ensure that `Delete`s are emitted
-        // before `Insert`s, so that we can avoid temporary violation of the `LIMIT` constraint.
-        self.to_update
-            .into_values()
-            .flat_map(|(old_row, new_row)| {
-                [(Op::UpdateDelete, old_row), (Op::UpdateInsert, new_row)]
-            })
-            .chain(self.to_delete.into_values().map(|row| (Op::Delete, row)))
-            .chain(self.to_insert.into_values().map(|row| (Op::Insert, row)))
+        self.inner.is_empty()
     }
 
     /// Iterate over the changes in the staging, and deserialize the rows.
     pub fn into_deserialized_changes(
         self,
         deserializer: &RowDeserializer,
-    ) -> impl Iterator<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_ {
-        self.into_changes()
-            .map(|(op, row)| Ok((op, deserializer.deserialize(row.row.as_ref())?)))
+    ) -> impl Iterator<Item = StreamExecutorResult<Record<OwnedRow>>> + '_ {
+        self.inner.into_records().map(|record| {
+            record.try_map(|row| {
+                deserializer
+                    .deserialize(row.row.as_ref())
+                    .map_err(Into::into)
+            })
+        })
     }
 }
 
