@@ -57,6 +57,26 @@ impl CatalogController {
         Ok(ObjectModel(conn, obj.unwrap()).into())
     }
 
+    pub async fn get_table_catalog_by_name(
+        &self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        name: &str,
+    ) -> MetaResult<Option<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_obj = Table::find()
+            .find_also_related(Object)
+            .filter(
+                table::Column::Name
+                    .eq(name)
+                    .and(object::Column::DatabaseId.eq(database_id))
+                    .and(object::Column::SchemaId.eq(schema_id)),
+            )
+            .one(&inner.db)
+            .await?;
+        Ok(table_obj.map(|(table, obj)| ObjectModel(table, obj.unwrap()).into()))
+    }
+
     pub async fn get_table_by_name(
         &self,
         database_name: &str,

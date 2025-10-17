@@ -26,6 +26,7 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::replace_job_plan::{
     ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
 };
@@ -244,6 +245,14 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         database_id: DatabaseId,
         param: AlterDatabaseParam,
+    ) -> Result<()>;
+
+    async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
     ) -> Result<()>;
 }
 
@@ -663,6 +672,20 @@ impl CatalogWriter for CatalogWriterImpl {
             .alter_database_param(database_id, param)
             .await
             .map_err(|e| anyhow!(e))?;
+        self.wait_version(version).await
+    }
+
+    async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_iceberg_table(table_job_info, sink_job_info, iceberg_source, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 }

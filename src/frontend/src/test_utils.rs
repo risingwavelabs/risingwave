@@ -45,6 +45,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
     alter_swap_rename_request, create_connection_request,
@@ -726,6 +727,16 @@ impl CatalogWriter for MockCatalogWriter {
         }
         self.catalog.write().update_database(&pb_database);
         Ok(())
+    }
+
+    async fn create_iceberg_table(
+        &self,
+        _table_job_info: PbTableJobInfo,
+        _sink_job_info: PbSinkJobInfo,
+        _iceberg_source: PbSource,
+        _if_not_exists: bool,
+    ) -> Result<()> {
+        todo!()
     }
 }
 

@@ -67,7 +67,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
 use crate::error::ErrorCode;
-use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
+use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
 
 pub type ShareId = usize;
@@ -132,6 +132,9 @@ pub struct Binder {
 
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
+
+    /// The staging catalogs that will be used during binding phase
+    staging_catalog_manager: StagingCatalogManager,
 
     /// Information for `secure_compare` function. It's ONLY available when binding the
     /// `VALIDATE` clause of Webhook source i.e. `VALIDATE SECRET ... AS SECURE_COMPARE(...)`.
@@ -250,6 +253,7 @@ impl Binder {
             included_udfs: HashSet::new(),
             param_types: ParameterTypes::new(vec![]),
             temporary_source_manager: session.temporary_source_manager(),
+            staging_catalog_manager: session.staging_catalog_manager(),
             secure_compare_context: None,
         }
     }
