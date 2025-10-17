@@ -11,7 +11,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 cfg-or-panic = "0.2"
 clap = { workspace = true }
-console = "0.15"
+console = "0.16"
 expect-test = "1"
 fail = { version = "0.5" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
