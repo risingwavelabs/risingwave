@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::TableId;
 use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::ScalarRef;
 use risingwave_common::util::value_encoding::{BasicSerializer, ValueRowSerializer};
 use risingwave_storage::StateStore;
 use risingwave_storage::store::{
@@ -99,7 +98,6 @@ impl<S: StateStore> VectorIndexWriteExecutor<S> {
                             continue;
                         };
                         let vector = vector_datum.into_vector();
-                        let vector = vector.to_owned_scalar();
                         let info = self
                             .serializer
                             .serialize(row.project(&info_column_indices))

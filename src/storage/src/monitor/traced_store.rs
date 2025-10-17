@@ -28,7 +28,7 @@ use risingwave_hummock_trace::{
     TracedBytes, TracedSealCurrentEpochOptions, init_collector, should_use_trace,
 };
 use thiserror_ext::AsReport;
-
+use risingwave_common::array::VectorRef;
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, ObjectIdManagerRef};
@@ -145,11 +145,11 @@ impl<S> TracedStateStore<S, TableSnapshot> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for TracedStateStore<S, TableSnapshot> {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         if let Some((key, value)) = self
             .traced_get_keyed_row(
@@ -336,12 +336,12 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreReadVector> StateStoreReadVector for TracedStateStore<S, TableSnapshot> {
-    fn nearest<O: Send + 'static>(
-        &self,
-        vec: Vector,
+    fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
-    ) -> impl StorageFuture<'_, Vec<O>> {
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<O>> {
         self.inner.nearest(vec, options, on_nearest_item_fn)
     }
 }

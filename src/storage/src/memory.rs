@@ -35,7 +35,8 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use thiserror_ext::AsReport;
 use tokio::task::yield_now;
 use tracing::error;
-
+use risingwave_common::array::VectorRef;
+use risingwave_common::types::ScalarRef;
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::hummock::utils::{
@@ -687,11 +688,11 @@ pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         self.inner
             .get_keyed_row_impl(key, self.epoch, self.table_id)
@@ -728,21 +729,21 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
 }
 
 impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
-    async fn nearest<O: Send + 'static>(
-        &self,
-        vec: Vector,
+    async fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
-        fn nearest_impl<M: MeasureDistanceBuilder, O>(
-            store: &InMemVectorStore,
+        fn nearest_impl<'a, M: MeasureDistanceBuilder, O>(
+            store: &'a InMemVectorStore,
             epoch: u64,
             table_id: TableId,
-            vec: Vector,
+            vec: VectorRef<'a>,
             options: VectorNearestOptions,
-            on_nearest_item_fn: impl OnNearestItemFn<O>,
+            on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
         ) -> Vec<O> {
-            let mut builder = NearestBuilder::<'_, O, M>::new(vec.to_ref(), options.top_n);
+            let mut builder = NearestBuilder::<'_, O, M>::new(vec, options.top_n);
             builder.add(
                 store
                     .read()
@@ -1007,11 +1008,11 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreGet for RangeKvLocalStateStore<R> {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         if let Some((key, value)) = match self.mem_table.buffer.get(&key) {
             None => self
@@ -1285,8 +1286,8 @@ impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreWriteVector for RangeKvLocalStateStore<R> {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
-        self.vectors.push((vec, info));
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
+        self.vectors.push((vec.to_owned_scalar(), info));
         Ok(())
     }
 }

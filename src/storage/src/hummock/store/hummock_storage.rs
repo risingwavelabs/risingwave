@@ -35,7 +35,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
-
+use risingwave_common::array::VectorRef;
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{CommittedVersion, HummockVersionReader, read_filter_for_version};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
@@ -260,11 +260,11 @@ impl HummockStorageReadSnapshot {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    async fn get_inner<O>(
-        &self,
+    async fn get_inner<'a, O>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
@@ -639,12 +639,12 @@ pub struct HummockStorageReadSnapshot {
 }
 
 impl StateStoreGet for HummockStorageReadSnapshot {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>> {
+        on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>> {
         self.get_inner(key, read_options, on_key_value_fn)
     }
 }
@@ -687,11 +687,11 @@ impl StateStoreRead for HummockStorageReadSnapshot {
 }
 
 impl StateStoreReadVector for HummockStorageReadSnapshot {
-    async fn nearest<O: Send + 'static>(
-        &self,
-        vec: Vector,
+    async fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
         let version = match self.epoch {
             HummockReadEpoch::Committed(epoch)

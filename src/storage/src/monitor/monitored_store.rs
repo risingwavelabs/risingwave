@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{Instrument, error};
-
+use risingwave_common::types::VectorRef;
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -139,12 +139,12 @@ impl<S, E> MonitoredStateStore<S, E> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for MonitoredTableStateStore<S> {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>> {
+        on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>> {
         let table_id = self.table_id();
         let key_len = key.len();
         self.monitored_on_key_value(
@@ -207,12 +207,12 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
 }
 
 impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<S> {
-    fn nearest<O: Send + 'static>(
-        &self,
-        vec: Vector,
+    fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
-    ) -> impl StorageFuture<'_, Vec<O>> {
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<O>> {
         // TODO: monitor
         self.inner.nearest(vec, options, on_nearest_item_fn)
     }
@@ -300,7 +300,7 @@ impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl for MonitoredTa
 }
 
 impl<S: StateStoreWriteVector> StateStoreWriteVector for MonitoredTableStateStore<S> {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
         // TODO: monitor
         self.inner.insert(vec, info)
     }

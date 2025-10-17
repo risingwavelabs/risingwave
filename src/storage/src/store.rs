@@ -22,7 +22,7 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
-use risingwave_common::array::Op;
+use risingwave_common::array::{Op, VectorRef};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
@@ -257,16 +257,16 @@ pub trait StateStoreReadLog: StaticSendSync {
     ) -> impl StorageFuture<'_, Self::ChangeLogIter>;
 }
 
-pub trait KeyValueFn<O> =
-    for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'static;
+pub trait KeyValueFn<'a, O> =
+    for<'kv> FnOnce(FullKey<&'kv [u8]>, &'kv [u8]) -> StorageResult<O> + Send + 'a;
 
 pub trait StateStoreGet: StaticSendSync {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>>;
+        on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>>;
 }
 
 pub trait StateStoreRead: StateStoreGet + StaticSendSync {
@@ -428,7 +428,7 @@ pub trait StateStoreWriteEpochControl: StaticSendSync {
 }
 
 pub trait StateStoreWriteVector: StateStoreWriteEpochControl + StaticSendSync {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()>;
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()>;
 }
 
 pub struct VectorNearestOptions {
@@ -437,15 +437,15 @@ pub struct VectorNearestOptions {
     pub hnsw_ef_search: usize,
 }
 
-pub trait OnNearestItemFn<O> = OnNearestItem<O> + Send + Sync + 'static;
+pub trait OnNearestItemFn<'a, O> = OnNearestItem<O> + Send + Sync + 'a;
 
 pub trait StateStoreReadVector: StaticSendSync {
-    fn nearest<O: Send + 'static>(
-        &self,
-        vec: Vector,
+    fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
-    ) -> impl StorageFuture<'_, Vec<O>>;
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<O>>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory

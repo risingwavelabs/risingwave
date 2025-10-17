@@ -16,6 +16,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -30,12 +31,12 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreGet for PanicStateStore {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         _key: TableKey<Bytes>,
         _read_options: ReadOptions,
-        _on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>> {
+        _on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>> {
         async { panic!("should not read from PanicStateStore") }
     }
 }
@@ -146,17 +147,17 @@ impl StateStoreWriteEpochControl for PanicStateStore {
 }
 
 impl StateStoreWriteVector for PanicStateStore {
-    fn insert(&mut self, _vec: Vector, _info: Bytes) -> StorageResult<()> {
+    fn insert(&mut self, _vec: VectorRef<'_>, _info: Bytes) -> StorageResult<()> {
         panic!()
     }
 }
 
 impl StateStoreReadVector for PanicStateStore {
-    async fn nearest<O: Send + 'static>(
-        &self,
-        _vec: Vector,
+    async fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        _vec: VectorRef<'a>,
         _options: VectorNearestOptions,
-        _on_nearest_item_fn: impl OnNearestItemFn<O>,
+        _on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> StorageResult<Vec<O>> {
         panic!()
     }
