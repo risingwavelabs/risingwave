@@ -433,6 +433,7 @@
                         <removeUnusedImports/>
                         <excludes>
                             <exclude>**/org/apache/iceberg/common/**</exclude>
+                            <exclude>**/io/debezium/**</exclude>
                         </excludes>
                     </java>
                 </configuration>

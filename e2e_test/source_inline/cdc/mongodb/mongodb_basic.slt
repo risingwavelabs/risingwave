@@ -102,20 +102,20 @@ insert into phases values ('03_ingested', now());
 query TTT
 select * from all_types_access order by _id, field;
 ----
-{"$oid": "6911a33502454e0f774f8803"} f01a_double    2.5
+{"$oid": "6911a33502454e0f774f8803"} f01a_double    {"$numberDouble": "2.5"}
 {"$oid": "6911a33502454e0f774f8803"} f02_string     "Rising"
 {"$oid": "6911a33502454e0f774f8803"} f03_object     {"bar": false, "foo": true}
 {"$oid": "6911a33502454e0f774f8803"} f04_array      ["e0", "e1"]
-{"$oid": "6911a33502454e0f774f8803"} f05a_binData   {"$binary": "3q2+7w==", "$type": "00"}
-{"$oid": "6911a33502454e0f774f8803"} f05b_binData   {"$binary": "ABEiM0RVZneImaq7zN3u/w==", "$type": "04"}
-{"$oid": "6911a33502454e0f774f8803"} f05c_binData   {"$binary": "JwAAAABAAABAQA==", "$type": "09"}
+{"$oid": "6911a33502454e0f774f8803"} f05a_binData   {"$binary": {"base64": "3q2+7w==", "subType": "00"}}
+{"$oid": "6911a33502454e0f774f8803"} f05b_binData   {"$binary": {"base64": "ABEiM0RVZneImaq7zN3u/w==", "subType": "04"}}
+{"$oid": "6911a33502454e0f774f8803"} f05c_binData   {"$binary": {"base64": "JwAAAABAAABAQA==", "subType": "09"}}
 {"$oid": "6911a33502454e0f774f8803"} f08_bool       false
-{"$oid": "6911a33502454e0f774f8803"} f09a_date      {"$date": 1}
-{"$oid": "6911a33502454e0f774f8803"} f09b_date      {"$date": -138751200000}
+{"$oid": "6911a33502454e0f774f8803"} f09a_date      {"$date": {"$numberLong": "1"}}
+{"$oid": "6911a33502454e0f774f8803"} f09b_date      {"$date": {"$numberLong": "-138751200000"}}
 {"$oid": "6911a33502454e0f774f8803"} f10_null       null
-{"$oid": "6911a33502454e0f774f8803"} f11_regex      {"$options": "i", "$regex": "ab+c"}
+{"$oid": "6911a33502454e0f774f8803"} f11_regex      {"$regularExpression": {"options": "i", "pattern": "ab+c"}}
 {"$oid": "6911a33502454e0f774f8803"} f13_javascript {"$code": "function() {}"}
-{"$oid": "6911a33502454e0f774f8803"} f16_int        42
+{"$oid": "6911a33502454e0f774f8803"} f16_int        {"$numberInt": "42"}
 {"$oid": "6911a33502454e0f774f8803"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
 {"$oid": "6911a33502454e0f774f8803"} f18_long       {"$numberLong": "9007199254740993"}
 {"$oid": "6911a33502454e0f774f8803"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
@@ -165,37 +165,37 @@ from all_types_extjson order by commit_ts;
 query TTT
 select * from all_types_access order by _id, field;
 ----
-{"$oid": "6911a33502454e0f774f8803"} f01a_double    2.5
+{"$oid": "6911a33502454e0f774f8803"} f01a_double    {"$numberDouble": "2.5"}
 {"$oid": "6911a33502454e0f774f8803"} f02_string     "Rising"
 {"$oid": "6911a33502454e0f774f8803"} f03_object     {"bar": false, "foo": true}
 {"$oid": "6911a33502454e0f774f8803"} f04_array      ["e0", "e1"]
-{"$oid": "6911a33502454e0f774f8803"} f05a_binData   {"$binary": "3q2+7w==", "$type": "00"}
-{"$oid": "6911a33502454e0f774f8803"} f05b_binData   {"$binary": "ABEiM0RVZneImaq7zN3u/w==", "$type": "04"}
-{"$oid": "6911a33502454e0f774f8803"} f05c_binData   {"$binary": "JwAAAABAAABAQA==", "$type": "09"}
+{"$oid": "6911a33502454e0f774f8803"} f05a_binData   {"$binary": {"base64": "3q2+7w==", "subType": "00"}}
+{"$oid": "6911a33502454e0f774f8803"} f05b_binData   {"$binary": {"base64": "ABEiM0RVZneImaq7zN3u/w==", "subType": "04"}}
+{"$oid": "6911a33502454e0f774f8803"} f05c_binData   {"$binary": {"base64": "JwAAAABAAABAQA==", "subType": "09"}}
 {"$oid": "6911a33502454e0f774f8803"} f08_bool       false
-{"$oid": "6911a33502454e0f774f8803"} f09a_date      {"$date": 1}
-{"$oid": "6911a33502454e0f774f8803"} f09b_date      {"$date": -138751200000}
+{"$oid": "6911a33502454e0f774f8803"} f09a_date      {"$date": {"$numberLong": "1"}}
+{"$oid": "6911a33502454e0f774f8803"} f09b_date      {"$date": {"$numberLong": "-138751200000"}}
 {"$oid": "6911a33502454e0f774f8803"} f10_null       null
-{"$oid": "6911a33502454e0f774f8803"} f11_regex      {"$options": "i", "$regex": "ab+c"}
+{"$oid": "6911a33502454e0f774f8803"} f11_regex      {"$regularExpression": {"options": "i", "pattern": "ab+c"}}
 {"$oid": "6911a33502454e0f774f8803"} f13_javascript {"$code": "function() {}"}
-{"$oid": "6911a33502454e0f774f8803"} f16_int        42
+{"$oid": "6911a33502454e0f774f8803"} f16_int        {"$numberInt": "42"}
 {"$oid": "6911a33502454e0f774f8803"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
 {"$oid": "6911a33502454e0f774f8803"} f18_long       {"$numberLong": "9007199254740993"}
 {"$oid": "6911a33502454e0f774f8803"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
-{"$oid": "6911a33502454e0f774f8804"} f01a_double    2.5
+{"$oid": "6911a33502454e0f774f8804"} f01a_double    {"$numberDouble": "2.5"}
 {"$oid": "6911a33502454e0f774f8804"} f02_string     "Rising"
 {"$oid": "6911a33502454e0f774f8804"} f03_object     {"bar": false, "foo": true}
 {"$oid": "6911a33502454e0f774f8804"} f04_array      ["e0", "e1"]
-{"$oid": "6911a33502454e0f774f8804"} f05a_binData   {"$binary": "3q2+7w==", "$type": "00"}
-{"$oid": "6911a33502454e0f774f8804"} f05b_binData   {"$binary": "ABEiM0RVZneImaq7zN3u/w==", "$type": "04"}
-{"$oid": "6911a33502454e0f774f8804"} f05c_binData   {"$binary": "JwAAAABAAABAQA==", "$type": "09"}
+{"$oid": "6911a33502454e0f774f8804"} f05a_binData   {"$binary": {"base64": "3q2+7w==", "subType": "00"}}
+{"$oid": "6911a33502454e0f774f8804"} f05b_binData   {"$binary": {"base64": "ABEiM0RVZneImaq7zN3u/w==", "subType": "04"}}
+{"$oid": "6911a33502454e0f774f8804"} f05c_binData   {"$binary": {"base64": "JwAAAABAAABAQA==", "subType": "09"}}
 {"$oid": "6911a33502454e0f774f8804"} f08_bool       false
-{"$oid": "6911a33502454e0f774f8804"} f09a_date      {"$date": 1}
-{"$oid": "6911a33502454e0f774f8804"} f09b_date      {"$date": -138751200000}
+{"$oid": "6911a33502454e0f774f8804"} f09a_date      {"$date": {"$numberLong": "1"}}
+{"$oid": "6911a33502454e0f774f8804"} f09b_date      {"$date": {"$numberLong": "-138751200000"}}
 {"$oid": "6911a33502454e0f774f8804"} f10_null       null
-{"$oid": "6911a33502454e0f774f8804"} f11_regex      {"$options": "i", "$regex": "ab+c"}
+{"$oid": "6911a33502454e0f774f8804"} f11_regex      {"$regularExpression": {"options": "i", "pattern": "ab+c"}}
 {"$oid": "6911a33502454e0f774f8804"} f13_javascript {"$code": "function() {}"}
-{"$oid": "6911a33502454e0f774f8804"} f16_int        42
+{"$oid": "6911a33502454e0f774f8804"} f16_int        {"$numberInt": "42"}
 {"$oid": "6911a33502454e0f774f8804"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
 {"$oid": "6911a33502454e0f774f8804"} f18_long       {"$numberLong": "9007199254740993"}
 {"$oid": "6911a33502454e0f774f8804"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
