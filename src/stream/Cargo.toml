@@ -31,6 +31,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hytra = "0.1.2"
 iceberg = { workspace = true }
+indexmap = "2"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 lru = { workspace = true }
@@ -90,6 +91,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
   "test",
 ] }
+risingwave_stream = { workspace = true, features = ["test"] }
 serde_yaml = "0.9"
 tracing-subscriber = "0.3.20"
 tracing-test = "0.2"
