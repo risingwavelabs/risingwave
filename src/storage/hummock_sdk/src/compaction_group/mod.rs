@@ -165,7 +165,7 @@ pub mod group_split {
             (l, r)
         };
         let (table_ids_l, table_ids_r) =
-            split_table_ids_with_split_key(&origin_sst_info.table_ids, split_key.clone());
+            split_table_ids_with_split_key(&origin_sst_info.table_ids, split_key);
 
         // rebuild the key_range and size and sstable file size
         {

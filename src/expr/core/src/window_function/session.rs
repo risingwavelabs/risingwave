@@ -168,7 +168,7 @@ impl SessionFrameGap {
         self.add_expr = Some(Arc::new(build_func(
             PbExprType::Add,
             order_data_type.clone(),
-            vec![input_expr.clone().boxed(), gap_expr.clone().boxed()],
+            vec![input_expr.boxed(), gap_expr.boxed()],
         )?));
         Ok(())
     }

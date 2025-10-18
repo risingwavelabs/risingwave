@@ -105,8 +105,7 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        let executor =
-            ExecutorBuilder::new(&plan_node, &task_id, context, self.shutdown_rx().clone());
+        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.shutdown_rx());
         let executor = executor.build().await?;
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.
@@ -127,11 +126,11 @@ impl LocalQueryExecution {
     pub fn stream_rows(self) -> LocalQueryStream {
         let compute_runtime = self.front_env.compute_runtime();
         let (sender, receiver) = mpsc::channel(10);
-        let shutdown_rx = self.shutdown_rx().clone();
+        let shutdown_rx = self.shutdown_rx();
 
         let catalog_reader = self.front_env.catalog_reader().clone();
         let user_info_reader = self.front_env.user_info_reader().clone();
-        let auth_context = self.session.auth_context().clone();
+        let auth_context = self.session.auth_context();
         let db_name = self.session.database();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();

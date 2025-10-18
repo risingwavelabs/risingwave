@@ -244,7 +244,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
 ) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
     let connector_name = with_options.get_connector();
     let db_name: &str = &session.database();
-    let (mut options, secret_refs, connection_refs) = with_options.clone().into_parts();
+    let (mut options, secret_refs, connection_refs) = with_options.into_parts();
 
     let mut connection_id = None;
     let mut connection_params = None;

@@ -96,7 +96,7 @@ impl LogicalCdcScan {
             self.table_name().to_owned(),
             output_col_idx,
             self.core.cdc_table_desc.clone(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.core.options.clone(),
         )
         .into()

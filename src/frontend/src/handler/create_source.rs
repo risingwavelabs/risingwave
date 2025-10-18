@@ -428,7 +428,7 @@ pub(crate) fn bind_all_columns(
                 )?;
                 match key_data_type {
                     DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64 => {
-                        columns[0].column_desc.data_type = key_data_type.clone();
+                        columns[0].column_desc.data_type = key_data_type;
                     }
                     _ => {
                         return Err(RwError::from(ProtocolError(

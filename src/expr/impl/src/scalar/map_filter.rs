@@ -42,7 +42,7 @@ impl Expression for MapFilterExpression {
         let map_input = self.map.eval(input).await?;
         let map_array = map_input.as_map();
 
-        let mut builder = MapArrayBuilder::with_type(map_array.len(), self.return_type().clone());
+        let mut builder = MapArrayBuilder::with_type(map_array.len(), self.return_type());
 
         for idx in 0..map_array.len() {
             if map_array.is_null(idx) {

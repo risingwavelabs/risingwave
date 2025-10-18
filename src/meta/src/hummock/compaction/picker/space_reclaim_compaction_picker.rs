@@ -239,7 +239,7 @@ mod test {
             *sst_10 = SstableInfoInner {
                 key_range: KeyRange {
                     right_exclusive: true,
-                    ..sst_10.get_inner().key_range.clone()
+                    ..sst_10.get_inner().key_range
                 },
                 ..sst_10.get_inner()
             }

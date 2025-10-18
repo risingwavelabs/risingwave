@@ -169,8 +169,7 @@ impl SnowflakeV2Config {
         let jdbc_url = self
             .jdbc_url
             .clone()
-            .ok_or(SinkError::Config(anyhow!("jdbc.url is required")))?
-            .clone();
+            .ok_or(SinkError::Config(anyhow!("jdbc.url is required")))?;
         let username = self
             .username
             .clone()

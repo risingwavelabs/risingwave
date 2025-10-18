@@ -73,7 +73,7 @@ pub fn get_columns_from_sink(
     sink_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
     let binder = Binder::new_for_system(session);
-    let sink = binder.bind_sink_by_name(sink_name.clone())?;
+    let sink = binder.bind_sink_by_name(sink_name)?;
     Ok(sink.sink_catalog.full_columns().to_vec())
 }
 
@@ -82,7 +82,7 @@ pub fn get_columns_from_view(
     view_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
     let binder = Binder::new_for_system(session);
-    let view = binder.bind_view_by_name(view_name.clone())?;
+    let view = binder.bind_view_by_name(view_name)?;
 
     Ok(view
         .view_catalog

@@ -253,7 +253,7 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 Some((command, notifiers)),
                 checkpoint,
-                span.clone(),
+                span,
                 control_stream_manager,
                 &self.hummock_version_stats,
             )
@@ -277,7 +277,7 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 None,
                 checkpoint,
-                span.clone(),
+                span,
                 control_stream_manager,
                 &self.hummock_version_stats,
             )
@@ -1241,7 +1241,7 @@ impl DatabaseCheckpointControl {
         let command_ctx = CommandContext::new(
             barrier_info,
             pre_applied_subscription_info,
-            table_ids_to_commit.clone(),
+            table_ids_to_commit,
             command,
             span,
         );

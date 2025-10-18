@@ -76,7 +76,7 @@ impl Rule<Logical> for SplitNowOrRule {
 
         let share = LogicalShare::create(input);
         let filter1 = LogicalFilter::create_with_expr(share.clone(), arm1);
-        let filter2 = LogicalFilter::create_with_expr(share.clone(), arm2);
+        let filter2 = LogicalFilter::create_with_expr(share, arm2);
         let union_all = LogicalUnion::create(true, vec![filter1, filter2]);
         Some(union_all)
     }

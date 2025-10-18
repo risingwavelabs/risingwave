@@ -220,7 +220,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 regex::escape(&s)
             }
             1 => {
-                let mut shuffled = chars.clone();
+                let mut shuffled = chars;
                 shuffled.reverse();
                 regex::escape(&shuffled.into_iter().collect::<String>())
             }

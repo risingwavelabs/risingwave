@@ -412,7 +412,7 @@ impl StreamActorManager {
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
                 related_subscriptions,
-                self.env.meta_client().clone(),
+                self.env.meta_client(),
                 streaming_config,
                 self.env.clone(),
             );
@@ -468,7 +468,7 @@ impl StreamActorManager {
             let handle = {
                 let trace_span =
                     format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
-                let barrier_manager = local_barrier_manager.clone();
+                let barrier_manager = local_barrier_manager;
                 // wrap the future of `create_actor` with `boxed` to avoid stack overflow
                 let actor = self
                     .clone()

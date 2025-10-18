@@ -206,7 +206,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_iter_fetch_meta_duration",
             "Histogram of iterator fetch SST meta time that have been issued to state store",
-            state_store_read_time_buckets.clone(),
+            state_store_read_time_buckets,
         );
         let iter_fetch_meta_duration =
             register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();

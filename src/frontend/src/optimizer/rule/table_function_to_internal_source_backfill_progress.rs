@@ -65,7 +65,7 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
                 Field::new("backfill_state_table_id", DataType::Int32),
                 Field::new("backfill_progress", DataType::Jsonb),
             ];
-            let plan = LogicalValues::new(vec![], Schema::new(fields), ctx.clone());
+            let plan = LogicalValues::new(vec![], Schema::new(fields), ctx);
             return Ok(plan.into());
         }
 
@@ -82,7 +82,7 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
     }
 
     fn build_scan(ctx: Rc<OptimizerContext>, table: Arc<TableCatalog>) -> LogicalScan {
-        LogicalScan::create(table, ctx.clone(), None)
+        LogicalScan::create(table, ctx, None)
     }
 
     fn build_project(

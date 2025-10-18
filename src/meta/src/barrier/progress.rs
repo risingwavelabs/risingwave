@@ -642,7 +642,7 @@ impl CreateMviewProgressTracker {
             actors,
             upstream_mv_count,
             upstream_total_key_count,
-            definition.clone(),
+            definition,
             create_type.into(),
             backfill_order_state,
         );

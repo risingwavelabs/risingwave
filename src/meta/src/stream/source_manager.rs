@@ -372,7 +372,7 @@ impl SourceManager {
         replace_plan: &ReplaceStreamJobPlan,
     ) {
         // Extract the fragments that include source operators.
-        let dropped_source_fragments = dropped_job_fragments.stream_source_fragments().clone();
+        let dropped_source_fragments = dropped_job_fragments.stream_source_fragments();
 
         self.apply_source_change(SourceChange::ReplaceJob {
             dropped_source_fragments,

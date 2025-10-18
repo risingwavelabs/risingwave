@@ -346,7 +346,7 @@ impl LogicalScan {
             self.table().clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             predicate,
             self.as_of(),
         )
@@ -359,7 +359,7 @@ impl LogicalScan {
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.predicate().clone(),
             self.as_of(),
         )

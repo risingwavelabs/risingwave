@@ -447,7 +447,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     }
 
                     if let Some(watermark) = staging_state_watermark.take() {
-                        self.left_table.update_watermark(watermark.clone());
+                        self.left_table.update_watermark(watermark);
                     };
 
                     if let Some(watermark) = watermark_to_propagate.take() {

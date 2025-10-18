@@ -65,7 +65,7 @@ impl Rule<Logical> for PullUpCorrelatedPredicateAggRule {
         let top_filter = if let Some(top_filter) = plan.as_logical_filter() {
             top_filter.clone()
         } else {
-            LogicalFilter::new(plan.clone(), Condition::true_cond())
+            LogicalFilter::new(plan, Condition::true_cond())
         };
         let top_filter_input = top_filter.input();
         let apply = top_filter_input.as_logical_apply()?;

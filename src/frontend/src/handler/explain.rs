@@ -142,15 +142,8 @@ pub async fn do_handle_explain(
                         columns,
                         emit_mode,
                         ..
-                    } => gen_create_mv_plan(
-                        &session,
-                        context.clone(),
-                        *query,
-                        name,
-                        columns,
-                        emit_mode,
-                    )
-                    .map(|(plan, table)| (PhysicalPlanRef::Stream(plan), Some(table))),
+                    } => gen_create_mv_plan(&session, context, *query, name, columns, emit_mode)
+                        .map(|(plan, table)| (PhysicalPlanRef::Stream(plan), Some(table))),
                     Statement::CreateView {
                         materialized: false,
                         ..
@@ -180,7 +173,7 @@ pub async fn do_handle_explain(
                             resolve_index_schema(&session, name, table_name)?;
                         gen_create_index_plan(
                             &session,
-                            context.clone(),
+                            context,
                             schema_name,
                             table,
                             index_table_name,

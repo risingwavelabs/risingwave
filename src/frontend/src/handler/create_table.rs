@@ -252,7 +252,7 @@ pub fn bind_sql_column_constraints(
     };
 
     let mut binder = Binder::new_for_ddl(session);
-    binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
+    binder.bind_columns_to_context(table_name, column_catalogs)?;
 
     for column in columns {
         let Some(idx) = column_catalogs
@@ -2289,8 +2289,7 @@ fn get_source_and_resolved_table_name(
     let db_name = &session.database();
     let (schema_name, resolved_table_name) =
         Binder::resolve_schema_qualified_name(db_name, &table_name)?;
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let (format_encode, source_name) =
         Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;

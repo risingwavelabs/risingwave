@@ -100,7 +100,7 @@ impl StorageCatalog {
                 let enable_config_load = config.enable_config_load.unwrap_or(false);
                 file_io_builder = file_io_builder
                     .with_prop(S3_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string());
-                (config.warehouse.clone(), file_io_builder.build()?)
+                (config.warehouse, file_io_builder.build()?)
             }
             StorageCatalogConfig::Gcs(config) => {
                 let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
@@ -110,7 +110,7 @@ impl StorageCatalog {
                 let enable_config_load = config.enable_config_load.unwrap_or(false);
                 file_io_builder = file_io_builder
                     .with_prop(GCS_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string());
-                (config.warehouse.clone(), file_io_builder.build()?)
+                (config.warehouse, file_io_builder.build()?)
             }
             StorageCatalogConfig::Azblob(config) => {
                 let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
@@ -123,7 +123,7 @@ impl StorageCatalog {
                 if let Some(endpoint) = &config.endpoint {
                     file_io_builder = file_io_builder.with_prop(AZBLOB_ENDPOINT, endpoint)
                 };
-                (config.warehouse.clone(), file_io_builder.build()?)
+                (config.warehouse, file_io_builder.build()?)
             }
         };
 
