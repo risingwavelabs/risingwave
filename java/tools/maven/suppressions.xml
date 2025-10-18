@@ -26,6 +26,8 @@ under the License.
     <!-- exclude patched class -->
     <suppress files="src/main/java/io/debezium/connector/postgresql/PostgresConnectorConfig.java"
               checks=".*"/>
+    <suppress files="src/main/java/io/debezium/connector/mongodb/JsonSerialization.java"
+              checks=".*"/>
     <!-- target directory is not relevant for checkstyle -->
     <suppress
             files="[\\/]target[\\/]"
