@@ -102,7 +102,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, FileData>,
         properties: ConnectorProperties,
         parser_config: ParserConfig,
-        source_ctx: SourceContext,
+        source_ctx: Arc<SourceContext>,
     ) -> StreamExecutorResult<()> {
         // Pop up to BATCH_SIZE files from the queue to process
         let mut batch = Vec::with_capacity(BATCH_SIZE);
@@ -135,7 +135,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         batch: Vec<OpendalFsSplit<OpendalPosixFs>>,
         properties: ConnectorProperties,
         parser_config: ParserConfig,
-        source_ctx: SourceContext,
+        source_ctx: Arc<SourceContext>,
     ) {
         let ConnectorProperties::BatchPosixFs(batch_posix_fs_properties) = properties else {
             unreachable!()
@@ -185,11 +185,9 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                 };
 
                 // Parser is created per line because it's consumed by parse_stream
-                let parser = ByteStreamSourceParserImpl::create(
-                    parser_config.clone(),
-                    Arc::new(source_ctx.clone()),
-                )
-                .await?;
+                let parser =
+                    ByteStreamSourceParserImpl::create(parser_config.clone(), source_ctx.clone())
+                        .await?;
 
                 let chunk_stream = parser
                     .parse_stream(Box::pin(futures::stream::once(async { Ok(vec![message]) })));
@@ -251,6 +249,20 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         let barrier_manager = self.barrier_manager.clone();
         let rate_limit_rps = &mut self.rate_limit_rps;
 
+        let source_ctx = Arc::new(SourceContext::new(
+            actor_ctx.id,
+            core.source_id,
+            actor_ctx.fragment_id,
+            core.source_name.clone(),
+            source_desc.metrics.clone(),
+            SourceCtrlOpts {
+                chunk_size: limited_chunk_size(*rate_limit_rps),
+                split_txn: rate_limit_rps.is_some(),
+            },
+            source_desc.source.config.clone(),
+            None,
+        ));
+
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
@@ -261,7 +273,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                     // Barrier messages from upstream
                     Either::Left(msg) => match msg {
                         Message::Barrier(barrier) => {
-                            let mut need_rebuild_reader = false;
+                            let need_rebuild_reader = false;
 
                             if let Some(mutation) = barrier.mutation.as_deref() {
                                 match mutation {
@@ -312,13 +324,17 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
 
                             let epoch = barrier.epoch;
 
+                            let barrier_is_checkpoint = barrier.is_checkpoint();
+                            // Propagate the barrier.
+                            yield Message::Barrier(barrier);
+
                             // Report load finished when:
                             // 1. All files have been processed (files_in_progress == 0 and file_queue is empty)
                             // 2. ListFinish mutation has been received
                             if files_in_progress == 0
                                 && file_queue.is_empty()
                                 && list_finished
-                                && barrier.is_checkpoint()
+                                && barrier_is_checkpoint
                             {
                                 tracing::info!(
                                     ?epoch,
@@ -335,32 +351,16 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 // Reset the flag to avoid duplicate reports
                                 list_finished = false;
                             }
-                            // Propagate the barrier.
-                            yield Message::Barrier(barrier);
 
                             // Rebuild reader when all current files are processed
                             if files_in_progress == 0 || need_rebuild_reader {
-                                let source_ctx = SourceContext::new(
-                                    actor_ctx.id,
-                                    core.source_id,
-                                    actor_ctx.fragment_id,
-                                    core.source_name.clone(),
-                                    source_desc.metrics.clone(),
-                                    SourceCtrlOpts {
-                                        chunk_size: limited_chunk_size(*rate_limit_rps),
-                                        split_txn: rate_limit_rps.is_some(),
-                                    },
-                                    source_desc.source.config.clone(),
-                                    None,
-                                );
-
                                 Self::replace_with_new_batch_reader(
                                     &mut files_in_progress,
                                     &mut file_queue,
                                     &mut stream,
                                     properties.clone(),
                                     parser_config.clone(),
-                                    source_ctx,
+                                    source_ctx.clone(),
                                 )?;
                             }
                         }
