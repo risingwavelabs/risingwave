@@ -4137,3 +4137,27 @@ fn parse_window_clause() {
     let ast = parse_sql_statements(sql).unwrap();
     assert_eq!(ast.len(), 1);
 }
+
+#[test]
+fn parse_alter_fragment_set_parallelism() {
+    match verified_stmt("ALTER FRAGMENT 1 SET PARALLELISM = 4") {
+        Statement::AlterFragment {
+            fragment_id,
+            operation,
+        } => {
+            assert_eq!(fragment_id, 1);
+            match operation {
+                AlterFragmentOperation::SetParallelism { parallelism } => {
+                    assert_eq!(
+                        parallelism,
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(
+                            "4".into()
+                        )))
+                    );
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+}
