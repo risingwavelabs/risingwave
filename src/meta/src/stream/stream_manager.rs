@@ -34,15 +34,14 @@ use thiserror_ext::AsReport;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
 use tracing::Instrument;
 
-use super::{
-    FragmentBackfillOrder, Locations, ParallelismPolicy, ReschedulePolicy, ScaleControllerRef,
-};
+use super::{FragmentBackfillOrder, Locations, ReschedulePolicy, ScaleControllerRef};
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::error::bail_invalid_parameter;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
@@ -54,7 +53,7 @@ use crate::stream::SourceManagerRef;
 use crate::stream::cdc::{
     assign_cdc_table_snapshot_splits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
-use crate::{MetaError, MetaResult, bail_invalid_parameter};
+use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
 
@@ -834,7 +833,7 @@ impl GlobalStreamManager {
                 .filter_map(|(fragment_id, mask)| {
                     FragmentTypeMask::from(mask)
                         .contains(FragmentTypeFlag::StreamCdcScan)
-                        .then(|| fragment_id)
+                        .then_some(fragment_id)
                 })
                 .collect_vec();
 
