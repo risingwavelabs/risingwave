@@ -819,7 +819,6 @@ impl GlobalBarrierWorkerContextImpl {
                 }
             }
         }
-        // TODO
         Ok(stream_actors)
     }
 }

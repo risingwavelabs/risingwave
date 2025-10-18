@@ -69,6 +69,7 @@ use thiserror_ext::AsReport;
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::fragment::FragmentTypeMaskExt;
+use crate::controller::scale::resolve_streaming_job_definition;
 use crate::model::FragmentDownstreamRelation;
 use crate::{MetaError, MetaResult};
 
@@ -2161,6 +2162,41 @@ pub fn build_select_node_list(
     }
 
     Ok(exprs)
+}
+
+pub async fn get_streaming_job_runtime_info<C>(
+    txn: &C,
+    job_ids: Vec<ObjectId>,
+) -> Result<HashMap<ObjectId, (Option<String>, String)>, MetaError>
+where
+    C: ConnectionTrait,
+{
+    let timezone_pairs: Vec<(ObjectId, Option<String>)> = StreamingJob::find()
+        .select_only()
+        .columns([
+            streaming_job::Column::JobId,
+            streaming_job::Column::Timezone,
+        ])
+        .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let job_ids = job_ids.into_iter().collect();
+
+    let mut definitions = resolve_streaming_job_definition(txn, &job_ids).await?;
+
+    let result = timezone_pairs
+        .into_iter()
+        .map(|(job_id, timezone)| {
+            (
+                job_id,
+                (timezone, definitions.remove(&job_id).unwrap_or_default()),
+            )
+        })
+        .collect();
+
+    Ok(result)
 }
 
 #[cfg(test)]

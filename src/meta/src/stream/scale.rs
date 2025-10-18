@@ -45,7 +45,9 @@ use crate::controller::scale::{
     RenderedGraph, WorkerInfo, find_fragment_no_shuffle_dags_detailed, render_jobs,
 };
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
-use crate::model::{ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers};
+use crate::model::{
+    ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, StreamContext,
+};
 use crate::serving::{
     ServingVnodeMapping, to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
 };
@@ -82,12 +84,11 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
-use risingwave_pb::plan_common::PbExprContext;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait};
 
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
-use crate::controller::utils::compose_dispatchers;
+use crate::controller::utils::{compose_dispatchers, get_streaming_job_runtime_info};
 
 pub type ScaleControllerRef = Arc<ScaleController>;
 
@@ -157,6 +158,7 @@ impl ScaleController {
         upstream_fragments: HashMap<FragmentId, DispatcherType>,
         downstream_fragments: HashMap<FragmentId, DispatcherType>,
         all_actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
+        job_runtime_info: Option<&(Option<String>, String)>,
     ) -> MetaResult<Reschedule> {
         let prev_actors: HashMap<_, _> = prev_fragment_info
             .actors
@@ -233,6 +235,8 @@ impl ScaleController {
             .map(|(fragment_id, _)| *fragment_id)
             .collect();
 
+        let (timezone, job_definition) = job_runtime_info.cloned().unwrap_or_default();
+
         let newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)> =
             added_actor_ids
                 .iter()
@@ -241,8 +245,13 @@ impl ScaleController {
                         actor_id: *actor_id,
                         fragment_id: prev_fragment_info.fragment_id,
                         vnode_bitmap: curr_actors[actor_id].vnode_bitmap.clone(),
-                        mview_definition: "wtf".to_owned(), // TODO: handle mview definition
-                        expr_context: Some(PbExprContext::default()),
+                        mview_definition: job_definition.clone(),
+                        expr_context: Some(
+                            StreamContext {
+                                timezone: timezone.clone(),
+                            }
+                            .to_expr_context(),
+                        ),
                     };
                     (
                         *actor_id,
@@ -451,6 +460,13 @@ impl ScaleController {
         //     }
         // }
 
+        let job_ids = render_result
+            .values()
+            .flat_map(|jobs| jobs.keys().copied())
+            .collect_vec();
+
+        let job_infos = get_streaming_job_runtime_info(txn, job_ids).await?;
+
         let fragment_ids = render_result
             .values()
             .flat_map(|jobs| jobs.values())
@@ -560,7 +576,14 @@ impl ScaleController {
         for (database_id, jobs) in &render_result {
             let mut all_fragment_actors = HashMap::new();
             let mut reschedules = HashMap::new();
-            for (fragment_id, fragment_info) in jobs.values().flatten() {
+
+            for (job_id, fragment_id, fragment_info) in
+                jobs.iter().flat_map(|(job_id, fragments)| {
+                    fragments
+                        .iter()
+                        .map(move |(fragment_id, info)| (job_id, fragment_id, info))
+                })
+            {
                 let InflightFragmentInfo {
                     distribution_type,
                     actors,
@@ -659,14 +682,13 @@ impl ScaleController {
 
                 let prev_fragment = all_prev_fragments.get(&{ *fragment_id }).unwrap();
 
-                // NOTE: diff fragment does not handle split reassignment currently because we can't fetch stream node from inflight info.
-                // So we need to manually handle later.
                 let reschedule = self.diff_fragment(
                     prev_fragment,
                     actors,
                     upstream_fragments,
                     downstream_fragments,
                     all_actor_dispatchers,
+                    job_infos.get(job_id).clone(),
                 )?;
 
                 reschedules.insert(*fragment_id as FragmentId, reschedule);
