@@ -23,7 +23,8 @@ use super::*;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
-    get_database_resource_group, get_existing_job_resource_group, get_table_columns,
+    StreamingJobExtraInfo, get_database_resource_group, get_existing_job_resource_group,
+    get_streaming_job_extra_info as fetch_streaming_job_extra_info, get_table_columns,
 };
 use crate::model::{StreamActor, StreamContext, StreamJobFragments, TableParallelism};
 
@@ -613,14 +614,14 @@ impl CatalogController {
         Ok(status)
     }
 
-    pub async fn get_streaming_job_runtime_info(
+    pub async fn get_streaming_job_extra_info(
         &self,
         job_ids: Vec<ObjectId>,
-    ) -> MetaResult<HashMap<ObjectId, (Option<String>, String)>> {
+    ) -> MetaResult<HashMap<ObjectId, StreamingJobExtraInfo>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let result = get_streaming_job_runtime_info(&txn, job_ids).await?;
+        let result = fetch_streaming_job_extra_info(&txn, job_ids).await?;
         Ok(result)
     }
 

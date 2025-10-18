@@ -2164,10 +2164,16 @@ pub fn build_select_node_list(
     Ok(exprs)
 }
 
-pub async fn get_streaming_job_runtime_info<C>(
+#[derive(Clone, Debug, Default)]
+pub struct StreamingJobExtraInfo {
+    pub timezone: Option<String>,
+    pub job_definition: String,
+}
+
+pub async fn get_streaming_job_extra_info<C>(
     txn: &C,
     job_ids: Vec<ObjectId>,
-) -> Result<HashMap<ObjectId, (Option<String>, String)>, MetaError>
+) -> MetaResult<HashMap<ObjectId, StreamingJobExtraInfo>>
 where
     C: ConnectionTrait,
 {
@@ -2189,9 +2195,13 @@ where
     let result = timezone_pairs
         .into_iter()
         .map(|(job_id, timezone)| {
+            let job_definition = definitions.remove(&job_id).unwrap_or_default();
             (
                 job_id,
-                (timezone, definitions.remove(&job_id).unwrap_or_default()),
+                StreamingJobExtraInfo {
+                    timezone,
+                    job_definition,
+                },
             )
         })
         .collect();

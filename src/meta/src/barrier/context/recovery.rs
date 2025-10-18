@@ -35,6 +35,7 @@ use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightActorInfo;
+use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamContext, StreamJobFragments};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
@@ -779,30 +780,24 @@ impl GlobalBarrierWorkerContextImpl {
             .flat_map(|jobs| jobs.keys().map(|job_id| job_id.table_id as i32))
             .collect_vec();
 
-        let job_infos = self
+        let job_extra_info = self
             .metadata_manager
             .catalog_controller
-            .get_streaming_job_runtime_info(job_ids)
+            .get_streaming_job_extra_info(job_ids)
             .await?;
 
         let mut stream_actors = HashMap::new();
 
         for (_, streaming_info) in all_info.values().flatten() {
-            let job_info = job_infos.get(&(streaming_info.job_id.table_id as i32));
+            let StreamingJobExtraInfo {
+                timezone,
+                job_definition,
+            } = job_extra_info
+                .get(&(streaming_info.job_id.table_id as i32))
+                .cloned()
+                .unwrap_or_default();
 
-            let (mview_definition, expr_context) = job_info
-                .map(|(timezone, definition)| {
-                    (
-                        definition,
-                        Some(
-                            StreamContext {
-                                timezone: timezone.clone(),
-                            }
-                            .to_expr_context(),
-                        ),
-                    )
-                })
-                .unwrap();
+            let expr_context = Some(StreamContext { timezone }.to_expr_context());
 
             for (fragment_id, fragment_info) in &streaming_info.fragment_infos {
                 for (actor_id, InflightActorInfo { vnode_bitmap, .. }) in &fragment_info.actors {
@@ -812,7 +807,7 @@ impl GlobalBarrierWorkerContextImpl {
                             actor_id: *actor_id as _,
                             fragment_id: *fragment_id as _,
                             vnode_bitmap: vnode_bitmap.clone(),
-                            mview_definition: mview_definition.clone(),
+                            mview_definition: job_definition.clone(),
                             expr_context: expr_context.clone(),
                         },
                     );

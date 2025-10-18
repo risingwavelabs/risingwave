@@ -88,7 +88,9 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait};
 
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
-use crate::controller::utils::{compose_dispatchers, get_streaming_job_runtime_info};
+use crate::controller::utils::{
+    StreamingJobExtraInfo, compose_dispatchers, get_streaming_job_extra_info,
+};
 
 pub type ScaleControllerRef = Arc<ScaleController>;
 
@@ -158,7 +160,7 @@ impl ScaleController {
         upstream_fragments: HashMap<FragmentId, DispatcherType>,
         downstream_fragments: HashMap<FragmentId, DispatcherType>,
         all_actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
-        job_runtime_info: Option<&(Option<String>, String)>,
+        job_extra_info: Option<&StreamingJobExtraInfo>,
     ) -> MetaResult<Reschedule> {
         let prev_actors: HashMap<_, _> = prev_fragment_info
             .actors
@@ -235,7 +237,9 @@ impl ScaleController {
             .map(|(fragment_id, _)| *fragment_id)
             .collect();
 
-        let (timezone, job_definition) = job_runtime_info.cloned().unwrap_or_default();
+        let extra_info = job_extra_info.cloned().unwrap_or_default();
+        let timezone = extra_info.timezone.clone();
+        let job_definition = extra_info.job_definition;
 
         let newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)> =
             added_actor_ids
@@ -465,7 +469,7 @@ impl ScaleController {
             .flat_map(|jobs| jobs.keys().copied())
             .collect_vec();
 
-        let job_infos = get_streaming_job_runtime_info(txn, job_ids).await?;
+        let job_extra_info = get_streaming_job_extra_info(txn, job_ids).await?;
 
         let fragment_ids = render_result
             .values()
@@ -688,7 +692,7 @@ impl ScaleController {
                     upstream_fragments,
                     downstream_fragments,
                     all_actor_dispatchers,
-                    job_infos.get(job_id).clone(),
+                    job_extra_info.get(job_id),
                 )?;
 
                 reschedules.insert(*fragment_id as FragmentId, reschedule);
