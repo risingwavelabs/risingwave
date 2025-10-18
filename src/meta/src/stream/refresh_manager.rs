@@ -94,11 +94,11 @@ impl RefreshManager {
         let table_id = TableId::new(request.table_id);
         let associated_source_id = TableId::new(request.associated_source_id);
 
-        tracing::info!("Starting refresh operation for table {}", table_id);
-
         // Validate that the table exists and is refreshable
         self.validate_refreshable_table(table_id, associated_source_id)
             .await?;
+
+        tracing::info!("Starting refresh operation for table {}", table_id);
 
         // Get database_id for the table
         let database_id = DatabaseId::new(
@@ -132,8 +132,13 @@ impl RefreshManager {
                 tracing::error!(
                     error = %e.as_report(),
                     table_id = %table_id,
-                    "Failed to execute refresh command"
+                    "Failed to execute refresh command, resetting refresh state to Idle"
                 );
+
+                self.metadata_manager
+                    .catalog_controller
+                    .set_table_refresh_state(table_id.table_id as _, RefreshState::Idle)
+                    .await?;
 
                 Err(anyhow!(e)
                     .context(format!("Failed to refresh table {}", table_id))

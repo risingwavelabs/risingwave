@@ -86,6 +86,13 @@ CREATE TABLE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
 ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
 
 
+# No initial load
+query I retry 3 backoff 1s
+select count(*) from refresh_fs_t;
+----
+0
+
+
 statement ok
 create materialized view refresh_fs_t_mv as select * from refresh_fs_t;
 
@@ -100,15 +107,12 @@ WITH (
 FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
 
 
-statement ok
-CREATE TABLE refresh_fs_t_complex (id int PRIMARY KEY, name varchar, ts timestamptz AS proctime(), x int as id+1) WITH (
-    connector = '__for_testing_only_batch_posix_fs',
-    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
-    match_pattern = '*.csv'
-) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+# trigger refresh to load
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_fs_t;
 
-
-sleep 2s
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_fs_t_on_conflict_ignore;
 
 # Initial load should read existing files
 query II rowsort retry 3 backoff 5s

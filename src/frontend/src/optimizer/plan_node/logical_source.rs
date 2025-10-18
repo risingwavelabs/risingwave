@@ -182,7 +182,7 @@ impl LogicalSource {
         if core.is_new_fs_connector() {
             plan = Self::create_list_plan(core.clone(), true)?;
             plan = StreamFsFetch::new(plan, core.clone()).into();
-        } else if core.is_iceberg_connector() {
+        } else if core.is_iceberg_connector() || core.is_batch_connector() {
             plan = Self::create_list_plan(core.clone(), false)?;
             plan = StreamFsFetch::new(plan, core.clone()).into();
         } else {
