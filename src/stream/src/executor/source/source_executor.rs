@@ -97,7 +97,7 @@ pub struct SourceExecutor<S: StateStore> {
     is_shared_non_cdc: bool,
 
     /// Local barrier manager for reporting source load finished events
-    barrier_manager: LocalBarrierManager,
+    _barrier_manager: LocalBarrierManager,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -120,7 +120,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
-            barrier_manager,
+            _barrier_manager: barrier_manager,
         }
     }
 
@@ -225,20 +225,6 @@ impl<S: StateStore> SourceExecutor<S> {
         (column_ids, source_ctx)
     }
 
-    /// Check if this is a batch refreshable source.
-    fn is_batch_source(&self) -> bool {
-        self.stream_source_core.is_batch_source
-    }
-
-    /// Refresh splits
-    fn refresh_batch_splits(&mut self) -> StreamExecutorResult<Vec<SplitImpl>> {
-        debug_assert!(self.is_batch_source());
-        let core = &self.stream_source_core;
-        let mut split = core.get_batch_split();
-        split.refresh();
-        Ok(vec![split.into()])
-    }
-
     fn is_auto_schema_change_enable(&self) -> bool {
         self.actor_ctx
             .streaming_config
@@ -287,12 +273,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     {
                         should_rebuild_stream = true;
                     }
-                }
-                ApplyMutationAfterBarrier::RefreshBatchSplits(splits) => {
-                    // Just override the latest split info with the refreshed splits. No need to check.
-                    self.stream_source_core.latest_split_info =
-                        splits.into_iter().map(|s| (s.id(), s)).collect();
-                    should_rebuild_stream = true;
                 }
                 ApplyMutationAfterBarrier::ConnectorPropsChange => {
                     should_rebuild_stream = true;
@@ -823,7 +803,6 @@ enum ApplyMutationAfterBarrier<'a> {
         should_trim_state: bool,
         split_change_count: &'a LabelGuardedMetric<GenericCounter<AtomicU64>>,
     },
-    RefreshBatchSplits(Vec<SplitImpl>),
     ConnectorPropsChange,
 }
 
@@ -1036,7 +1015,6 @@ mod tests {
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_owned(),
-            is_batch_source: false,
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();
@@ -1125,7 +1103,6 @@ mod tests {
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_owned(),
-            is_batch_source: false,
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();

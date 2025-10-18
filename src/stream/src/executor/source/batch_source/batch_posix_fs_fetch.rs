@@ -242,6 +242,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         // File queue is empty by default (no restoration from persistent state)
 
         let mut list_finished = false;
+        let mut is_refreshing = false;
         let mut file_queue = self.file_queue;
 
         // Extract fields we'll need later
@@ -298,6 +299,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                         file_queue.clear();
                                         files_in_progress = 0;
                                         list_finished = false;
+                                        is_refreshing = true;
 
                                         // Abort current file reader
                                         stream.replace_data_stream(stream::pending().boxed());
@@ -324,17 +326,18 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
 
                             let epoch = barrier.epoch;
 
-                            let barrier_is_checkpoint = barrier.is_checkpoint();
-                            // Propagate the barrier.
-                            yield Message::Barrier(barrier);
-
-                            // Report load finished when:
+                            // Report load finished BEFORE yielding barrier when:
                             // 1. All files have been processed (files_in_progress == 0 and file_queue is empty)
                             // 2. ListFinish mutation has been received
+                            //
+                            // IMPORTANT: Must report BEFORE yield to ensure epoch is still in inflight_barriers.
+                            // If we yield first, the barrier worker may collect the barrier and remove the epoch
+                            // from inflight_barriers, causing the report to be ignored with a warning.
                             if files_in_progress == 0
                                 && file_queue.is_empty()
                                 && list_finished
-                                && barrier_is_checkpoint
+                                && is_refreshing
+                            // && barrier_is_checkpoint
                             {
                                 tracing::info!(
                                     ?epoch,
@@ -350,7 +353,11 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 );
                                 // Reset the flag to avoid duplicate reports
                                 list_finished = false;
+                                is_refreshing = false;
                             }
+
+                            // Propagate the barrier AFTER reporting progress.
+                            yield Message::Barrier(barrier);
 
                             // Rebuild reader when all current files are processed
                             if files_in_progress == 0 || need_rebuild_reader {
@@ -382,7 +389,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                         Message::Watermark(_) => unreachable!(),
                     },
                     // Data from file reader
-                    Either::Right(FileData { chunks, file_path }) => {
+                    Either::Right(FileData { chunks, .. }) => {
                         // Decrement counter after processing a file
                         files_in_progress -= 1;
 
@@ -393,11 +400,6 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 split_idx,
                                 offset_idx,
                                 &source_desc.columns,
-                            );
-                            tracing::info!(
-                                actor_id = actor_ctx.id,
-                                file_path = %file_path,
-                                "Yielding chunk {}", chunk.to_pretty()
                             );
                             yield Message::Chunk(chunk);
                         }

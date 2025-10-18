@@ -225,15 +225,11 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
         yield Message::Barrier(first_barrier);
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
 
-        // Initial file listing
-        let file_iter = Self::list_files_to_stream(
-            batch_posix_fs_properties.root.clone(),
-            batch_posix_fs_properties.match_pattern.clone(),
-        )
-        .await?;
-        let file_stream = futures::stream::iter(file_iter);
-
-        let mut stream = StreamReaderWithPause::<true, _>::new(barrier_stream, file_stream);
+        let mut is_refreshing = false;
+        let mut stream = StreamReaderWithPause::<true, _>::new(
+            barrier_stream,
+            futures::stream::pending().boxed(),
+        );
 
         let mut list_finished = false;
 
@@ -274,6 +270,7 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                                                 let new_file_stream =
                                                     futures::stream::iter(file_iter);
                                                 stream.replace_data_stream(new_file_stream);
+                                                is_refreshing = true;
                                                 list_finished = false;
                                             }
                                             Err(e) => {
@@ -289,9 +286,10 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                             }
 
                             // Report list finished after all files are listed
-                            if !list_finished {
+                            if !list_finished && is_refreshing {
                                 self.report_list_finished(barrier.epoch);
                                 list_finished = true;
+                                is_refreshing = false;
                             }
 
                             // Propagate the barrier.
