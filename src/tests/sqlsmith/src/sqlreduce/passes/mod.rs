@@ -104,8 +104,7 @@ pub trait Transform: Send + Sync {
                 let mut results = Vec::new();
                 if reduction_points.len() >= k {
                     for i in 0..=reduction_points.len() - k {
-                        let new_ast =
-                            self.apply_on(ast.clone(), &reduction_points[i..i + k]);
+                        let new_ast = self.apply_on(ast.clone(), &reduction_points[i..i + k]);
                         results.push((new_ast, i));
                     }
                 }
