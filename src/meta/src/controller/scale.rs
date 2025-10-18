@@ -182,7 +182,6 @@ pub struct RenderedGraph {
     pub ensembles: Vec<NoShuffleEnsemble>,
 }
 
-
 impl RenderedGraph {
     pub fn empty() -> Self {
         Self::default()
@@ -196,56 +195,18 @@ impl RenderedGraph {
 pub async fn render_fragments<C>(
     txn: &C,
     id_gen: &IdGeneratorManagerRef,
-    fragment_ids: Vec<FragmentId>,
+    ensembles: Vec<NoShuffleEnsemble>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
 ) -> MetaResult<RenderedGraph>
 where
     C: ConnectionTrait,
 {
-    let requested_fragments: HashSet<FragmentId> = fragment_ids.into_iter().collect();
-
-    if requested_fragments.is_empty() {
+    if ensembles.is_empty() {
         return Ok(RenderedGraph::empty());
     }
 
-    let initial_fragment_ids = requested_fragments.iter().copied().collect_vec();
-
-    let ensembles = find_fragment_no_shuffle_dags_detailed(txn, &initial_fragment_ids).await?;
-
-    let filtered_ensembles: Vec<_> = ensembles
-        .into_iter()
-        .filter(|ensemble| {
-            ensemble
-                .entries
-                .iter()
-                .any(|fragment_id| requested_fragments.contains(fragment_id))
-        })
-        .collect();
-
-    if filtered_ensembles.is_empty() {
-        return Ok(RenderedGraph::empty());
-    }
-
-    let covered_entries: HashSet<_> = filtered_ensembles
-        .iter()
-        .flat_map(|ensemble| ensemble.entries.iter().copied())
-        .collect();
-
-    let missing_entries: Vec<_> = requested_fragments
-        .difference(&covered_entries)
-        .copied()
-        .collect();
-
-    if !missing_entries.is_empty() {
-        return Err(anyhow!(
-            "fragments {:?} are not entry fragments in their no-shuffle ensembles",
-            missing_entries
-        )
-        .into());
-    }
-
-    let required_fragment_ids: HashSet<_> = filtered_ensembles
+    let required_fragment_ids: HashSet<_> = ensembles
         .iter()
         .flat_map(|ensemble| ensemble.components.iter().copied())
         .collect();
@@ -299,7 +260,7 @@ where
     let fragments = render_no_shuffle_ensembles(
         txn,
         id_gen,
-        &filtered_ensembles,
+        &ensembles,
         &fragment_map,
         &jobs,
         &workers,
@@ -309,7 +270,7 @@ where
 
     Ok(RenderedGraph {
         fragments,
-        ensembles: filtered_ensembles,
+        ensembles,
     })
 }
 
@@ -448,6 +409,18 @@ where
             .map(|fragment_id| fragment_map.get(fragment_id).unwrap())
             .collect_vec();
 
+        let entry_fragment_parallelism = entry_fragments
+            .iter()
+            .map(|fragment| fragment.parallelism.clone())
+            .dedup()
+            .exactly_one()
+            .map_err(|_| {
+                anyhow!(
+                    "entry fragments {:?} have inconsistent parallelism settings",
+                    entries.iter().copied().collect_vec()
+                )
+            })?;
+
         let (job_id, vnode_count) = entry_fragments
             .iter()
             .map(|f| (f.job_id, f.vnode_count as usize))
@@ -488,23 +461,26 @@ where
 
         let total_parallelism = available_workers.values().map(|w| w.get()).sum::<usize>();
 
-        let actual_parallelism = match job.parallelism {
-            StreamingParallelism::Custom | StreamingParallelism::Adaptive => {
+        let actual_parallelism = match entry_fragment_parallelism
+            .as_ref()
+            .unwrap_or(&job.parallelism)
+        {
+            StreamingParallelism::Adaptive | StreamingParallelism::Custom => {
                 adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
             }
-            StreamingParallelism::Fixed(n) => n,
+            StreamingParallelism::Fixed(n) => *n,
         }
-        .min(job.max_parallelism as usize)
         .min(vnode_count);
 
         tracing::debug!(
-            "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {}",
+            "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {} fragment_override {:?}",
             job_id,
             actual_parallelism,
             job.parallelism,
             total_parallelism,
             job.max_parallelism,
-            vnode_count
+            vnode_count,
+            entry_fragment_parallelism
         );
 
         let assigner = AssignerBuilder::new(job_id).build();
@@ -715,7 +691,7 @@ pub struct ActorGraph<'a> {
     pub locations: &'a HashMap<ActorId, WorkerId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoShuffleEnsemble {
     entries: HashSet<FragmentId>,
     components: HashSet<FragmentId>,
@@ -724,6 +700,18 @@ pub struct NoShuffleEnsemble {
 impl NoShuffleEnsemble {
     pub fn fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
         self.components.iter().cloned()
+    }
+
+    pub fn entry_fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.entries.iter().copied()
+    }
+
+    pub fn component_fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.components.iter().copied()
+    }
+
+    pub fn contains_entry(&self, fragment_id: &FragmentId) -> bool {
+        self.entries.contains(fragment_id)
     }
 }
 

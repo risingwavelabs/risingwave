@@ -42,8 +42,8 @@ use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
 use crate::controller::scale::{
-    FragmentRenderMap, RenderedGraph, WorkerInfo, find_fragment_no_shuffle_dags_detailed,
-    render_fragments, render_jobs,
+    FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
+    find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
 };
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
@@ -430,11 +430,14 @@ impl ScaleController {
         policy: HashMap<risingwave_meta_model::FragmentId, ParallelismPolicy>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if policy.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let fragment_ids: HashSet<_> = policy.keys().copied().collect();
-        let fragment_id_list = fragment_ids.iter().copied().collect_vec();
+        let fragment_id_list = policy.keys().copied().collect_vec();
 
         let existing_fragment_ids: HashSet<_> = Fragment::find()
             .select_only()
@@ -446,7 +449,7 @@ impl ScaleController {
             .into_iter()
             .collect();
 
-        if let Some(missing_fragment_id) = fragment_ids
+        if let Some(missing_fragment_id) = fragment_id_list
             .iter()
             .find(|fragment_id| !existing_fragment_ids.contains(fragment_id))
         {
@@ -456,13 +459,46 @@ impl ScaleController {
             ));
         }
 
-        for (fragment_id, target) in &policy {
-            let mut fragment = fragment::ActiveModel {
-                fragment_id: Set(*fragment_id),
-                parallelism: Set(Some(target.parallelism.clone())),
-                ..Default::default()
+        let mut target_ensembles = vec![];
+
+        for ensemble in find_fragment_no_shuffle_dags_detailed(&txn, &fragment_id_list).await? {
+            let entry_fragment_ids = ensemble.entry_fragments().collect_vec();
+
+            let parallelisms = entry_fragment_ids
+                .iter()
+                .filter_map(|fragment_id| policy.get(fragment_id))
+                .dedup()
+                .collect_vec();
+
+            let parallelism = match parallelisms.as_slice() {
+                [] => {
+                    bail!(
+                        "no reschedule policy specified for fragments in the no-shuffle ensemble: {:?}",
+                        entry_fragment_ids
+                    );
+                }
+                [policy] => &policy.parallelism,
+                _ => {
+                    bail!(
+                        "conflicting reschedule policies for fragments in the same no-shuffle ensemble: {:?}",
+                        parallelisms
+                            .iter()
+                            .map(|policy| &policy.parallelism)
+                            .collect_vec()
+                    );
+                }
             };
-            fragment.update(&txn).await?;
+
+            for fragment_id in entry_fragment_ids {
+                let fragment = fragment::ActiveModel {
+                    fragment_id: Set(fragment_id),
+                    parallelism: Set(Some(parallelism.clone())),
+                    ..Default::default()
+                };
+                fragment.update(&txn).await?;
+            }
+
+            target_ensembles.push(ensemble);
         }
 
         let workers = workers
@@ -479,7 +515,7 @@ impl ScaleController {
             .collect();
 
         let command = self
-            .rerender_fragment_inner(&txn, fragment_ids, workers)
+            .rerender_fragment_inner(&txn, target_ensembles, workers)
             .await?;
 
         txn.commit().await?;
@@ -499,10 +535,10 @@ impl ScaleController {
     async fn rerender_fragment_inner(
         &self,
         txn: &impl ConnectionTrait,
-        fragments: HashSet<risingwave_meta_model::FragmentId>,
+        ensembles: Vec<NoShuffleEnsemble>,
         workers: BTreeMap<WorkerId, WorkerInfo>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
-        if fragments.is_empty() {
+        if ensembles.is_empty() {
             return Ok(HashMap::new());
         }
 
@@ -513,21 +549,16 @@ impl ScaleController {
 
         let id_gen = self.env.id_gen_manager();
 
-        let fragment_ids = fragments.into_iter().collect_vec();
-
-        let RenderedGraph {
-            fragments: render_result,
-            ..
-        } = render_fragments(
+        let RenderedGraph { fragments, .. } = render_fragments(
             txn,
             id_gen,
-            fragment_ids,
+            ensembles,
             workers,
             adaptive_parallelism_strategy,
         )
         .await?;
 
-        self.build_reschedule_commands(txn, render_result).await
+        self.build_reschedule_commands(txn, fragments).await
     }
 
     async fn rerender_inner(
@@ -543,12 +574,10 @@ impl ScaleController {
 
         let id_gen = self.env.id_gen_manager();
 
-        let RenderedGraph {
-            fragments: render_result,
-            ..
-        } = render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy).await?;
+        let RenderedGraph { fragments, .. } =
+            render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy).await?;
 
-        self.build_reschedule_commands(txn, render_result).await
+        self.build_reschedule_commands(txn, fragments).await
     }
 
     async fn build_reschedule_commands(
@@ -845,7 +874,7 @@ impl ScaleController {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParallelismPolicy {
     pub parallelism: StreamingParallelism,
 }

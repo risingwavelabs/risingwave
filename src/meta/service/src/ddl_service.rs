@@ -25,9 +25,9 @@ use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
+use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy};
-use risingwave_meta::model::stream::TableParallelism as ModelTableParallelism;
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::{ObjectId, StreamingParallelism};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
@@ -984,7 +984,7 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterCdcTableBackfillParallelismResponse>, Status> {
         let req = request.into_inner();
         let job_id = req.get_table_id();
-        let parallelism = req.get_parallelism()?.clone();
+        let parallelism = *req.get_parallelism()?;
 
         let table_parallelism = ModelTableParallelism::from(parallelism);
         let streaming_parallelism = match table_parallelism {

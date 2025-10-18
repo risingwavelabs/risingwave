@@ -1958,6 +1958,7 @@ mod tests {
             state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: Default::default(),
             vnode_count: VirtualNode::COUNT_FOR_TEST as _,
+            parallelism: None,
         };
 
         let (pb_fragment, pb_actor_status, pb_actor_splits) =
