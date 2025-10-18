@@ -291,7 +291,7 @@ mod tests {
         let reduction_points = OrderByRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![2, 1, 0]);
 
-        let new_ast = OrderByRemove.apply_on(ast[0].clone(), &reduction_points[..1].to_vec());
+        let new_ast = OrderByRemove.apply_on(ast[0].clone(), &reduction_points[..1]);
         assert_eq!(
             new_ast,
             parse_sql("SELECT a, b FROM t ORDER BY a, b;")[0].clone()
@@ -327,7 +327,7 @@ mod tests {
         let reduction_points = FromRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![1, 0]);
 
-        let new_ast = FromRemove.apply_on(ast[0].clone(), &reduction_points[..1].to_vec());
+        let new_ast = FromRemove.apply_on(ast[0].clone(), &reduction_points[..1]);
         assert_eq!(new_ast, parse_sql("SELECT * FROM t1;")[0].clone());
     }
 
@@ -349,7 +349,7 @@ mod tests {
         let reduction_points = SelectItemRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![2, 1, 0]);
 
-        let new_ast = SelectItemRemove.apply_on(ast[0].clone(), &reduction_points[..1].to_vec());
+        let new_ast = SelectItemRemove.apply_on(ast[0].clone(), &reduction_points[..1]);
         assert_eq!(new_ast, parse_sql("SELECT a, b FROM t;")[0].clone());
     }
 
