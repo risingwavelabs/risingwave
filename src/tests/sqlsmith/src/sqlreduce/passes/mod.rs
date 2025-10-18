@@ -71,7 +71,7 @@ pub trait Transform: Send + Sync {
     ///
     /// # Returns
     /// - The modified AST.
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast;
+    fn apply_on(&self, ast: Ast, reduction_points: &[usize]) -> Ast;
 
     /// Applies the transformation to the AST at the given reduction points.
     ///
@@ -89,14 +89,14 @@ pub trait Transform: Send + Sync {
                     if i < idx {
                         continue;
                     }
-                    let new_ast = self.apply_on(&mut ast.clone(), vec![*rp]);
+                    let new_ast = self.apply_on(ast.clone(), &[*rp]);
                     results.push((new_ast, i));
                 }
                 results
             }
             Strategy::Aggressive => {
                 let mut results = Vec::new();
-                let new_ast = self.apply_on(&mut ast.clone(), reduction_points[idx..].to_vec());
+                let new_ast = self.apply_on(ast.clone(), &reduction_points[idx..]);
                 results.push((new_ast, idx));
                 results
             }
@@ -104,8 +104,7 @@ pub trait Transform: Send + Sync {
                 let mut results = Vec::new();
                 if reduction_points.len() >= k {
                     for i in 0..=reduction_points.len() - k {
-                        let new_ast =
-                            self.apply_on(&mut ast.clone(), reduction_points[i..i + k].to_vec());
+                        let new_ast = self.apply_on(ast.clone(), &reduction_points[i..i + k]);
                         results.push((new_ast, i));
                     }
                 }
