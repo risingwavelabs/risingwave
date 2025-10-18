@@ -312,6 +312,13 @@ message AlterParallelismRequest {
 
 message AlterParallelismResponse {}
 
+message AlterFragmentParallelismRequest {
+  uint32 fragment_id = 1;
+  meta.TableParallelism parallelism = 2;
+}
+
+message AlterFragmentParallelismResponse {}
+
 message AlterCdcTableBackfillParallelismRequest {
   uint32 table_id = 1;
   meta.TableParallelism parallelism = 2;
@@ -645,6 +652,7 @@ service DdlService {
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
   rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
+  rpc AlterFragmentParallelism(AlterFragmentParallelismRequest) returns (AlterFragmentParallelismResponse);
   rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);

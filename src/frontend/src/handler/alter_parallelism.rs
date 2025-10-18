@@ -121,6 +121,23 @@ pub async fn handle_alter_parallelism(
     Ok(builder.into())
 }
 
+pub async fn handle_alter_fragment_parallelism(
+    handler_args: HandlerArgs,
+    fragment_id: u32,
+    parallelism: SetVariableValue,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let target_parallelism = extract_table_parallelism(parallelism)?;
+
+    session
+        .env()
+        .meta_client()
+        .alter_fragment_parallelism(fragment_id, target_parallelism)
+        .await?;
+
+    Ok(RwPgResponse::builder(StatementType::ALTER_FRAGMENT).into())
+}
+
 fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParallelism> {
     let adaptive_parallelism = PbTableParallelism {
         parallelism: Some(PbParallelism::Adaptive(AdaptiveParallelism {})),

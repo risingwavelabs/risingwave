@@ -838,6 +838,45 @@ impl GlobalStreamManager {
         Ok(())
     }
 
+    pub(crate) async fn reschedule_fragment(
+        &self,
+        fragment_id: u32,
+        target: ReschedulePolicy,
+    ) -> MetaResult<()> {
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
+        let parallelism_policy = match target {
+            ReschedulePolicy::Parallelism(policy) => policy,
+            _ => bail_invalid_parameter!("fragment reschedule only supports parallelism targets"),
+        };
+
+        let worker_nodes = self
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await?
+            .into_iter()
+            .filter(|w| w.is_streaming_schedulable())
+            .collect_vec();
+        let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+
+        let fragment_policy = HashMap::from([(fragment_id as _, parallelism_policy.clone())]);
+
+        let commands = self
+            .scale_controller
+            .reschedule_fragment_inplace(fragment_policy, workers)
+            .await?;
+
+        let _source_pause_guard = self.source_manager.pause_tick().await;
+
+        for (database_id, command) in commands {
+            self.barrier_scheduler
+                .run_command(database_id, command)
+                .await?;
+        }
+
+        Ok(())
+    }
+
     // Don't need to add actor, just send a command
     pub async fn create_subscription(
         self: &Arc<Self>,

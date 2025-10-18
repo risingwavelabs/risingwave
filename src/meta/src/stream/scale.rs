@@ -41,6 +41,7 @@ use crate::controller::scale::{
     FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
     find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
 };
+use crate::error::bail_invalid_parameter;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
     ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, StreamContext,
@@ -402,8 +403,9 @@ impl ScaleController {
 
             let parallelism = match parallelisms.as_slice() {
                 [] => {
-                    bail!(
-                        "no reschedule policy specified for fragments in the no-shuffle ensemble: {:?}",
+                    bail_invalid_parameter!(
+                        "none of the entry fragments {:?} were included in the reschedule request; \
+                         provide at least one entry fragment id",
                         entry_fragment_ids
                     );
                 }

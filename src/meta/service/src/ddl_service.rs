@@ -1041,6 +1041,33 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(AlterParallelismResponse {}))
     }
 
+    async fn alter_fragment_parallelism(
+        &self,
+        request: Request<AlterFragmentParallelismRequest>,
+    ) -> Result<Response<AlterFragmentParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let fragment_id = req.fragment_id;
+        let parallelism = *req.get_parallelism()?;
+
+        let parallelism = match parallelism.get_parallelism()? {
+            Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                StreamingParallelism::Fixed(*parallelism as _)
+            }
+            Parallelism::Auto(_) | Parallelism::Adaptive(_) => StreamingParallelism::Adaptive,
+            _ => bail_unavailable!(),
+        };
+
+        self.ddl_controller
+            .reschedule_fragment(
+                fragment_id,
+                ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
+            )
+            .await?;
+
+        Ok(Response::new(AlterFragmentParallelismResponse {}))
+    }
+
     /// Auto schema change for cdc sources,
     /// called by the source parser when a schema change is detected.
     async fn auto_schema_change(

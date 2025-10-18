@@ -520,6 +520,17 @@ impl DdlController {
             .await
     }
 
+    pub async fn reschedule_fragment(
+        &self,
+        fragment_id: u32,
+        target: ReschedulePolicy,
+    ) -> MetaResult<()> {
+        tracing::info!("altering parallelism for fragment {}", fragment_id);
+        self.stream_manager
+            .reschedule_fragment(fragment_id, target)
+            .await
+    }
+
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         self.drop_object(ObjectType::Database, database_id as _, DropMode::Cascade)
             .await
