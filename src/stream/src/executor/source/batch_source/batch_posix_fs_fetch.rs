@@ -73,7 +73,7 @@ struct FileData {
     chunks: Vec<StreamChunk>,
 
     /// Path to the data file, used for logging
-    file_path: String,
+    _file_path: String,
 }
 
 impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
@@ -164,7 +164,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                 // Empty file, skip it
                 yield FileData {
                     chunks: vec![],
-                    file_path,
+                    _file_path: file_path,
                 };
                 continue;
             }
@@ -198,7 +198,10 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                 }
             }
 
-            yield FileData { chunks, file_path };
+            yield FileData {
+                chunks,
+                _file_path: file_path,
+            };
         }
     }
 
