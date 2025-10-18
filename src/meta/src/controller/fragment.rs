@@ -457,47 +457,70 @@ impl CatalogController {
     ) -> MetaResult<Option<(FragmentDesc, Vec<FragmentId>)>> {
         let inner = self.inner.read().await;
 
-        let fragment_model_opt = FragmentModel::find_by_id(fragment_id)
+        let fragment_model = match FragmentModel::find_by_id(fragment_id)
             .one(&inner.db)
-            .await?;
-
-        let fragment = fragment_model_opt.map(|fragment| {
-            let info = self.env.shared_actor_infos().read_guard();
-
-            let SharedFragmentInfo { actors, .. } = info
-                .get_fragment(fragment.fragment_id as _)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Failed to retrieve fragment description: fragment {} (job_id {}) not found in shared actor info",
-                        fragment.fragment_id,
-                        fragment.job_id
-                    )
-                });
-
-            FragmentDesc {
-                fragment_id: fragment.fragment_id,
-                job_id: fragment.job_id,
-                fragment_type_mask: fragment.fragment_type_mask,
-                distribution_type: fragment.distribution_type,
-                state_table_ids: fragment.state_table_ids.clone(),
-                vnode_count: fragment.vnode_count,
-                stream_node: fragment.stream_node.clone(),
-                parallelism: actors.len() as _,
-            }
-        });
-
-        let Some(fragment) = fragment else {
-            return Ok(None); // Fragment not found
+            .await?
+        {
+            Some(fragment) => fragment,
+            None => return Ok(None),
         };
 
-        // Get upstream fragments
-        let upstreams: Vec<FragmentId> = FragmentRelation::find()
+        let job_parallelism: Option<StreamingParallelism> =
+            StreamingJob::find_by_id(fragment_model.job_id)
+                .select_only()
+                .column(streaming_job::Column::Parallelism)
+                .into_tuple()
+                .one(&inner.db)
+                .await?;
+
+        let upstream_entries: Vec<(FragmentId, DispatcherType)> = FragmentRelation::find()
             .select_only()
-            .column(fragment_relation::Column::SourceFragmentId)
+            .columns([
+                fragment_relation::Column::SourceFragmentId,
+                fragment_relation::Column::DispatcherType,
+            ])
             .filter(fragment_relation::Column::TargetFragmentId.eq(fragment_id))
             .into_tuple()
             .all(&inner.db)
             .await?;
+
+        let mut upstreams = Vec::with_capacity(upstream_entries.len());
+        let mut noshuffle_upstreams = Vec::new();
+        for (source_id, dispatcher_type) in upstream_entries {
+            upstreams.push(source_id);
+            if dispatcher_type == DispatcherType::NoShuffle {
+                noshuffle_upstreams.push(source_id);
+            }
+        }
+
+        let info = self.env.shared_actor_infos().read_guard();
+        let SharedFragmentInfo { actors, .. } = info
+            .get_fragment(fragment_model.fragment_id as _)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Failed to retrieve fragment description: fragment {} (job_id {}) not found in shared actor info",
+                    fragment_model.fragment_id,
+                    fragment_model.job_id
+                )
+            });
+
+        let parallelism_policy = Self::format_fragment_parallelism_policy(
+            &fragment_model,
+            job_parallelism.as_ref(),
+            &noshuffle_upstreams,
+        );
+
+        let fragment = FragmentDesc {
+            fragment_id: fragment_model.fragment_id,
+            job_id: fragment_model.job_id,
+            fragment_type_mask: fragment_model.fragment_type_mask,
+            distribution_type: fragment_model.distribution_type,
+            state_table_ids: fragment_model.state_table_ids.clone(),
+            parallelism: actors.len() as _,
+            vnode_count: fragment_model.vnode_count,
+            stream_node: fragment_model.stream_node.clone(),
+            parallelism_policy,
+        };
 
         Ok(Some((fragment, upstreams)))
     }
@@ -1064,22 +1087,56 @@ impl CatalogController {
 
         let fragment_ids = fragments.iter().map(|f| f.fragment_id).collect_vec();
 
-        let upstreams: Vec<(FragmentId, FragmentId)> = FragmentRelation::find()
-            .select_only()
-            .columns([
-                fragment_relation::Column::TargetFragmentId,
-                fragment_relation::Column::SourceFragmentId,
-            ])
-            .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids))
-            .into_tuple()
-            .all(&txn)
-            .await?;
+        let job_parallelisms: HashMap<ObjectId, StreamingParallelism> = if fragments.is_empty() {
+            HashMap::new()
+        } else {
+            let job_ids = fragments.iter().map(|f| f.job_id).unique().collect_vec();
+            StreamingJob::find()
+                .select_only()
+                .columns([
+                    streaming_job::Column::JobId,
+                    streaming_job::Column::Parallelism,
+                ])
+                .filter(streaming_job::Column::JobId.is_in(job_ids))
+                .into_tuple()
+                .all(&txn)
+                .await?
+                .into_iter()
+                .collect()
+        };
+
+        let upstream_entries: Vec<(FragmentId, FragmentId, DispatcherType)> =
+            if fragment_ids.is_empty() {
+                Vec::new()
+            } else {
+                FragmentRelation::find()
+                    .select_only()
+                    .columns([
+                        fragment_relation::Column::TargetFragmentId,
+                        fragment_relation::Column::SourceFragmentId,
+                        fragment_relation::Column::DispatcherType,
+                    ])
+                    .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids))
+                    .into_tuple()
+                    .all(&txn)
+                    .await?
+            };
 
         let guard = self.env.shared_actor_info.read_guard();
 
         let mut result = Vec::new();
 
-        let mut all_upstreams = upstreams.into_iter().into_group_map();
+        let mut all_upstreams: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+        let mut noshuffle_upstreams: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+        for (target_id, source_id, dispatcher_type) in upstream_entries {
+            all_upstreams.entry(target_id).or_default().push(source_id);
+            if dispatcher_type == DispatcherType::NoShuffle {
+                noshuffle_upstreams
+                    .entry(target_id)
+                    .or_default()
+                    .push(source_id);
+            }
+        }
 
         for fragment_desc in fragments {
             // note: here sometimes fragment is not found in the cache, fallback to 0
@@ -1091,6 +1148,15 @@ impl CatalogController {
             let upstreams = all_upstreams
                 .remove(&fragment_desc.fragment_id)
                 .unwrap_or_default();
+            let noshuffle_upstreams = noshuffle_upstreams
+                .remove(&fragment_desc.fragment_id)
+                .unwrap_or_default();
+
+            let parallelism_policy = Self::format_fragment_parallelism_policy(
+                &fragment_desc,
+                job_parallelisms.get(&fragment_desc.job_id),
+                &noshuffle_upstreams,
+            );
 
             let fragment = FragmentDistribution {
                 fragment_id: fragment_desc.fragment_id as _,
@@ -1103,11 +1169,50 @@ impl CatalogController {
                 parallelism: parallelism as _,
                 vnode_count: fragment_desc.vnode_count as _,
                 node: Some(fragment_desc.stream_node.to_protobuf()),
+                parallelism_policy,
             };
 
             result.push((fragment, upstreams));
         }
         Ok(result)
+    }
+
+    fn format_fragment_parallelism_policy(
+        fragment: &fragment::Model,
+        job_parallelism: Option<&StreamingParallelism>,
+        noshuffle_upstreams: &[FragmentId],
+    ) -> String {
+        if fragment.distribution_type == DistributionType::Single {
+            return "single".to_owned();
+        }
+
+        if let Some(parallelism) = fragment.parallelism.as_ref() {
+            return format!(
+                "override({})",
+                Self::format_streaming_parallelism(parallelism)
+            );
+        }
+
+        if !noshuffle_upstreams.is_empty() {
+            let mut upstreams = noshuffle_upstreams.to_vec();
+            upstreams.sort_unstable();
+            upstreams.dedup();
+
+            return format!("upstream_fragment({upstreams:?})");
+        }
+
+        let inherited = job_parallelism
+            .map(Self::format_streaming_parallelism)
+            .unwrap_or_else(|| "unknown".to_owned());
+        format!("inherit({inherited})")
+    }
+
+    fn format_streaming_parallelism(parallelism: &StreamingParallelism) -> String {
+        match parallelism {
+            StreamingParallelism::Adaptive => "adaptive".to_owned(),
+            StreamingParallelism::Fixed(n) => format!("fixed({n})"),
+            StreamingParallelism::Custom => "custom".to_owned(),
+        }
     }
 
     pub async fn list_sink_actor_mapping(

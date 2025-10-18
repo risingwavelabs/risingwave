@@ -290,6 +290,7 @@ pub struct FragmentDesc {
     pub parallelism: i64,
     pub vnode_count: i32,
     pub stream_node: StreamNode,
+    pub parallelism_policy: String,
 }
 
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.

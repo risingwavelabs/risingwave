@@ -687,10 +687,11 @@ fn fragment_desc_to_distribution(
         table_id: fragment_desc.job_id.as_raw_id(),
         distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type) as _,
         state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
-        upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
+        upstream_fragment_ids: upstreams.into_iter().map(|id| id as _).collect(),
         fragment_type_mask: fragment_desc.fragment_type_mask as _,
         parallelism: fragment_desc.parallelism as _,
         vnode_count: fragment_desc.vnode_count as _,
         node: Some(fragment_desc.stream_node.to_protobuf()),
+        parallelism_policy: fragment_desc.parallelism_policy,
     }
 }
