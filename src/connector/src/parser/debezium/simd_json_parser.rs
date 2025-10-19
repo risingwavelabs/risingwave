@@ -113,6 +113,10 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
         _: &crate::source::SourceMeta,
     ) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
+        tracing::warn!(
+            "== RAW: {}",
+            str::from_utf8(self.value.as_ref().unwrap()).unwrap()
+        );
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
                 .context("failed to parse debezium mongo json payload")?;
