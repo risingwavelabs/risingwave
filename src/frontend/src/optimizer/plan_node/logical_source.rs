@@ -277,16 +277,12 @@ impl LogicalSource {
 
         // Build source_cols: table columns from required_cols + always keep last 4 columns
         let mut source_cols = Vec::new();
-        let mut has_hidden_cols_in_required = false;
 
         // Collect table columns (before the last 4 columns) from required_cols
         for &idx in required_cols {
             if idx < iceberg_start_idx {
                 // Regular table column
                 source_cols.push(idx);
-            } else {
-                // One of the last 4 columns (iceberg hidden or row_id) is in required_cols
-                has_hidden_cols_in_required = true;
             }
         }
 
@@ -319,29 +315,21 @@ impl LogicalSource {
             output_row_id_index: Some(source_cols.len() - 1),
         };
 
-        if has_hidden_cols_in_required {
-            // User requested some of the last 4 columns, need to project to match required_cols
-            // Build mapping from original schema indices to pruned schema indices
-            let mut old_to_new = vec![None; self.schema().len()];
-            for (new_idx, &old_idx) in source_cols.iter().enumerate() {
-                old_to_new[old_idx] = Some(new_idx);
-            }
-
-            // Map required_cols to indices in the pruned schema
-            let new_required: Vec<_> = required_cols
-                .iter()
-                .map(|&old_idx| old_to_new[old_idx].unwrap())
-                .collect();
-
-            let mapping = ColIndexMapping::with_remaining_columns(
-                &new_required,
-                pruned_source.schema().len(),
-            );
-            LogicalProject::with_mapping(pruned_source.into(), mapping).into()
-        } else {
-            // Only table columns were requested, last 4 columns are kept for internal use
-            pruned_source.into()
+        // Build mapping from original schema indices to pruned schema indices
+        let mut old_to_new = vec![None; self.schema().len()];
+        for (new_idx, &old_idx) in source_cols.iter().enumerate() {
+            old_to_new[old_idx] = Some(new_idx);
         }
+
+        // Map required_cols to indices in the pruned schema
+        let new_required: Vec<_> = required_cols
+            .iter()
+            .map(|&old_idx| old_to_new[old_idx].unwrap())
+            .collect();
+
+        let mapping =
+            ColIndexMapping::with_remaining_columns(&new_required, pruned_source.schema().len());
+        LogicalProject::with_mapping(pruned_source.into(), mapping).into()
     }
 }
 
