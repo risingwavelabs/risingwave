@@ -522,22 +522,6 @@ fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
     vector.normalized()
 }
 
-fn check_dim(name: &'static str, dim: i32) -> Result<()> {
-    if dim < 1 {
-        return Err(ExprError::InvalidParam {
-            name,
-            reason: "vector must have at least 1 dimension".into(),
-        });
-    }
-    if dim > (DataType::VEC_MAX_SIZE as i32) {
-        return Err(ExprError::InvalidParam {
-            name,
-            reason: format!("vector cannot have more than {} dimensions", dim).into(),
-        });
-    }
-    Ok(())
-}
-
 /// ```slt
 /// query R
 /// SELECT subvector('[1,2,3,4,5]'::vector(5), 1, 3);
@@ -547,7 +531,7 @@ fn check_dim(name: &'static str, dim: i32) -> Result<()> {
 /// query R
 /// SELECT subvector('[1,2,3,4,5]'::vector(5), 3, 2);
 /// ----
-/// [3, 4]
+/// [3,4]
 ///
 /// query R
 /// SELECT subvector('[1,2,3,4,5]'::vector(5), -1, 3);
@@ -583,7 +567,6 @@ fn subvector(v: VectorRef<'_>, start: i32, count: i32) -> Result<VectorVal> {
     if start < 1 {
         start = 1
     }
-    check_dim("subvector", end - start)?;
 
     let result = vector[(start - 1) as usize..(end - 1) as usize]
         .iter()

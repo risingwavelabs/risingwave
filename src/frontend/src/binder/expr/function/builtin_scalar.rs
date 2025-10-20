@@ -434,44 +434,52 @@ impl Binder {
                 ("inner_product", raw_call(ExprType::InnerProduct)),
                 ("vector_norm", raw_call(ExprType::L2Norm)),
                 ("l2_normalize", raw_call(ExprType::L2Normalize)),
-                ("subvector", guard_by_len::<3>(|_, inputs| {
-                    let vector = inputs[0]
-                        .as_literal()
-                        .and_then(|lit| match lit.get_data() {
-                            Some(ScalarImpl::Vector(v)) => Some(v),
-                            _ => None,
-                        })
-                        .ok_or_else(|| ErrorCode::ExprError("`vector` must be a Vector literal".into()))?;
-                    let start = inputs[1]
+                ("subvector", guard_by_len::<3>(|_, [vector_expr, start_expr, len_expr]| {
+                    let length = if let DataType::Vector(length) = vector_expr.return_type() {
+                        length as i32
+                    } else {
+                        return Err(ErrorCode::BindError("subvector expects `vector(dim)` input".into()).into());
+                    };
+                    let start = start_expr
                         .as_literal()
                         .and_then(|lit| match lit.get_data() {
                             Some(ScalarImpl::Int32(v)) => Some(*v),
                             _ => None,
                         })
                         .ok_or_else(|| ErrorCode::ExprError("`start` must be an Int32 literal".into()))?;
-                    let count = inputs[2]
+                    let len = len_expr
                         .as_literal()
                         .and_then(|lit| match lit.get_data() {
                             Some(ScalarImpl::Int32(v)) => Some(*v),
                             _ => None,
                         }).ok_or_else(|| ErrorCode::ExprError("`count` must be an Int32 literal".into()))?;
-                    let length = vector.as_slice().len() as i32;
-                    if count < 1 {
-                        return Err(ErrorCode::InvalidParameterValue(format!("count: {}",count)).into());
+                    
+                    if len < 1 {
+                        return Err(ErrorCode::InvalidParameterValue(format!("vector must have at least 1 dimension, not {}", len)).into());
                     }
 
                     let mut start = start;
-                    let end = if start > length - count {
+                    let end = if start > length - len {
                         length + 1
                     } else {
-                        start + count
+                        start + len
                     };
                     if start < 1 {
                         start = 1
                     } else if start > length {
-                        return Err(ErrorCode::InvalidParameterValue(format!("start: {}",count)).into());
+                        return Err(ErrorCode::InvalidParameterValue(format!("vector must have at least 1 dimension, not {}", start)).into());
                     }
-                    Ok(FunctionCall::new_unchecked(ExprType::Subvector, inputs.to_vec(), DataType::Vector((end - start) as usize)).into())
+                    let dim = (end - start) as usize;
+                    if dim < 1 || dim > DataType::VEC_MAX_SIZE {
+                        return Err(ErrorCode::InvalidParameterValue(
+                            format!(
+                                "(start..end) range is invalid: computed dim = {}, must be within (1..={})",
+                                dim,
+                                DataType::VEC_MAX_SIZE
+                            )
+                        ).into());
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::Subvector, vec![vector_expr, start_expr, len_expr], DataType::Vector(dim)).into()) 
                 })),
                 // Functions that return a constant value
                 ("pi", pi()),
