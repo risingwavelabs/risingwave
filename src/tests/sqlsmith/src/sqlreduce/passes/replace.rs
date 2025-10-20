@@ -70,12 +70,12 @@ impl Transform for ScalarReplace {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                if let SelectItem::UnnamedExpr(Expr::Value(ref mut v)) = select.projection[i] {
+                if let SelectItem::UnnamedExpr(Expr::Value(ref mut v)) = select.projection[*i] {
                     let new_v = Self::replacement_for_value(v);
                     *v = new_v;
                 }
@@ -121,12 +121,12 @@ impl Transform for NullReplace {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                select.projection[i] = SelectItem::UnnamedExpr(Expr::Value(Value::Null));
+                select.projection[*i] = SelectItem::UnnamedExpr(Expr::Value(Value::Null));
             }
         }
         ast.clone()
@@ -145,7 +145,7 @@ mod tests {
         let reduction_points = ScalarReplace.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0, 1, 2, 3]);
 
-        let new_ast = ScalarReplace.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = ScalarReplace.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT 1, 'a', true, null;")[0].clone());
     }
 
@@ -156,7 +156,7 @@ mod tests {
         let reduction_points = NullReplace.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0, 1, 2]);
 
-        let new_ast = NullReplace.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = NullReplace.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT NULL, NULL, NULL;")[0].clone());
     }
 }

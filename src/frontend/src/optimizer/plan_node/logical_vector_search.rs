@@ -432,6 +432,7 @@ impl ToBatch for LogicalVectorSearch {
                     info_output_indices: (0..info_column_desc.len()).collect(),
                     info_column_desc,
                     include_distance: true,
+                    as_of: scan.as_of(),
                     vector_column_idx: 0,
                     hnsw_ef_search,
                     ctx: self.core.ctx(),
@@ -515,7 +516,7 @@ impl ToBatch for LogicalVectorSearch {
                         vec![],
                         self.core.input.ctx(),
                         Condition::true_cond(),
-                        None,
+                        scan.as_of(),
                     );
                     let logical_scan = LogicalScan::from(table_scan);
                     let batch_scan = logical_scan.to_batch()?;
