@@ -37,6 +37,7 @@ use super::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
+use crate::sink::starrocks::_default_stream_load_http_timeout_ms;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{Sink, SinkParam, SinkWriter, SinkWriterParam};
 
@@ -83,6 +84,12 @@ pub struct DorisConfig {
     pub common: DorisCommon,
 
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(
+        rename = "doris.stream_load.http.timeout.ms",
+        default = "_default_stream_load_http_timeout_ms"
+    )]
+    pub stream_load_http_timeout_ms: u64,
 }
 
 impl EnforceSecret for DorisConfig {
@@ -321,6 +328,7 @@ impl DorisSinkWriter {
             config.common.database.clone(),
             config.common.table.clone(),
             header,
+            config.stream_load_http_timeout_ms,
         )?;
         Ok(Self {
             config,
