@@ -85,11 +85,13 @@ pub struct DorisConfig {
 
     pub r#type: String, // accept "append-only" or "upsert"
 
+    /// The timeout in milliseconds for stream load http request, defaults to 10 seconds.
     #[serde(
         rename = "doris.stream_load.http.timeout.ms",
         default = "_default_stream_load_http_timeout_ms"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub stream_load_http_timeout_ms: u64,
 }
 

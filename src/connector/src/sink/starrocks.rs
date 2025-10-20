@@ -108,6 +108,7 @@ pub struct StarrocksConfig {
         default = "_default_stream_load_http_timeout_ms"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub stream_load_http_timeout_ms: u64,
 
     /// Set this option to a positive integer n, RisingWave will try to commit data
