@@ -453,7 +453,6 @@ impl Binder {
                             Some(ScalarImpl::Int32(v)) => Some(*v),
                             _ => None,
                         }).ok_or_else(|| ErrorCode::ExprError("`count` must be an Int32 literal".into()))?;
-                    
                     if len < 1 {
                         return Err(ErrorCode::InvalidParameterValue(format!("vector must have at least 1 dimension, not {}", len)).into());
                     }
@@ -479,7 +478,7 @@ impl Binder {
                             )
                         ).into());
                     }
-                    Ok(FunctionCall::new_unchecked(ExprType::Subvector, vec![vector_expr, start_expr, len_expr], DataType::Vector(dim)).into()) 
+                    Ok(FunctionCall::new_unchecked(ExprType::Subvector, vec![vector_expr, start_expr, len_expr], DataType::Vector(dim)).into())
                 })),
                 // Functions that return a constant value
                 ("pi", pi()),
