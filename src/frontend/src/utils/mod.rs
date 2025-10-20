@@ -38,11 +38,8 @@ pub(crate) mod group_by;
 pub mod overwrite_options;
 pub use group_by::*;
 pub use overwrite_options::*;
-use risingwave_common::util::recursive::{Recurse, tracker};
 
-use crate::error::ErrorCode;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, is_impure_func_call};
-use crate::session::current::notice_to_user;
+use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 
 pub static FRONTEND_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -218,64 +215,4 @@ pub fn ordinal(i: usize) -> String {
         "th"
     };
     s + suffix
-}
-
-pub(crate) struct IndexColumnExprValidator {
-    allow_impure: bool,
-    result: crate::error::Result<()>,
-}
-
-impl IndexColumnExprValidator {
-    fn unsupported_expr_err(expr: &ExprImpl) -> ErrorCode {
-        ErrorCode::NotSupported(
-            format!("unsupported index column expression type: {:?}", expr),
-            "use columns or expressions instead".into(),
-        )
-    }
-
-    pub(crate) fn validate(expr: &ExprImpl, allow_impure: bool) -> crate::error::Result<()> {
-        match expr {
-            ExprImpl::InputRef(_) | ExprImpl::FunctionCall(_) => {}
-            other_expr => {
-                return Err(Self::unsupported_expr_err(other_expr).into());
-            }
-        }
-        let mut visitor = Self {
-            allow_impure,
-            result: Ok(()),
-        };
-        visitor.visit_expr(expr);
-        visitor.result
-    }
-}
-
-impl ExprVisitor for IndexColumnExprValidator {
-    fn visit_expr(&mut self, expr: &ExprImpl) {
-        if self.result.is_err() {
-            return;
-        }
-        tracker!().recurse(|t| {
-            if t.depth_reaches(crate::expr::EXPR_DEPTH_THRESHOLD) {
-                notice_to_user(crate::expr::EXPR_TOO_DEEP_NOTICE);
-            }
-
-            match expr {
-                ExprImpl::InputRef(_) | ExprImpl::Literal(_) => {}
-                ExprImpl::FunctionCall(inner) => {
-                    if !self.allow_impure && is_impure_func_call(inner) {
-                        self.result = Err(ErrorCode::NotSupported(
-                            "this expression is impure".into(),
-                            "use a pure expression instead".into(),
-                        )
-                        .into());
-                        return;
-                    }
-                    self.visit_function_call(inner)
-                }
-                other_expr => {
-                    self.result = Err(Self::unsupported_expr_err(other_expr).into());
-                }
-            }
-        })
-    }
 }
