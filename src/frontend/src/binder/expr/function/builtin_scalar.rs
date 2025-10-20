@@ -469,7 +469,7 @@ impl Binder {
                         return Err(ErrorCode::InvalidParameterValue(format!("vector must have at least 1 dimension, not {}", start)).into());
                     }
                     let dim = (end - start) as usize;
-                    if dim < 1 || dim > DataType::VEC_MAX_SIZE {
+                    if !(1..=DataType::VEC_MAX_SIZE).contains(&dim) {
                         return Err(ErrorCode::InvalidParameterValue(
                             format!(
                                 "(start..end) range is invalid: computed dim = {}, must be within (1..={})",
