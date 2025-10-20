@@ -134,7 +134,7 @@ impl Source {
 
     /// The output is [`risingwave_connector::source::filesystem::FsPageItem`] / [`iceberg::scan::FileScanTask`]
     pub fn file_list_node(core: Self) -> Self {
-        let column_catalog = if core.is_iceberg_connector() || core.is_batch_connector() {
+        let column_catalog = if core.is_iceberg_connector() {
             vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
@@ -150,6 +150,29 @@ impl Source {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
                             name: "file_scan_task".to_owned(),
+                            data_type: DataType::Jsonb,
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+            ]
+        } else if core.is_batch_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_id".to_owned(),
+                            data_type: DataType::Varchar,
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_info".to_owned(),
                             data_type: DataType::Jsonb,
                         },
                         1,

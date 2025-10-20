@@ -129,12 +129,7 @@ impl SplitEnumerator for BatchPosixFsEnumerator {
 
 /// Reader for batch posix fs source
 #[derive(Debug)]
-pub struct BatchPosixFsReader {
-    _properties: BatchPosixFsProperties,
-    _splits: Vec<BatchPosixFsSplit>,
-    _parser_config: ParserConfig,
-    _source_ctx: SourceContextRef,
-}
+pub struct BatchPosixFsReader {}
 
 #[async_trait]
 impl SplitReader for BatchPosixFsReader {
@@ -142,18 +137,13 @@ impl SplitReader for BatchPosixFsReader {
     type Split = BatchPosixFsSplit;
 
     async fn new(
-        properties: Self::Properties,
-        splits: Vec<Self::Split>,
-        parser_config: ParserConfig,
-        source_ctx: SourceContextRef,
+        _properties: Self::Properties,
+        _splits: Vec<Self::Split>,
+        _parser_config: ParserConfig,
+        _source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> ConnectorResult<Self> {
-        Ok(Self {
-            _properties: properties,
-            _splits: splits,
-            _parser_config: parser_config,
-            _source_ctx: source_ctx,
-        })
+        return Err(anyhow!("BatchPosixFsReader should not be used").into());
     }
 
     fn into_stream(self) -> BoxSourceChunkStream {
