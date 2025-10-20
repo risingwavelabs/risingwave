@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
+use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -28,7 +29,7 @@ use risingwave_hummock_trace::{
     TracedBytes, TracedSealCurrentEpochOptions, init_collector, should_use_trace,
 };
 use thiserror_ext::AsReport;
-use risingwave_common::array::VectorRef;
+
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, ObjectIdManagerRef};

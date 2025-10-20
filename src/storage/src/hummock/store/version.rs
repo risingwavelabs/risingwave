@@ -22,6 +22,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -39,7 +40,7 @@ use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
 use tracing::warn;
-use risingwave_common::array::VectorRef;
+
 use crate::error::StorageResult;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::change_log::ChangeLogIterator;

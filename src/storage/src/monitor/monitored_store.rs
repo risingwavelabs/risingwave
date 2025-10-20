@@ -23,12 +23,13 @@ use futures::{Future, FutureExt, TryFutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::types::VectorRef;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{Instrument, error};
-use risingwave_common::types::VectorRef;
+
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;

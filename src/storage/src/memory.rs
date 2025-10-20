@@ -22,10 +22,12 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::types::ScalarRef;
 use risingwave_common::util::epoch::{EpochPair, MAX_EPOCH};
 use risingwave_hummock_sdk::key::{
     FullKey, TableKey, TableKeyRange, UserKey, prefixed_range_with_vnode,
@@ -35,8 +37,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use thiserror_ext::AsReport;
 use tokio::task::yield_now;
 use tracing::error;
-use risingwave_common::array::VectorRef;
-use risingwave_common::types::ScalarRef;
+
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::hummock::utils::{

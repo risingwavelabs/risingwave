@@ -20,6 +20,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::array::VectorRef;
 use risingwave_common::catalog::TableId;
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::util::epoch::is_max_epoch;
@@ -35,7 +36,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
-use risingwave_common::array::VectorRef;
+
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{CommittedVersion, HummockVersionReader, read_filter_for_version};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;

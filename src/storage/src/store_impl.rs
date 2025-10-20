@@ -286,12 +286,13 @@ pub mod verify {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use risingwave_common::array::VectorRef;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
     use tracing::log::warn;
-    use risingwave_common::array::VectorRef;
+
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
     use crate::store::*;
