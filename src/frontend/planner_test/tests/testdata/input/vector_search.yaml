@@ -168,6 +168,7 @@
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_batch
+    - batch_plan
 - before:
     - create_correlated_tables
   id: correlated_read_with_embedding
@@ -183,6 +184,7 @@
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_batch
+    - batch_plan
 - before:
     - create_correlated_tables
   id: correlated_read_with_distance
@@ -197,6 +199,7 @@
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_batch
+    - batch_plan
 - id: create_correlated_tables_with_column_value_index
   sql: |
     create table items (id int primary key, name string, embedding vector(3)) append only;
