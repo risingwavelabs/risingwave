@@ -59,6 +59,16 @@ pub struct IcebergCommon {
     pub access_key: Option<String>,
     #[serde(rename = "s3.secret.key")]
     pub secret_key: Option<String>,
+    /// Enable SSL certificate verification for S3 connections.
+    /// When set to `false`, disables SSL certificate verification, allowing connections
+    /// to MinIO instances with self-signed or untrusted certificates.
+    /// This is useful for development environments or when using MinIO with custom certificates.
+    #[serde(
+        rename = "s3.ssl.verify",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub ssl_verify: Option<bool>,
 
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
@@ -374,7 +384,16 @@ impl IcebergCommon {
                     path_style_access.to_string(),
                 );
             }
-
+            
+            if let Some(ssl_verify) = self.ssl_verify{
+                if !ssl_verify {
+                    java_catalog_configs.insert(
+                        "client.trust-all-certificates".to_owned(),
+                        "true".to_owned()
+                    );
+                }
+            }
+            
             let headers = self.headers()?;
             for (header_name, header_value) in headers {
                 java_catalog_configs.insert(format!("header.{}", header_name), header_value);
@@ -498,6 +517,7 @@ impl IcebergCommon {
                             .region(self.region.clone())
                             .endpoint(self.endpoint.clone())
                             .path_style_access(self.path_style_access)
+                            .ssl_verify(self.ssl_verify)
                             .enable_config_load(Some(self.enable_config_load()))
                             .build(),
                     ),
@@ -546,6 +566,15 @@ impl IcebergCommon {
                             S3_PATH_STYLE_ACCESS.to_owned(),
                             path_style_access.to_string(),
                         );
+                    }
+                    
+                    if let Some(ssl_verify) = self.ssl_verify {
+                        if !ssl_verify {
+                            iceberg_configs.insert(
+                                "client.trust-all-certificates".to_owned(),
+                                "true".to_owned()
+                            );
+                        }
                     }
                 };
 
@@ -615,6 +644,16 @@ impl IcebergCommon {
                         path_style_access.to_string(),
                     );
                 }
+
+                if let Some(ssl_verify) = self.ssl_verify {
+                    if !ssl_verify {
+                        iceberg_configs.insert(
+                            "client.trust-all-certificates".to_owned(),
+                            "true".to_owned()
+                        );
+                    }
+                }
+                
                 let config_builder =
                     iceberg_catalog_glue::GlueCatalogConfig::builder()
                         .warehouse(self.warehouse_path.clone().ok_or_else(|| {

@@ -2490,6 +2490,7 @@ mod test {
                 endpoint: Some("http://127.0.0.1:9301".to_owned()),
                 access_key: Some("hummockadmin".to_owned()),
                 secret_key: Some("hummockadmin".to_owned()),
+                ssl_verify: None,
                 gcs_credential: None,
                 catalog_type: Some("jdbc".to_owned()),
                 glue_id: None,
