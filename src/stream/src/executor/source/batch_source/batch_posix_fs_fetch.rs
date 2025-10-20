@@ -72,8 +72,8 @@ struct FileData {
     /// The actual data chunks read from the file
     chunks: Vec<StreamChunk>,
 
-    /// Path to the data file, used for logging
-    _file_path: String,
+    /// Path to the data file
+    file_path: String,
 }
 
 impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
@@ -152,7 +152,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                 Ok(content) => content,
                 Err(e) => {
                     tracing::error!(
-                        error = %e,
+                        error = %e.as_report(),
                         file_path = %full_path.display(),
                         "Failed to read file"
                     );
@@ -164,7 +164,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                 // Empty file, skip it
                 yield FileData {
                     chunks: vec![],
-                    _file_path: file_path,
+                    file_path,
                 };
                 continue;
             }
@@ -199,10 +199,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                 }
             }
 
-            yield FileData {
-                chunks,
-                _file_path: file_path,
-            };
+            yield FileData { chunks, file_path };
         }
     }
 
@@ -392,9 +389,13 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                         Message::Watermark(_) => unreachable!(),
                     },
                     // Data from file reader
-                    Either::Right(FileData { chunks, .. }) => {
+                    Either::Right(FileData { chunks, file_path }) => {
                         // Decrement counter after processing a file
                         files_in_progress -= 1;
+                        tracing::debug!(
+                            file_path = ?file_path,
+                            "Processed file"
+                        );
 
                         // Yield all chunks from the file
                         for chunk in chunks {
