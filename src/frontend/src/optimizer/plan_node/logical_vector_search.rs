@@ -276,8 +276,15 @@ impl ToStream for LogicalVectorSearch {
 }
 
 impl LogicalVectorSearch {
-    fn to_top_n(&self) -> LogicalTopN {
-        let (neg, expr_type) = match self.core.distance_type {
+    pub fn to_top_n(
+        input: PlanRef,
+        left: ExprImpl,
+        right: ExprImpl,
+        distance_type: PbDistanceType,
+        top_n: u64,
+        output_indices: &[usize],
+    ) -> LogicalTopN {
+        let (neg, expr_type) = match distance_type {
             PbDistanceType::Unspecified => {
                 unreachable!()
             }
@@ -288,7 +295,7 @@ impl LogicalVectorSearch {
         };
         let mut expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
             expr_type,
-            vec![self.core.left.clone(), self.core.right.clone()],
+            vec![left, right],
             VECTOR_DISTANCE_TYPE,
         )));
         if neg {
@@ -298,20 +305,17 @@ impl LogicalVectorSearch {
                 VECTOR_DISTANCE_TYPE,
             )));
         }
-        let exprs = generic::Project::out_col_idx_exprs(
-            &self.core.input,
-            self.core.output_indices.iter().copied(),
-        )
-        .chain([expr])
-        .collect();
+        let exprs = generic::Project::out_col_idx_exprs(&input, output_indices.iter().copied())
+            .chain([expr])
+            .collect();
 
-        let input = LogicalProject::new(self.input(), exprs).into();
+        let input = LogicalProject::new(input, exprs).into();
         let top_n = generic::TopN::without_group(
             input,
-            TopNLimit::Simple(self.core.top_n),
+            TopNLimit::Simple(top_n),
             0,
             Order::new(vec![ColumnOrder::new(
-                self.core.output_indices.len(),
+                output_indices.len(),
                 OrderType::ascending(),
             )]),
         );
@@ -613,6 +617,14 @@ impl ToBatch for LogicalVectorSearch {
                 });
             }
         }
-        self.to_top_n().to_batch()
+        Self::to_top_n(
+            self.core.input.clone(),
+            self.core.left.clone(),
+            self.core.right.clone(),
+            self.core.distance_type,
+            self.core.top_n,
+            &self.core.output_indices,
+        )
+        .to_batch()
     }
 }
