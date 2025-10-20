@@ -177,10 +177,14 @@ impl CorrelatedTopNToVectorSearchRule {
 impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
+        // match pattern LogicalApply { type: LeftOuter, on: true, correlated_id, max_one_row: true }
         if apply.join_type() != JoinType::LeftOuter {
             return None;
         }
         if !apply.max_one_row() {
+            return None;
+        }
+        if !apply.on_condition().always_true() {
             return None;
         }
         let correlated_id = apply.correlated_id();
