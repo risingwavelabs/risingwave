@@ -230,6 +230,11 @@ DorisConfig:
   - name: r#type
     field_type: String
     required: true
+  - name: doris.stream_load.http.timeout.ms
+    field_type: u64
+    comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    required: false
+    default: 30 * 1000
 DynamoDbConfig:
   fields:
   - name: table

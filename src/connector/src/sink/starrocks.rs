@@ -51,7 +51,7 @@ const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
-const fn _default_stream_load_http_timeout_ms() -> u64 {
+pub const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
 }
 
@@ -289,7 +289,10 @@ impl Sink for StarrocksSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<StarrocksSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
+        "commit_checkpoint_interval",
+        "starrocks.stream_load.http.timeout.ms",
+    ];
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
     async fn validate(&self) -> Result<()> {

@@ -25,7 +25,7 @@ use risingwave_common::types::DataType;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
-use serde_with::serde_as;
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
@@ -38,6 +38,7 @@ use super::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
+use crate::sink::starrocks::_default_stream_load_http_timeout_ms;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
 
@@ -84,6 +85,14 @@ pub struct DorisConfig {
     pub common: DorisCommon,
 
     pub r#type: String, // accept "append-only" or "upsert"
+
+    /// The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    #[serde(
+        rename = "doris.stream_load.http.timeout.ms",
+        default = "_default_stream_load_http_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub stream_load_http_timeout_ms: u64,
 }
 
 impl EnforceSecret for DorisConfig {
@@ -225,6 +234,10 @@ impl Sink for DorisSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = LogSinkerOf<DorisSinkWriter>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
+        "commit_checkpoint_interval",
+        "doris.stream_load.http.timeout.ms",
+    ];
     const SINK_NAME: &'static str = DORIS_SINK;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -321,6 +334,7 @@ impl DorisSinkWriter {
             config.common.database.clone(),
             config.common.table.clone(),
             header,
+            config.stream_load_http_timeout_ms,
         )?;
         Ok(Self {
             config,

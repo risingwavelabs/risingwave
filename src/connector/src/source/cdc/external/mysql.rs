@@ -445,9 +445,9 @@ impl MySqlExternalTableReader {
         // Query primary key columns and their data types
         let sql = format!(
             "SELECT COLUMN_NAME, COLUMN_TYPE
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = '{}' 
-            AND TABLE_NAME = '{}' 
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = '{}'
+            AND TABLE_NAME = '{}'
             AND COLUMN_KEY = 'PRI'
             ORDER BY ORDINAL_POSITION",
             database, table
@@ -482,7 +482,7 @@ impl MySqlExternalTableReader {
         negative_val as u64
     }
 
-    /// Convert negative i32 to unsigned u32 based on column type  
+    /// Convert negative i32 to unsigned u32 based on column type
     fn convert_negative_to_unsigned_i32(&self, negative_val: i32) -> u32 {
         negative_val as u32
     }
