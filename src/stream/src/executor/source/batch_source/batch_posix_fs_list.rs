@@ -231,8 +231,6 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
             futures::stream::pending().boxed(),
         );
 
-        let mut list_finished = false;
-
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
@@ -271,7 +269,6 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                                                     futures::stream::iter(file_iter);
                                                 stream.replace_data_stream(new_file_stream);
                                                 is_refreshing = true;
-                                                list_finished = false;
                                             }
                                             Err(e) => {
                                                 tracing::error!(
@@ -286,9 +283,8 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                             }
 
                             // Report list finished after all files are listed
-                            if !list_finished && is_refreshing {
+                            if is_refreshing {
                                 self.report_list_finished(barrier.epoch);
-                                list_finished = true;
                                 is_refreshing = false;
                             }
 

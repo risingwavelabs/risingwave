@@ -451,7 +451,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             let key_chunk = chunk
                                                 .clone()
                                                 .project(self.state_table.pk_indices());
-                                            tracing::info!(
+                                            tracing::trace!(
                                                 staging_chunk = %key_chunk.to_pretty(),
                                                 input_chunk = %chunk.to_pretty(),
                                                 "writing to staging table"
