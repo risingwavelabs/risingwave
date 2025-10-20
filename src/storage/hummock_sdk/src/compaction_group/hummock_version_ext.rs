@@ -2275,7 +2275,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::redundant_clone)]
     fn test_split_sst() {
         let epoch = test_epoch(1);
         let sst = gen_sstable_info(1, vec![1, 2, 3, 5], epoch);
@@ -2349,8 +2348,7 @@ mod tests {
 
         {
             let split_key = group_split::build_split_key(6, VirtualNode::ZERO);
-            let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key);
+            let split_type = group_split::need_to_split(&sst, split_key);
             assert_eq!(SstSplitType::Left, split_type);
         }
 

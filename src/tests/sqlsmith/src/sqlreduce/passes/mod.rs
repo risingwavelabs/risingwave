@@ -79,7 +79,6 @@ pub trait Transform: Send + Sync {
     /// - `ast`: The SQL AST to apply the transformation to.
     /// - `idx`: The index of the reduction point to apply the transformation to.
     /// - `strategy`: The strategy to use for applying the transformation.
-    #[allow(clippy::redundant_clone)]
     fn transform(&self, ast: Ast, idx: usize, strategy: Strategy) -> Vec<(Ast, usize)> {
         let reduction_points = self.get_reduction_points(ast.clone());
 
@@ -97,7 +96,7 @@ pub trait Transform: Send + Sync {
             }
             Strategy::Aggressive => {
                 let mut results = Vec::new();
-                let new_ast = self.apply_on(ast.clone(), &reduction_points[idx..]);
+                let new_ast = self.apply_on(ast, &reduction_points[idx..]);
                 results.push((new_ast, idx));
                 results
             }
