@@ -217,17 +217,28 @@ impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
         let array_agg_input = first.as_input_ref()?;
         let project_input = project.input();
         let agg = project_input.as_logical_agg()?;
-        if !agg.group_key().is_empty() {
+        if !agg.group_key().is_empty() || !agg.grouping_sets().is_empty() {
             return None;
         }
         let Ok(array_agg) = agg.agg_calls().as_slice().try_into() else {
             return None;
         };
+        assert_eq!(array_agg_input.index, 0);
         let [array_agg]: &[_; 1] = array_agg;
+
         if array_agg.agg_type != AggType::Builtin(PbAggKind::ArrayAgg) {
             return None;
         }
-        assert_eq!(array_agg_input.index, 0);
+        if array_agg.distinct {
+            return None;
+        }
+        if !array_agg.filter.always_true() {
+            return None;
+        }
+        if !array_agg.direct_args.is_empty() {
+            return None;
+        }
+
         let Ok(array_agg_input) = array_agg.inputs.as_slice().try_into() else {
             return None;
         };

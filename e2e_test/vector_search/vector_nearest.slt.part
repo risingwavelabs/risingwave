@@ -89,10 +89,10 @@ statement ok
 drop view query_view;
 
 # test vector index lookup join on raw embedding column
-# query T
-# with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from no_index_mv order by input.embedding <-> no_index_mv.embedding limit 2) as related_info from input;
-# ----
-# {"(1,first)","(2,second)"}
+query T
+with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from no_index_mv order by input.embedding <-> no_index_mv.embedding limit 2) as related_info from input;
+----
+{"(1,first)","(2,second)"}
 
 statement ok
 create view query_view as with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from items order by input.embedding <-> items.embedding limit 2) as related_info from input;
@@ -182,10 +182,10 @@ statement ok
 drop view query_view;
 
 # test vector index lookup join on functional embedding column
-# query T
-# with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from no_index_mv order by input.embedding <-> get_embedding(no_index_mv.text) limit 2) as related_info from input;
-# ----
-# {"(1,first)","(2,second)"}
+query T
+with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from no_index_mv order by input.embedding <-> get_embedding(no_index_mv.text) limit 2) as related_info from input;
+----
+{"(1,first)","(2,second)"}
 
 statement ok
 create view query_view as with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from items order by input.embedding <-> get_embedding(items.text) limit 2) as related_info from input;

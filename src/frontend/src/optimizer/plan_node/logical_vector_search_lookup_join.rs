@@ -13,24 +13,28 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::array::VECTOR_DISTANCE_TYPE;
+use risingwave_common::array::{ListValue, VECTOR_DISTANCE_TYPE};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataType, StructType};
+use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::catalog::vector_index_info;
 use risingwave_pb::common::PbDistanceType;
+use risingwave_pb::plan_common::JoinType;
 
 use crate::OptimizerContextRef;
-use crate::expr::{ExprDisplay, ExprImpl};
+use crate::expr::{CorrelatedInputRef, ExprDisplay, ExprImpl, ExprType, FunctionCall};
+use crate::optimizer::LogicalOptimizer;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{
-    GenericPlanNode, GenericPlanRef, VectorIndexLookupJoin, ensure_sorted_required_cols,
+    Agg, GenericPlanNode, GenericPlanRef, VectorIndexLookupJoin, ensure_sorted_required_cols,
 };
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, *};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{Condition, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct VectorSearchLookupJoinCore {
@@ -61,6 +65,21 @@ impl VectorSearchLookupJoinCore {
             include_distance: self.include_distance,
         }
     }
+
+    fn struct_type(&self) -> StructType {
+        StructType::new(
+            self.lookup_output_indices
+                .iter()
+                .map(|i| {
+                    let field = &self.lookup.schema().fields[*i];
+                    (field.name.clone(), field.data_type.clone())
+                })
+                .chain(
+                    self.include_distance
+                        .then(|| ("vector_distance".to_owned(), VECTOR_DISTANCE_TYPE)),
+                ),
+        )
+    }
 }
 
 impl GenericPlanNode for VectorSearchLookupJoinCore {
@@ -78,19 +97,7 @@ impl GenericPlanNode for VectorSearchLookupJoinCore {
             .cloned()
             .chain([Field::new(
                 "array",
-                DataType::Struct(StructType::new(
-                    self.lookup_output_indices
-                        .iter()
-                        .map(|i| {
-                            let field = &self.lookup.schema().fields[*i];
-                            (field.name.clone(), field.data_type.clone())
-                        })
-                        .chain(
-                            self.include_distance
-                                .then(|| ("vector_distance".to_owned(), VECTOR_DISTANCE_TYPE)),
-                        ),
-                ))
-                .list(),
+                DataType::Struct(self.struct_type()).list(),
             )])
             .collect();
 
@@ -285,6 +292,92 @@ impl ToStream for LogicalVectorSearchLookupJoin {
     }
 }
 
+impl LogicalVectorSearchLookupJoin {
+    fn to_logical_apply(&self) -> LogicalApply {
+        let ctx = self.base.ctx();
+        let correlated_id = ctx.next_correlated_id();
+        let mut input_ref = CorrelatedInputRef::new(
+            self.core.input_vector_col_idx,
+            self.core.input.schema()[self.core.input_vector_col_idx].data_type(),
+            1, // random non-zero depth to be rewritten later
+        );
+        input_ref.set_correlated_id(correlated_id);
+        let input_vector = ExprImpl::CorrelatedInputRef(input_ref.into());
+        // top_n schema is [lookup_output1, lookup_output2, .., distance]
+        let top_n = LogicalVectorSearch::to_top_n(
+            self.core.lookup.clone(),
+            input_vector,
+            self.core.lookup_vector.clone(),
+            self.core.distance_type,
+            self.core.top_n,
+            &self.core.lookup_output_indices,
+        );
+        let struct_type = self.core.struct_type();
+        let row_inputs = (0..struct_type.len())
+            .map(|i| ExprImpl::InputRef(InputRef::new(i, struct_type.type_at(i).clone()).into()))
+            .collect();
+
+        // Row columns must be the prefix of top_n columns, no matter whether include_distance
+        let struct_type = DataType::Struct(struct_type);
+        let row_expr = FunctionCall::new_unchecked(ExprType::Row, row_inputs, struct_type.clone());
+        let distance_expr =
+            InputRef::new(self.core.lookup_output_indices.len(), VECTOR_DISTANCE_TYPE);
+        // Project([Row([...]), distance])
+        let project = LogicalProject::new(
+            top_n.into(),
+            vec![
+                ExprImpl::FunctionCall(row_expr.into()),
+                ExprImpl::InputRef(distance_expr.into()),
+            ],
+        );
+        let array_agg_call = PlanAggCall {
+            agg_type: AggType::Builtin(PbAggKind::ArrayAgg),
+            return_type: struct_type.clone().list(),
+            inputs: vec![InputRef::new(0, project.schema()[0].data_type())],
+            distinct: false,
+            order_by: vec![ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
+            }],
+            filter: Condition::true_cond(),
+            direct_args: vec![],
+        };
+        let array_agg: LogicalAgg =
+            Agg::new(vec![array_agg_call], IndexSet::empty(), project.into()).into();
+
+        let unwrap_or_empty_array_expr = ExprImpl::FunctionCall(
+            FunctionCall::new_unchecked(
+                ExprType::Coalesce,
+                vec![
+                    ExprImpl::InputRef(InputRef::new(0, array_agg.schema()[0].data_type()).into()),
+                    ExprImpl::Literal(
+                        Literal::new(
+                            Some(ScalarImpl::List(ListValue::empty(&struct_type))),
+                            struct_type.list(),
+                        )
+                        .into(),
+                    ),
+                ],
+                array_agg.schema()[0].data_type(),
+            )
+            .into(),
+        );
+        let unwrap_or_empty_array =
+            LogicalProject::new(array_agg.into(), vec![unwrap_or_empty_array_expr]);
+
+        LogicalApply::new(
+            self.core.input.clone(),
+            unwrap_or_empty_array.into(),
+            JoinType::LeftOuter,
+            Condition::true_cond(),
+            correlated_id,
+            vec![self.core.input_vector_col_idx],
+            false,
+            false,
+        )
+    }
+}
+
 impl ToBatch for LogicalVectorSearchLookupJoin {
     fn to_batch(&self) -> Result<BatchPlanRef> {
         if let Some(scan) = self.core.lookup.as_logical_scan()
@@ -333,12 +426,21 @@ impl ToBatch for LogicalVectorSearchLookupJoin {
             };
             return Ok(BatchVectorSearch::with_core(core).into());
         }
-        let todo = 0;
-        Ok(BatchValues::new(LogicalValues::new(
-            vec![],
-            self.base.schema().clone(),
-            self.base.ctx(),
-        ))
-        .into())
+
+        let logical_apply: LogicalPlanRef = self.to_logical_apply().into();
+        let ctx = self.base.ctx();
+
+        if ctx.is_explain_trace() {
+            ctx.trace("LogicalVectorSearchLookupJoin revert to LogicalApply:");
+            ctx.trace(logical_apply.explain_to_string());
+        }
+
+        let unnested_plan = LogicalOptimizer::subquery_unnesting(
+            logical_apply,
+            false,
+            ctx.is_explain_trace(),
+            &ctx,
+        )?;
+        unnested_plan.to_batch()
     }
 }
