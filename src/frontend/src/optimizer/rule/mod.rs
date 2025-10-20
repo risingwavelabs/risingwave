@@ -261,6 +261,7 @@ mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
 mod top_n_to_vector_search_rule;
 mod values_extract_project_rule;
+mod correlated_topn_to_vector_search;
 
 pub use add_logstore_rule::*;
 pub use batch::batch_iceberg_count_star::*;
@@ -276,6 +277,7 @@ pub use table_function_to_internal_source_backfill_progress::*;
 pub use table_function_to_mysql_query_rule::*;
 pub use table_function_to_postgres_query_rule::*;
 pub use top_n_to_vector_search_rule::*;
+pub use correlated_topn_to_vector_search::*;
 pub use values_extract_project_rule::*;
 
 use crate::optimizer::plan_node::ConventionMarker;
