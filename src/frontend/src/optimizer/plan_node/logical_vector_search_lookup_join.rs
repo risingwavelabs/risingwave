@@ -420,6 +420,7 @@ impl ToBatch for LogicalVectorSearchLookupJoin {
                 info_column_desc: index.info_column_desc(),
                 info_output_indices,
                 include_distance: self.core.include_distance,
+                as_of: scan.as_of(),
                 vector_column_idx: self.core.input_vector_col_idx,
                 hnsw_ef_search,
                 ctx: self.core.ctx(),
