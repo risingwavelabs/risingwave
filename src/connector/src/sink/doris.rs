@@ -24,7 +24,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde_with::serde_as;
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
@@ -89,6 +89,7 @@ pub struct DorisConfig {
         rename = "doris.stream_load.http.timeout.ms",
         default = "_default_stream_load_http_timeout_ms"
     )]
+    #[serde_as(as = "DisplayFromStr")]
     pub stream_load_http_timeout_ms: u64,
 }
 
