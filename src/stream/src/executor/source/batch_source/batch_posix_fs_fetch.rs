@@ -184,6 +184,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                     meta: SourceMeta::Empty,
                 };
 
+                // TODO(tab): avoid rebuilding ByteStreamSourceParserImpl for each file
                 // Parser is created per line because it's consumed by parse_stream
                 let parser =
                     ByteStreamSourceParserImpl::create(parser_config.clone(), source_ctx.clone())
