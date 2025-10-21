@@ -26,6 +26,7 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
+use risingwave_connector::source::cdc::external::ExternalDatabaseConfig;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -45,6 +46,7 @@ use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additiona
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
+use crate::executor::source::cdc::try_initialize_cdc_source_state;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
@@ -94,7 +96,11 @@ pub struct SourceExecutor<S: StateStore> {
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
-    is_shared_non_cdc: bool,
+    is_shared: bool,
+
+    is_cdc: bool,
+
+    cdc_source_opts: Option<ExternalDatabaseConfig>,
 
     /// Local barrier manager for reporting source load finished events
     barrier_manager: LocalBarrierManager,
@@ -109,7 +115,9 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         rate_limit_rps: Option<u32>,
-        is_shared_non_cdc: bool,
+        is_shared: bool,
+        is_cdc: bool,
+        cdc_source_opts: Option<ExternalDatabaseConfig>,
         barrier_manager: LocalBarrierManager,
     ) -> Self {
         Self {
@@ -119,7 +127,9 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
-            is_shared_non_cdc,
+            is_shared,
+            is_cdc,
+            cdc_source_opts,
             barrier_manager,
         }
     }
@@ -518,6 +528,14 @@ impl<S: StateStore> SourceExecutor<S> {
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
         let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
 
+        if self.is_cdc {
+            assert_eq!(boot_state.len(), 1);
+            let Some(opts) = &self.cdc_source_opts else {
+                return Err(anyhow!("expect cdc source opts").into());
+            };
+            try_initialize_cdc_source_state(opts).await?;
+        }
+
         yield Message::Barrier(first_barrier);
 
         let mut core = self.stream_source_core;
@@ -572,13 +590,13 @@ impl<S: StateStore> SourceExecutor<S> {
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
 
-        let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
+        let barrier_stream: std::pin::Pin<Box<dyn Stream<Item = Result<crate::executor::MessageInner<Option<Arc<Mutation>>>, StreamExecutorError>> + Send>> = barrier_to_message_stream(barrier_receiver).boxed();
         let mut reader_stream_builder = self.stream_reader_builder(source_desc.clone());
         let mut latest_splits = None;
         // Build the source stream reader.
         if is_uninitialized {
             let create_split_reader_result = reader_stream_builder
-                .fetch_latest_splits(recover_state.clone(), self.is_shared_non_cdc)
+                .fetch_latest_splits(recover_state.clone(), self.is_shared && !self.is_cdc)
                 .await?;
             latest_splits = create_split_reader_result.latest_splits;
         }
@@ -594,8 +612,10 @@ impl<S: StateStore> SourceExecutor<S> {
         // barriers over source data chunks here.
         let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
             barrier_stream,
-            reader_stream_builder
-                .into_retry_stream(recover_state, is_uninitialized && self.is_shared_non_cdc),
+            reader_stream_builder.into_retry_stream(
+                recover_state,
+                is_uninitialized && self.is_shared && !self.is_cdc,
+            ),
         );
         let mut command_paused = false;
 
@@ -1098,6 +1118,8 @@ mod tests {
             system_params_manager.get_params(),
             None,
             false,
+            false,
+            None,
             LocalBarrierManager::for_test(),
         );
         let mut executor = executor.boxed().execute();
@@ -1187,6 +1209,8 @@ mod tests {
             system_params_manager.get_params(),
             None,
             false,
+            false,
+            None,
             LocalBarrierManager::for_test(),
         );
         let mut handler = executor.boxed().execute();

@@ -59,9 +59,8 @@ pub enum ExternalCdcTableType {
 }
 
 impl ExternalCdcTableType {
-    pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
-        let connector = with_properties.get_connector().unwrap_or_default();
-        match connector.as_str() {
+    pub fn from_str(s: &str) -> Self {
+        match s {
             "mysql-cdc" => Self::MySql,
             "postgres-cdc" => Self::Postgres,
             "citus-cdc" => Self::Citus,
@@ -69,6 +68,11 @@ impl ExternalCdcTableType {
             "mongodb-cdc" => Self::Mongo,
             _ => Self::Undefined,
         }
+    }
+
+    pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
+        let connector = with_properties.get_connector().unwrap_or_default();
+        Self::from_str(connector.as_str())
     }
 
     pub fn can_backfill(&self) -> bool {
@@ -107,6 +111,29 @@ impl ExternalCdcTableType {
             // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
+        }
+    }
+
+    pub async fn get_current_cdc_offset(
+        &self,
+        config: &ExternalDatabaseConfig,
+    ) -> ConnectorResult<Option<CdcOffset>> {
+        match self {
+            ExternalCdcTableType::MySql => mysql::get_current_cdc_offset(config).await.map(Some),
+            ExternalCdcTableType::Postgres => {
+                postgres::get_current_cdc_offset(config).await.map(Some)
+            }
+            ExternalCdcTableType::SqlServer => {
+                // TODO
+                Ok(None)
+            }
+            _ => {
+                tracing::warn!(
+                    "cdc source state initialization is not implemented for connector {}",
+                    config.connector
+                );
+                Ok(None)
+            }
         }
     }
 }
@@ -280,7 +307,7 @@ pub enum ExternalTableReaderImpl {
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
-pub struct ExternalTableConfig {
+pub struct ExternalDatabaseConfig {
     pub connector: String,
 
     #[serde(rename = "hostname")]
@@ -290,10 +317,7 @@ pub struct ExternalTableConfig {
     pub password: String,
     #[serde(rename = "database.name")]
     pub database: String,
-    #[serde(rename = "schema.name", default = "Default::default")]
-    pub schema: String,
-    #[serde(rename = "table.name")]
-    pub table: String,
+
     /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
     /// Choices include `disabled`, `preferred`, and `required`.
     /// This field is optional.
@@ -311,9 +335,32 @@ pub struct ExternalTableConfig {
     pub encrypt: String,
 }
 
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct ExternalTableConfig {
+    #[serde(rename = "schema.name", default = "Default::default")]
+    pub schema: String,
+    #[serde(rename = "table.name")]
+    pub table: String,
+    #[serde(flatten)]
+    pub database_config: ExternalDatabaseConfig,
+}
+
 fn postgres_ssl_mode_default() -> SslMode {
     // NOTE(StrikeW): Default to `disabled` for backward compatibility
     SslMode::Disabled
+}
+
+impl ExternalDatabaseConfig {
+    pub fn try_from_btreemap(
+        connect_properties: BTreeMap<String, String>,
+        secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> ConnectorResult<Self> {
+        let options_with_secret =
+            LocalSecretManager::global().fill_secrets(connect_properties, secret_refs)?;
+        let json_value = serde_json::to_value(options_with_secret)?;
+        let config = serde_json::from_value::<ExternalDatabaseConfig>(json_value)?;
+        Ok(config)
+    }
 }
 
 impl ExternalTableConfig {
@@ -468,22 +515,22 @@ pub enum ExternalTableImpl {
 
 impl ExternalTableImpl {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
-        let cdc_source_type = CdcSourceType::from(config.connector.as_str());
+        let cdc_source_type = CdcSourceType::from(config.database_config.connector.as_str());
         match cdc_source_type {
             CdcSourceType::Mysql => Ok(ExternalTableImpl::MySql(
                 MySqlExternalTable::connect(config).await?,
             )),
             CdcSourceType::Postgres => Ok(ExternalTableImpl::Postgres(
                 PostgresExternalTable::connect(
-                    &config.username,
-                    &config.password,
-                    &config.host,
-                    config.port.parse::<u16>().unwrap(),
-                    &config.database,
+                    &config.database_config.username,
+                    &config.database_config.password,
+                    &config.database_config.host,
+                    config.database_config.port.parse::<u16>().unwrap(),
+                    &config.database_config.database,
                     &config.schema,
                     &config.table,
-                    &config.ssl_mode,
-                    &config.ssl_root_cert,
+                    &config.database_config.ssl_mode,
+                    &config.database_config.ssl_root_cert,
                     false,
                 )
                 .await?,
@@ -491,7 +538,11 @@ impl ExternalTableImpl {
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
                 SqlServerExternalTable::connect(config).await?,
             )),
-            _ => Err(anyhow!("Unsupported cdc connector type: {}", config.connector).into()),
+            _ => Err(anyhow!(
+                "Unsupported cdc connector type: {}",
+                config.database_config.connector
+            )
+            .into()),
         }
     }
 

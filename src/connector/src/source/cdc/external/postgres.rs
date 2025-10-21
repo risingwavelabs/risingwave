@@ -35,7 +35,8 @@ use crate::parser::{postgres_cell_to_scalar_impl, postgres_row_to_owned_row};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CDC_TABLE_SPLIT_ID_START, CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption,
-    DebeziumOffset, ExternalTableConfig, ExternalTableReader, SchemaTableName,
+    DebeziumOffset, ExternalDatabaseConfig, ExternalTableConfig, ExternalTableReader,
+    SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -147,25 +148,29 @@ pub struct PostgresExternalTableReader {
     schema_table_name: SchemaTableName,
 }
 
+async fn current_cdc_offset(client: &mut tokio_postgres::Client) -> ConnectorResult<CdcOffset> {
+    // start a transaction to read current lsn and txid
+    let trxn = client.transaction().await?;
+    let row = trxn.query_one("SELECT pg_current_wal_lsn()", &[]).await?;
+    let mut pg_offset = PostgresOffset::default();
+    let pg_lsn = row.get::<_, PgLsn>(0);
+    tracing::debug!("current lsn: {}", pg_lsn);
+    pg_offset.lsn = pg_lsn.into();
+
+    let txid_row = trxn.query_one("SELECT txid_current()", &[]).await?;
+    let txid: i64 = txid_row.get::<_, i64>(0);
+    pg_offset.txid = txid;
+
+    // commit the transaction
+    trxn.commit().await?;
+
+    Ok(CdcOffset::Postgres(pg_offset))
+}
+
 impl ExternalTableReader for PostgresExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut client = self.client.lock().await;
-        // start a transaction to read current lsn and txid
-        let trxn = client.transaction().await?;
-        let row = trxn.query_one("SELECT pg_current_wal_lsn()", &[]).await?;
-        let mut pg_offset = PostgresOffset::default();
-        let pg_lsn = row.get::<_, PgLsn>(0);
-        tracing::debug!("current lsn: {}", pg_lsn);
-        pg_offset.lsn = pg_lsn.into();
-
-        let txid_row = trxn.query_one("SELECT txid_current()", &[]).await?;
-        let txid: i64 = txid_row.get::<_, i64>(0);
-        pg_offset.txid = txid;
-
-        // commit the transaction
-        trxn.commit().await?;
-
-        Ok(CdcOffset::Postgres(pg_offset))
+        current_cdc_offset(&mut client).await
     }
 
     fn snapshot_read(
@@ -226,6 +231,25 @@ impl ExternalTableReader for PostgresExternalTableReader {
     }
 }
 
+pub async fn get_current_cdc_offset(config: &ExternalDatabaseConfig) -> ConnectorResult<CdcOffset> {
+    let mut client = create_client(config).await?;
+    current_cdc_offset(&mut client).await
+}
+
+async fn create_client(config: &ExternalDatabaseConfig) -> ConnectorResult<tokio_postgres::Client> {
+    let client = create_pg_client(
+        &config.username,
+        &config.password,
+        &config.host,
+        &config.port,
+        &config.database,
+        &config.ssl_mode,
+        &config.ssl_root_cert,
+    )
+    .await?;
+    Ok(client)
+}
+
 impl PostgresExternalTableReader {
     pub async fn new(
         config: ExternalTableConfig,
@@ -238,16 +262,7 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-        let client = create_pg_client(
-            &config.username,
-            &config.password,
-            &config.host,
-            &config.port,
-            &config.database,
-            &config.ssl_mode,
-            &config.ssl_root_cert,
-        )
-        .await?;
+        let client = create_client(&config.database_config).await?;
         let field_names = rw_schema
             .fields
             .iter()
@@ -939,15 +954,15 @@ mod tests {
         };
 
         let table = PostgresExternalTable::connect(
-            &config.username,
-            &config.password,
-            &config.host,
+            &config.database_config.username,
+            &config.database_config.password,
+            &config.database_config.host,
             config.port.parse::<u16>().unwrap(),
-            &config.database,
+            &config.database_config.database,
             &config.schema,
             &config.table,
-            &config.ssl_mode,
-            &config.ssl_root_cert,
+            &config.database_config.ssl_mode,
+            &config.database_config.ssl_root_cert,
             false,
         )
         .await

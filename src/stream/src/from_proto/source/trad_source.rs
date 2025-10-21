@@ -15,6 +15,7 @@
 use risingwave_common::catalog::{
     KAFKA_TIMESTAMP_COLUMN_NAME, default_key_column_name_version_mapping,
 };
+use risingwave_connector::source::cdc::external::ExternalDatabaseConfig;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
@@ -223,6 +224,15 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .boxed()
                 } else {
                     let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
+                    let is_cdc = source.with_properties.is_cdc_connector();
+                    let cdc_source_opts = if is_cdc {
+                        Some(ExternalDatabaseConfig::try_from_btreemap(
+                            source.with_properties.clone(),
+                            source.secret_refs.clone(),
+                        )?)
+                    } else {
+                        None
+                    };
                     SourceExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
@@ -230,7 +240,9 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         barrier_receiver,
                         system_params,
                         source.rate_limit,
-                        is_shared && !source.with_properties.is_cdc_connector(),
+                        is_shared,
+                        is_cdc,
+                        cdc_source_opts,
                         params.local_barrier_manager.clone(),
                     )
                     .boxed()

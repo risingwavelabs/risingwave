@@ -29,6 +29,7 @@ use risingwave_pb::plan_common::AdditionalColumn;
 use risingwave_pb::plan_common::additional_column::ColumnType;
 pub use state_table_handler::*;
 
+mod cdc;
 mod executor_core;
 pub use executor_core::StreamSourceCore;
 

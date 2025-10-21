@@ -21,6 +21,7 @@ use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
+use mysql_async::{Conn, OptsBuilder};
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
@@ -41,7 +42,8 @@ use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName, SslMode, mysql_row_to_owned_row,
+    ExternalDatabaseConfig, ExternalTableConfig, ExternalTableReader, SchemaTableName, SslMode,
+    mysql_row_to_owned_row,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -79,16 +81,22 @@ pub struct MySqlExternalTable {
     pk_names: Vec<String>,
 }
 
+pub async fn get_current_cdc_offset(config: &ExternalDatabaseConfig) -> ConnectorResult<CdcOffset> {
+    let opts_builder = get_opts_builder(&config);
+    let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
+    current_cdc_offset(conn).await
+}
+
 impl MySqlExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         tracing::debug!("connect to mysql");
         let options = MySqlConnectOptions::new()
-            .username(&config.username)
-            .password(&config.password)
-            .host(&config.host)
-            .port(config.port.parse::<u16>().unwrap())
-            .database(&config.database)
-            .ssl_mode(match config.ssl_mode {
+            .username(&config.database_config.username)
+            .password(&config.database_config.password)
+            .host(&config.database_config.host)
+            .port(config.database_config.port.parse::<u16>().unwrap())
+            .database(&config.database_config.database)
+            .ssl_mode(match config.database_config.ssl_mode {
                 SslMode::Disabled => sqlx::mysql::MySqlSslMode::Disabled,
                 SslMode::Preferred => sqlx::mysql::MySqlSslMode::Preferred,
                 SslMode::Required => sqlx::mysql::MySqlSslMode::Required,
@@ -96,14 +104,14 @@ impl MySqlExternalTable {
                     return Err(anyhow!("unsupported SSL mode").into());
                 }
             });
-
         let connection = MySqlPool::connect_with(options).await?;
-        let mut schema_discovery = SchemaDiscovery::new(connection, config.database.as_str());
+        let mut schema_discovery =
+            SchemaDiscovery::new(connection, config.database_config.database.as_str());
 
         // discover system version first
         let system_info = schema_discovery.discover_system().await?;
         schema_discovery.query = SchemaQueryBuilder::new(system_info.clone());
-        let schema = Alias::new(config.database.as_str()).into_iden();
+        let schema = Alias::new(config.database_config.database.as_str()).into_iden();
         let table = Alias::new(config.table.as_str()).into_iden();
         let columns = schema_discovery
             .discover_columns(schema, table, &system_info)
@@ -346,22 +354,25 @@ pub struct MySqlExternalTableReader {
     pool: mysql_async::Pool,
 }
 
+async fn current_cdc_offset(mut conn: Conn) -> ConnectorResult<CdcOffset> {
+    let sql = "SHOW MASTER STATUS".to_owned();
+    let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
+    let row = rs
+        .iter_mut()
+        .exactly_one()
+        .ok()
+        .context("expect exactly one row when reading binlog offset")?;
+    drop(conn);
+    Ok(CdcOffset::MySql(MySqlOffset {
+        filename: row.take("File").unwrap(),
+        position: row.take("Position").unwrap(),
+    }))
+}
+
 impl ExternalTableReader for MySqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
-        let mut conn = self.pool.get_conn().await?;
-
-        let sql = "SHOW MASTER STATUS".to_owned();
-        let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
-        let row = rs
-            .iter_mut()
-            .exactly_one()
-            .ok()
-            .context("expect exactly one row when reading binlog offset")?;
-        drop(conn);
-        Ok(CdcOffset::MySql(MySqlOffset {
-            filename: row.take("File").unwrap(),
-            position: row.take("Position").unwrap(),
-        }))
+        let conn = self.pool.get_conn().await?;
+        current_cdc_offset(conn).await
     }
 
     fn snapshot_read(
@@ -397,25 +408,30 @@ impl ExternalTableReader for MySqlExternalTableReader {
     }
 }
 
+fn get_opts_builder(config: &ExternalDatabaseConfig) -> OptsBuilder {
+    let mut opts_builder = mysql_async::OptsBuilder::default()
+        .user(Some(config.username.clone()))
+        .pass(Some(config.password.clone()))
+        .ip_or_hostname(config.host.clone())
+        .tcp_port(config.port.parse::<u16>().unwrap())
+        .db_name(Some(config.database.clone()));
+
+    opts_builder = match config.ssl_mode {
+        SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
+        // verify-ca and verify-full are same as required for mysql now
+        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
+            let ssl_without_verify = mysql_async::SslOpts::default()
+                .with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true);
+            opts_builder.ssl_opts(Some(ssl_without_verify))
+        }
+    };
+    opts_builder
+}
+
 impl MySqlExternalTableReader {
     pub fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
-        let mut opts_builder = mysql_async::OptsBuilder::default()
-            .user(Some(config.username))
-            .pass(Some(config.password))
-            .ip_or_hostname(config.host)
-            .tcp_port(config.port.parse::<u16>().unwrap())
-            .db_name(Some(config.database));
-
-        opts_builder = match config.ssl_mode {
-            SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-            // verify-ca and verify-full are same as required for mysql now
-            SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
-                let ssl_without_verify = mysql_async::SslOpts::default()
-                    .with_danger_accept_invalid_certs(true)
-                    .with_danger_skip_domain_validation(true);
-                opts_builder.ssl_opts(Some(ssl_without_verify))
-            }
-        };
+        let opts_builder = get_opts_builder(&config.database_config);
         let pool = mysql_async::Pool::new(opts_builder);
 
         let field_names = rw_schema

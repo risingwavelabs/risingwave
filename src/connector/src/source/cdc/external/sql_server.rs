@@ -32,7 +32,7 @@ use crate::sink::sqlserver::SqlServerClient;
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName,
+    ExternalDatabaseConfig, ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
 // The maximum commit_lsn value in Sql Server
@@ -84,15 +84,15 @@ impl SqlServerExternalTable {
 
         let mut client_config = Config::new();
 
-        client_config.host(&config.host);
-        client_config.database(&config.database);
-        client_config.port(config.port.parse::<u16>().unwrap());
+        client_config.host(&config.database_config.host);
+        client_config.database(&config.database_config.database);
+        client_config.port(config.database_config.port.parse::<u16>().unwrap());
         client_config.authentication(tiberius::AuthMethod::sql_server(
-            &config.username,
-            &config.password,
+            &config.database_config.username,
+            &config.database_config.password,
         ));
         // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
-        if config.encrypt == "true" {
+        if config.database_config.encrypt == "true" {
             client_config.encryption(tiberius::EncryptionLevel::Required);
         }
         client_config.trust_cert();
@@ -165,7 +165,7 @@ impl SqlServerExternalTable {
                 "Sql Server table '{}'.'{}' not found in '{}'",
                 config.schema,
                 config.table,
-                config.database
+                config.database_config.database
             );
         }
 
@@ -220,51 +220,55 @@ pub struct SqlServerExternalTableReader {
     client: tokio::sync::Mutex<SqlServerClient>,
 }
 
+async fn current_cdc_offset(client: &mut SqlServerClient) -> ConnectorResult<CdcOffset> {
+    // start a transaction to read max start_lsn.
+    let row = client
+        .inner_client
+        .simple_query(String::from("SELECT sys.fn_cdc_get_max_lsn()"))
+        .await?
+        .into_row()
+        .await?
+        .expect("No result returned by `SELECT sys.fn_cdc_get_max_lsn()`");
+    // An example of change_lsn or commit_lsn: "00000027:00000ac0:0002" from debezium
+    // sys.fn_cdc_get_max_lsn() returns a 10 bytes array, we convert it to a hex string here.
+    let max_lsn = match row.try_get::<&[u8], usize>(0)? {
+        Some(bytes) => {
+            let mut hex_string = String::with_capacity(bytes.len() * 2 + 2);
+            assert_eq!(
+                bytes.len(),
+                10,
+                "sys.fn_cdc_get_max_lsn() should return a 10 bytes array."
+            );
+            for byte in &bytes[0..4] {
+                hex_string.push_str(&format!("{:02x}", byte));
+            }
+            hex_string.push(':');
+            for byte in &bytes[4..8] {
+                hex_string.push_str(&format!("{:02x}", byte));
+            }
+            hex_string.push(':');
+            for byte in &bytes[8..10] {
+                hex_string.push_str(&format!("{:02x}", byte));
+            }
+            hex_string
+        }
+        None => bail!(
+            "None is returned by `SELECT sys.fn_cdc_get_max_lsn()`, please ensure Sql Server Agent is running."
+        ),
+    };
+
+    tracing::debug!("current max_lsn: {}", max_lsn);
+
+    Ok(CdcOffset::SqlServer(SqlServerOffset {
+        change_lsn: max_lsn,
+        commit_lsn: MAX_COMMIT_LSN.into(),
+    }))
+}
+
 impl ExternalTableReader for SqlServerExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut client = self.client.lock().await;
-        // start a transaction to read max start_lsn.
-        let row = client
-            .inner_client
-            .simple_query(String::from("SELECT sys.fn_cdc_get_max_lsn()"))
-            .await?
-            .into_row()
-            .await?
-            .expect("No result returned by `SELECT sys.fn_cdc_get_max_lsn()`");
-        // An example of change_lsn or commit_lsn: "00000027:00000ac0:0002" from debezium
-        // sys.fn_cdc_get_max_lsn() returns a 10 bytes array, we convert it to a hex string here.
-        let max_lsn = match row.try_get::<&[u8], usize>(0)? {
-            Some(bytes) => {
-                let mut hex_string = String::with_capacity(bytes.len() * 2 + 2);
-                assert_eq!(
-                    bytes.len(),
-                    10,
-                    "sys.fn_cdc_get_max_lsn() should return a 10 bytes array."
-                );
-                for byte in &bytes[0..4] {
-                    hex_string.push_str(&format!("{:02x}", byte));
-                }
-                hex_string.push(':');
-                for byte in &bytes[4..8] {
-                    hex_string.push_str(&format!("{:02x}", byte));
-                }
-                hex_string.push(':');
-                for byte in &bytes[8..10] {
-                    hex_string.push_str(&format!("{:02x}", byte));
-                }
-                hex_string
-            }
-            None => bail!(
-                "None is returned by `SELECT sys.fn_cdc_get_max_lsn()`, please ensure Sql Server Agent is running."
-            ),
-        };
-
-        tracing::debug!("current max_lsn: {}", max_lsn);
-
-        Ok(CdcOffset::SqlServer(SqlServerOffset {
-            change_lsn: max_lsn,
-            commit_lsn: MAX_COMMIT_LSN.into(),
-        }))
+        current_cdc_offset(&mut client).await
     }
 
     fn snapshot_read(
@@ -296,6 +300,30 @@ impl ExternalTableReader for SqlServerExternalTableReader {
     }
 }
 
+pub async fn get_current_cdc_offset(config: &ExternalDatabaseConfig) -> ConnectorResult<CdcOffset> {
+    let mut client = create_client(config).await?;
+    current_cdc_offset(&mut client).await
+}
+
+async fn create_client(config: &ExternalDatabaseConfig) -> ConnectorResult<SqlServerClient> {
+    let mut client_config = Config::new();
+    client_config.host(&config.host);
+    client_config.database(&config.database);
+    client_config.port(config.port.parse::<u16>().unwrap());
+    client_config.authentication(tiberius::AuthMethod::sql_server(
+        &config.username,
+        &config.password,
+    ));
+    // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
+    if config.encrypt == "true" {
+        client_config.encryption(tiberius::EncryptionLevel::Required);
+    }
+    client_config.trust_cert();
+
+    let client = SqlServerClient::new_with_config(client_config).await?;
+    Ok(client)
+}
+
 impl SqlServerExternalTableReader {
     pub async fn new(
         config: ExternalTableConfig,
@@ -307,23 +335,7 @@ impl SqlServerExternalTableReader {
             ?pk_indices,
             "create sql server external table reader"
         );
-        let mut client_config = Config::new();
-
-        client_config.host(&config.host);
-        client_config.database(&config.database);
-        client_config.port(config.port.parse::<u16>().unwrap());
-        client_config.authentication(tiberius::AuthMethod::sql_server(
-            &config.username,
-            &config.password,
-        ));
-        // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
-        if config.encrypt == "true" {
-            client_config.encryption(tiberius::EncryptionLevel::Required);
-        }
-        client_config.trust_cert();
-
-        let client = SqlServerClient::new_with_config(client_config).await?;
-
+        let client = create_client(&config.database_config).await?;
         let field_names = rw_schema
             .fields
             .iter()
