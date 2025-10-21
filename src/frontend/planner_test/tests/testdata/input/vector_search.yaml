@@ -156,13 +156,13 @@
     - create_correlated_tables
   id: correlated_read_without_embedding
   sql: |
-    select 
+    select
       event_id, array(
         select row(id, name)
         from items
         order by events.embedding <=> items.embedding
         limit 3
-      ) as related_info, 
+      ) as related_info,
       time
     from events;
   expected_outputs:
@@ -173,11 +173,11 @@
     - create_correlated_tables
   id: correlated_read_with_embedding
   sql: |
-    select 
+    select
       event_id, time, embedding, array(
         select row(id, name)
         from items
-        order by items.embedding <=> events.embedding 
+        order by items.embedding <=> events.embedding
         limit 3
       )
     as related_info from events;
@@ -189,11 +189,11 @@
     - create_correlated_tables
   id: correlated_read_with_distance
   sql: |
-    select 
+    select
       event_id, array(
         select row(id, distance, name)
         from (select id, name, events.embedding <=> items.embedding as distance from items order by distance limit 3)
-      ) as related_info, 
+      ) as related_info,
       time
     from events;
   expected_outputs:
@@ -210,11 +210,11 @@
     - create_correlated_tables_with_column_value_index
   id: correlated_read_without_embedding
   sql: |
-    select 
+    select
       event_id, array(
         select row(name)
         from (select name from items order by events.embedding <-> items.embedding limit 3)
-      ) as related_info, 
+      ) as related_info,
       time
     from events;
   expected_outputs:
