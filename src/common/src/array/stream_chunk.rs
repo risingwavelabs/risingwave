@@ -520,7 +520,7 @@ pub struct OpRowMutRef<'a> {
     i: usize,
 }
 
-// Act as a placeholder value.
+// Act as a placeholder value when using in `ChangeBuffer`.
 impl Default for OpRowMutRef<'_> {
     fn default() -> Self {
         static mut DUMMY_CHUNK_MUT: LazyLock<StreamChunkMut> =
@@ -552,6 +552,10 @@ impl<'a> OpRowMutRef<'a> {
 
     pub fn set_op(&mut self, val: Op) {
         self.c.set_op(self.i, val);
+    }
+
+    pub fn row_ref(&self) -> RowRef<'_> {
+        RowRef::with_columns(self.c.columns(), self.i)
     }
 
     /// return if the two row ref is in the same chunk

@@ -54,7 +54,7 @@ impl StreamChunkCompactor {
     ///   have three kind of patterns Insert, Delete or Update.
     /// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
     ///   removed.
-    pub fn into_inline_compacted_chunks(
+    pub fn into_compacted_chunks_inline(
         self,
         ib: InconsistencyBehavior,
     ) -> impl Iterator<Item = StreamChunk> {
@@ -82,11 +82,13 @@ impl StreamChunkCompactor {
                     mut old_row,
                     mut new_row,
                 } => {
-                    old_row.set_vis(true);
-                    new_row.set_vis(true);
-                    if old_row.same_chunk(&new_row) && old_row.index() + 1 == new_row.index() {
-                        old_row.set_op(Op::UpdateDelete);
-                        new_row.set_op(Op::UpdateInsert);
+                    if old_row.row_ref() != new_row.row_ref() {
+                        old_row.set_vis(true);
+                        new_row.set_vis(true);
+                        if old_row.same_chunk(&new_row) && old_row.index() + 1 == new_row.index() {
+                            old_row.set_op(Op::UpdateDelete);
+                            new_row.set_op(Op::UpdateInsert);
+                        }
                     }
                 }
             }
@@ -96,7 +98,7 @@ impl StreamChunkCompactor {
     }
 
     /// re-construct the stream chunks to compact them with the key.
-    pub fn into_reconstructed_compacted_chunks(
+    pub fn into_compacted_chunks_reconstructed(
         self,
         chunk_size: usize,
         data_types: Vec<DataType>,
@@ -117,13 +119,13 @@ impl StreamChunkCompactor {
     }
 }
 
-pub fn merge_chunk_row(
+pub fn compact_chunk_inline(
     stream_chunk: StreamChunk,
     pk_indices: &[usize],
     ib: InconsistencyBehavior,
 ) -> StreamChunk {
     let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), vec![stream_chunk]);
-    compactor.into_inline_compacted_chunks(ib).next().unwrap()
+    compactor.into_compacted_chunks_inline(ib).next().unwrap()
 }
 
 #[cfg(test)]
@@ -133,7 +135,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_merge_chunk_row() {
+    fn test_compact_chunk_inline() {
         let pk_indices = [0, 1];
         let chunks = vec![
             StreamChunk::from_pretty(
@@ -158,9 +160,11 @@ mod tests {
             ),
         ];
         let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
-        let mut iter = compactor.into_inline_compacted_chunks(InconsistencyBehavior::Panic);
+        let mut iter = compactor.into_compacted_chunks_inline(InconsistencyBehavior::Panic);
+
+        let chunk = iter.next().unwrap().compact();
         assert_eq!(
-            iter.next().unwrap().compact(),
+            chunk,
             StreamChunk::from_pretty(
                 " I I I
                 U- 1 1 1
@@ -168,21 +172,27 @@ mod tests {
                 + 4 9 2
                 + 2 5 5
                 - 6 6 9",
-            )
+            ),
+            "{}",
+            chunk.to_pretty()
         );
+
+        let chunk = iter.next().unwrap().compact();
         assert_eq!(
-            iter.next().unwrap().compact(),
+            chunk,
             StreamChunk::from_pretty(
                 " I I I
                 + 2 2 2",
-            )
+            ),
+            "{}",
+            chunk.to_pretty()
         );
 
         assert_eq!(iter.next(), None);
     }
 
     #[test]
-    fn test_compact_chunk_row() {
+    fn test_compact_chunk_reconstructed() {
         let pk_indices = [0, 1];
         let chunks = vec![
             StreamChunk::from_pretty(
@@ -208,7 +218,7 @@ mod tests {
         ];
         let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
 
-        let chunks = compactor.into_reconstructed_compacted_chunks(
+        let chunks = compactor.into_compacted_chunks_reconstructed(
             100,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             InconsistencyBehavior::Panic,
