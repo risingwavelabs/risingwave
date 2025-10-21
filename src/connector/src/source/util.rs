@@ -26,13 +26,13 @@ pub fn fill_adaptive_split(
     // Just Nats is adaptive for now
     if let SplitImpl::Nats(split) = split_template {
         let mut new_splits = BTreeMap::new();
-        for actor_idx in 0..actor_count {
-            let actor_id: Arc<str> = actor_idx.to_string().into();
+        for idx in 0..actor_count {
+            let split_id: Arc<str> = idx.to_string().into();
             new_splits.insert(
-                actor_id.clone(),
+                split_id.clone(),
                 SplitImpl::Nats(NatsSplit::new(
                     split.subject.clone(),
-                    actor_id,
+                    split_id,
                     split.start_sequence.clone(),
                 )),
             );
