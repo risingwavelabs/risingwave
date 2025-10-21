@@ -313,7 +313,6 @@ def _(outer_panels: Panels):
                         "remote storage error {{type}}: {{%s}} @ {{%s}}"
                         % (COMPONENT_LABEL, NODE_LABEL),
                     ),
-
                     # We add a small constant 0.05 to make sure that the counter jumps from null to not-null, 
                     # the line will be flat at y=0.05 instead of disappearing.
                      panels.target(
@@ -334,7 +333,6 @@ def _(outer_panels: Panels):
                         + f"unless on({COMPONENT_LABEL}, {NODE_LABEL}) ((absent_over_time({metric('user_sink_error_cnt')}[20s])) > 0)",
                         "{{error_type}} @ {{sink_name}} (sink_id={{sink_id}} fragment_id={{fragment_id}})",
                     ),
-                    
                 ],
             ),
             panels.subheader("User Streaming Errors"),
