@@ -1,4 +1,5 @@
 import os
+import datetime
 import pymongo
 from faker import Faker
 
@@ -26,6 +27,9 @@ for _ in range(55):
         "name": fake.name(),
         "address": fake.address(),
         "email": fake.email(),
+        'at': fake.date_time(datetime.timezone.utc),
+        'int': fake.pyint(),
+        'float': fake.pyfloat(),
     }
     collection.insert_one(user_data)
 

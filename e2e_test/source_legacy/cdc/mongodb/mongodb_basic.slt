@@ -41,5 +41,11 @@ random_data users
 random_data users
 
 
+query T
+select payload from users limit 1;
+----
+placeholder
+
+
 statement ok
 DROP TABLE users cascade
