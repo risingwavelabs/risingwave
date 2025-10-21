@@ -14,12 +14,9 @@
 
 //! SQL reduction framework for `RisingWave`.
 //!
-//! This module provides two approaches for reducing SQL queries:
-//! 1. `PassBased` reduction: Traditional approach using multiple reduction passes
-//! 2. `PathBased` reduction: Advanced approach using systematic path enumeration
-//!
-//! The `PathBased` approach uses path enumeration and rules-based transformations
-//! to systematically reduce SQL queries with better coverage and control.
+//! This module provides path-based SQL query reduction using systematic
+//! path enumeration and rules-based transformations to systematically
+//! reduce SQL queries with better coverage and control.
 
 use std::collections::HashSet;
 
@@ -27,15 +24,6 @@ use anyhow::{Result, anyhow};
 
 use crate::parse_sql;
 use crate::sqlreduce::checker::Checker;
-// Keep pass-based approach for backward compatibility
-use crate::sqlreduce::passes::pullup::{
-    ArrayPullup, BinaryOperatorPullup, CasePullup, RowPullup, SetOperationPullup,
-};
-use crate::sqlreduce::passes::remove::{
-    FromRemove, GroupByRemove, HavingRemove, OrderByRemove, SelectItemRemove, WhereRemove,
-};
-use crate::sqlreduce::passes::replace::{NullReplace, ScalarReplace};
-use crate::sqlreduce::passes::{Strategy, Transform};
 use crate::sqlreduce::path::{
     ast_node_to_statement, enumerate_reduction_paths, statement_to_ast_node,
 };
@@ -43,54 +31,15 @@ use crate::sqlreduce::rules::{
     ReductionRules, apply_reduction_operation, generate_reduction_candidates,
 };
 
-/// Reduction mode determines which approach to use.
-#[derive(Debug, Clone)]
-pub enum ReductionMode {
-    /// Use the new path-based reduction approach (default)
-    PathBased,
-    /// Use the traditional pass-based reduction approach
-    PassBased,
-}
-
 pub struct Reducer {
-    // PassBased mode fields
-    transforms: Vec<Box<dyn Transform>>,
-    strategy: Strategy,
-
-    // New path-based fields
     rules: ReductionRules,
-    mode: ReductionMode,
-
-    // Shared checker
     checker: Checker,
 }
 
 impl Reducer {
-    pub fn new(checker: Checker, strategy: Strategy) -> Self {
-        Self::new_with_mode(checker, strategy, ReductionMode::PathBased)
-    }
-
-    pub fn new_with_mode(checker: Checker, strategy: Strategy, mode: ReductionMode) -> Self {
-        let transforms: Vec<Box<dyn Transform>> = vec![
-            Box::new(ScalarReplace),
-            Box::new(NullReplace),
-            Box::new(GroupByRemove),
-            Box::new(OrderByRemove),
-            Box::new(WhereRemove),
-            Box::new(FromRemove),
-            Box::new(SelectItemRemove),
-            Box::new(BinaryOperatorPullup),
-            Box::new(CasePullup),
-            Box::new(RowPullup),
-            Box::new(ArrayPullup),
-            Box::new(SetOperationPullup),
-            Box::new(HavingRemove),
-        ];
+    pub fn new(checker: Checker) -> Self {
         Self {
-            transforms,
-            strategy,
             rules: ReductionRules::default(),
-            mode,
             checker,
         }
     }
@@ -140,14 +89,8 @@ impl Reducer {
             panic!("There is a bug in the checker!")
         }
 
-        tracing::info!("Beginning fixed-point reduction");
-        let reduced_sql = match self.mode {
-            ReductionMode::PathBased => self.reduce_path_based(&failing_query.to_string()).await,
-            ReductionMode::PassBased => {
-                self.reduce_until_fixed_point(&failing_query.to_string())
-                    .await
-            }
-        };
+        tracing::info!("Beginning path-based reduction");
+        let reduced_sql = self.reduce_path_based(&failing_query.to_string()).await;
 
         tracing::info!("Reduction complete");
 
@@ -163,82 +106,6 @@ impl Reducer {
         self.checker.drop_schema().await;
 
         Ok(reduced_sqls)
-    }
-
-    /// Apply all transformations in a fixed-point loop until no further reduction is possible.
-    ///
-    /// For each transformation:
-    /// - Iterate over all applicable reduction points.
-    /// - If a smaller version of the query is found and passes the failure check,
-    ///   accept it and continue from that point.
-    ///
-    /// The process continues until a global fixed point is reached (i.e., no transformation
-    /// makes progress on any part of the SQL).
-    ///
-    /// # Arguments
-    /// - `sql`: The SQL string (usually the failing query) to reduce.
-    ///
-    /// # Returns
-    /// - A reduced SQL string (still failing) that is minimized w.r.t the current passes.
-    async fn reduce_until_fixed_point(&mut self, sql: &str) -> String {
-        let mut global_fixed_point = false;
-        let mut ast = parse_sql(sql)[0].clone();
-        let mut iteration = 0;
-
-        while !global_fixed_point {
-            iteration += 1;
-            tracing::info!("Global iteration {} starting", iteration);
-            global_fixed_point = true;
-            for trans in &self.transforms {
-                let mut local_fixed_point = false;
-                let mut idx = 0;
-                let mut sql_len = ast.to_string().len();
-                tracing::info!("Applying transform: {}", trans.name());
-
-                while !local_fixed_point {
-                    local_fixed_point = true;
-                    tracing::debug!("Transform iteration starting at index {}", idx);
-
-                    let items = trans.transform(ast.clone(), idx, self.strategy.clone());
-
-                    for (new_ast, i) in items {
-                        let ast_sql = ast.to_string();
-                        let new_ast_sql = new_ast.to_string();
-                        tracing::debug!("SQL changes from\n{}\nto\n{}", ast_sql, new_ast_sql);
-                        if new_ast_sql.len() < sql_len {
-                            tracing::debug!(
-                                "Candidate reduction found: len {} → {}",
-                                sql_len,
-                                new_ast_sql.len()
-                            );
-                            if self
-                                .checker
-                                .is_failure_preserved(&ast_sql, &new_ast_sql)
-                                .await
-                            {
-                                tracing::info!(
-                                    "Valid reduction applied at index {} ({} → {})",
-                                    i,
-                                    sql_len,
-                                    new_ast_sql.len()
-                                );
-                                ast = new_ast;
-                                idx = i;
-                                local_fixed_point = false;
-                                global_fixed_point = false;
-                                sql_len = new_ast_sql.len();
-                                break;
-                            } else {
-                                tracing::debug!("Reduction not valid; failure not preserved");
-                            }
-                        }
-                    }
-                }
-            }
-            tracing::info!("Global iteration {} complete", iteration);
-        }
-
-        ast.to_string()
     }
 
     /// Path-based reduction approach using systematic AST traversal.

@@ -81,31 +81,23 @@ pub enum AstField {
     Lateral,
 }
 
-impl AstField {
-    /// Convert `AstField` to string for compatibility
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            // Statement fields
+impl fmt::Display for AstField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
             AstField::Query => "query",
             AstField::Name => "name",
             AstField::Columns => "columns",
-
-            // Query fields
             AstField::Body => "body",
             AstField::With => "with",
             AstField::OrderBy => "order_by",
             AstField::Limit => "limit",
             AstField::Offset => "offset",
-
-            // Select fields
             AstField::Projection => "projection",
             AstField::Selection => "selection",
             AstField::From => "from",
             AstField::GroupBy => "group_by",
             AstField::Having => "having",
             AstField::Distinct => "distinct",
-
-            // Expression fields
             AstField::Left => "left",
             AstField::Right => "right",
             AstField::Operand => "operand",
@@ -115,93 +107,18 @@ impl AstField {
             AstField::Expr => "expr",
             AstField::Low => "low",
             AstField::High => "high",
-
-            // TableWithJoins fields
             AstField::Relation => "relation",
             AstField::Joins => "joins",
-
-            // Join fields
             AstField::JoinOperator => "join_operator",
-
-            // SelectItem fields
             AstField::Alias => "alias",
-
-            // OrderByExpr fields
             AstField::Asc => "asc",
             AstField::NullsFirst => "nulls_first",
-
-            // With clause fields
             AstField::CteTable => "cte_tables",
             AstField::Recursive => "recursive",
-
-            // CTE fields
             AstField::CteInner => "cte_inner",
-
-            // TableFactor fields
             AstField::Lateral => "lateral",
-        }
-    }
-
-    /// Create `AstField` from string for backward compatibility
-    pub fn from_string(s: &str) -> Option<Self> {
-        match s {
-            // Statement fields
-            "query" => Some(AstField::Query),
-            "name" => Some(AstField::Name),
-            "columns" => Some(AstField::Columns),
-
-            // Query fields
-            "body" => Some(AstField::Body),
-            "with" => Some(AstField::With),
-            "order_by" => Some(AstField::OrderBy),
-            "limit" => Some(AstField::Limit),
-            "offset" => Some(AstField::Offset),
-
-            // Select fields
-            "projection" => Some(AstField::Projection),
-            "selection" => Some(AstField::Selection),
-            "from" => Some(AstField::From),
-            "group_by" => Some(AstField::GroupBy),
-            "having" => Some(AstField::Having),
-            "distinct" => Some(AstField::Distinct),
-
-            // Expression fields
-            "left" => Some(AstField::Left),
-            "right" => Some(AstField::Right),
-            "operand" => Some(AstField::Operand),
-            "else_result" => Some(AstField::ElseResult),
-            "subquery" => Some(AstField::Subquery),
-            "inner" => Some(AstField::Inner),
-            "expr" => Some(AstField::Expr),
-            "low" => Some(AstField::Low),
-            "high" => Some(AstField::High),
-
-            // TableWithJoins fields
-            "relation" => Some(AstField::Relation),
-            "joins" => Some(AstField::Joins),
-
-            // Join fields
-            "join_operator" => Some(AstField::JoinOperator),
-
-            // SelectItem fields
-            "alias" => Some(AstField::Alias),
-
-            // OrderByExpr fields
-            "asc" => Some(AstField::Asc),
-            "nulls_first" => Some(AstField::NullsFirst),
-
-            // With clause fields
-            "cte_tables" => Some(AstField::CteTable),
-            "recursive" => Some(AstField::Recursive),
-
-            // CTE fields
-            "cte_inner" => Some(AstField::CteInner),
-
-            // TableFactor fields
-            "lateral" => Some(AstField::Lateral),
-
-            _ => None,
-        }
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -222,15 +139,10 @@ impl PathComponent {
         PathComponent::Field(field)
     }
 
-    /// Create a Field `PathComponent` from string (for backward compatibility)
-    pub fn field_from_str(field_name: &str) -> Option<Self> {
-        AstField::from_string(field_name).map(PathComponent::Field)
-    }
-
-    /// Get the field name as string for compatibility
-    pub fn field_name(&self) -> Option<&'static str> {
+    /// Get the field name as owned String for compatibility
+    pub fn field_name(&self) -> Option<String> {
         match self {
-            PathComponent::Field(field) => Some(field.as_str()),
+            PathComponent::Field(field) => Some(field.to_string()),
             PathComponent::Index(_) => None,
         }
     }
@@ -320,7 +232,7 @@ impl PathComponent {
 impl fmt::Display for PathComponent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PathComponent::Field(field) => write!(f, ".{}", field.as_str()),
+            PathComponent::Field(field) => write!(f, ".{}", field),
             PathComponent::Index(idx) => write!(f, "[{}]", idx),
         }
     }
@@ -1034,7 +946,6 @@ pub fn set_node_at_path(
 }
 
 /// Helper function to get a child node and recurse if it exists.
-/// Helper function using type-safe field access
 fn explore_child_field(
     node: &AstNode,
     field: AstField,
@@ -1106,7 +1017,8 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
                 let expr_path = [current_path.clone(), vec![PathComponent::Index(i)]].concat();
                 paths.push(expr_path.clone());
                 // Also descend into expressions for pullup opportunities
-                if let Some(expr_node) = get_node_at_path(node, &expr_path) {
+                let relative_path = vec![PathComponent::Index(i)];
+                if let Some(expr_node) = get_node_at_path(node, &relative_path) {
                     paths.extend(enumerate_reduction_paths(&expr_node, expr_path));
                 }
             }

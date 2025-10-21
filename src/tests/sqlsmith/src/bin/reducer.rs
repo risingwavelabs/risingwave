@@ -14,25 +14,11 @@
 
 use std::time::Duration;
 
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use risingwave_sqlsmith::reducer::shrink_file;
-use risingwave_sqlsmith::sqlreduce::{ReductionMode, Strategy};
 use thiserror_ext::AsReport;
 use tokio_postgres::NoTls;
 use tracing_subscriber::EnvFilter;
-
-#[derive(Debug, Clone, ValueEnum)]
-enum ReductionStrategy {
-    Single,
-    Aggressive,
-    Consecutive,
-}
-
-#[derive(Debug, Clone, ValueEnum)]
-enum ReductionModeArg {
-    PathBased,
-    PassBased,
-}
 
 /// Reduce an sql query
 #[derive(Parser, Debug)]
@@ -46,21 +32,9 @@ struct Args {
     #[arg(short, long)]
     output_file: String,
 
-    /// Reducer strategy
-    #[arg(short, long, default_value = "single")]
-    strategy: ReductionStrategy,
-
-    /// For consecutive strategy, number of elements to reduce at once (used only when strategy = consecutive)
-    #[arg(short, long, default_value_t = 2)]
-    consecutive_k: usize,
-
     /// Command to restore RW
     #[clap(long)]
     run_rw_cmd: String,
-
-    /// Reduction mode
-    #[arg(short = 'm', long, default_value = "path-based")]
-    mode: ReductionModeArg,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
@@ -90,22 +64,9 @@ async fn main() {
         }
     });
 
-    let strategy = match args.strategy {
-        ReductionStrategy::Single => Strategy::Single,
-        ReductionStrategy::Aggressive => Strategy::Aggressive,
-        ReductionStrategy::Consecutive => Strategy::Consecutive(args.consecutive_k),
-    };
-
-    let mode = match args.mode {
-        ReductionModeArg::PathBased => ReductionMode::PathBased,
-        ReductionModeArg::PassBased => ReductionMode::PassBased,
-    };
-
     shrink_file(
         &args.input_file,
         &args.output_file,
-        strategy,
-        mode,
         client,
         &args.run_rw_cmd,
     )

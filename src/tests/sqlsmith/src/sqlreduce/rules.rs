@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use risingwave_sqlparser::ast::*;
 
-use crate::sqlreduce::path::{AstNode, AstPath, PathComponent};
+use crate::sqlreduce::path::{AstField, AstNode, AstPath, PathComponent};
 
 /// Defines what actions can be performed on an AST node during reduction.
 #[derive(Debug, Clone, Default)]
@@ -29,13 +29,13 @@ pub struct ReductionRule {
     /// Whether to try replacing this node with NULL/None
     pub try_null: bool,
     /// Attributes to descend into for further reduction
-    pub descend: Vec<String>,
+    pub descend: Vec<AstField>,
     /// Attributes that can be removed (set to None)
-    pub remove: Vec<String>,
+    pub remove: Vec<AstField>,
     /// Attributes whose children can be pulled up to replace this node
-    pub pullup: Vec<String>,
+    pub pullup: Vec<AstField>,
     /// Attributes whose subtrees can replace this entire node
-    pub replace: Vec<String>,
+    pub replace: Vec<AstField>,
 }
 
 /// Repository of reduction rules for different AST node types.
@@ -54,18 +54,18 @@ impl Default for ReductionRules {
             ReductionRule {
                 try_null: false,
                 descend: vec![
-                    "projection".to_owned(),
-                    "from".to_owned(),
-                    "selection".to_owned(),
-                    "group_by".to_owned(),
-                    "having".to_owned(),
+                    AstField::Projection,
+                    AstField::From,
+                    AstField::Selection,
+                    AstField::GroupBy,
+                    AstField::Having,
                 ],
                 remove: vec![
-                    "selection".to_owned(),
-                    "having".to_owned(),
-                    "projection".to_owned(),
-                    "from".to_owned(),
-                    "group_by".to_owned(),
+                    AstField::Selection,
+                    AstField::Having,
+                    AstField::Projection,
+                    AstField::From,
+                    AstField::GroupBy,
                 ],
                 pullup: vec![],
                 replace: vec![],
@@ -77,10 +77,10 @@ impl Default for ReductionRules {
             "Query".to_owned(),
             ReductionRule {
                 try_null: false,
-                descend: vec!["body".to_owned(), "with".to_owned(), "order_by".to_owned()],
-                remove: vec!["with".to_owned(), "order_by".to_owned()],
+                descend: vec![AstField::Body, AstField::With, AstField::OrderBy],
+                remove: vec![AstField::With, AstField::OrderBy],
                 pullup: vec![],
-                replace: vec!["body".to_owned()],
+                replace: vec![AstField::Body],
             },
         );
 
@@ -89,7 +89,7 @@ impl Default for ReductionRules {
             "With".to_owned(),
             ReductionRule {
                 try_null: true,
-                descend: vec!["cte_tables".to_owned()],
+                descend: vec![AstField::CteTable],
                 remove: vec![],
                 pullup: vec![],
                 replace: vec![],
@@ -113,9 +113,9 @@ impl Default for ReductionRules {
             "Cte".to_owned(),
             ReductionRule {
                 try_null: false,
-                descend: vec!["cte_inner".to_owned()],
+                descend: vec![AstField::CteInner],
                 remove: vec![],
-                pullup: vec!["cte_inner".to_owned()],
+                pullup: vec![AstField::CteInner],
                 replace: vec![],
             },
         );
@@ -127,7 +127,7 @@ impl Default for ReductionRules {
                 try_null: true,
                 descend: vec![],
                 remove: vec![],
-                pullup: vec!["left".to_owned(), "right".to_owned()],
+                pullup: vec![AstField::Left, AstField::Right],
                 replace: vec![],
             },
         );
@@ -138,7 +138,7 @@ impl Default for ReductionRules {
                 try_null: true,
                 descend: vec![],
                 remove: vec![],
-                pullup: vec!["operand".to_owned(), "else_result".to_owned()],
+                pullup: vec![AstField::Operand, AstField::ElseResult],
                 replace: vec![],
             },
         );
@@ -148,9 +148,9 @@ impl Default for ReductionRules {
             "Function".to_owned(),
             ReductionRule {
                 try_null: true,
-                descend: vec!["args".to_owned()],
-                remove: vec!["args".to_owned()],
-                pullup: vec!["args".to_owned()],
+                descend: vec![], // args is not modeled as an AstField in our enum
+                remove: vec![],
+                pullup: vec![],
                 replace: vec![],
             },
         );
@@ -163,7 +163,7 @@ impl Default for ReductionRules {
                 descend: vec![],
                 remove: vec![],
                 pullup: vec![],
-                replace: vec!["query".to_owned()],
+                replace: vec![AstField::Subquery],
             },
         );
 
@@ -229,10 +229,10 @@ impl Default for ReductionRules {
             "TableWithJoins".to_owned(),
             ReductionRule {
                 try_null: false,
-                descend: vec!["relation".to_owned(), "joins".to_owned()],
-                remove: vec!["joins".to_owned()],
-                pullup: vec!["relation".to_owned()],
-                replace: vec!["relation".to_owned()],
+                descend: vec![AstField::Relation, AstField::Joins],
+                remove: vec![AstField::Joins],
+                pullup: vec![AstField::Relation],
+                replace: vec![AstField::Relation],
             },
         );
 
@@ -240,10 +240,10 @@ impl Default for ReductionRules {
             "Join".to_owned(),
             ReductionRule {
                 try_null: true,
-                descend: vec!["relation".to_owned()],
+                descend: vec![AstField::Relation],
                 remove: vec![],
-                pullup: vec!["relation".to_owned()],
-                replace: vec!["relation".to_owned()],
+                pullup: vec![AstField::Relation],
+                replace: vec![AstField::Relation],
             },
         );
 
@@ -251,10 +251,10 @@ impl Default for ReductionRules {
             "TableFactor".to_owned(),
             ReductionRule {
                 try_null: true, // Allow trying NULL for derived tables
-                descend: vec!["subquery".to_owned()],
-                remove: vec!["subquery".to_owned()], // Allow removing subquery entirely
-                pullup: vec!["subquery".to_owned()],
-                replace: vec!["subquery".to_owned()],
+                descend: vec![AstField::Subquery],
+                remove: vec![AstField::Subquery], // Allow removing subquery entirely
+                pullup: vec![AstField::Subquery],
+                replace: vec![AstField::Subquery],
             },
         );
 
@@ -317,11 +317,11 @@ pub enum ReductionOperation {
     /// Replace node with NULL/None
     TryNull,
     /// Remove a specific attribute (set to None)
-    Remove(String),
+    Remove(AstField),
     /// Pull up a subnode to replace this node
-    Pullup(String),
+    Pullup(AstField),
     /// Replace this node with a subtree
-    Replace(String),
+    Replace(AstField),
     /// Remove an element from a list/tuple
     RemoveListElement(usize),
 }
@@ -496,19 +496,16 @@ pub fn apply_reduction_operation(
             set_node_at_path(root, &candidate.path, Some(null_expr))
         }
 
-        ReductionOperation::Remove(attr) => {
+        ReductionOperation::Remove(field) => {
             // Remove an attribute (set to None)
             let attr_path = [
                 candidate.path.clone(),
-                vec![
-                    PathComponent::field_from_str(attr)
-                        .unwrap_or_else(|| panic!("Invalid field name: {}", attr)),
-                ],
+                vec![PathComponent::field(field.clone())],
             ]
             .concat();
             tracing::debug!(
                 "apply_reduction_operation: Removing attribute '{}' at path {}",
-                attr,
+                field.to_string(),
                 display_ast_path(&attr_path)
             );
 
@@ -516,25 +513,22 @@ pub fn apply_reduction_operation(
             if result.is_none() {
                 tracing::debug!(
                     "apply_reduction_operation: Failed to remove attribute '{}'",
-                    attr
+                    field.to_string()
                 );
             } else {
                 tracing::debug!(
                     "apply_reduction_operation: Successfully removed attribute '{}'",
-                    attr
+                    field.to_string()
                 );
             }
             result
         }
 
-        ReductionOperation::Pullup(attr) => {
+        ReductionOperation::Pullup(field) => {
             // Pull up a subnode to replace the current node
             let attr_path = [
                 candidate.path.clone(),
-                vec![
-                    PathComponent::field_from_str(attr)
-                        .unwrap_or_else(|| panic!("Invalid field name: {}", attr)),
-                ],
+                vec![PathComponent::field(field.clone())],
             ]
             .concat();
             if let Some(subnode) = get_node_at_path(root, &attr_path) {
@@ -544,19 +538,16 @@ pub fn apply_reduction_operation(
             }
         }
 
-        ReductionOperation::Replace(attr) => {
+        ReductionOperation::Replace(field) => {
             // Replace current node with a subtree
             let attr_path = [
                 candidate.path.clone(),
-                vec![
-                    PathComponent::field_from_str(attr)
-                        .unwrap_or_else(|| panic!("Invalid field name: {}", attr)),
-                ],
+                vec![PathComponent::field(field.clone())],
             ]
             .concat();
             tracing::debug!(
                 "apply_reduction_operation: Replacing with attribute '{}' from path {}",
-                attr,
+                field.to_string(),
                 display_ast_path(&attr_path)
             );
 
