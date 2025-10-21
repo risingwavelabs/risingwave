@@ -22,6 +22,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
+use risingwave_sqlparser::ast::AsOf;
 
 use crate::OptimizerContextRef;
 use crate::expr::{CorrelatedInputRef, ExprDisplay, ExprImpl, ExprType, FunctionCall};
@@ -281,13 +282,35 @@ impl PredicatePushdown for LogicalVectorSearchLookupJoin {
 impl ToStream for LogicalVectorSearchLookupJoin {
     fn logical_rewrite_for_stream(
         &self,
-        _ctx: &mut RewriteStreamContext,
+        ctx: &mut RewriteStreamContext,
     ) -> crate::error::Result<(PlanRef, ColIndexMapping)> {
-        bail!("LogicalVectorSearch can only for batch plan, not stream plan");
+        if !self
+            .core
+            .input
+            .logical_rewrite_for_stream(ctx)?
+            .1
+            .is_identity()
+        {
+            // TODO: support it
+            bail!(
+                "LogicalVectorSearchLookupJoin does not support input that can possibly be rewritten"
+            )
+        }
+        Ok((
+            self.clone().into(),
+            ColIndexMapping::identity(self.base.schema().len()),
+        ))
     }
 
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> crate::error::Result<StreamPlanRef> {
-        bail!("LogicalVectorSearch can only for batch plan, not stream plan");
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
+        if let Some(core) = self.to_vector_index_lookup_join(|plan| plan.to_stream(ctx))? {
+            if !matches!(&core.as_of, Some(AsOf::ProcessTime)) {
+                bail!("streaming vector index lookup join must be proctime temporal join");
+
+            }
+            return Ok(StreamVectorIndexLookupJoin::new(core)?.into());
+        }
+        bail!("LogicalVectorSearchLookupJoin should use proper vector index in streaming job")
     }
 }
 
@@ -377,8 +400,11 @@ impl LogicalVectorSearchLookupJoin {
     }
 }
 
-impl ToBatch for LogicalVectorSearchLookupJoin {
-    fn to_batch(&self) -> Result<BatchPlanRef> {
+impl LogicalVectorSearchLookupJoin {
+    fn to_vector_index_lookup_join<PlanRef>(
+        &self,
+        gen_input: impl FnOnce(&LogicalPlanRef) -> Result<PlanRef>,
+    ) -> Result<Option<VectorIndexLookupJoin<PlanRef>>> {
         if let Some(scan) = self.core.lookup.as_logical_scan()
             && let Some((
                 index,
@@ -403,7 +429,7 @@ impl ToBatch for LogicalVectorSearchLookupJoin {
                 })
                 .collect();
             let core = VectorIndexLookupJoin {
-                input: self.core.input.to_batch()?,
+                input: gen_input(&self.core.input)?,
                 top_n: self.core.top_n,
                 distance_type: self.core.distance_type,
                 index_name: index.index_table.name.clone(),
@@ -416,6 +442,15 @@ impl ToBatch for LogicalVectorSearchLookupJoin {
                 hnsw_ef_search,
                 ctx: self.core.ctx(),
             };
+            return Ok(Some(core));
+        }
+        Ok(None)
+    }
+}
+
+impl ToBatch for LogicalVectorSearchLookupJoin {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
+        if let Some(core) = self.to_vector_index_lookup_join(|plan| plan.to_batch())? {
             return Ok(BatchVectorSearch::with_core(core).into());
         }
 

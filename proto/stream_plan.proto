@@ -1004,6 +1004,11 @@ message VectorIndexWriteNode {
   catalog.Table table = 1;
 }
 
+message VectorIndexLookupJoinNode {
+  plan_common.VectorIndexReaderDesc reader_desc = 1;
+  uint32 vector_column_idx = 2;
+}
+
 message UpstreamSinkUnionNode {
   // It is always empty in the persisted metadata, and get filled before we spawn the actors.
   // The actual upstream info may be added and removed dynamically at runtime.
@@ -1082,6 +1087,7 @@ message StreamNode {
     VectorIndexWriteNode vector_index_write = 150;
     UpstreamSinkUnionNode upstream_sink_union = 151;
     LocalityProviderNode locality_provider = 152;
+    VectorIndexLookupJoinNode vector_index_lookup_join = 153;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
