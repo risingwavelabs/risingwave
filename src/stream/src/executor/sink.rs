@@ -639,7 +639,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if F::ALLOW_REWIND {
                         match log_reader.rewind().await {
                             Ok(()) => {
-                                warn!(
+                                error!(
                                     error = %e.as_report(),
                                     executor_id = sink_writer_param.executor_id,
                                     sink_id = sink_param.sink_id.sink_id,
