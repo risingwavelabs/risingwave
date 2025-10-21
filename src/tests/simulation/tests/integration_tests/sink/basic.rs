@@ -45,7 +45,7 @@ async fn basic_test_inner(is_decouple: bool, test_type: TestSinkType) -> Result<
 
     let internal_tables = session.run("show internal tables").await?;
 
-    let table_name_prefix = "__internal_test_sink_";
+    let table_name_prefix = "public.__internal_test_sink_";
 
     let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
         internal_tables

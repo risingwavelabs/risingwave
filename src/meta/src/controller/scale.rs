@@ -123,7 +123,7 @@ fn construct_no_shuffle_traverse_query_helper(
             Expr::col((FragmentRelation, fragment_relation::Column::DispatcherType))
                 .eq(DispatcherType::NoShuffle),
         )
-        .and_where(Expr::col(compared_column.clone()).is_in(fragment_ids.clone()))
+        .and_where(Expr::col(compared_column.clone()).is_in(fragment_ids))
         .to_owned();
 
     let cte_referencing = SelectStatement::new()
@@ -149,20 +149,20 @@ fn construct_no_shuffle_traverse_query_helper(
         )
         .to_owned();
 
-    let common_table_expr = CommonTableExpression::new()
+    let mut common_table_expr = CommonTableExpression::new();
+    common_table_expr
         .query(base_query.union(UnionType::All, cte_referencing).to_owned())
         .column(fragment_relation::Column::SourceFragmentId)
         .column(fragment_relation::Column::DispatcherType)
         .column(fragment_relation::Column::TargetFragmentId)
-        .table_name(cte_alias.clone())
-        .to_owned();
+        .table_name(cte_alias.clone());
 
     SelectStatement::new()
         .column(fragment_relation::Column::SourceFragmentId)
         .column(fragment_relation::Column::DispatcherType)
         .column(fragment_relation::Column::TargetFragmentId)
         .distinct()
-        .from(cte_alias.clone())
+        .from(cte_alias)
         .to_owned()
         .with(
             WithClause::new()
@@ -170,7 +170,6 @@ fn construct_no_shuffle_traverse_query_helper(
                 .cte(common_table_expr)
                 .to_owned(),
         )
-        .to_owned()
 }
 
 #[derive(Debug, Clone)]

@@ -73,7 +73,7 @@ struct JoinSide<K: HashKey, S: StateStore, E: JoinEncoding> {
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
-    /// The mapping from input indices of a side to output columes.
+    /// The mapping from input indices of a side to output columns.
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
     /// The first field of the ith element indicates that when a watermark at the ith column of
@@ -335,10 +335,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l =
-            is_subset(state_pk_indices_l.clone(), state_join_key_indices_l.clone());
-        let pk_contained_in_jk_r =
-            is_subset(state_pk_indices_r.clone(), state_join_key_indices_r.clone());
+        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
+        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
@@ -2395,8 +2393,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I
-                 + 3 8
-                 - 3 8",
+                 + 3 8 D
+                 - 3 8 D",
             )
         );
 
@@ -2525,8 +2523,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I
-                 + 3 8
-                 - 3 8",
+                 + 3 8 D
+                 - 3 8 D",
             )
         );
 
@@ -2826,8 +2824,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + 3 8 . .
-                - 3 8 . ."
+                + 3 8 . . D
+                - 3 8 . . D"
             )
         );
 
@@ -2837,9 +2835,9 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 7"
+                " I I I I
+                - 2 5 . .
+                + 2 5 2 7"
             )
         );
 
@@ -2849,9 +2847,9 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U- 3 6 . .
-                U+ 3 6 3 10"
+                " I I I I
+                - 3 6 . .
+                + 3 6 3 10"
             )
         );
 
@@ -2910,8 +2908,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + . 8 . .
-                - . 8 . ."
+                + . 8 . . D
+                - . 8 . . D"
             )
         );
 
@@ -2921,9 +2919,9 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 7"
+                " I I I I
+                - 2 5 . .
+                + 2 5 2 7"
             )
         );
 
@@ -2933,9 +2931,9 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U- . 6 . .
-                U+ . 6 . 10"
+                " I I I I
+                - . 6 . .
+                + . 6 . 10"
             )
         );
 
@@ -3002,8 +3000,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + . . 5 10
-                - . . 5 10"
+                + . . 5 10 D
+                - . . 5 10 D"
             )
         );
 
@@ -3074,11 +3072,11 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I I I
-                U- 2 5 2 . . .
-                U+ 2 5 2 2 5 1
-                U- 4 9 4 . . .
-                U+ 4 9 4 4 9 2"
+                " I I I I I I
+                - 2 5 2 . . .
+                + 2 5 2 2 5 1
+                - 4 9 4 . . .
+                + 4 9 4 4 9 2"
             )
         );
 
@@ -3088,11 +3086,11 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I I I
-                U- 1 4 1 . . .
-                U+ 1 4 1 1 4 4
-                U- 3 6 3 . . .
-                U+ 3 6 3 3 6 5"
+                " I I I I I I
+                - 1 4 1 . . .
+                + 1 4 1 1 4 4
+                - 3 6 3 . . .
+                + 3 6 3 3 6 5"
             )
         );
 
@@ -3222,8 +3220,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + 3 8 . .
-                - 3 8 . ."
+                + 3 8 . . D
+                - 3 8 . . D"
             )
         );
 
@@ -3233,11 +3231,11 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U-  2 5 . .
-                U+  2 5 2 7
-                +  . . 4 8
-                +  . . 6 9"
+                " I I I I
+                - 2 5 . .
+                + 2 5 2 7
+                + . . 4 8
+                + . . 6 9"
             )
         );
 
@@ -3248,8 +3246,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + . . 5 10
-                - . . 5 10"
+                + . . 5 10 D
+                - . . 5 10 D"
             )
         );
 
@@ -3291,8 +3289,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                U- 1 1 . .
-                U+ 1 1 1 1"
+                - 1 1 . .
+                + 1 1 1 1"
             )
         );
 
@@ -3374,8 +3372,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + 3 8 . .
-                - 3 8 . .
+                + 3 8 . . D
+                - 3 8 . . D
                 - 1 4 . ."
             )
         );
@@ -3386,13 +3384,13 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U-  2 5 . .
-                U+  2 5 2 6
-                +  . . 4 8
-                +  . . 3 4" /* regression test (#2420): 3 4 should be forwarded only once
-                             * despite matching on eq join on 2
-                             * entries */
+                " I I I I
+                - 2 5 . .
+                + 2 5 2 6
+                + . . 4 8
+                + . . 3 4" /* regression test (#2420): 3 4 should be forwarded only once
+                            * despite matching on eq join on 2
+                            * entries */
             )
         );
 
@@ -3403,8 +3401,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + . . 5 10
-                - . . 5 10
+                + . . 5 10 D
+                - . . 5 10 D
                 + . . 1 2" /* regression test (#2420): 1 2 forwarded even if matches on an empty
                             * join entry */
             )

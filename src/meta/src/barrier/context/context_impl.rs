@@ -84,7 +84,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
-        job.finish(&self.metadata_manager).await
+        job.finish(&self.metadata_manager, &self.source_manager)
+            .await
     }
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]
@@ -110,6 +111,65 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         database_id: DatabaseId,
     ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
         self.reload_database_runtime_info_impl(database_id).await
+    }
+
+    async fn handle_list_finished_source_ids(
+        &self,
+        list_finished_source_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        use risingwave_common::catalog::TableId;
+
+        tracing::info!(
+            "Handling list finished source IDs: {:?}",
+            list_finished_source_ids
+        );
+
+        use crate::barrier::Command;
+        for associated_source_id in list_finished_source_ids {
+            let res: MetaResult<()> = try {
+                tracing::info!(%associated_source_id, "Scheduling ListFinish command for refreshable batch source");
+
+                // For refreshable batch sources, associated_source_id is the table_id
+                let associated_source_id = TableId::new(associated_source_id);
+                // Use a proper lookup to get the table_id associated with the source_id
+                let table_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_table_by_associate_source_id(associated_source_id.table_id() as _)
+                    .await
+                    .context("Failed to get table id for source")?
+                    .id
+                    .into();
+
+                // Find the database ID for this table
+                let database_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_object_database_id(associated_source_id.table_id() as _)
+                    .await
+                    .context("Failed to get database id for table")?;
+
+                // Create ListFinish command
+                let list_finish_command = Command::ListFinish {
+                    table_id,
+                    associated_source_id,
+                };
+
+                // Schedule the command through the barrier system without waiting
+                self.barrier_scheduler
+                    .run_command_no_wait(
+                        risingwave_common::catalog::DatabaseId::new(database_id as u32),
+                        list_finish_command,
+                    )
+                    .context("Failed to schedule ListFinish command")?;
+
+                tracing::info!(%associated_source_id, %table_id, "ListFinish command scheduled successfully");
+            };
+            if let Err(e) = res {
+                tracing::error!(error = %e.as_report(), %associated_source_id, "Failed to handle source list finished");
+            }
+        }
+        Ok(())
     }
 
     async fn handle_load_finished_source_ids(
@@ -232,16 +292,11 @@ impl CommandContext {
 
             Command::SourceChangeSplit(SplitState {
                 split_assignment: assignment,
-                discovered_source_splits: source_splits,
+                ..
             }) => {
                 barrier_manager_context
                     .metadata_manager
                     .update_actor_splits_by_split_assignment(assignment)
-                    .await?;
-
-                barrier_manager_context
-                    .metadata_manager
-                    .update_source_splits(source_splits)
                     .await?;
 
                 barrier_manager_context
@@ -476,6 +531,10 @@ impl CommandContext {
                     .catalog_controller
                     .set_table_refresh_state(table_id.table_id() as i32, RefreshState::Refreshing)
                     .await?;
+            }
+            Command::ListFinish { .. } => {
+                // List stage completed, table remains in Refreshing state
+                // The next stage will be load completion
             }
             Command::LoadFinish { table_id, .. } => {
                 barrier_manager_context

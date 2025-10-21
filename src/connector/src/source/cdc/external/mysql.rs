@@ -479,20 +479,7 @@ impl MySqlExternalTableReader {
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
-        if start_pk_row.is_none() {
-            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
-            let row_stream = rs_stream.map(|row| {
-                // convert mysql row into OwnedRow
-                let mut row = row?;
-                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
-            });
-            pin_mut!(row_stream);
-            #[for_await]
-            for row in row_stream {
-                let row = row?;
-                yield row;
-            }
-        } else {
+        if let Some(start_pk_row) = start_pk_row {
             let field_map = self
                 .rw_schema
                 .fields
@@ -503,7 +490,7 @@ impl MySqlExternalTableReader {
             // fill in start primary key params
             let params: Vec<_> = primary_keys
                 .iter()
-                .zip_eq_fast(start_pk_row.unwrap().into_iter())
+                .zip_eq_fast(start_pk_row.into_iter())
                 .map(|(pk, datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
@@ -552,7 +539,20 @@ impl MySqlExternalTableReader {
                 let row = row?;
                 yield row;
             }
-        };
+        } else {
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
+            let row_stream = rs_stream.map(|row| {
+                // convert mysql row into OwnedRow
+                let mut row = row?;
+                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+            });
+            pin_mut!(row_stream);
+            #[for_await]
+            for row in row_stream {
+                let row = row?;
+                yield row;
+            }
+        }
         drop(conn);
     }
 
@@ -681,7 +681,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_mysql_table_reader() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
             ColumnDesc::named("v2", ColumnId::new(2), DataType::Decimal),
             ColumnDesc::named("v3", ColumnId::new(3), DataType::Varchar),

@@ -103,7 +103,7 @@ impl BuildingFragment {
 
     /// Extract the internal tables from the fragment.
     fn extract_internal_tables(&self) -> Vec<Table> {
-        let mut fragment = self.inner.to_owned();
+        let mut fragment = self.inner.clone();
         let mut tables = Vec::new();
         stream_graph_visitor::visit_internal_tables(&mut fragment, |table, _| {
             tables.push(table.clone());
@@ -1082,6 +1082,44 @@ impl StreamFragmentGraph {
         }
 
         fragment_ordering
+    }
+
+    pub fn find_locality_provider_fragment_state_table_mapping(
+        &self,
+    ) -> HashMap<FragmentId, Vec<TableId>> {
+        let mut mapping: HashMap<FragmentId, Vec<TableId>> = HashMap::new();
+
+        for (fragment_id, fragment) in &self.fragments {
+            let fragment_id = fragment_id.as_global_id();
+
+            // Check if this fragment contains a LocalityProvider node
+            if let Some(node) = fragment.node.as_ref() {
+                let mut state_table_ids = Vec::new();
+
+                visit_stream_node_cont(node, |stream_node| {
+                    if let Some(NodeBody::LocalityProvider(locality_provider)) =
+                        stream_node.node_body.as_ref()
+                    {
+                        // Collect state table ID (except the progress table)
+                        let state_table_id = locality_provider
+                            .state_table
+                            .as_ref()
+                            .expect("must have state table")
+                            .id;
+                        state_table_ids.push(TableId::new(state_table_id));
+                        false // Stop visiting once we find a LocalityProvider
+                    } else {
+                        true // Continue visiting
+                    }
+                });
+
+                if !state_table_ids.is_empty() {
+                    mapping.insert(fragment_id, state_table_ids);
+                }
+            }
+        }
+
+        mapping
     }
 
     /// Find dependency relationships among fragments containing `LocalityProvider` nodes.

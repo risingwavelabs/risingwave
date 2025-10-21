@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::alloc::Global;
+
 use std::cmp::Ordering;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::sync::Arc;
@@ -21,7 +21,6 @@ use futures::future::{join, try_join};
 use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::for_await;
 use join_row_set::JoinRowSet;
-use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
@@ -102,8 +101,7 @@ impl<E: JoinEncoding> DerefMut for HashValueWrapper<E> {
     }
 }
 
-type JoinHashMapInner<K, E> =
-    ManagedLruCache<K, HashValueWrapper<E>, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+type JoinHashMapInner<K, E> = ManagedLruCache<K, HashValueWrapper<E>, PrecomputedBuildHasher>;
 
 pub struct JoinHashMapMetrics {
     /// Basic information
@@ -425,7 +423,6 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
         fragment_id: FragmentId,
         side: &'static str,
     ) -> Self {
-        let alloc = StatsAlloc::new(Global).shared();
         // TODO: unify pk encoding with state table.
         let pk_data_types = state_pk_indices
             .iter()
@@ -461,11 +458,10 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
             format!("hash join {}", side),
         );
 
-        let cache = ManagedLruCache::unbounded_with_hasher_in(
+        let cache = ManagedLruCache::unbounded_with_hasher(
             watermark_sequence,
             metrics_info,
             PrecomputedBuildHasher,
-            alloc,
         );
 
         Self {

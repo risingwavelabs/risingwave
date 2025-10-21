@@ -21,7 +21,6 @@ use anyhow::anyhow;
 use futures::future::{Either, select};
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
-use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
@@ -539,25 +538,6 @@ impl MetadataManager {
         Ok((fragments, actors))
     }
 
-    pub async fn get_worker_actor_ids(
-        &self,
-        job_ids: HashSet<TableId>,
-    ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
-        let worker_actors = self
-            .catalog_controller
-            .get_worker_actor_ids(job_ids.into_iter().map(|id| id.table_id as _).collect())
-            .await?;
-        Ok(worker_actors
-            .into_iter()
-            .map(|(id, actors)| {
-                (
-                    id as WorkerId,
-                    actors.into_iter().map(|id| id as ActorId).collect(),
-                )
-            })
-            .collect())
-    }
-
     pub async fn get_job_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
         let job_internal_table_ids = self.catalog_controller.get_job_internal_table_ids().await;
         job_internal_table_ids.map(|ids| {
@@ -581,15 +561,9 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_running_actors_of_fragment(
-        &self,
-        id: FragmentId,
-    ) -> MetaResult<HashSet<ActorId>> {
-        let actor_ids = self
-            .catalog_controller
+    pub fn get_running_actors_of_fragment(&self, id: FragmentId) -> MetaResult<HashSet<ActorId>> {
+        self.catalog_controller
             .get_running_actors_of_fragment(id as _)
-            .await?;
-        Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
     }
 
     // (backfill_actor_id, upstream_source_actor_id)
@@ -609,21 +583,6 @@ impl MetadataManager {
             .into_iter()
             .map(|(id, upstream)| (id as ActorId, upstream as ActorId))
             .collect())
-    }
-
-    pub async fn get_job_fragments_by_ids(
-        &self,
-        ids: &[TableId],
-    ) -> MetaResult<Vec<StreamJobFragments>> {
-        let mut table_fragments = vec![];
-        for id in ids {
-            table_fragments.push(
-                self.catalog_controller
-                    .get_job_fragments_by_id(id.table_id as _)
-                    .await?,
-            );
-        }
-        Ok(table_fragments)
     }
 
     pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
@@ -773,16 +732,6 @@ impl MetadataManager {
     ) -> MetaResult<()> {
         self.catalog_controller
             .update_actor_splits(split_assignment)
-            .await
-    }
-
-    #[await_tree::instrument]
-    pub async fn update_source_splits(
-        &self,
-        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
-    ) -> MetaResult<()> {
-        self.catalog_controller
-            .update_source_splits(source_splits)
             .await
     }
 

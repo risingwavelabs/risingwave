@@ -76,7 +76,7 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                     None
                 },
                 internal_rpc_host_addr: property.map(|p| p.internal_rpc_host_addr.clone()),
-                rw_version: resource.map(|r| r.rw_version.to_owned()),
+                rw_version: resource.map(|r| r.rw_version.clone()),
                 system_total_memory_bytes: resource.map(|r| r.total_memory_bytes as _),
                 system_total_cpu_cores: resource.map(|r| r.total_cpu_cores as _),
                 started_at: worker

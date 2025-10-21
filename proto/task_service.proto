@@ -39,7 +39,8 @@ message TaskInfoResponse {
 message CreateTaskRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
-  common.BatchQueryEpoch epoch = 3;
+  reserved "epoch";
+  reserved 3;
   map<string, string> tracing_context = 4;
   plan_common.ExprContext expr_context = 5;
 }
@@ -92,7 +93,8 @@ message FastInsertResponse {
 message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
-  common.BatchQueryEpoch epoch = 3;
+  reserved "epoch";
+  reserved 3;
   map<string, string> tracing_context = 4;
   plan_common.ExprContext expr_context = 5;
 }

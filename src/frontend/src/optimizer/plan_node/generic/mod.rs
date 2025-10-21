@@ -93,10 +93,14 @@ mod postgres_query;
 pub use postgres_query::*;
 
 mod mysql_query;
+
 pub use mysql_query::*;
 
 mod locality_provider;
 pub use locality_provider::*;
+
+mod vector_index_lookup_join;
+pub use vector_index_lookup_join::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;

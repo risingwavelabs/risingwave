@@ -381,7 +381,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_mysql_table_reader() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("o_orderkey", ColumnId::new(1), DataType::Int64),
             ColumnDesc::named("o_custkey", ColumnId::new(2), DataType::Int64),
             ColumnDesc::named("o_orderstatus", ColumnId::new(3), DataType::Varchar),

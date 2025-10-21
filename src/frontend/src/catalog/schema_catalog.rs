@@ -567,9 +567,7 @@ impl SchemaCatalog {
         self.secret_by_id
             .try_insert(id, secret_ref.clone())
             .unwrap();
-        self.secret_by_name
-            .try_insert(name, secret_ref.clone())
-            .unwrap();
+        self.secret_by_name.try_insert(name, secret_ref).unwrap();
     }
 
     pub fn update_secret(&mut self, prost: &PbSecret) {

@@ -159,6 +159,13 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // DorisConfig
+    map.try_insert(
+        std::any::type_name::<DorisConfig>().to_owned(),
+        [
+            "doris.stream_load.http.timeout.ms".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // IcebergConfig
     map.try_insert(
         std::any::type_name::<IcebergConfig>().to_owned(),
@@ -214,6 +221,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
     map.try_insert(
         std::any::type_name::<StarrocksConfig>().to_owned(),
         [
+            "starrocks.stream_load.http.timeout.ms".to_owned(),
             "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();

@@ -14,9 +14,7 @@
 
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(let_chains)]
 #![feature(btree_cursors)]
-#![feature(strict_overflow_ops)]
 #![feature(map_try_insert)]
 
 mod key_cmp;

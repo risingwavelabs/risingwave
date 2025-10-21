@@ -38,9 +38,9 @@ use crate::types::{DataType, DefaultOrdered, ToText};
 /// `Op` represents three operations in `StreamChunk`.
 ///
 /// `UpdateDelete` and `UpdateInsert` are semantically equivalent to `Delete` and `Insert`
-/// but always appear in pairs to represent an update operation.
-/// For example, table source, aggregation and outer join can generate updates by themselves,
-/// while most of the other operators only pass through updates with best effort.
+/// but always appear in pairs to represent an update operation. It's guaranteed that
+/// they are adjacent to each other in the same `StreamChunk`, and the stream key of the two
+/// rows are the same.
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Op {
     Insert,
@@ -321,7 +321,7 @@ impl StreamChunk {
         }
     }
 
-    /// Remove the adjacent delete-insert if their row value are the same.
+    /// Remove the adjacent delete-insert and insert-deletes if their row value are the same.
     pub fn eliminate_adjacent_noop_update(self) -> Self {
         let len = self.data_chunk().capacity();
         let mut c: StreamChunkMut = self.into();
@@ -330,17 +330,32 @@ impl StreamChunk {
             if !c.vis(curr) {
                 continue;
             }
-            if let Some(prev) = prev_r {
-                if matches!(c.op(prev), Op::UpdateDelete | Op::Delete)
-                    && matches!(c.op(curr), Op::UpdateInsert | Op::Insert)
-                    && c.row_ref(prev) == c.row_ref(curr)
-                {
-                    c.set_vis(prev, false);
-                    c.set_vis(curr, false);
-                    prev_r = None;
-                } else {
-                    prev_r = Some(curr)
-                }
+            if let Some(prev) = prev_r
+                && (
+                    // 1. Delete then Insert
+                    (matches!(c.op(prev), Op::UpdateDelete | Op::Delete)
+                    && matches!(c.op(curr), Op::UpdateInsert | Op::Insert))
+                    ||
+                    // 2. Insert then Delete
+                    //
+                    // Note that after eliminating `U+` and `U-` here, we will get a new
+                    // pair of `U-` and `U+` consisting of `prev.prev` and the `next` row.
+                    // `prev.prev` and `prev`, `curr` and `next` share the same stream key
+                    // because they are `U-` and `U+` pairs, while `prev` and `curr` share
+                    // the same stream key because they are equal, so `prev-prev` and `next`
+                    // must also share the same stream key. Therefore, it's okay to leave
+                    // their `Update` ops unchanged.
+                    //
+                    // Also, they can't be the same, otherwise these 4 rows are the same,
+                    // which should already be eliminated by the first branch.
+                    (matches!(c.op(prev), Op::UpdateInsert | Op::Insert)
+                    && matches!(c.op(curr), Op::UpdateDelete | Op::Delete))
+                )
+                && c.row_ref(prev) == c.row_ref(curr)
+            {
+                c.set_vis(prev, false);
+                c.set_vis(curr, false);
+                prev_r = None;
             } else {
                 prev_r = Some(curr);
             }
@@ -871,8 +886,6 @@ mod tests {
             "\
 +---+---+---+
 | - | 2 | 2 |
-| + | 2 | 3 |
-| - | 2 | 3 |
 | + | 1 | 6 |
 | + | 2 | 3 |
 +---+---+---+"
