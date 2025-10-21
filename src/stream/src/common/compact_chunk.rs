@@ -12,18 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::hash::BuildHasherDefault;
-use std::mem;
-
 use itertools::Itertools;
-use prehash::{Passthru, Prehashed, new_prehashed_map_with_capacity};
-use risingwave_common::array::stream_chunk::{OpRowMutRef, StreamChunkMut};
-use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::row::{Project, RowExt};
+use risingwave_common::array::stream_chunk::StreamChunkMut;
+use risingwave_common::array::stream_record::Record;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::row::RowExt;
 use risingwave_common::types::DataType;
-use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 // XXX(bugen): This utility seems confusing. It's doing different things with different methods,
 // while all of them are named "compact" (also note `StreamChunk::compact`). We should consider
@@ -45,70 +39,6 @@ pub struct StreamChunkCompactor {
     key: Vec<usize>,
 }
 
-struct OpRowMutRefTuple<'a> {
-    before_prev: Option<OpRowMutRef<'a>>,
-    prev: OpRowMutRef<'a>,
-}
-
-impl<'a> OpRowMutRefTuple<'a> {
-    /// return true if no row left
-    fn push(&mut self, mut curr: OpRowMutRef<'a>, ib: InconsistencyBehavior) -> bool {
-        debug_assert!(self.prev.vis());
-        match (self.prev.op(), curr.op()) {
-            (Op::Insert, Op::Insert) => {
-                ib.report("receive duplicated insert on the stream");
-                // If need to tolerate inconsistency, override the previous insert.
-                // Note that because the primary key constraint has been violated, we
-                // don't mind losing some data here.
-                self.prev.set_vis(false);
-                self.prev = curr;
-            }
-            (Op::Delete, Op::Delete) => {
-                ib.report("receive duplicated delete on the stream");
-                // If need to tolerate inconsistency, override the previous delete.
-                // Note that because the primary key constraint has been violated, we
-                // don't mind losing some data here.
-                self.prev.set_vis(false);
-                self.prev = curr;
-            }
-            (Op::Insert, Op::Delete) => {
-                // Delete a row that has been inserted, just hide the two ops.
-                self.prev.set_vis(false);
-                curr.set_vis(false);
-                self.prev = if let Some(prev) = self.before_prev.take() {
-                    prev
-                } else {
-                    return true;
-                }
-            }
-            (Op::Delete, Op::Insert) => {
-                // The operation for the key must be (+, -, +) or (-, +). And the (+, -) must has
-                // been filtered.
-                debug_assert!(
-                    self.before_prev.is_none(),
-                    "should have been taken in the above match arm"
-                );
-                self.before_prev = Some(mem::replace(&mut self.prev, curr));
-            }
-            // `all the updateDelete` and `updateInsert` should be normalized to `delete`
-            // and`insert`
-            _ => unreachable!(),
-        };
-        false
-    }
-
-    fn as_update_op(&mut self) -> Option<(&mut OpRowMutRef<'a>, &mut OpRowMutRef<'a>)> {
-        self.before_prev.as_mut().map(|prev| {
-            debug_assert_eq!(prev.op(), Op::Delete);
-            debug_assert_eq!(self.prev.op(), Op::Insert);
-            (prev, &mut self.prev)
-        })
-    }
-}
-
-type OpRowMap<'a, 'b> =
-    HashMap<Prehashed<Project<'b, RowRef<'a>>>, OpRowMutRefTuple<'a>, BuildHasherDefault<Passthru>>;
-
 impl StreamChunkCompactor {
     pub fn new(key: Vec<usize>, chunks: Vec<StreamChunk>) -> Self {
         Self { chunks, key }
@@ -124,65 +54,49 @@ impl StreamChunkCompactor {
     ///   have three kind of patterns Insert, Delete or Update.
     /// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
     ///   removed.
-    pub fn into_compacted_chunks(
+    pub fn into_inline_compacted_chunks(
         self,
         ib: InconsistencyBehavior,
     ) -> impl Iterator<Item = StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
 
         let estimate_size = chunks.iter().map(|c| c.cardinality()).sum();
-        let mut chunks: Vec<(Vec<u64>, StreamChunkMut)> = chunks
-            .into_iter()
-            .map(|c| {
-                let hash_values = c
-                    .data_chunk()
-                    .get_hash_values(&key_indices, Crc32FastBuilder)
-                    .into_iter()
-                    .map(|hash| hash.value())
-                    .collect_vec();
-                (hash_values, StreamChunkMut::from(c))
-            })
-            .collect_vec();
+        let mut cb = ChangeBuffer::with_capacity(estimate_size).with_inconsistency_behavior(ib);
 
-        let mut op_row_map: OpRowMap<'_, '_> = new_prehashed_map_with_capacity(estimate_size);
-        for (hash_values, c) in &mut chunks {
-            for (row, mut op_row) in c.to_rows_mut() {
-                op_row.set_op(op_row.op().normalize_update());
-                let hash = hash_values[row.index()];
+        let mut chunks = chunks.into_iter().map(StreamChunkMut::from).collect_vec();
+        for chunk in &mut chunks {
+            for (row, mut op_row) in chunk.to_rows_mut() {
+                let op = op_row.op().normalize_update();
                 let key = row.project(&key_indices);
-                match op_row_map.entry(Prehashed::new(key, hash)) {
-                    Entry::Vacant(v) => {
-                        v.insert(OpRowMutRefTuple {
-                            before_prev: None,
-                            prev: op_row,
-                        });
-                    }
-                    Entry::Occupied(mut o) => {
-                        if o.get_mut().push(op_row, ib) {
-                            o.remove_entry();
-                        }
+                op_row.set_vis(false);
+                op_row.set_op(op);
+                cb.apply_op_row(op, key, op_row);
+            }
+        }
+
+        for record in cb.into_records() {
+            match record {
+                Record::Insert { mut new_row } => new_row.set_vis(true),
+                Record::Delete { mut old_row } => old_row.set_vis(true),
+                Record::Update {
+                    mut old_row,
+                    mut new_row,
+                } => {
+                    old_row.set_vis(true);
+                    new_row.set_vis(true);
+                    if old_row.same_chunk(&new_row) && old_row.index() + 1 == new_row.index() {
+                        old_row.set_op(Op::UpdateDelete);
+                        new_row.set_op(Op::UpdateInsert);
                     }
                 }
             }
         }
-        for tuple in op_row_map.values_mut() {
-            if let Some((prev, latest)) = tuple.as_update_op() {
-                if prev.row_ref() == latest.row_ref() {
-                    prev.set_vis(false);
-                    latest.set_vis(false);
-                } else if prev.same_chunk(latest) && prev.index() + 1 == latest.index() {
-                    // TODO(st1page): use next_one check in bitmap
-                    // Rows in this tuple have same key, thus it's safe to use `Update` op here.
-                    prev.set_op(Op::UpdateDelete);
-                    latest.set_op(Op::UpdateInsert);
-                }
-            }
-        }
-        chunks.into_iter().map(|(_, c)| c.into())
+
+        chunks.into_iter().map(|c| c.into())
     }
 
     /// re-construct the stream chunks to compact them with the key.
-    pub fn reconstructed_compacted_chunks(
+    pub fn into_reconstructed_compacted_chunks(
         self,
         chunk_size: usize,
         data_types: Vec<DataType>,
@@ -209,7 +123,7 @@ pub fn merge_chunk_row(
     ib: InconsistencyBehavior,
 ) -> StreamChunk {
     let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), vec![stream_chunk]);
-    compactor.into_compacted_chunks(ib).next().unwrap()
+    compactor.into_inline_compacted_chunks(ib).next().unwrap()
 }
 
 #[cfg(test)]
@@ -244,7 +158,7 @@ mod tests {
             ),
         ];
         let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
-        let mut iter = compactor.into_compacted_chunks(InconsistencyBehavior::Panic);
+        let mut iter = compactor.into_inline_compacted_chunks(InconsistencyBehavior::Panic);
         assert_eq!(
             iter.next().unwrap().compact(),
             StreamChunk::from_pretty(
@@ -294,7 +208,7 @@ mod tests {
         ];
         let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
 
-        let chunks = compactor.reconstructed_compacted_chunks(
+        let chunks = compactor.into_reconstructed_compacted_chunks(
             100,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             InconsistencyBehavior::Panic,

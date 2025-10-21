@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 use indexmap::IndexMap;
 use indexmap::map::Entry;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{StreamChunk, StreamChunkBuilder};
+use risingwave_common::array::{Op, StreamChunk, StreamChunkBuilder};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
@@ -165,6 +165,14 @@ where
                     self.update(old_key, old_row, new_row);
                 }
             }
+        }
+    }
+
+    /// Apply an `Op` of a row with the given key.
+    pub fn apply_op_row(&mut self, op: Op, key: K, row: R) {
+        match op {
+            Op::Insert | Op::UpdateInsert => self.insert(key, row),
+            Op::Delete | Op::UpdateDelete => self.delete(key, row),
         }
     }
 }

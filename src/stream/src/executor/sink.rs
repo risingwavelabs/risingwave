@@ -458,7 +458,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             let mut insert_chunks = vec![];
 
                             for c in StreamChunkCompactor::new(stream_key.clone(), chunks)
-                                .into_compacted_chunks(input_compact_ib)
+                                .into_inline_compacted_chunks(input_compact_ib)
                             {
                                 // We only enter the branch if need_advance_delete, in which case `sink_type` is not ForceAppendOnly or AppendOnly.
                                 {
@@ -484,7 +484,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         };
                         if re_construct_with_sink_pk {
                             let chunks = StreamChunkCompactor::new(down_stream_pk.clone(), chunks)
-                                .reconstructed_compacted_chunks(
+                                .into_reconstructed_compacted_chunks(
                                     chunk_size,
                                     input_data_types.clone(),
                                     // When compacting based on user provided primary key, we should never panic
