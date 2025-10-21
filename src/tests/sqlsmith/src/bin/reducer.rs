@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::process::Command;
 use std::time::Duration;
 
 use clap::Parser;
@@ -46,6 +47,22 @@ async fn main() {
         .try_init();
 
     let args = Args::parse();
+
+    // Execute restore command before connecting to database
+    tracing::info!("Executing restore command: {}", args.run_rw_cmd);
+    let status = Command::new("sh").arg("-c").arg(&args.run_rw_cmd).status();
+
+    match status {
+        Ok(s) if s.success() => tracing::info!("Restore command executed successfully"),
+        Ok(s) => {
+            tracing::error!("Restore command failed with status: {}", s);
+            panic!("Failed to restore RW");
+        }
+        Err(err) => {
+            tracing::error!("Failed to execute restore command: {}", err);
+            panic!("Failed to execute restore command: {}", err);
+        }
+    }
 
     let (client, connection) = tokio_postgres::Config::new()
         .host("localhost")
