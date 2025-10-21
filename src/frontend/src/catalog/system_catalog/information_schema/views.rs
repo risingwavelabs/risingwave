@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 /// The view `views` contains all views defined in the current database. Only those views
 /// are shown that the current user has access to (by way of being the owner or having
 /// some privilege).
-/// Ref: [`https://www.postgresql.org/docs/current/infoschema-views.html`]
+/// Ref: `https://www.postgresql.org/docs/current/infoschema-views.html`
 ///
 /// In RisingWave, `views` contains information about defined views.
 #[system_catalog(

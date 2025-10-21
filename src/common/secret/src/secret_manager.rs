@@ -37,7 +37,7 @@ static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::
 #[derive(Debug)]
 pub struct LocalSecretManager {
     secrets: RwLock<HashMap<SecretId, Vec<u8>>>,
-    /// The local directory used to write secrets into file, so that it can be passed into some libararies
+    /// The local directory used to write secrets into file, so that it can be passed into some libraries
     secret_file_dir: PathBuf,
 }
 
@@ -164,11 +164,10 @@ impl LocalSecretManager {
             RefAsType::Text => {
                 // We converted the secret string from sql to bytes using `as_bytes` in frontend.
                 // So use `from_utf8` here to convert it back to string.
-                Ok(String::from_utf8(secret_value_bytes.clone())?)
+                Ok(String::from_utf8(secret_value_bytes)?)
             }
             RefAsType::File => {
-                let path_str =
-                    self.get_or_init_secret_file(secret_id, secret_value_bytes.clone())?;
+                let path_str = self.get_or_init_secret_file(secret_id, secret_value_bytes)?;
                 Ok(path_str)
             }
             RefAsType::Unspecified => Err(SecretError::UnspecifiedRefType(secret_id)),
@@ -209,7 +208,7 @@ impl LocalSecretManager {
     #[cfg_or_panic::cfg_or_panic(not(madsim))]
     fn get_secret_value(pb_secret_bytes: &[u8]) -> SecretResult<Vec<u8>> {
         let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
-            risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
+            risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value,
             risingwave_pb::secret::secret::SecretBackend::HashicorpVault(vault_backend) => {
                 let config = HashiCorpVaultConfig::from_protobuf(&vault_backend)?;
                 let client = HashiCorpVaultClient::new(config)?;

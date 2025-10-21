@@ -233,6 +233,11 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Acosh
             | Type::Decode
             | Type::Encode
+            | Type::GetBit
+            | Type::GetByte
+            | Type::SetBit
+            | Type::SetByte
+            | Type::BitCount
             | Type::Sha1
             | Type::Sha224
             | Type::Sha256

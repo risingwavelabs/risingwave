@@ -71,8 +71,8 @@ impl Checker {
         self.replay_setup().await;
         let new_result = run_query(&mut self.client, new, &self.restore_cmd).await;
 
-        tracing::info!("old_result: {:?}", old_result);
-        tracing::info!("new_result: {:?}", new_result);
+        tracing::debug!("old_result: {:?}", old_result);
+        tracing::debug!("new_result: {:?}", new_result);
 
         old_result == new_result
     }
@@ -106,59 +106,46 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
     match client.simple_query(query).await {
         Ok(_) => (true, String::new()),
         Err(e) => {
-            if e.is_closed() {
-                tracing::error!("Frontend panic detected, restoring with `{restore_cmd}`...");
+            let status = Command::new("sh").arg("-c").arg(restore_cmd).status();
+            match status {
+                Ok(s) if s.success() => tracing::info!("restore cmd executed successfully"),
+                Ok(s) => tracing::error!("restore cmd failed with status: {s}"),
+                Err(err) => tracing::error!("failed to execute restore cmd: {err}"),
+            }
 
-                let status = Command::new("sh").arg("-c").arg(restore_cmd).status();
-                match status {
-                    Ok(s) if s.success() => tracing::info!("restore cmd executed successfully"),
-                    Ok(s) => tracing::error!("restore cmd failed with status: {s}"),
-                    Err(err) => tracing::error!("failed to execute restore cmd: {err}"),
-                }
-
-                // The connection to the frontend is lost when the frontend process panics,
-                // so the old `Client` instance becomes unusable (is_closed() = true).
-                // We must rebuild a brand new client connection here, otherwise all queries
-                // will keep failing. After reconnection, we still need to wait until RW
-                // finishes recovery before continuing.
-                match tokio_postgres::Config::new()
-                    .host("localhost")
-                    .port(4566)
-                    .dbname("dev")
-                    .user("root")
-                    .password("")
-                    .connect_timeout(Duration::from_secs(5))
-                    .connect(NoTls)
-                    .await
-                {
-                    Ok((new_client, connection)) => {
-                        tokio::spawn(async move {
-                            if let Err(e) = connection.await {
-                                tracing::error!("connection error: {}", e);
-                            }
-                        });
-                        *client = new_client;
-                        tracing::info!("Reconnected to Frontend after panic");
-
-                        if let Err(err) = wait_for_recovery(client).await {
-                            tracing::error!("RW failed to recover after frontend panic: {:?}", err);
-                        } else {
-                            tracing::info!("RW recovery complete (frontend case)");
+            // The connection to the frontend is lost when the frontend process panics,
+            // so the old `Client` instance becomes unusable (is_closed() = true).
+            // We must rebuild a brand new client connection here, otherwise all queries
+            // will keep failing. After reconnection, we still need to wait until RW
+            // finishes recovery before continuing.
+            match tokio_postgres::Config::new()
+                .host("localhost")
+                .port(4566)
+                .dbname("dev")
+                .user("root")
+                .password("")
+                .connect_timeout(Duration::from_secs(60))
+                .connect(NoTls)
+                .await
+            {
+                Ok((new_client, connection)) => {
+                    tokio::spawn(async move {
+                        if let Err(e) = connection.await {
+                            tracing::error!("connection error: {}", e);
                         }
-                    }
-                    Err(err) => {
-                        tracing::error!("Failed to reconnect frontend: {}", err);
+                    });
+                    *client = new_client;
+                    tracing::info!("Reconnected to Frontend after panic");
+
+                    if let Err(err) = wait_for_recovery(client).await {
+                        tracing::error!("RW failed to recover after frontend panic: {:?}", err);
+                    } else {
+                        tracing::info!("RW recovery complete (frontend case)");
                     }
                 }
-            } else if e.as_db_error().is_some() {
-                tracing::error!("Compute panic detected, waiting for recovery...");
-                if let Err(err) = wait_for_recovery(client).await {
-                    tracing::error!("RW failed to recover after compute panic: {:?}", err);
-                } else {
-                    tracing::info!("RW recovery complete (compute case)");
+                Err(err) => {
+                    tracing::error!("Failed to reconnect frontend: {}", err);
                 }
-            } else {
-                tracing::error!("Other panics detected...");
             }
 
             (false, e.to_string())

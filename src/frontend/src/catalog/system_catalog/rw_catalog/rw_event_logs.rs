@@ -45,7 +45,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwEventLog>> {
             RwEventLog {
                 unique_id: id,
                 timestamp: ts,
-                event_type: event_type.clone(),
+                event_type,
                 info: json!(e).into(),
             }
         })

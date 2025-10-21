@@ -61,7 +61,6 @@ members = [
     "src/utils/delta_btree_map",
     "src/utils/futures_util",
     "src/utils/iter_util",
-    "src/utils/local_stats_alloc",
     "src/utils/openai_embedding_service",
     "src/utils/pgwire",
     "src/utils/resource_util",
@@ -155,33 +154,36 @@ criterion = { version = "0.5", features = ["async_futures"] }
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
-foyer = { version = "0.19.2", features = ["serde", "tracing", "nightly"] }
+foyer = { version = "0.20.0", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
-governor = { version = "0.8", default-features = false, features = ["std"] }
-hashbrown = { version = "0.15", features = [
+governor = { version = "0.10", default-features = false, features = ["std"] }
+hashbrown = { version = "0.16", features = [
     "default-hasher",
     "inline-more",
     "nightly",
 ] }
+hashbrown0_14 = { package = "hashbrown", version = "0.14", features = [
+    "nightly",
+] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "49e9814409752db218dbed1aa552c2efe80ee2a3", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d1b8cabf4f8a33090d018b539bfec6e7c623d7c4", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
+    "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "49e9814409752db218dbed1aa552c2efe80ee2a3" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "49e9814409752db218dbed1aa552c2efe80ee2a3" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d1b8cabf4f8a33090d018b539bfec6e7c623d7c4" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d1b8cabf4f8a33090d018b539bfec6e7c623d7c4" }
 
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = "0.1.4"
 linkme = { version = "0.3.32", features = ["used_linker"] }
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
+lru = "0.14"
+madsim = "0.2.34"
 mixtrics = { version = "0.2", features = ["prometheus"] }
-mysql_async = { version = "0.34", default-features = false, features = [
-    "default",
-] }
+mysql_async = { version = "0.36", features = ["native-tls-tls", "rust_decimal"] }
 opendal = "0.53"
 opentelemetry = "0.29"
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
@@ -200,7 +202,7 @@ rand = { version = "0.9", features = ["small_rng"] }
 rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
     "cmake-build",
 ] }
-redis = { version = "0.28" }
+redis = { version = "0.32" }
 regex = "1.11"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_backup = { path = "./src/storage/backup" }
@@ -323,10 +325,13 @@ new_without_default = "allow"
 # TODO: remove later https://github.com/rust-lang/rust-clippy/issues/12537
 # duplicated_attributes = "allow"
 # TODO: remove later https://github.com/rust-lang/rust-clippy/issues/12436
-mixed_attributes_style = "allow"
+#mixed_attributes_style = "allow"
 too_long_first_doc_paragraph = "allow"
+# TODO: remove later when EnumAsInner, bitfield and EnumTryAs does not fire this warning
+double_parens = "allow"
 str_to_string = "warn"
-string_to_string = "warn"
+redundant_clone = "warn"
+implicit_clone = "warn"
 
 # TODO: this makes sense, but it's too noisy for now (2025-03-10)
 large_enum_variant = "allow"
@@ -406,3 +411,10 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "3efe6d0065963db2a2b7f30dee69f647e28dec81" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.14.0-json-no-preserve_order" }
+
+# patch to make zstd version compatible:
+# desired v4.9.0+2.10.0 requires: zstd-sys >= 2.0.15
+# conflict: parquet@54 requires: zstd-sys <= 2.0.13
+# why this patch work with zstd-sys < 2.0.15?
+# in the last release v4.8.0+2.3.0, the zstd-sys requirement is 2.0.6 < 2.0.13, and the release does not contain zstd related changes
+rdkafka-sys = { git = "https://github.com/risingwavelabs/rust-rdkafka", package = "rdkafka-sys", branch = "downgrade-zstd" }

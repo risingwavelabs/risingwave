@@ -80,8 +80,8 @@ impl StreamMaterialize {
             ConflictBehavior::Overwrite
             | ConflictBehavior::IgnoreConflict
             | ConflictBehavior::DoUpdateIfNotNull => match input.stream_kind() {
-                StreamKind::AppendOnly | StreamKind::Retract => input.stream_kind(),
-                StreamKind::Upsert => StreamKind::Retract,
+                StreamKind::AppendOnly => StreamKind::AppendOnly,
+                StreamKind::Retract | StreamKind::Upsert => StreamKind::Retract,
             },
         };
         let base = PlanBase::new_stream(
@@ -140,6 +140,12 @@ impl StreamMaterialize {
             CreateType::Foreground
         };
 
+        // For upsert stream, use `Overwrite` conflict behavior to convert into retract stream.
+        let conflict_behavior = match input.stream_kind() {
+            StreamKind::Retract | StreamKind::AppendOnly => ConflictBehavior::NoCheck,
+            StreamKind::Upsert => ConflictBehavior::Overwrite,
+        };
+
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
@@ -148,7 +154,7 @@ impl StreamMaterialize {
             user_order_by,
             columns,
             definition,
-            ConflictBehavior::NoCheck,
+            conflict_behavior,
             vec![],
             None,
             None,
@@ -197,19 +203,19 @@ impl StreamMaterialize {
             name.clone(),
             database_id,
             schema_id,
-            user_order_by.clone(),
-            columns.clone(),
-            definition.clone(),
+            user_order_by,
+            columns,
+            definition,
             conflict_behavior,
             version_column_indices,
-            Some(pk_column_indices.clone()),
+            Some(pk_column_indices),
             row_id_index,
             TableType::Table,
-            Some(version.clone()),
+            Some(version),
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
             CreateType::Foreground,
-            webhook_info.clone(),
+            webhook_info,
             engine,
             refreshable,
         )?;

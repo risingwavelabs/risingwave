@@ -405,7 +405,6 @@ fn build_fragment(
                 state
                     .dependent_table_ids
                     .insert(TableId::new(node.table_id));
-                current_fragment.upstream_table_ids.push(node.table_id);
             }
 
             NodeBody::StreamCdcScan(node) => {
@@ -434,9 +433,6 @@ fn build_fragment(
                 state
                     .dependent_table_ids
                     .insert(node.upstream_source_id.into());
-                current_fragment
-                    .upstream_table_ids
-                    .push(node.upstream_source_id);
             }
             NodeBody::SourceBackfill(node) => {
                 current_fragment
@@ -445,7 +441,6 @@ fn build_fragment(
                 // memorize upstream source id for later use
                 let source_id = node.upstream_source_id;
                 state.dependent_table_ids.insert(source_id.into());
-                current_fragment.upstream_table_ids.push(source_id);
                 state.has_source_backfill = true;
             }
 
@@ -480,6 +475,12 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::UpstreamSinkUnion);
+            }
+
+            NodeBody::LocalityProvider(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::LocalityProvider);
             }
 
             _ => {}

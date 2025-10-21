@@ -869,7 +869,7 @@ impl Parser<'_> {
             self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
             let order_by = self.parse_order_by_expr()?;
             self.expect_token(&Token::RParen)?;
-            Some(Box::new(order_by.clone()))
+            Some(Box::new(order_by))
         } else {
             None
         };
@@ -2413,9 +2413,7 @@ impl Parser<'_> {
     }
 
     pub fn parse_with_properties(&mut self) -> ModalResult<Vec<SqlOption>> {
-        Ok(self
-            .parse_options_with_preceding_keyword(Keyword::WITH)?
-            .to_vec())
+        self.parse_options_with_preceding_keyword(Keyword::WITH)
     }
 
     pub fn parse_discard(&mut self) -> ModalResult<Statement> {
@@ -2756,7 +2754,7 @@ impl Parser<'_> {
                 if wildcard_idx.is_none() {
                     wildcard_idx = Some(columns.len());
                 } else {
-                    parser_err!("At most 1 wildcard is allowed in source definetion");
+                    parser_err!("At most 1 wildcard is allowed in source definition");
                 }
             } else if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);

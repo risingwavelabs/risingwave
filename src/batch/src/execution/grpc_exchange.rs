@@ -50,7 +50,6 @@ impl GrpcExchangeSource {
                 let execute_request = ExecuteRequest {
                     task_id: Some(task_id),
                     plan: plan.plan,
-                    epoch: plan.epoch,
                     tracing_context: plan.tracing_context,
                     expr_context: Some(capture_expr_context()?),
                 };
