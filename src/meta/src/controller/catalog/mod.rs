@@ -728,12 +728,10 @@ impl CatalogController {
 
         let actor_num = {
             let guard = self.env.shared_actor_info.read_guard();
-            let actors = guard
+            guard
                 .iter_over_fragments()
-                .flat_map(|(_, fragment)| fragment.actors.keys())
-                .collect_vec();
-
-            actors.len() as u64
+                .map(|(_, fragment)| fragment.actors.len() as u64)
+                .sum::<u64>()
         };
 
         Ok(CatalogStats {
