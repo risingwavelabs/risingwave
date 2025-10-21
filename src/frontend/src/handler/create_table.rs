@@ -2040,11 +2040,15 @@ pub async fn create_iceberg_engine_table(
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
     // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
-    {
+    let (iceberg_catalog, table_identifier) = {
         let sink_param = SinkParam::try_from_sink_catalog(sink_catalog.clone())?;
         let iceberg_sink = IcebergSink::try_from(sink_param)?;
         iceberg_sink.create_table_if_not_exists().await?;
-    }
+
+        let iceberg_catalog = iceberg_sink.config.create_catalog().await?;
+        let table_identifier = iceberg_sink.config.full_table_name()?;
+        (iceberg_catalog, table_identifier)
+    };
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
@@ -2082,7 +2086,7 @@ pub async fn create_iceberg_engine_table(
     let _ = Jvm::get_or_init()?;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
+    let res = catalog_writer
         .create_iceberg_table(
             PbTableJobInfo {
                 source,
@@ -2097,7 +2101,20 @@ pub async fn create_iceberg_engine_table(
             iceberg_source_catalog.to_prost(),
             if_not_exists,
         )
-        .await?;
+        .await;
+    if res.is_err() {
+        let _ = iceberg_catalog
+            .drop_table(&table_identifier)
+            .await
+            .inspect_err(|err| {
+                tracing::error!(
+                    "failed to drop iceberg table {} after create iceberg engine table failed: {}",
+                    table_identifier,
+                    err
+                );
+            });
+        res?
+    }
 
     // TODO: remove it together with rate limit rewrite after we support atomic DDL in meta side.
     if has_connector {

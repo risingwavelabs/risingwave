@@ -1405,10 +1405,6 @@ impl SessionImpl {
             .create_table(table.name.clone(), table);
     }
 
-    pub fn get_staging_table(&self, name: &str) -> Option<TableCatalog> {
-        self.staging_catalog_manager.lock().get_table(name).cloned()
-    }
-
     pub fn drop_staging_table(&self, name: &str) {
         self.staging_catalog_manager.lock().drop_table(name);
     }

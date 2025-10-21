@@ -25,7 +25,6 @@ use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_meta::MetaResult;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism;
@@ -1419,10 +1418,6 @@ impl DdlService for DdlServiceImpl {
             fragment_graph,
         } = sink_info.unwrap();
         let sink = sink.unwrap();
-        let iceberg_config =
-            IcebergConfig::from_btreemap(sink.properties.clone()).map_err(|e| {
-                Status::invalid_argument(format!("Invalid iceberg sink config: {}", e.as_report()))
-            })?;
         let mut fragment_graph = fragment_graph.unwrap();
 
         assert_eq!(fragment_graph.dependent_table_ids.len(), 1);
@@ -1514,25 +1509,6 @@ impl DdlService for DdlServiceImpl {
                         "Failed to clean up table after iceberg source creation failure",
                     );
                 });
-
-            // Purge table from warehouse
-            let iceberg_catalog = iceberg_config.create_catalog().await.map_err(|e| {
-                Status::internal(format!(
-                    "Failed to create iceberg catalog for cleanup: {}",
-                    e.as_report()
-                ))
-            })?;
-            let table_identifier = iceberg_config.full_table_name().unwrap();
-            iceberg_catalog
-                .drop_table(&table_identifier)
-                .await
-                .map_err(|e| {
-                    Status::internal(format!(
-                        "Failed to drop iceberg table {} during cleanup: {}",
-                        table_identifier,
-                        e.as_report()
-                    ))
-                })?;
         }
 
         Ok(Response::new(CreateIcebergTableResponse {

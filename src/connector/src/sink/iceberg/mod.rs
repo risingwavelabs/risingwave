@@ -342,7 +342,7 @@ impl IcebergConfig {
 }
 
 pub struct IcebergSink {
-    config: IcebergConfig,
+    pub config: IcebergConfig,
     param: SinkParam,
     // In upsert mode, it never be None and empty.
     unique_column_ids: Option<Vec<usize>>,
