@@ -503,6 +503,7 @@ impl StreamJobFragments {
                 FragmentTypeFlag::Values,
                 FragmentTypeFlag::StreamScan,
                 FragmentTypeFlag::SourceScan,
+                FragmentTypeFlag::LocalityProvider,
             ]) {
                 actor_ids.extend(fragment.actors.iter().map(|actor| {
                     (
@@ -782,6 +783,7 @@ pub enum BackfillUpstreamType {
     MView,
     Values,
     Source,
+    LocalityProvider,
 }
 
 impl BackfillUpstreamType {
@@ -789,12 +791,13 @@ impl BackfillUpstreamType {
         let is_mview = mask.contains(FragmentTypeFlag::StreamScan);
         let is_values = mask.contains(FragmentTypeFlag::Values);
         let is_source = mask.contains(FragmentTypeFlag::SourceScan);
+        let is_locality_provider = mask.contains(FragmentTypeFlag::LocalityProvider);
 
         // Note: in theory we can have multiple backfill executors in one fragment, but currently it's not possible.
         // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
         debug_assert!(
-            is_mview as u8 + is_values as u8 + is_source as u8 == 1,
-            "a backfill fragment should either be mview, value or source, found {:?}",
+            is_mview as u8 + is_values as u8 + is_source as u8 + is_locality_provider as u8 == 1,
+            "a backfill fragment should either be mview, value, source, or locality provider, found {:?}",
             mask
         );
 
@@ -804,6 +807,8 @@ impl BackfillUpstreamType {
             BackfillUpstreamType::Values
         } else if is_source {
             BackfillUpstreamType::Source
+        } else if is_locality_provider {
+            BackfillUpstreamType::LocalityProvider
         } else {
             unreachable!("invalid fragment type mask: {:?}", mask);
         }

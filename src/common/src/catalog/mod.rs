@@ -581,16 +581,11 @@ impl StreamJobStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord, Default)]
 pub enum CreateType {
+    #[default]
     Foreground,
     Background,
-}
-
-impl Default for CreateType {
-    fn default() -> Self {
-        Self::Foreground
-    }
 }
 
 impl CreateType {
@@ -637,7 +632,8 @@ macro_rules! for_all_fragment_type_flags {
                 CrossDbSnapshotBackfillStreamScan,
                 StreamCdcScan,
                 VectorIndexWrite,
-                UpstreamSinkUnion
+                UpstreamSinkUnion,
+                LocalityProvider
             },
             {},
             0
@@ -891,6 +887,11 @@ mod tests {
                     UpstreamSinkUnion,
                     65536,
                     "UPSTREAM_SINK_UNION",
+                ),
+                (
+                    LocalityProvider,
+                    131072,
+                    "LOCALITY_PROVIDER",
                 ),
             ]
         "#]]

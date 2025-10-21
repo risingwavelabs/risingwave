@@ -320,17 +320,14 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListFragmentDistributionRequest>,
     ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
-        let fragment_descs = self
+        let distributions = self
             .metadata_manager
             .catalog_controller
-            .list_fragment_descs()
-            .await?;
-        let distributions = fragment_descs
+            .list_fragment_descs(false)
+            .await?
             .into_iter()
-            .map(|(fragment_desc, upstreams)| {
-                fragment_desc_to_distribution(fragment_desc, upstreams)
-            })
-            .collect_vec();
+            .map(|(dist, _)| dist)
+            .collect();
 
         Ok(Response::new(ListFragmentDistributionResponse {
             distributions,
@@ -341,17 +338,14 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListCreatingFragmentDistributionRequest>,
     ) -> Result<Response<ListCreatingFragmentDistributionResponse>, Status> {
-        let fragment_descs = self
+        let distributions = self
             .metadata_manager
             .catalog_controller
-            .list_creating_fragment_descs()
-            .await?;
-        let distributions = fragment_descs
+            .list_fragment_descs(true)
+            .await?
             .into_iter()
-            .map(|(fragment_desc, upstreams)| {
-                fragment_desc_to_distribution(fragment_desc, upstreams)
-            })
-            .collect_vec();
+            .map(|(dist, _)| dist)
+            .collect();
 
         Ok(Response::new(ListCreatingFragmentDistributionResponse {
             distributions,
@@ -380,8 +374,7 @@ impl StreamManagerService for StreamServiceImpl {
         let actor_locations = self
             .metadata_manager
             .catalog_controller
-            .list_actor_locations()
-            .await?;
+            .list_actor_locations()?;
         let states = actor_locations
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {

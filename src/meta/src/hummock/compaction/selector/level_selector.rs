@@ -140,7 +140,7 @@ impl DynamicLevelSelectorCore {
     // TODO: calculate this scores in apply compact result.
     /// `calculate_level_base_size` calculate base level and the base size of LSM tree build for
     /// current dataset. In other words,  `level_max_bytes` is our compaction goal which shall
-    /// reach. This algorithm refers to the implementation in  [`https://github.com/facebook/rocksdb/blob/v7.2.2/db/version_set.cc#L3706`]
+    /// reach. This algorithm refers to the implementation in  `https://github.com/facebook/rocksdb/blob/v7.2.2/db/version_set.cc#L3706`
     pub fn calculate_level_base_size(&self, levels: &Levels) -> SelectContext {
         let mut first_non_empty_level = 0;
         let mut max_level_size = 0;
@@ -350,7 +350,7 @@ impl DynamicLevelSelectorCore {
     /// `compact_pending_bytes_needed` calculates the number of compact bytes needed to balance the
     /// LSM Tree from the current state of each level in the LSM Tree in combination with
     /// `compaction_config`
-    /// This algorithm refers to the implementation in  [`https://github.com/facebook/rocksdb/blob/main/db/version_set.cc#L3141`]
+    /// This algorithm refers to the implementation in  `https://github.com/facebook/rocksdb/blob/main/db/version_set.cc#L3141`
     pub fn compact_pending_bytes_needed(&self, levels: &Levels) -> u64 {
         let ctx = self.calculate_level_base_size(levels);
         self.compact_pending_bytes_needed_with_ctx(levels, &ctx)

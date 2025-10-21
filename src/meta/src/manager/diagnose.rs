@@ -108,12 +108,9 @@ impl DiagnoseCommand {
     }
 
     async fn write_catalog_inner(&self, s: &mut String) {
-        let guard = self
-            .metadata_manager
-            .catalog_controller
-            .get_inner_read_guard()
-            .await;
-        let stat = match guard.stats().await {
+        let stats = self.metadata_manager.catalog_controller.stats().await;
+
+        let stat = match stats {
             Ok(stat) => stat,
             Err(err) => {
                 tracing::warn!(error=?err.as_report(), "failed to get catalog stats");
@@ -131,7 +128,7 @@ impl DiagnoseCommand {
     }
 
     async fn write_worker_nodes(&self, s: &mut String) {
-        let Ok(worker_actor_count) = self.metadata_manager.worker_actor_count().await else {
+        let Ok(worker_actor_count) = self.metadata_manager.worker_actor_count() else {
             tracing::warn!("failed to get worker actor count");
             return;
         };

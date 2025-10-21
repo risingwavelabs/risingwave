@@ -16,4 +16,3 @@ mod backfill;
 mod background_ddl;
 mod event_log;
 mod nexmark_recovery;
-mod pause_on_bootstrap;

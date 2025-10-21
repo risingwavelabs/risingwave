@@ -232,6 +232,12 @@ DorisConfig:
   - name: r#type
     field_type: String
     required: true
+  - name: doris.stream_load.http.timeout.ms
+    field_type: u64
+    comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    required: false
+    default: 30 * 1000
+    allow_alter_on_fly: true
 DynamoDbConfig:
   fields:
   - name: table
@@ -462,6 +468,15 @@ IcebergConfig:
     field_type: String
     required: false
   - name: azblob.endpoint_url
+    field_type: String
+    required: false
+  - name: adlsgen2.account_name
+    field_type: String
+    required: false
+  - name: adlsgen2.account_key
+    field_type: String
+    required: false
+  - name: adlsgen2.endpoint
     field_type: String
     required: false
   - name: warehouse.path
@@ -1600,6 +1615,7 @@ StarrocksConfig:
     comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
     required: false
     default: 30 * 1000
+    allow_alter_on_fly: true
   - name: commit_checkpoint_interval
     field_type: u64
     comments: |-

@@ -42,6 +42,8 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
+mod vector_index_reader;
+pub use vector_index_reader::VectorIndexReader;
 
 use crate::StateStore;
 use crate::error::{StorageError, StorageResult};
@@ -407,11 +409,9 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 },
             )
             .await?;
-        // TODO: may avoid the clone here when making the `on_key_value_fn` non-static
-        let row_serde = self.row_serde.clone();
         match read_snapshot
             .on_key_value(serialized_pk, read_options, move |key, value| {
-                let row = row_serde.deserialize(value)?;
+                let row = self.row_serde.deserialize(value)?;
                 Ok((key.epoch_with_gap.pure_epoch(), row))
             })
             .await?

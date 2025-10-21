@@ -20,7 +20,7 @@ use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
-/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
+/// similar to a table. Ref: `https://www.postgresql.org/docs/current/catalog-pg-class.html`
 #[derive(Fields)]
 struct PgClass {
     #[primary_key]

@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// Returns the hostname of the current machine, or an empty string if failed,
+/// which rarely happens.
+pub fn hostname() -> String {
+    hostname::get()
+        .unwrap_or_default()
+        .into_string()
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum CgroupVersion {
     V1,
@@ -136,7 +145,7 @@ pub mod memory {
 
     use super::runtime::get_resource;
 
-    /// Default paths for memory limtiations and usage for cgroup v1 and cgroup v2.
+    /// Default paths for memory limitations and usage for cgroup v1 and cgroup v2.
     const V1_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
     const V1_MEMORY_CURRENT_PATH: &str = "/sys/fs/cgroup/memory/memory.usage_in_bytes";
     const V2_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory.max";

@@ -1445,6 +1445,7 @@ mod tests {
             }
 
             let mut expected = vec![];
+            #[expect(clippy::needless_range_loop)]
             for key_idx in 0..=2 {
                 for epoch in (1..=3).rev() {
                     let item = batch_items[epoch - 1][key_idx].clone();
@@ -1632,6 +1633,7 @@ mod tests {
             }
 
             let mut expected = vec![];
+            #[expect(clippy::needless_range_loop)]
             for key_idx in 0..=2 {
                 for epoch in (1..=3).rev() {
                     let item = batch_items[epoch - 1][key_idx].clone();

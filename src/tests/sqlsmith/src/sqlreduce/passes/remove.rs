@@ -46,12 +46,12 @@ impl Transform for GroupByRemove {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                select.group_by.remove(i);
+                select.group_by.remove(*i);
             }
         }
         ast.clone()
@@ -86,10 +86,10 @@ impl Transform for OrderByRemove {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast) {
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast) {
             for i in reduction_points {
-                query.order_by.remove(i);
+                query.order_by.remove(*i);
             }
         }
         ast.clone()
@@ -125,8 +125,8 @@ impl Transform for WhereRemove {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for _ in reduction_points {
@@ -168,12 +168,12 @@ impl Transform for FromRemove {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                select.from.remove(i);
+                select.from.remove(*i);
             }
         }
         ast.clone()
@@ -210,12 +210,12 @@ impl Transform for SelectItemRemove {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                select.projection.remove(i);
+                select.projection.remove(*i);
             }
         }
         ast.clone()
@@ -242,8 +242,8 @@ impl Transform for HavingRemove {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for _ in reduction_points {
@@ -266,7 +266,7 @@ mod tests {
         let reduction_points = GroupByRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![2, 1, 0]);
 
-        let new_ast = GroupByRemove.apply_on(&mut ast[0].clone(), reduction_points[..1].to_vec());
+        let new_ast = GroupByRemove.apply_on(ast[0].clone(), &reduction_points[..1]);
         assert_eq!(
             new_ast,
             parse_sql("SELECT a, COUNT(*) FROM t GROUP BY a, b;")[0].clone()
@@ -280,7 +280,7 @@ mod tests {
         let reduction_points = GroupByRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![2, 1, 0]);
 
-        let new_ast = GroupByRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = GroupByRemove.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT a, COUNT(*) FROM t;")[0].clone());
     }
 
@@ -291,7 +291,7 @@ mod tests {
         let reduction_points = OrderByRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![2, 1, 0]);
 
-        let new_ast = OrderByRemove.apply_on(&mut ast[0].clone(), reduction_points[..1].to_vec());
+        let new_ast = OrderByRemove.apply_on(ast[0].clone(), &reduction_points[..1]);
         assert_eq!(
             new_ast,
             parse_sql("SELECT a, b FROM t ORDER BY a, b;")[0].clone()
@@ -305,7 +305,7 @@ mod tests {
         let reduction_points = OrderByRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![2, 1, 0]);
 
-        let new_ast = OrderByRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = OrderByRemove.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT a, b FROM t;")[0].clone());
     }
 
@@ -316,7 +316,7 @@ mod tests {
         let reduction_points = WhereRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0]);
 
-        let new_ast = WhereRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = WhereRemove.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT * FROM t;")[0].clone());
     }
 
@@ -327,7 +327,7 @@ mod tests {
         let reduction_points = FromRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![1, 0]);
 
-        let new_ast = FromRemove.apply_on(&mut ast[0].clone(), reduction_points[..1].to_vec());
+        let new_ast = FromRemove.apply_on(ast[0].clone(), &reduction_points[..1]);
         assert_eq!(new_ast, parse_sql("SELECT * FROM t1;")[0].clone());
     }
 
@@ -338,7 +338,7 @@ mod tests {
         let reduction_points = FromRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![1, 0]);
 
-        let new_ast = FromRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = FromRemove.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT *;")[0].clone());
     }
 
@@ -349,8 +349,7 @@ mod tests {
         let reduction_points = SelectItemRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![2, 1, 0]);
 
-        let new_ast =
-            SelectItemRemove.apply_on(&mut ast[0].clone(), reduction_points[..1].to_vec());
+        let new_ast = SelectItemRemove.apply_on(ast[0].clone(), &reduction_points[..1]);
         assert_eq!(new_ast, parse_sql("SELECT a, b FROM t;")[0].clone());
     }
 
@@ -361,7 +360,7 @@ mod tests {
         let reduction_points = HavingRemove.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0]);
 
-        let new_ast = HavingRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = HavingRemove.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT * FROM t;")[0].clone());
     }
 }

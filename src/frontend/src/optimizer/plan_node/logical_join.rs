@@ -30,7 +30,7 @@ use super::utils::{Distill, childless_record};
 use super::{
     BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
     PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject, ToBatch,
-    ToStream, generic,
+    ToStream, generic, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -903,19 +903,12 @@ impl LogicalJoin {
         let lhs_join_key_idx = self.eq_indexes().into_iter().map(|(l, _)| l).collect_vec();
         let rhs_join_key_idx = self.eq_indexes().into_iter().map(|(_, r)| r).collect_vec();
 
-        let logical_right = self
-            .right()
-            .try_better_locality(&rhs_join_key_idx)
-            .unwrap_or_else(|| self.right());
+        let logical_right = try_enforce_locality_requirement(self.right(), &rhs_join_key_idx);
         let mut right = logical_right.to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
             ctx,
         )?;
-        let logical_left = self
-            .left()
-            .try_better_locality(&lhs_join_key_idx)
-            .unwrap_or_else(|| self.left());
-
+        let logical_left = try_enforce_locality_requirement(self.left(), &lhs_join_key_idx);
         let r2l =
             predicate.r2l_eq_columns_mapping(logical_left.schema().len(), right.schema().len());
         let l2r =
@@ -994,7 +987,7 @@ impl LogicalJoin {
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
 
-            let mut core = core.clone();
+            let mut core = core;
             core.output_indices = default_indices.clone();
             // Temporarily remove output indices.
             let eq_cond = EqJoinPredicate::new(
@@ -1255,10 +1248,7 @@ impl LogicalJoin {
             .into_iter()
             .map(|(l, _)| l)
             .collect_vec();
-        let logical_left = self
-            .left()
-            .try_better_locality(&lhs_join_key_idx)
-            .unwrap_or_else(|| self.left());
+        let logical_left = try_enforce_locality_requirement(self.left(), &lhs_join_key_idx);
         let left = logical_left.to_stream(ctx)?;
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.stream_enforce(left);

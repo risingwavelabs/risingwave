@@ -283,6 +283,11 @@ impl Binder {
                     Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, vec![input], DataType::Varchar).into())
                 })),
                 ("string_to_array", raw_call(ExprType::StringToArray)),
+                ("get_bit", raw_call(ExprType::GetBit)),
+                ("get_byte", raw_call(ExprType::GetByte)),
+                ("set_bit", raw_call(ExprType::SetBit)),
+                ("set_byte", raw_call(ExprType::SetByte)),
+                ("bit_count", raw_call(ExprType::BitCount)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
                 ("convert_from", raw_call(ExprType::ConvertFrom)),
@@ -753,7 +758,7 @@ impl Binder {
         static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
             let mut tree = BKTree::new(metrics::Levenshtein);
 
-            // TODO: Also hint other functinos, e.g., Agg or UDF.
+            // TODO: Also hint other functions, e.g., Agg or UDF.
             for k in HANDLES.keys() {
                 tree.add(*k);
             }
