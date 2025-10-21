@@ -24,7 +24,7 @@ use risingwave_common::types::DataType;
 
 use crate::consistency::consistency_panic;
 
-/// Behavior when inconsistency is detected when applying changes.
+/// Behavior when inconsistency is detected when aggregating changes to [`ChangeBuffer`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InconsistencyBehavior {
     Panic,

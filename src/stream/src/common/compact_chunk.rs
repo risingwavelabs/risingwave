@@ -19,21 +19,10 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::RowExt;
 use risingwave_common::types::DataType;
 
-// XXX(bugen): This utility seems confusing. It's doing different things with different methods,
-// while all of them are named "compact" (also note `StreamChunk::compact`). We should consider
-// refactoring it.
-//
-// Basically,
-// - `StreamChunk::compact`: construct a new chunk by removing invisible rows.
-// - `StreamChunkCompactor::into_compacted_chunks`: hide intermediate operations of the same key
-//   by modifying the visibility, while preserving the original chunk structure.
-// - `StreamChunkCompactor::reconstructed_compacted_chunks`: filter out intermediate operations
-//   of the same key, construct new chunks. A combination of `into_compacted_chunks`, `compact`,
-//   and `StreamChunkBuilder`.
 pub use super::change_buffer::InconsistencyBehavior;
 use crate::common::change_buffer::ChangeBuffer;
 
-/// A helper to compact the stream chunks by modifying the `Ops` and visibility of the chunk.
+/// A helper to remove unnecessary changes in the stream chunks based on the key.
 pub struct StreamChunkCompactor {
     chunks: Vec<StreamChunk>,
     key: Vec<usize>,
@@ -48,12 +37,7 @@ impl StreamChunkCompactor {
         (self.chunks, self.key)
     }
 
-    /// Compact a chunk by modifying the ops and the visibility of a stream chunk.
-    /// Currently, two transformation will be applied
-    /// - remove intermediate operation of the same key. The operations of the same stream key will only
-    ///   have three kind of patterns Insert, Delete or Update.
-    /// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
-    ///   removed.
+    /// Remove unnecessary changes in the given chunks, by modifying the visibility and ops in place.
     pub fn into_compacted_chunks_inline(
         self,
         ib: InconsistencyBehavior,
@@ -97,7 +81,8 @@ impl StreamChunkCompactor {
         chunks.into_iter().map(|c| c.into())
     }
 
-    /// re-construct the stream chunks to compact them with the key.
+    /// Remove unnecessary changes in the given chunks, by filtering them out and constructing new
+    /// chunks, with the given chunk size.
     pub fn into_compacted_chunks_reconstructed(
         self,
         chunk_size: usize,
@@ -119,6 +104,8 @@ impl StreamChunkCompactor {
     }
 }
 
+/// Remove unnecessary changes in the given chunk, by modifying the visibility and ops in place.
+/// This is the same as [`StreamChunkCompactor::into_compacted_chunks_inline`] with only one chunk.
 pub fn compact_chunk_inline(
     stream_chunk: StreamChunk,
     pk_indices: &[usize],
