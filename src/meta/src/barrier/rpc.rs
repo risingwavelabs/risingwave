@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::max;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -38,7 +37,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation, SubscriptionUpstreamInfo};
+use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
     BuildActorInfo, FragmentBuildActorInfo,
@@ -65,12 +64,14 @@ use crate::barrier::checkpoint::{
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
-use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
+use crate::barrier::info::{
+    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, SubscriberType,
+};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
-use crate::model::{ActorId, StreamActor, StreamJobActorsToCreate};
+use crate::model::{ActorId, FragmentId, StreamActor, StreamJobActorsToCreate};
 use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
 
@@ -124,13 +125,7 @@ impl ControlStreamManager {
     pub(super) async fn try_reconnect_worker(
         &mut self,
         worker_id: WorkerId,
-        inflight_infos: impl Iterator<
-            Item = (
-                DatabaseId,
-                &InflightSubscriptionInfo,
-                impl Iterator<Item = TableId>,
-            ),
-        >,
+        inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId>)>,
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) {
@@ -167,13 +162,7 @@ impl ControlStreamManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        inflight_infos: impl Iterator<
-            Item = (
-                DatabaseId,
-                &InflightSubscriptionInfo,
-                impl Iterator<Item = TableId>,
-            ),
-        >,
+        inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId>)>,
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) {
@@ -351,25 +340,17 @@ impl ControlStreamManager {
     }
 
     fn collect_init_request(
-        initial_inflight_infos: impl Iterator<
-            Item = (
-                DatabaseId,
-                &InflightSubscriptionInfo,
-                impl Iterator<Item = TableId>,
-            ),
-        >,
+        initial_inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId>)>,
         term_id: String,
     ) -> PbInitRequest {
         PbInitRequest {
             databases: initial_inflight_infos
-                .map(|(database_id, subscriptions, creating_job_ids)| {
+                .map(|(database_id, creating_job_ids)| {
                     let mut graphs = vec![PbInitialPartialGraph {
                         partial_graph_id: to_partial_graph_id(None),
-                        subscriptions: subscriptions.into_iter().collect_vec(),
                     }];
                     graphs.extend(creating_job_ids.map(|job_id| PbInitialPartialGraph {
                         partial_graph_id: to_partial_graph_id(Some(job_id)),
-                        subscriptions: vec![],
                     }));
                     PbDatabaseInitialPartialGraph {
                         database_id: database_id.database_id,
@@ -463,7 +444,7 @@ impl ControlStreamManager {
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
-        jobs: HashMap<TableId, InflightStreamingJobInfo>,
+        jobs: HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         edges: &mut FragmentEdgeBuildResult,
@@ -478,7 +459,7 @@ impl ControlStreamManager {
         self.add_partial_graph(database_id, None);
         let source_split_assignments = jobs
             .values()
-            .flat_map(|job| job.fragment_infos())
+            .flat_map(|fragments| fragments.values())
             .flat_map(|info| info.actors.keys())
             .filter_map(|actor_id| {
                 let actor_id = *actor_id as ActorId;
@@ -489,7 +470,7 @@ impl ControlStreamManager {
             .collect();
         let database_cdc_table_snapshot_split_assignment = jobs
             .values()
-            .flat_map(|job| job.fragment_infos())
+            .flat_map(|fragments| fragments.values())
             .flat_map(|info| info.actors.keys())
             .filter_map(|actor_id| {
                 let actor_id = *actor_id as ActorId;
@@ -521,21 +502,18 @@ impl ControlStreamManager {
             new_upstream_sinks: Default::default(),
         });
 
-        fn resolve_jobs_committed_epoch(
+        fn resolve_jobs_committed_epoch<'a>(
             state_table_committed_epochs: &mut HashMap<TableId, u64>,
-            jobs: impl IntoIterator<Item = &InflightStreamingJobInfo>,
+            fragments: impl Iterator<Item = &'a InflightFragmentInfo> + 'a,
         ) -> u64 {
-            let mut epochs = jobs
-                .into_iter()
-                .flat_map(InflightStreamingJobInfo::existing_table_ids)
-                .map(|table_id| {
-                    (
-                        table_id,
-                        state_table_committed_epochs
-                            .remove(&table_id)
-                            .expect("should exist"),
-                    )
-                });
+            let mut epochs = InflightFragmentInfo::existing_table_ids(fragments).map(|table_id| {
+                (
+                    table_id,
+                    state_table_committed_epochs
+                        .remove(&table_id)
+                        .expect("should exist"),
+                )
+            });
             let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
             for (table_id, epoch) in epochs {
                 assert_eq!(
@@ -546,6 +524,22 @@ impl ControlStreamManager {
             }
             prev_epoch
         }
+
+        let mut subscribers: HashMap<_, HashMap<_, _>> = subscription_info
+            .mv_depended_subscriptions
+            .into_iter()
+            .map(|(job_id, subscriptions)| {
+                (
+                    job_id,
+                    subscriptions
+                        .into_iter()
+                        .map(|(subscription_id, retention)| {
+                            (subscription_id, SubscriberType::Subscription(retention))
+                        })
+                        .collect(),
+                )
+            })
+            .collect();
 
         let mut database_jobs = HashMap::new();
         let mut snapshot_backfill_jobs = HashMap::new();
@@ -578,8 +572,10 @@ impl ControlStreamManager {
             })
             .collect();
 
-        let prev_epoch =
-            resolve_jobs_committed_epoch(state_table_committed_epochs, database_jobs.values());
+        let prev_epoch = resolve_jobs_committed_epoch(
+            state_table_committed_epochs,
+            database_jobs.values().flat_map(|job| job.values()),
+        );
         let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
         // Use a different `curr_epoch` for each recovery attempt.
         let curr_epoch = prev_epoch.next();
@@ -590,9 +586,9 @@ impl ControlStreamManager {
         };
 
         let mut ongoing_snapshot_backfill_jobs: HashMap<TableId, _> = HashMap::new();
-        for (job_id, (info, definition)) in snapshot_backfill_jobs {
+        for (job_id, (fragment_infos, definition)) in snapshot_backfill_jobs {
             let committed_epoch =
-                resolve_jobs_committed_epoch(state_table_committed_epochs, [&info]);
+                resolve_jobs_committed_epoch(state_table_committed_epochs, fragment_infos.values());
             if committed_epoch == barrier_info.prev_epoch() {
                 info!(
                     "recovered creating snapshot backfill job {} catch up with upstream already",
@@ -602,10 +598,15 @@ impl ControlStreamManager {
                     .try_insert(job_id, definition)
                     .expect("non-duplicate");
                 database_jobs
-                    .try_insert(job_id, info)
+                    .try_insert(job_id, fragment_infos)
                     .expect("non-duplicate");
                 continue;
             }
+            let info = InflightStreamingJobInfo {
+                job_id,
+                fragment_infos,
+                subscribers: Default::default(), /* no subscriber for ongoing snapshot backfill jobs */
+            };
             let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
                 info.fragment_infos()
                     .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
@@ -639,11 +640,10 @@ impl ControlStreamManager {
                 )
             })?;
             for upstream_table_id in &upstream_table_ids {
-                subscription_info
-                    .mv_depended_subscriptions
+                subscribers
                     .entry(*upstream_table_id)
                     .or_default()
-                    .try_insert(job_id.into(), max(snapshot_epoch, committed_epoch))
+                    .try_insert(job_id.into(), SubscriberType::SnapshotBackfill)
                     .expect("non-duplicate");
             }
             ongoing_snapshot_backfill_jobs
@@ -660,21 +660,39 @@ impl ControlStreamManager {
                 .expect("non-duplicated");
         }
 
-        let node_to_collect = {
-            let node_actors = edges.collect_actors_to_create(database_jobs.values().flatten().map(
-                move |fragment_info| {
+        let database_jobs: HashMap<TableId, InflightStreamingJobInfo> = {
+            database_jobs
+                .into_iter()
+                .map(|(job_id, fragment_infos)| {
                     (
-                        fragment_info.fragment_id,
-                        &fragment_info.nodes,
-                        fragment_info.actors.iter().map(move |(actor_id, actor)| {
-                            (
-                                stream_actors.get(actor_id).expect("should exist"),
-                                actor.worker_id,
-                            )
-                        }),
+                        job_id,
+                        InflightStreamingJobInfo {
+                            job_id,
+                            fragment_infos,
+                            subscribers: subscribers.remove(&job_id).unwrap_or_default(),
+                        },
                     )
-                },
-            ));
+                })
+                .collect()
+        };
+
+        let node_to_collect = {
+            let node_actors =
+                edges.collect_actors_to_create(database_jobs.values().flat_map(move |job| {
+                    job.fragment_infos.values().map(move |fragment_info| {
+                        (
+                            fragment_info.fragment_id,
+                            &fragment_info.nodes,
+                            fragment_info.actors.iter().map(move |(actor_id, actor)| {
+                                (
+                                    stream_actors.get(actor_id).expect("should exist"),
+                                    actor.worker_id,
+                                )
+                            }),
+                            job.subscribers.keys().copied(),
+                        )
+                    })
+                }));
 
             let node_to_collect = self.inject_barrier(
                 database_id,
@@ -684,8 +702,6 @@ impl ControlStreamManager {
                 database_jobs.values().flatten(),
                 database_jobs.values().flatten(),
                 Some(node_actors),
-                (&subscription_info).into_iter().collect(),
-                vec![],
             )?;
             debug!(
                 ?node_to_collect,
@@ -715,7 +731,7 @@ impl ControlStreamManager {
             ongoing_snapshot_backfill_jobs
         {
             let node_actors =
-                edges.collect_actors_to_create(info.fragment_infos().map(move |fragment_info| {
+                edges.collect_actors_to_create(info.fragment_infos().map(|fragment_info| {
                     (
                         fragment_info.fragment_id,
                         &fragment_info.nodes,
@@ -725,6 +741,7 @@ impl ControlStreamManager {
                                 actor.worker_id,
                             )
                         }),
+                        info.subscribers.keys().copied(),
                     )
                 }));
 
@@ -770,7 +787,6 @@ impl ControlStreamManager {
             self.env.shared_actor_infos().clone(),
             new_epoch,
             database_jobs.into_values(),
-            subscription_info,
             is_paused,
         );
         let cdc_table_backfill_tracker = self.env.cdc_table_backfill_tracker();
@@ -796,16 +812,6 @@ impl ControlStreamManager {
         edges: &mut Option<FragmentEdgeBuildResult>,
     ) -> MetaResult<NodeToCollect> {
         let mutation = command.and_then(|c| c.to_mutation(is_paused, edges, self));
-        let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
-            add.subscriptions_to_add.clone()
-        } else {
-            vec![]
-        };
-        let subscriptions_to_remove = if let Some(Mutation::DropSubscriptions(drop)) = &mutation {
-            drop.info.clone()
-        } else {
-            vec![]
-        };
         self.inject_barrier(
             database_id,
             None,
@@ -817,8 +823,6 @@ impl ControlStreamManager {
                 .as_ref()
                 .map(|command| command.actors_to_create(pre_applied_graph_info, edges, self))
                 .unwrap_or_default(),
-            subscriptions_to_add,
-            subscriptions_to_remove,
         )
     }
 
@@ -831,8 +835,6 @@ impl ControlStreamManager {
         pre_applied_graph_info: impl IntoIterator<Item = &InflightFragmentInfo>,
         applied_graph_info: impl IntoIterator<Item = &'a InflightFragmentInfo> + 'a,
         mut new_actors: Option<StreamJobActorsToCreate>,
-        subscriptions_to_add: Vec<SubscriptionUpstreamInfo>,
-        subscriptions_to_remove: Vec<SubscriptionUpstreamInfo>,
     ) -> MetaResult<NodeToCollect> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -900,7 +902,7 @@ impl ControlStreamManager {
                                             .into_iter()
                                             .flatten()
                                             .flatten()
-                                            .map(|(fragment_id, (node, actors))| {
+                                            .map(|(fragment_id, (node, actors, initial_subscriber_ids))| {
                                                 FragmentBuildActorInfo {
                                                     fragment_id,
                                                     node: Some(node),
@@ -926,14 +928,13 @@ impl ControlStreamManager {
                                                                 vnode_bitmap: actor.vnode_bitmap.map(|bitmap| bitmap.to_protobuf()),
                                                                 mview_definition: actor.mview_definition,
                                                                 expr_context: actor.expr_context,
+                                                                initial_subscriber_ids: initial_subscriber_ids.iter().copied().collect(),
                                                             }
                                                         })
                                                         .collect(),
                                                 }
                                             })
                                             .collect(),
-                                        subscriptions_to_add: subscriptions_to_add.clone(),
-                                        subscriptions_to_remove: subscriptions_to_remove.clone(),
                                     },
                                 ),
                             ),

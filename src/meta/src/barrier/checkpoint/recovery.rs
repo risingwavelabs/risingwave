@@ -438,8 +438,12 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut cdc_table_snapshot_split_assignment,
         } = runtime_info;
         let result: MetaResult<_> = try {
-            let mut builder =
-                FragmentEdgeBuilder::new(job_infos.values().flatten(), control_stream_manager);
+            let mut builder = FragmentEdgeBuilder::new(
+                job_infos
+                    .values()
+                    .flat_map(|fragment_infos| fragment_infos.values()),
+                control_stream_manager,
+            );
             builder.add_relations(&fragment_relations);
             let mut edges = builder.build();
             control_stream_manager.inject_database_initial_barrier(

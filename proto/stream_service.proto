@@ -34,11 +34,10 @@ message InjectBarrierRequest {
     common.Buffer vnode_bitmap = 4;
     string mview_definition = 5;
     plan_common.ExprContext expr_context = 6;
+    repeated uint32 initial_subscriber_ids = 7;
   }
 
   repeated FragmentBuildActorInfo actors_to_build = 9;
-  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_add = 10;
-  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_remove = 11;
 }
 
 message BarrierCompleteResponse {
@@ -104,7 +103,6 @@ message BarrierCompleteResponse {
 message StreamingControlStreamRequest {
   message InitialPartialGraph {
     uint32 partial_graph_id = 1;
-    repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
   }
 
   message DatabaseInitialPartialGraph {

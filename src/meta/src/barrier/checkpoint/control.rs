@@ -48,7 +48,7 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
-use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, InflightSubscriptionInfo};
+use crate::barrier::{BarrierKind, Command, CreateStreamingJobType};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{SourceChange, fill_snapshot_backfill_epoch};
@@ -371,25 +371,16 @@ impl CheckpointControl {
 
     pub(crate) fn inflight_infos(
         &self,
-    ) -> impl Iterator<
-        Item = (
-            DatabaseId,
-            &InflightSubscriptionInfo,
-            impl Iterator<Item = TableId> + '_,
-        ),
-    > + '_ {
+    ) -> impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId> + '_)> + '_ {
         self.databases.iter().flat_map(|(database_id, database)| {
-            database
-                .database_state()
-                .map(|(database_state, creating_jobs)| {
-                    (
-                        *database_id,
-                        &database_state.inflight_subscription_info,
-                        creating_jobs
-                            .values()
-                            .filter_map(|job| job.is_consuming().then_some(job.job_id)),
-                    )
-                })
+            database.database_state().map(|(_, creating_jobs)| {
+                (
+                    *database_id,
+                    creating_jobs
+                        .values()
+                        .filter_map(|job| job.is_consuming().then_some(job.job_id)),
+                )
+            })
         })
     }
 }
@@ -785,6 +776,8 @@ impl DatabaseCheckpointControl {
                         CompleteJobType::First => true,
                         CompleteJobType::Normal => false,
                         CompleteJobType::Finished => {
+                            let todo = 0;
+                            // unsubscribe on upstream mv
                             finished_jobs.push((*table_id, epoch, resps));
                             continue;
                         }
@@ -1206,7 +1199,7 @@ impl DatabaseCheckpointControl {
 
         let (
             pre_applied_graph_info,
-            pre_applied_subscription_info,
+            mv_subscription_max_retention,
             table_ids_to_commit,
             jobs_to_wait,
             prev_paused_reason,
@@ -1246,7 +1239,7 @@ impl DatabaseCheckpointControl {
 
         let command_ctx = CommandContext::new(
             barrier_info,
-            pre_applied_subscription_info,
+            mv_subscription_max_retention,
             table_ids_to_commit,
             command,
             span,

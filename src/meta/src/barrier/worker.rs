@@ -375,7 +375,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
-                                    let workers = InflightFragmentInfo::workers(runtime_info.job_infos.values().flat_map(|job| job.fragment_infos()));
+                                    let workers = InflightFragmentInfo::workers(runtime_info.job_infos.values().flat_map(|fragments| fragments.values()));
                                     for worker_id in workers {
                                         if !self.control_stream_manager.is_connected(worker_id) {
                                             self.control_stream_manager.try_reconnect_worker(worker_id, entering_initializing.control().inflight_infos(), self.term_id.clone(), &*self.context).await;
@@ -798,7 +798,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             info!(elapsed=?reset_start_time.elapsed(), ?unconnected_worker, "control stream reset");
 
             {
-                let mut builder = FragmentEdgeBuilder::new(database_job_infos.values().flat_map(|info| info.values().flatten()), &control_stream_manager);
+                let mut builder = FragmentEdgeBuilder::new(database_job_infos.values().flat_map(|jobs| jobs.values().flat_map(|fragments| fragments.values())), &control_stream_manager);
                 builder.add_relations(&fragment_relations);
                 let mut edges = builder.build();
 

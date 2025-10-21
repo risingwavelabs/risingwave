@@ -35,10 +35,10 @@ use tracing::{debug, info, warn};
 
 use super::BarrierWorkerRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
-use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
+use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActor, TableParallelism};
+use crate::model::{ActorId, FragmentId, StreamActor, TableParallelism};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
@@ -105,7 +105,8 @@ impl GlobalBarrierWorkerContextImpl {
     async fn resolve_graph_info(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>> {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+    {
         let database_id = database_id.map(|database_id| database_id.database_id as _);
         let all_actor_infos = self
             .metadata_manager
@@ -127,13 +128,10 @@ impl GlobalBarrierWorkerContextImpl {
                             let job_id = TableId::new(job_id as _);
                             (
                                 job_id,
-                                InflightStreamingJobInfo {
-                                    job_id,
-                                    fragment_infos: fragment_infos
-                                        .into_iter()
-                                        .map(|(fragment_id, info)| (fragment_id as _, info))
-                                        .collect(),
-                                },
+                                fragment_infos
+                                    .into_iter()
+                                    .map(|(fragment_id, info)| (fragment_id as _, info))
+                                    .collect(),
                             )
                         })
                         .collect(),
@@ -276,7 +274,10 @@ impl GlobalBarrierWorkerContextImpl {
     /// the operator.
     async fn recovery_table_with_upstream_sinks(
         &self,
-        inflight_jobs: &mut HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
+        inflight_jobs: &mut HashMap<
+            DatabaseId,
+            HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
+        >,
     ) -> MetaResult<()> {
         let mut jobs = inflight_jobs.values_mut().try_fold(
             HashMap::new(),
@@ -298,9 +299,9 @@ impl GlobalBarrierWorkerContextImpl {
             .await?;
         for table in tables {
             assert_eq!(table.table_type(), PbTableType::Table);
-            let fragments = jobs.get_mut(&table.id).unwrap();
+            let fragment_infos = jobs.get_mut(&table.id).unwrap();
             let mut target_fragment_id = None;
-            for fragment in fragments.fragment_infos.values() {
+            for fragment in fragment_infos.values() {
                 let mut is_target_fragment = false;
                 visit_stream_node_cont(&fragment.nodes, |node| {
                     if let Some(PbNodeBody::UpstreamSinkUnion(_)) = node.node_body {
@@ -322,10 +323,7 @@ impl GlobalBarrierWorkerContextImpl {
                 );
                 continue;
             };
-            let target_fragment = fragments
-                .fragment_infos
-                .get_mut(&target_fragment_id)
-                .unwrap();
+            let target_fragment = fragment_infos.get_mut(&target_fragment_id).unwrap();
             let upstream_infos = self
                 .metadata_manager
                 .catalog_controller
@@ -449,7 +447,9 @@ impl GlobalBarrierWorkerContextImpl {
                         &info
                             .values()
                             .flatten()
-                            .flat_map(|(_, job)| job.existing_table_ids())
+                            .flat_map(|(_, fragments)| {
+                                InflightFragmentInfo::existing_table_ids(fragments.values())
+                            })
                             .collect(),
                     )
                     .await
@@ -495,8 +495,8 @@ impl GlobalBarrierWorkerContextImpl {
                         .get_fragment_downstream_relations(
                             info.values()
                                 .flatten()
-                                .flat_map(|(_, job)| job.fragment_infos())
-                                .map(|fragment| fragment.fragment_id as _)
+                                .flat_map(|(_, job)| job.keys())
+                                .map(|fragment_id| *fragment_id as _)
                                 .collect(),
                         )
                         .await?;
@@ -534,8 +534,8 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // get split assignments for all actors
                     let mut source_splits = HashMap::new();
-                    for (_, job) in info.values().flatten() {
-                        for fragment in job.fragment_infos.values() {
+                    for (_, fragment_infos) in info.values().flatten() {
+                        for fragment in fragment_infos.values() {
                             for (actor_id, info) in &fragment.actors {
                                 source_splits.insert(*actor_id, info.splits.clone());
                             }
@@ -689,7 +689,7 @@ impl GlobalBarrierWorkerContextImpl {
             .get_fragment_downstream_relations(
                 info.values()
                     .flatten()
-                    .map(|fragment| fragment.fragment_id as _)
+                    .map(|(fragment_id, _)| *fragment_id as _)
                     .collect(),
             )
             .await?;
@@ -701,7 +701,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         // get split assignments for all actors
         let mut source_splits = HashMap::new();
-        for fragment in info.values().flatten() {
+        for (_, fragment) in info.values().flatten() {
             for (actor_id, info) in &fragment.actors {
                 source_splits.insert(*actor_id, info.splits.clone());
             }
@@ -754,7 +754,8 @@ impl GlobalBarrierWorkerContextImpl {
     async fn migrate_actors(
         &self,
         active_nodes: &mut ActiveStreamingWorkerNodes,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>> {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+    {
         let mgr = &self.metadata_manager;
 
         // all worker slots used by actors

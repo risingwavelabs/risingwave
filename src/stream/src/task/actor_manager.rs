@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use core::time::Duration;
-use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -21,7 +20,7 @@ use async_recursion::async_recursion;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
@@ -399,7 +398,6 @@ impl StreamActorManager {
         actor: BuildActorInfo,
         fragment_id: FragmentId,
         node: Arc<StreamNode>,
-        related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
@@ -411,7 +409,6 @@ impl StreamActorManager {
                 fragment_id,
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
-                related_subscriptions,
                 self.env.meta_client(),
                 streaming_config,
                 self.env.clone(),
@@ -457,7 +454,6 @@ impl StreamActorManager {
         actor: BuildActorInfo,
         fragment_id: FragmentId,
         node: Arc<StreamNode>,
-        related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
@@ -476,7 +472,6 @@ impl StreamActorManager {
                         actor,
                         fragment_id,
                         node,
-                        related_subscriptions,
                         barrier_manager.clone(),
                         new_output_request_rx
                     ).boxed().and_then(|actor| actor.run()).map(move |result| {
