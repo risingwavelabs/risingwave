@@ -311,7 +311,7 @@ impl Binder {
 
         let default_columns = default_column_indices
             .into_iter()
-            .map(|i| -> Result<(usize, ExprImpl)> {
+            .map(|i| {
                 let column = &cols_to_insert_in_table[i];
                 let expr = default_columns_from_catalog
                     .get(&i)
@@ -333,9 +333,9 @@ impl Binder {
                     .into()
                 };
 
-                Ok((i, expr))
+                (i, expr)
             })
-            .try_collect()?;
+            .collect_vec();
 
         let insert = BoundInsert {
             table_id,
