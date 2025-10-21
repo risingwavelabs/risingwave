@@ -432,7 +432,7 @@ impl StreamManagerService for StreamServiceImpl {
             let guard = self.env.shared_actor_info.read_guard();
             guard
                 .iter_over_fragments()
-                .filter(|(frag_id, _)| all_fragment_ids.contains(&{ **frag_id }))
+                .filter(|(frag_id, _)| all_fragment_ids.contains(frag_id))
                 .flat_map(|(fragment_id, fragment_info)| {
                     fragment_info
                         .actors
