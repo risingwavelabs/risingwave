@@ -19,9 +19,12 @@ use std::sync::Arc;
 use educe::Educe;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, IndexId, Schema};
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbVectorIndexInfo};
+use risingwave_pb::catalog::{
+    PbIndex, PbIndexColumnProperties, PbVectorIndexInfo, vector_index_info,
+};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{OwnedByUserCatalog, TableCatalog};
@@ -74,6 +77,13 @@ impl VectorIndex {
             .iter()
             .map(|col| col.column_desc.clone())
             .collect()
+    }
+
+    pub fn resolve_hnsw_ef_search(&self, config: &SessionConfig) -> Option<usize> {
+        match self.vector_index_info.config.as_ref().unwrap() {
+            vector_index_info::Config::Flat(_) => None,
+            vector_index_info::Config::HnswFlat(_) => Some(config.batch_hnsw_ef_search()),
+        }
     }
 }
 
