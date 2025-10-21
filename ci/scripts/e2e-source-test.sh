@@ -121,8 +121,13 @@ echo '> run test..'
 risedev slt './e2e_test/source_legacy/cdc/mongodb/**/*.slt'
 
 echo "--- inline cdc test"
+
+source ci/scripts/cdc-auto-schema-change-failure-test.sh
+
+
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
+
 
 echo "--- mysql & postgres cdc validate test"
 risedev slt './e2e_test/source_legacy/cdc/cdc.validate.mysql.slt'
