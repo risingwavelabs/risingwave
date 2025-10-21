@@ -153,13 +153,11 @@ impl SnowflakeV2Config {
         let database = self
             .snowflake_database
             .clone()
-            .ok_or(SinkError::Config(anyhow!("database is required")))?
-            .to_owned();
+            .ok_or(SinkError::Config(anyhow!("database is required")))?;
         let schema_name = self
             .snowflake_schema
             .clone()
-            .ok_or(SinkError::Config(anyhow!("schema is required")))?
-            .to_owned();
+            .ok_or(SinkError::Config(anyhow!("schema is required")))?;
         let mut snowflake_task_ctx = SnowflakeTaskContext {
             target_table_name: target_table_name.clone(),
             database,
@@ -171,8 +169,7 @@ impl SnowflakeV2Config {
         let jdbc_url = self
             .jdbc_url
             .clone()
-            .ok_or(SinkError::Config(anyhow!("jdbc.url is required")))?
-            .to_owned();
+            .ok_or(SinkError::Config(anyhow!("jdbc.url is required")))?;
         let username = self
             .username
             .clone()

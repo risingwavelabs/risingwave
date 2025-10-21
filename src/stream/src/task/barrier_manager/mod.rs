@@ -41,6 +41,12 @@ pub(super) enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
+    ReportSourceListFinished {
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+        associated_source_id: u32,
+    },
     ReportSourceLoadFinished {
         epoch: EpochPair,
         actor_id: ActorId,
@@ -161,6 +167,21 @@ impl LocalBarrierManager {
             tx,
         });
         rx
+    }
+
+    pub fn report_source_list_finished(
+        &self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: u32,
+        associated_source_id: u32,
+    ) {
+        self.send_event(LocalBarrierEvent::ReportSourceListFinished {
+            epoch,
+            actor_id,
+            table_id,
+            associated_source_id,
+        });
     }
 
     pub fn report_source_load_finished(

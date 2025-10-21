@@ -536,11 +536,9 @@ impl NonOverlapSubLevelPicker {
 
                         // Print SstableInfo for `expected_sst_ids`
                         let mut expected_sst_infos = String::new();
-                        level.table_infos[overlap_sst_range.clone()]
-                            .iter()
-                            .for_each(|s| {
-                                append_sstable_info_to_string(&mut expected_sst_infos, s)
-                            });
+                        level.table_infos[overlap_sst_range].iter().for_each(|s| {
+                            append_sstable_info_to_string(&mut expected_sst_infos, s)
+                        });
 
                         // Print SstableInfo for selected ssts in all sub-levels
                         let mut ret_sst_infos = String::new();
@@ -769,7 +767,7 @@ pub mod tests {
             },
         ];
 
-        let levels_handlers = vec![
+        let levels_handlers = [
             LevelHandler::new(0),
             LevelHandler::new(1),
             LevelHandler::new(2),
@@ -878,7 +876,7 @@ pub mod tests {
             },
         ];
 
-        let levels_handlers = vec![
+        let levels_handlers = [
             LevelHandler::new(0),
             LevelHandler::new(1),
             LevelHandler::new(2),
@@ -1072,7 +1070,7 @@ pub mod tests {
             },
         ];
 
-        let levels_handlers = vec![
+        let levels_handlers = [
             LevelHandler::new(0),
             LevelHandler::new(1),
             LevelHandler::new(2),

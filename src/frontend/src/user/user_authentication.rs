@@ -117,10 +117,10 @@ pub fn encrypted_raw_password(info: &AuthInfo) -> String {
 /// Encrypt the stored password with given salt, used for user authentication.
 #[inline(always)]
 pub fn md5_hash_with_salt(encrypted_value: &[u8], salt: &[u8; 4]) -> Vec<u8> {
-    let mut ctx = md5::Context::new();
-    ctx.consume(encrypted_value);
-    ctx.consume(salt);
-    format!("md5{:x}", ctx.compute()).into_bytes()
+    let mut ctx = md5::Md5::new();
+    ctx.update(encrypted_value);
+    ctx.update(salt);
+    format!("md5{:x}", ctx.finalize()).into_bytes()
 }
 
 #[inline(always)]
@@ -146,10 +146,10 @@ pub fn sha256_hash(name: &str, password: &str) -> Vec<u8> {
 /// Encrypt "`password`+`name`" with MD5.
 #[inline(always)]
 pub fn md5_hash(name: &str, password: &str) -> Vec<u8> {
-    let mut ctx = md5::Context::new();
-    ctx.consume(password.as_bytes());
-    ctx.consume(name.as_bytes());
-    format!("{:x}", ctx.compute()).into_bytes()
+    let mut ctx = md5::Md5::new();
+    ctx.update(password.as_bytes());
+    ctx.update(name.as_bytes());
+    format!("{:x}", ctx.finalize()).into_bytes()
 }
 
 #[cfg(test)]

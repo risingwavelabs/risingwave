@@ -21,7 +21,7 @@ use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemTableCatalog};
 use crate::error::Result;
 
 /// The catalog `pg_constraint` records information about table and index inheritance hierarchies.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-constraint.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-constraint.html`
 /// This is introduced only for pg compatibility and is not used in our system.
 #[derive(Fields)]
 struct PgConstraint {

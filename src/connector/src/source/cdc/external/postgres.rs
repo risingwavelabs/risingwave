@@ -663,7 +663,7 @@ impl PostgresExternalTableReader {
                         right_bound_exclusive = None;
                     }
                     Some(next_right) => {
-                        next_left_bound_inclusive = next_right.to_owned();
+                        next_left_bound_inclusive = next_right.clone();
                         right_bound_exclusive = Some(next_right);
                     }
                 }
@@ -1149,7 +1149,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_pg_table_reader() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
             ColumnDesc::named("v2", ColumnId::new(2), DataType::Varchar),
             ColumnDesc::named("v3", ColumnId::new(3), DataType::Decimal),

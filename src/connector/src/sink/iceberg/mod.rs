@@ -977,11 +977,7 @@ impl IcebergSinkWriter {
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
-            DataFileWriterBuilder::new(
-                parquet_writer_builder.clone(),
-                None,
-                partition_spec.spec_id(),
-            )
+            DataFileWriterBuilder::new(parquet_writer_builder, None, partition_spec.spec_id())
         };
         let position_delete_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
@@ -998,7 +994,7 @@ impl IcebergSinkWriter {
             );
             MonitoredPositionDeleteWriterBuilder::new(
                 SortPositionDeleteWriterBuilder::new(
-                    parquet_writer_builder.clone(),
+                    parquet_writer_builder,
                     writer_param
                         .streaming_config
                         .developer
@@ -1033,7 +1029,7 @@ impl IcebergSinkWriter {
                 ),
             );
 
-            EqualityDeleteFileWriterBuilder::new(parquet_writer_builder.clone(), config)
+            EqualityDeleteFileWriterBuilder::new(parquet_writer_builder, config)
         };
         let delta_builder = EqualityDeltaWriterBuilder::new(
             data_file_builder,
@@ -2510,6 +2506,9 @@ mod test {
                 azblob_account_key: None,
                 azblob_endpoint_url: None,
                 header: None,
+                adlsgen2_account_name: None,
+                adlsgen2_account_key: None,
+                adlsgen2_endpoint: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,

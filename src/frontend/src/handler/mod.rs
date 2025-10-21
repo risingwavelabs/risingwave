@@ -688,7 +688,7 @@ pub async fn handle(
                 name,
                 table_name,
                 method,
-                columns.to_vec(),
+                columns.clone(),
                 include,
                 distributed_by,
             )

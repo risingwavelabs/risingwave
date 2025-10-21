@@ -324,7 +324,7 @@ impl LogicalScan {
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
         let scan_without_predicate = generic::TableScan::new(
-            self.required_col_idx().to_vec(),
+            self.required_col_idx().clone(),
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
@@ -342,11 +342,11 @@ impl LogicalScan {
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::TableScan::new_inner(
-            self.output_col_idx().to_vec(),
+            self.output_col_idx().clone(),
             self.table().clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             predicate,
             self.as_of(),
         )
@@ -359,7 +359,7 @@ impl LogicalScan {
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.predicate().clone(),
             self.as_of(),
         )

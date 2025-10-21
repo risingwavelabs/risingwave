@@ -872,6 +872,13 @@ mod tests {
             unimplemented!()
         }
 
+        async fn handle_list_finished_source_ids(
+            &self,
+            _list_finished_source_ids: Vec<u32>,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
         async fn handle_load_finished_source_ids(
             &self,
             _load_finished_source_ids: Vec<u32>,

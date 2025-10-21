@@ -967,12 +967,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             ..Default::default()
         };
 
-        // TODO: avoid clone when `on_key_value_fn` can be non-static
-        let row_serde = self.row_serde.clone();
-
         self.state_store
             .on_key_value(key_bytes, read_options, move |_, value| {
-                let row = row_serde.deserialize(value)?;
+                let row = self.row_serde.deserialize(value)?;
                 Ok(OwnedRow::new(row))
             })
             .await
@@ -1524,9 +1521,15 @@ where
     }
 }
 
-pub trait RowStream<'a> = Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
-pub trait KeyedRowStream<'a> = Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
-pub trait PkRowStream<'a, K> = Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a;
+// Manually expand trait alias for better IDE experience.
+pub trait RowStream<'a>: Stream<Item = StreamExecutorResult<OwnedRow>> + 'a {}
+impl<'a, S: Stream<Item = StreamExecutorResult<OwnedRow>> + 'a> RowStream<'a> for S {}
+
+pub trait KeyedRowStream<'a>: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {}
+impl<'a, S: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a> KeyedRowStream<'a> for S {}
+
+pub trait PkRowStream<'a, K>: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a {}
+impl<'a, K, S: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a> PkRowStream<'a, K> for S {}
 
 pub trait FromVnodeBytes {
     fn from_vnode_bytes(vnode: VirtualNode, bytes: &Bytes) -> Self;

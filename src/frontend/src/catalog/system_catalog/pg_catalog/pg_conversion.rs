@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_conversion` describes encoding conversion functions.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-conversion.html`]
+/// Reference: `https://www.postgresql.org/docs/current/catalog-pg-conversion.html`
 #[system_catalog(view, "pg_catalog.pg_conversion")]
 #[derive(Fields)]
 struct PgConversion {
