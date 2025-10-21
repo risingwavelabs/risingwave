@@ -530,21 +530,25 @@ impl AstNode {
                     name,
                     columns,
                     query: _,
-                    ..
+                    or_replace,
+                    materialized,
+                    if_not_exists,
+                    emit_mode,
+                    with_options,
                 }),
                 PathComponent::Field(field),
             ) => match field {
                 AstField::Query => {
                     if let Some(AstNode::Query(new_query)) = new_child {
                         let new_stmt = Statement::CreateView {
-                            or_replace: false,
-                            materialized: true,
-                            if_not_exists: false,
+                            or_replace: *or_replace,
+                            materialized: *materialized,
+                            if_not_exists: *if_not_exists,
                             name: name.clone(),
                             columns: columns.clone(),
                             query: new_query,
-                            emit_mode: None,
-                            with_options: vec![],
+                            emit_mode: emit_mode.clone(),
+                            with_options: with_options.clone(),
                         };
                         Some(AstNode::Statement(new_stmt))
                     } else {
