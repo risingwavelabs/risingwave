@@ -326,7 +326,7 @@ impl Binder {
                         vec![
                             expr,
                             ExprImpl::literal_varchar(column.name().to_owned()),
-                            ExprImpl::literal_varchar(table_name.to_owned()),
+                            ExprImpl::literal_varchar(table_name.clone()),
                         ],
                         column.data_type().clone(),
                     )
