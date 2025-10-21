@@ -396,11 +396,11 @@ pub fn start_iceberg_compactor(
                             }
                         }
 
-                        tracing::info!(
-                            running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
-                            pull_task_ack = %pull_task_ack,
-                            pending_pull_task_count = %pending_pull_task_count
-                        );
+                        // tracing::info!(
+                        //     running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
+                        //     pull_task_ack = %pull_task_ack,
+                        //     pending_pull_task_count = %pending_pull_task_count
+                        // );
 
                         continue;
                     }

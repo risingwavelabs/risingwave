@@ -168,6 +168,186 @@ impl IcebergCompactorRunner {
         })
     }
 
+    /// Execute compaction with a given plan.
+    /// This is the core execution method that will be the main interface in the future.
+    pub async fn compact_with_plan(
+        &self,
+        compaction_plan: CompactionPlan,
+        context: &RunnerContext,
+    ) -> HummockResult<RewriteFilesStat> {
+        let task_id = self.task_id;
+
+        let statistics = self.analyze_task_statistics(&compaction_plan);
+
+        let input_parallelism = compaction_plan.recommended_executor_parallelism() as u32;
+        let output_parallelism = compaction_plan.recommended_output_parallelism() as u32;
+
+        if !context.is_available_parallelism_sufficient(
+            compaction_plan.recommended_executor_parallelism() as _,
+        ) {
+            tracing::warn!(
+                task_id = task_id,
+                table = ?self.table_ident,
+                input_parallelism = input_parallelism,
+                "Available parallelism is less than input parallelism, task will not run",
+            );
+            return Err(HummockError::compaction_executor(
+                "Available parallelism is less than input parallelism",
+            ));
+        }
+
+        let compaction_execution_config = CompactionExecutionConfigBuilder::default()
+            .enable_validate_compaction(self.config.enable_validate_compaction)
+            .max_record_batch_rows(self.config.max_record_batch_rows)
+            .write_parquet_properties(self.config.write_parquet_properties.clone())
+            .base(CompactionBaseConfig {
+                target_file_size: self.config.target_file_size_bytes,
+            })
+            .max_concurrent_closes(self.config.max_concurrent_closes)
+            .enable_dynamic_size_estimation(self.config.enable_dynamic_size_estimation)
+            .size_estimation_smoothing_factor(self.config.size_estimation_smoothing_factor)
+            .build()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to build iceberg compaction execution config: {:?}",
+                    e.as_report()
+                );
+            });
+
+        tracing::info!(
+            task_id = task_id,
+            task_type = ?self.task_type,
+            table = ?self.table_ident,
+            input_parallelism = input_parallelism,
+            output_parallelism = output_parallelism,
+            statistics = ?statistics,
+            "Executing compaction plan",
+        );
+
+        let branch = commit_branch(
+            self.iceberg_config.r#type.as_str(),
+            self.iceberg_config.write_mode.as_str(),
+        );
+
+        let retry_config = CommitManagerRetryConfig::default();
+        let compaction = CompactionBuilder::new(
+            self.catalog.clone(),
+            self.table_ident.clone(),
+            CompactionType::Full,
+        )
+        .with_catalog_name(self.iceberg_config.catalog_name())
+        .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
+        .with_registry(ICEBERG_COMPACTION_METRICS_REGISTRY.clone())
+        .with_retry_config(retry_config)
+        .with_to_branch(branch)
+        .build();
+
+        context.incr_running_task_parallelism(input_parallelism);
+        self.metrics.compact_task_pending_num.inc();
+        self.metrics
+            .compact_task_pending_parallelism
+            .add(input_parallelism as _);
+
+        let _release_guard = scopeguard::guard(
+            (input_parallelism, context.clone(), self.metrics.clone()),
+            |(val, ctx, metrics_guard)| {
+                ctx.decr_running_task_parallelism(val);
+                metrics_guard.compact_task_pending_num.dec();
+                metrics_guard.compact_task_pending_parallelism.sub(val as _);
+            },
+        );
+
+        let CompactionResult {
+            data_files,
+            stats,
+            table,
+        } = compaction
+            .compact_with_plan(compaction_plan, &compaction_execution_config)
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?
+            .unwrap();
+
+        if let Some(committed_table) = table
+            && should_enable_iceberg_cow(
+                self.iceberg_config.r#type.as_str(),
+                self.iceberg_config.write_mode.as_str(),
+            )
+        {
+            let ingestion_branch = commit_branch(
+                self.iceberg_config.r#type.as_str(),
+                self.iceberg_config.write_mode.as_str(),
+            );
+
+            // Overwrite Main branch
+            let consistency_params = CommitConsistencyParams {
+                starting_snapshot_id: committed_table
+                    .metadata()
+                    .snapshot_for_ref(ingestion_branch.as_str())
+                    .ok_or(HummockError::compaction_executor(anyhow::anyhow!(
+                        "Don't find current_snapshot for ingestion_branch {}",
+                        ingestion_branch
+                    )))?
+                    .snapshot_id(),
+                use_starting_sequence_number: true,
+                basic_schema_id: committed_table.metadata().current_schema().schema_id(),
+            };
+
+            let commit_manager = compaction.build_commit_manager(consistency_params);
+
+            let input_files = {
+                let mut input_files = vec![];
+                if let Some(snapshot) = committed_table.metadata().snapshot_for_ref(MAIN_BRANCH) {
+                    let manifest_list = snapshot
+                        .load_manifest_list(committed_table.file_io(), committed_table.metadata())
+                        .await
+                        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+                    for manifest_file in manifest_list
+                        .entries()
+                        .iter()
+                        .filter(|entry| entry.has_added_files() || entry.has_existing_files())
+                    {
+                        let manifest = manifest_file
+                            .load_manifest(committed_table.file_io())
+                            .await
+                            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                        let (entry, _) = manifest.into_parts();
+                        for i in entry {
+                            match i.content_type() {
+                                iceberg::spec::DataContentType::Data => {
+                                    input_files.push(i.data_file().clone());
+                                }
+                                iceberg::spec::DataContentType::EqualityDeletes => {
+                                    unreachable!(
+                                        "Equality deletes are not supported in main branch"
+                                    );
+                                }
+                                iceberg::spec::DataContentType::PositionDeletes => {
+                                    unreachable!(
+                                        "Position deletes are not supported in main branch"
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    input_files
+                } else {
+                    vec![]
+                }
+            };
+
+            let _new_table = commit_manager
+                .overwrite_files(data_files, input_files, MAIN_BRANCH)
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+        }
+
+        Ok(stats)
+    }
+
+    /// Compact all plans generated by the planner.
+    /// This method handles planning + execution orchestration.
     pub async fn compact(
         self,
         context: RunnerContext,
@@ -176,7 +356,8 @@ impl IcebergCompactorRunner {
         let task_id = self.task_id;
         let now = std::time::Instant::now();
 
-        let compact = async move {
+        let compact_task = async move {
+            // Phase 1: Planning
             let compaction_type = Self::get_compaction_type(self.task_type);
             let planning_config = CompactionPlanningConfigBuilder::default()
                 .max_parallelism(self.config.max_parallelism as usize)
@@ -190,7 +371,11 @@ impl IcebergCompactorRunner {
                 )
                 .small_file_threshold(self.config.small_file_threshold)
                 .max_task_total_size(self.config.max_task_total_size)
-                .grouping_strategy(iceberg_compaction_core::config::GroupingStrategy::Noop)
+                .grouping_strategy(iceberg_compaction_core::config::GroupingStrategy::BinPack(
+                    iceberg_compaction_core::config::BinPackConfig::new(
+                        32 * 1024 * 1024, // 32MB
+                    ),
+                ))
                 .build()
                 .unwrap_or_else(|e| {
                     panic!(
@@ -226,184 +411,60 @@ impl IcebergCompactorRunner {
                 return Ok::<RewriteFilesStat, HummockError>(RewriteFilesStat::default());
             }
 
-            assert_eq!(1, compaction_plans.len());
+            tracing::info!(
+                task_id = task_id,
+                table = ?self.table_ident,
+                plan_count = compaction_plans.len(),
+                planning_config = ?planning_config,
+                "Generated {} compaction plan(s)",
+                compaction_plans.len(),
+            );
 
-            let compaction_plan = compaction_plans.into_iter().next().unwrap();
+            // Phase 2: Execute all plans sequentially
+            let total_plan_count = compaction_plans.len();
+            let mut all_stats = Vec::with_capacity(total_plan_count);
 
-            let statistics = self.analyze_task_statistics(&compaction_plan);
-
-            let input_parallelism = compaction_plan.recommended_executor_parallelism() as u32;
-            let output_parallelism = compaction_plan.recommended_output_parallelism() as u32;
-
-            if !context.is_available_parallelism_sufficient(
-                compaction_plan.recommended_executor_parallelism() as _,
-            ) {
-                tracing::warn!(
+            for (plan_index, plan) in compaction_plans.into_iter().enumerate() {
+                tracing::info!(
                     task_id = task_id,
-                    table = ?self.table_ident,
-                    input_parallelism = input_parallelism,
-                    "Available parallelism is less than input parallelism task will not run",
+                    plan_index = plan_index,
+                    total_plans = total_plan_count,
+                    "Processing compaction plan {}/{}",
+                    plan_index + 1,
+                    total_plan_count,
                 );
-                return Err(HummockError::compaction_executor(
-                    "Available parallelism is less than input parallelism",
-                ));
+
+                let plan_stats = self.compact_with_plan(plan, &context).await?;
+
+                tracing::info!(
+                    task_id = task_id,
+                    plan_index = plan_index,
+                    stat = ?plan_stats,
+                    "Completed compaction plan {}/{}",
+                    plan_index + 1,
+                    total_plan_count,
+                );
+
+                all_stats.push(plan_stats);
             }
 
-            let compaction_execution_config = CompactionExecutionConfigBuilder::default()
-                .enable_validate_compaction(self.config.enable_validate_compaction)
-                .max_record_batch_rows(self.config.max_record_batch_rows)
-                .write_parquet_properties(self.config.write_parquet_properties.clone())
-                .base(CompactionBaseConfig {
-                    target_file_size: self.config.target_file_size_bytes,
-                })
-                .max_concurrent_closes(self.config.max_concurrent_closes)
-                .enable_dynamic_size_estimation(self.config.enable_dynamic_size_estimation)
-                .size_estimation_smoothing_factor(self.config.size_estimation_smoothing_factor)
-                .build()
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "Failed to build iceberg compaction write props: {:?}",
-                        e.as_report()
-                    );
-                });
+            // Merge all statistics
+            let merged_stats = Self::merge_rewrite_stats(all_stats);
 
             tracing::info!(
                 task_id = task_id,
-                task_type = ?self.task_type,
-                table = ?self.table_ident,
-                input_parallelism = input_parallelism,
-                output_parallelism = output_parallelism,
-                statistics = ?statistics,
-                planning_config = ?planning_config,
-                "Iceberg compaction task started",
+                total_plans = total_plan_count,
+                "Completed all compaction plans",
             );
 
-            let retry_config = CommitManagerRetryConfig::default();
-            let compaction = CompactionBuilder::new(
-                self.catalog.clone(),
-                self.table_ident.clone(),
-                CompactionType::Full,
-            )
-            .with_catalog_name(self.iceberg_config.catalog_name())
-            .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
-            .with_registry(ICEBERG_COMPACTION_METRICS_REGISTRY.clone())
-            .with_retry_config(retry_config)
-            .with_to_branch(branch)
-            .build();
-
-            context.incr_running_task_parallelism(input_parallelism);
-            self.metrics.compact_task_pending_num.inc();
-            self.metrics
-                .compact_task_pending_parallelism
-                .add(input_parallelism as _);
-
-            let _release_guard = scopeguard::guard(
-                (input_parallelism, context.clone(), self.metrics.clone()), /* metrics.clone() if Arc */
-                |(val, ctx, metrics_guard)| {
-                    ctx.decr_running_task_parallelism(val);
-                    metrics_guard.compact_task_pending_num.dec();
-                    metrics_guard.compact_task_pending_parallelism.sub(val as _);
-                },
-            );
-
-            let CompactionResult {
-                data_files,
-                stats,
-                table,
-            } = compaction
-                .compact_with_plan(compaction_plan, &compaction_execution_config)
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?
-                .unwrap();
-
-            if let Some(committed_table) = table
-                && should_enable_iceberg_cow(
-                    self.iceberg_config.r#type.as_str(),
-                    self.iceberg_config.write_mode.as_str(),
-                )
-            {
-                let ingestion_branch = commit_branch(
-                    self.iceberg_config.r#type.as_str(),
-                    self.iceberg_config.write_mode.as_str(),
-                );
-
-                // Overwrite Main branch
-                let consistency_params = CommitConsistencyParams {
-                    starting_snapshot_id: committed_table
-                        .metadata()
-                        .snapshot_for_ref(ingestion_branch.as_str())
-                        .ok_or(HummockError::compaction_executor(anyhow::anyhow!(
-                            "Don't find current_snapshot for ingestion_branch {}",
-                            ingestion_branch
-                        )))?
-                        .snapshot_id(),
-                    use_starting_sequence_number: true,
-                    basic_schema_id: committed_table.metadata().current_schema().schema_id(),
-                };
-
-                let commit_manager = compaction.build_commit_manager(consistency_params);
-
-                let input_files = {
-                    let mut input_files = vec![];
-                    if let Some(snapshot) = committed_table.metadata().snapshot_for_ref(MAIN_BRANCH)
-                    {
-                        let manifest_list = snapshot
-                            .load_manifest_list(
-                                committed_table.file_io(),
-                                committed_table.metadata(),
-                            )
-                            .await
-                            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-                        for manifest_file in manifest_list
-                            .entries()
-                            .iter()
-                            .filter(|entry| entry.has_added_files() || entry.has_existing_files())
-                        {
-                            let manifest = manifest_file
-                                .load_manifest(committed_table.file_io())
-                                .await
-                                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-                            let (entry, _) = manifest.into_parts();
-                            for i in entry {
-                                match i.content_type() {
-                                    iceberg::spec::DataContentType::Data => {
-                                        input_files.push(i.data_file().clone());
-                                    }
-                                    iceberg::spec::DataContentType::EqualityDeletes => {
-                                        unreachable!(
-                                            "Equality deletes are not supported in main branch"
-                                        );
-                                    }
-                                    iceberg::spec::DataContentType::PositionDeletes => {
-                                        unreachable!(
-                                            "Position deletes are not supported in main branch"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-
-                        input_files
-                    } else {
-                        vec![]
-                    }
-                };
-
-                let _new_table = commit_manager
-                    .overwrite_files(data_files, input_files, MAIN_BRANCH)
-                    .await
-                    .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            }
-
-            Ok::<RewriteFilesStat, HummockError>(stats)
+            Ok::<RewriteFilesStat, HummockError>(merged_stats)
         };
 
         tokio::select! {
             _ = shutdown_rx => {
                 tracing::info!(task_id = task_id, "Iceberg compaction task cancelled");
             }
-            stat = compact => {
+            stat = compact_task => {
                 match stat {
                     Ok(stat) => {
                         tracing::info!(
@@ -472,6 +533,28 @@ impl IcebergCompactorRunner {
                 )
             }
         }
+    }
+
+    /// Merge multiple `RewriteFilesStat` into one by aggregating all fields.
+    fn merge_rewrite_stats(stats_list: Vec<RewriteFilesStat>) -> RewriteFilesStat {
+        let mut merged_stats = RewriteFilesStat::default();
+
+        for stats in stats_list {
+            merged_stats.input_files_count += stats.input_files_count;
+            merged_stats.output_files_count += stats.output_files_count;
+            merged_stats.input_total_bytes += stats.input_total_bytes;
+            merged_stats.output_total_bytes += stats.output_total_bytes;
+            merged_stats.input_data_file_count += stats.input_data_file_count;
+            merged_stats.input_position_delete_file_count += stats.input_position_delete_file_count;
+            merged_stats.input_equality_delete_file_count += stats.input_equality_delete_file_count;
+            merged_stats.input_data_file_total_bytes += stats.input_data_file_total_bytes;
+            merged_stats.input_position_delete_file_total_bytes +=
+                stats.input_position_delete_file_total_bytes;
+            merged_stats.input_equality_delete_file_total_bytes +=
+                stats.input_equality_delete_file_total_bytes;
+        }
+
+        merged_stats
     }
 }
 
