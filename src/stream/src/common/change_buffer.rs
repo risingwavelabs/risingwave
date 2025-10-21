@@ -62,6 +62,7 @@ mod private {
 /// A buffer that accumulates changes and produce compacted changes.
 #[derive(Debug)]
 pub struct ChangeBuffer<K, R> {
+    // We use an `IndexMap` to preserve the original order of the changes as much as possible.
     buffer: IndexMap<K, Record<R>>,
     ib: InconsistencyBehavior,
 }
@@ -104,6 +105,8 @@ where
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 Record::Insert { .. } => {
+                    // FIXME: though preserving the order well,
+                    // this is not performant compared to `swap_remove`
                     e.shift_remove();
                 }
                 Record::Update { old_row, .. } => {

@@ -193,7 +193,7 @@ impl StreamChunkCompactor {
         let estimate_size = chunks.iter().map(|c| c.cardinality()).sum();
         let mut cb = ChangeBuffer::with_capacity(estimate_size).with_inconsistency_behavior(ib);
 
-        for chunk in chunks.iter() {
+        for chunk in &chunks {
             for record in chunk.records() {
                 cb.apply_record(record, |&row| row.project(&key_indices));
             }
@@ -299,17 +299,20 @@ mod tests {
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             InconsistencyBehavior::Panic,
         );
+        let chunk = chunks.into_iter().next().unwrap();
         assert_eq!(
-            chunks.into_iter().next().unwrap(),
+            chunk,
             StreamChunk::from_pretty(
-                " I I I
-                 + 2 5 5
-                 - 6 6 9
-                 + 4 9 2
+                "  I I I
                 U- 1 1 1
                 U+ 1 1 2
+                 + 4 9 2
+                 + 2 5 5
+                 - 6 6 9
                  + 2 2 2",
-            )
+            ),
+            "{}",
+            chunk.to_pretty()
         );
     }
 }
