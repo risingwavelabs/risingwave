@@ -127,28 +127,28 @@ impl Progress {
         let total_actors = self.states.len();
         let backfill_upstream_type = self.backfill_upstream_types.get(&actor).unwrap();
 
-        let mut old_crow = 0;
-        let mut new_crow = 0;
-        let mut old_brow = 0;
-        let mut new_brow = 0;
+        let mut old_consumed_row = 0;
+        let mut new_consumed_row = 0;
+        let mut old_buffered_row = 0;
+        let mut new_buffered_row = 0;
         match self.states.remove(&actor).unwrap() {
             BackfillState::Init => {}
-            BackfillState::ConsumingUpstream(_, old_consumed_rows, old_buffered_rows) => {
-                old_crow = old_consumed_rows;
-                old_brow = old_buffered_rows;
+            BackfillState::ConsumingUpstream(_, consumed_rows, buffered_rows) => {
+                old_consumed_row = consumed_rows;
+                old_buffered_row = buffered_rows;
             }
             BackfillState::Done(_, _) => panic!("should not report done multiple times"),
         };
         match &new_state {
             BackfillState::Init => {}
-            BackfillState::ConsumingUpstream(_, new_consumed_rows, new_buffered_rows) => {
-                new_crow = *new_consumed_rows;
-                new_brow = *new_buffered_rows;
+            BackfillState::ConsumingUpstream(_, consumed_rows, buffered_rows) => {
+                new_consumed_row = *consumed_rows;
+                new_buffered_row = *buffered_rows;
             }
-            BackfillState::Done(new_consumed_rows, new_buffered_rows) => {
+            BackfillState::Done(consumed_rows, buffered_rows) => {
                 tracing::debug!("actor {} done", actor);
-                new_crow = *new_consumed_rows;
-                new_brow = *new_buffered_rows;
+                new_consumed_row = *consumed_rows;
+                new_buffered_row = *buffered_rows;
                 self.done_count += 1;
                 let before_backfill_nodes = self
                     .backfill_order_state
@@ -178,15 +178,19 @@ impl Progress {
             }
         };
         debug_assert!(
-            new_crow >= old_crow,
+            new_consumed_row >= old_consumed_row,
+            "backfill progress should not go backward"
+        );
+        debug_assert!(
+            new_buffered_row >= old_buffered_row,
             "backfill progress should not go backward"
         );
         match backfill_upstream_type {
             BackfillUpstreamType::MView => {
-                self.mv_backfill_consumed_rows += new_crow - old_crow;
+                self.mv_backfill_consumed_rows += new_consumed_row - old_consumed_row;
             }
             BackfillUpstreamType::Source => {
-                self.source_backfill_consumed_rows += new_crow - old_crow;
+                self.source_backfill_consumed_rows += new_consumed_row - old_consumed_row;
             }
             BackfillUpstreamType::Values => {
                 // do not consider progress for values
@@ -194,8 +198,8 @@ impl Progress {
             BackfillUpstreamType::LocalityProvider => {
                 // Track LocalityProvider progress similar to MView
                 // Update buffered rows for precise progress calculation
-                self.mv_backfill_consumed_rows += new_crow - old_crow;
-                self.mv_backfill_buffered_rows += new_brow - old_brow;
+                self.mv_backfill_consumed_rows += new_consumed_row - old_consumed_row;
+                self.mv_backfill_buffered_rows += new_buffered_row - old_buffered_row;
             }
         }
         self.states.insert(actor, new_state);
