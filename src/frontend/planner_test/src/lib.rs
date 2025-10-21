@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 
 //! Data-driven tests.
@@ -863,7 +862,7 @@ impl TestCase {
 
         'sink: {
             if self.expected_outputs.contains(&TestType::SinkPlan) {
-                let plan_root = plan_root.clone();
+                let plan_root = plan_root;
                 let sink_name = "sink_test";
                 let mut options = BTreeMap::new();
                 options.insert("connector".to_owned(), "blackhole".to_owned());

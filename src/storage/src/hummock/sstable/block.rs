@@ -559,7 +559,7 @@ impl BlockBuilder {
             true
         };
 
-        let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
+        let diff_key = if self.entry_count.is_multiple_of(self.restart_count) || type_mismatch {
             let offset = utils::checked_into_u32(self.buf.len()).unwrap_or_else(|_| {
                 panic!(
                     "WARN overflow can't convert buf_len {} into u32 table {:?}",

@@ -174,9 +174,9 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let config = S::from_btreemap(param.properties)?;
-        let path = S::get_path(config.clone()).clone();
+        let path = S::get_path(config.clone());
         let op = S::new_operator(config.clone())?;
-        let batching_strategy = S::get_batching_strategy(config.clone());
+        let batching_strategy = S::get_batching_strategy(config);
         let engine_type = S::get_engine_type();
         let format_desc = match param.format_desc {
             Some(desc) => desc,
@@ -282,7 +282,7 @@ impl OpenDalSinkWriter {
 
 /// Private methods related to batching.
 impl OpenDalSinkWriter {
-    /// Method for judging whether batch condiction is met.
+    /// Method for judging whether batch condition is met.
     fn can_commit(&self) -> bool {
         self.duration_seconds_since_writer_created() >= self.batching_strategy.rollover_seconds
             || self.current_bached_row_num >= self.batching_strategy.max_row_count

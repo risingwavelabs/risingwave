@@ -1,0 +1,92 @@
+statement ok
+create table items (id int primary key, extra string, text string, embedding vector(3)) append only;
+
+statement ok
+create materialized view no_index_mv as select * from items;
+
+statement ok
+insert into items values (1, 'extra1', 'first', get_embedding('first'));
+
+statement ok
+create index i on items using flat (get_embedding(text)) include(text) with (distance_type = 'l2');
+
+statement ok
+insert into items values (2, 'extra2', 'second', get_embedding('second')), (3, 'extra3', 'third', '[7, 8, 9]'::vector(3));
+
+statement ok
+flush;
+
+query T
+select * from items order by id;
+----
+1 extra1 first [1,2,3]
+2 extra2 second [4,5,6]
+3 extra3 third [7,8,9]
+
+# test covering index on functional embedding column
+query T
+select id, text, power(distance, 2)::int from (select id, text, get_embedding('query') <-> get_embedding(text) as distance from no_index_mv order by distance limit 2) order by distance;
+----
+1 first 8
+2 second 35
+
+statement ok
+create view query_view as select id, text, power(distance, 2)::int as distance from (select id, text, get_embedding('query') <-> get_embedding(text) as distance from items order by distance limit 2);
+
+# ensure that vector index is used
+query T
+explain(verbose) select * from query_view;
+----
+<slt:ignore>BatchProject { exprs: [Field(Unnest($1), 1:Int32) as $expr1, Field(Unnest($1), 0:Int32) as $expr2, Pow(Field(Unnest($1), 2:Int32), 2:Float64)::Int32 as $expr3] }
+  └─BatchProjectSet { select_list: [Unnest($1)] }
+    └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, lookup_output: [("text", Varchar), ("items.id", Int32)], include_distance: true }
+      └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
+
+
+query T
+select * from query_view order by distance;
+----
+1 first 8
+2 second 35
+
+statement ok
+drop view query_view;
+
+# test non-covering index on functional embedding column
+query T
+select id, text, extra, power(distance, 2)::int from (select id, text, extra, get_embedding('query') <-> get_embedding(text) as distance from no_index_mv order by distance limit 2) order by distance;
+----
+1 first extra1 8
+2 second extra2 35
+
+statement ok
+create view query_view as select id, text, extra, power(distance, 2)::int as distance from (select id, text, extra, get_embedding('query') <-> get_embedding(text) as distance from items order by distance limit 2);
+
+# ensure that vector index is used
+query T
+explain(verbose) select * from query_view;
+----
+<slt:ignore>BatchProject { exprs: [$expr2, $expr1, items.extra, Pow($expr3, 2:Float64)::Int32 as $expr4] }
+<slt:ignore>└─BatchLookupJoin { type: Inner, predicate: $expr2 IS NOT DISTINCT FROM items.id, output: [$expr2, items.extra, $expr1, $expr3], lookup table: items }
+<slt:ignore>  └─BatchProject { exprs: [Field(Unnest($1), 0:Int32) as $expr1, Field(Unnest($1), 1:Int32) as $expr2, Field(Unnest($1), 2:Int32) as $expr3] }
+<slt:ignore>    └─BatchProjectSet { select_list: [Unnest($1)] }
+<slt:ignore>      └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, lookup_output: [("text", Varchar), ("items.id", Int32)], include_distance: true }
+<slt:ignore>        └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
+
+query T
+select * from query_view order by distance;
+----
+1 first extra1 8
+2 second extra2 35
+
+statement ok
+drop view query_view;
+
+statement ok
+drop index i;
+
+statement ok
+drop materialized view no_index_mv;
+
+statement ok
+drop table items;

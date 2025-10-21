@@ -136,7 +136,7 @@ pub fn serialize_props_with_secret(
             .unwrap()
             .find_map(|schema| schema.get_secret_by_id(&SecretId(v.secret_id)));
         let secret_name = secret
-            .map(|s| s.name.to_owned())
+            .map(|s| s.name.clone())
             .unwrap_or("not found".to_owned());
         result.insert(
             k,

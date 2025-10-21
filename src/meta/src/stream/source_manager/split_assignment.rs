@@ -337,11 +337,6 @@ impl SourceManagerCore {
                     discovered_splits.values().cloned().collect_vec(),
                 );
 
-                source_splits_discovered.insert(
-                    *source_id,
-                    discovered_splits.values().cloned().collect_vec(),
-                );
-
                 if let Some(new_assignment) = reassign_splits(
                     fragment_id,
                     prev_actor_splits,

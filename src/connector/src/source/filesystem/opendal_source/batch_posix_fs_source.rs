@@ -171,7 +171,7 @@ impl BatchPosixFsReader {
     async fn into_stream_inner(self) {
         for split in &self.splits {
             let files = self.collect_files_for_split(split).await?;
-            tracing::debug!(?files, ?split, "BatchPosixFsReader: colleted files");
+            tracing::debug!(?files, ?split, "BatchPosixFsReader: collected files");
 
             for file_path in files {
                 let full_path = Path::new(&self.properties.root).join(&file_path);

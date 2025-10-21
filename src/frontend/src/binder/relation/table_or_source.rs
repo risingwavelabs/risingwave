@@ -308,11 +308,7 @@ impl Binder {
                     if self.database_id != database_id
                         && !user.has_privilege(&PbObject::DatabaseId(database_id), AclMode::Connect)
                     {
-                        let db_name = self
-                            .catalog
-                            .get_database_by_id(&database_id)?
-                            .name
-                            .to_owned();
+                        let db_name = self.catalog.get_database_by_id(&database_id)?.name.clone();
 
                         return Err(PermissionDenied(format!(
                             "permission denied for database \"{db_name}\""

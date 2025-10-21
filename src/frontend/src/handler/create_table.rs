@@ -254,7 +254,7 @@ pub fn bind_sql_column_constraints(
     };
 
     let mut binder = Binder::new_for_ddl(session);
-    binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
+    binder.bind_columns_to_context(table_name, column_catalogs)?;
 
     for column in columns {
         let Some(idx) = column_catalogs
@@ -865,7 +865,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let non_generated_column_descs = columns
         .iter()
-        .filter(|&c| (!c.is_generated()))
+        .filter(|&c| !c.is_generated())
         .map(|c| c.column_desc.clone())
         .collect_vec();
     let non_generated_column_num = non_generated_column_descs.len();
@@ -1630,20 +1630,20 @@ pub async fn create_iceberg_engine_table(
 
                 let mut with_common = BTreeMap::new();
                 with_common.insert("connector".to_owned(), "iceberg".to_owned());
-                with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
-                with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
+                with_common.insert("database.name".to_owned(), iceberg_database_name);
+                with_common.insert("table.name".to_owned(), iceberg_table_name);
 
                 if let Some(s) = params.properties.get("hosted_catalog")
                     && s.eq_ignore_ascii_case("true")
                 {
                     with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
-                    with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
-                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+                    with_common.insert("catalog.uri".to_owned(), catalog_uri);
+                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user);
                     with_common.insert(
                         "catalog.jdbc.password".to_owned(),
                         meta_store_password.clone(),
                     );
-                    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
+                    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name);
                 }
 
                 with_common
@@ -1984,7 +1984,7 @@ pub async fn create_iceberg_engine_table(
                     ))
                 })?;
 
-            partition_columns.push(column.to_owned());
+            partition_columns.push(column);
         }
 
         ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, &pks).map_err(
@@ -2354,8 +2354,7 @@ fn get_source_and_resolved_table_name(
     let db_name = &session.database();
     let (schema_name, resolved_table_name) =
         Binder::resolve_schema_qualified_name(db_name, &table_name)?;
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let (format_encode, source_name) =
         Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;

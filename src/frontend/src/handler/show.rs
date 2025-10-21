@@ -73,7 +73,7 @@ pub fn get_columns_from_sink(
     sink_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
     let binder = Binder::new_for_system(session);
-    let sink = binder.bind_sink_by_name(sink_name.clone())?;
+    let sink = binder.bind_sink_by_name(sink_name)?;
     Ok(sink.sink_catalog.full_columns().to_vec())
 }
 
@@ -82,7 +82,7 @@ pub fn get_columns_from_view(
     view_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
     let binder = Binder::new_for_system(session);
-    let view = binder.bind_view_by_name(view_name.clone())?;
+    let view = binder.bind_view_by_name(view_name)?;
 
     Ok(view
         .view_catalog
@@ -792,7 +792,7 @@ pub async fn handle_show_object(
                 let session_id = format!("{}", s.id().0);
                 let user = s.user_name();
                 let host = format!("{}", s.peer_addr());
-                let database = s.database().to_owned();
+                let database = s.database().clone();
 
                 s.get_cursor_manager()
                     .iter_subscription_cursors(

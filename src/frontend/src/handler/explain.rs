@@ -142,15 +142,8 @@ pub async fn do_handle_explain(
                         columns,
                         emit_mode,
                         ..
-                    } => gen_create_mv_plan(
-                        &session,
-                        context.clone(),
-                        *query,
-                        name,
-                        columns,
-                        emit_mode,
-                    )
-                    .map(|(plan, table)| (PhysicalPlanRef::Stream(plan), Some(table))),
+                    } => gen_create_mv_plan(&session, context, *query, name, columns, emit_mode)
+                        .map(|(plan, table)| (PhysicalPlanRef::Stream(plan), Some(table))),
                     Statement::CreateView {
                         materialized: false,
                         ..
@@ -180,7 +173,7 @@ pub async fn do_handle_explain(
                             resolve_index_schema(&session, name, table_name)?;
                         gen_create_index_plan(
                             &session,
-                            context.clone(),
+                            context,
                             schema_name,
                             table,
                             index_table_name,
@@ -239,7 +232,7 @@ pub async fn do_handle_explain(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
                                 session.config().batch_parallelism().0,
-                                session.config().timezone().to_owned(),
+                                session.config().timezone(),
                                 plan.clone(),
                             )?);
                             batch_plan_fragmenter_fmt = if explain_format == ExplainFormat::Dot {

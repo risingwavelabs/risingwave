@@ -346,7 +346,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let handle_watermark_row = |watermark_row: Option<OwnedRow>| match watermark_row {
             Some(row) => {
                 if row.len() == 1 {
-                    Ok::<_, StreamExecutorError>(row[0].to_owned())
+                    Ok::<_, StreamExecutorError>(row[0].clone())
                 } else {
                     bail!("The watermark row should only contain 1 datum");
                 }
@@ -497,7 +497,7 @@ mod tests {
         );
         let eval_error_report = ActorEvalErrorReport {
             actor_context: ctx.clone(),
-            identity: info.identity.clone().into(),
+            identity: info.identity.into(),
         };
 
         (

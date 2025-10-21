@@ -16,10 +16,10 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
+use risingwave_pb::stream_plan::{Columns, PbStreamSource, SourceNode};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, TableCatalogBuilder, childless_record};
@@ -36,6 +36,9 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamSource {
     pub base: PlanBase<Stream>,
     pub(crate) core: generic::Source,
+    /// Downstream columns are used by list node to know which columns are needed.
+    /// For example, iceberg list node will use this info to plan files to read.
+    pub(crate) downstream_columns: Option<Vec<ColumnCatalog>>,
 }
 
 impl StreamSource {
@@ -48,7 +51,11 @@ impl StreamSource {
             WatermarkColumns::new(),
             MonotonicityMap::new(),
         );
-        Self { base, core }
+        Self {
+            base,
+            core,
+            downstream_columns: None,
+        }
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
@@ -110,6 +117,9 @@ impl StreamNode for StreamSource {
                 with_properties,
                 rate_limit: source_catalog.rate_limit,
                 secret_refs,
+                downstream_columns: self.downstream_columns.as_ref().map(|cols| Columns {
+                    columns: cols.iter().map(|c| c.to_protobuf()).collect_vec(),
+                }),
             }
         });
         PbNodeBody::Source(Box::new(SourceNode { source_inner }))

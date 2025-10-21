@@ -60,7 +60,7 @@ pub async fn handle_create_schema(
             };
         }
         let db = reader.get_database_by_name(database_name)?;
-        (db.id(), db.name.to_owned(), db.owner())
+        (db.id(), db.name.clone(), db.owner())
     };
 
     let schema_owner = if let Some(owner) = owner {

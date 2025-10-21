@@ -240,7 +240,7 @@ impl StreamReaderBuilder {
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         e.variant_name().to_owned(),
                         self.source_id.table_id.to_string(),
-                        self.source_name.to_owned(),
+                        self.source_name.clone(),
                         self.actor_ctx.fragment_id.to_string(),
                     ]);
                     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -275,7 +275,7 @@ impl StreamReaderBuilder {
                         GLOBAL_ERROR_METRICS.user_source_error.report([
                             e.variant_name().to_owned(),
                             self.source_id.table_id.to_string(),
-                            self.source_name.to_owned(),
+                            self.source_name.clone(),
                             self.actor_ctx.fragment_id.to_string(),
                         ]);
                         is_error = true;
