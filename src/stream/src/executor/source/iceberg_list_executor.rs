@@ -124,7 +124,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
                 .collect::<Vec<_>>()
         });
 
-        println!("downstream_columns: {:?}", downstream_columns);
+        tracing::debug!("downstream_columns: {:?}", downstream_columns);
 
         yield Message::Barrier(first_barrier);
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
