@@ -52,12 +52,14 @@ impl StreamChunkCompactor {
             for (row, mut op_row) in chunk.to_rows_mut() {
                 let op = op_row.op().normalize_update();
                 let key = row.project(&key_indices);
+                // Make all rows invisible first.
                 op_row.set_vis(false);
                 op_row.set_op(op);
                 cb.apply_op_row(op, key, op_row);
             }
         }
 
+        // For the rows that survive compaction, make them visible.
         for record in cb.into_records() {
             match record {
                 Record::Insert { mut new_row } => new_row.set_vis(true),
@@ -66,13 +68,12 @@ impl StreamChunkCompactor {
                     mut old_row,
                     mut new_row,
                 } => {
-                    if old_row.row_ref() != new_row.row_ref() {
-                        old_row.set_vis(true);
-                        new_row.set_vis(true);
-                        if old_row.same_chunk(&new_row) && old_row.index() + 1 == new_row.index() {
-                            old_row.set_op(Op::UpdateDelete);
-                            new_row.set_op(Op::UpdateInsert);
-                        }
+                    old_row.set_vis(true);
+                    new_row.set_vis(true);
+                    // Ops of adjacent updates can be set to `U-` and `U+`.
+                    if old_row.same_chunk(&new_row) && old_row.index() + 1 == new_row.index() {
+                        old_row.set_op(Op::UpdateDelete);
+                        new_row.set_op(Op::UpdateInsert);
                     }
                 }
             }
