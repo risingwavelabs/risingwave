@@ -41,6 +41,12 @@ random_data users
 random_data users
 
 
+system ok
+docker ps --all
+----
+ABCD
+
+
 query T
 select payload from users limit 1;
 ----
