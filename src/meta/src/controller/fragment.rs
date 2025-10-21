@@ -810,20 +810,28 @@ impl CatalogController {
     }
 
     /// Returns pairs of (job id, actor ids), where actors belong to CDC table backfill fragment of the job.
-    pub async fn cdc_table_backfill_actor_ids(&self) -> MetaResult<HashMap<u32, HashSet<u32>>> {
-        let inner = self.inner.read().await;
-        let mut job_id_actor_ids = HashMap::default();
-        let stream_cdc_scan_flag = FragmentTypeFlag::StreamCdcScan as i32;
-        let fragment_type_mask = stream_cdc_scan_flag;
-        let fragment_actors: Vec<(fragment::Model, Vec<actor::Model>)> = FragmentModel::find()
-            .find_with_related(Actor)
-            .filter(fragment::Column::FragmentTypeMask.eq(fragment_type_mask))
-            .all(&inner.db)
-            .await?;
-        for (fragment, actors) in fragment_actors {
-            let e: &mut HashSet<u32> = job_id_actor_ids.entry(fragment.job_id as _).or_default();
-            e.extend(actors.iter().map(|a| a.actor_id as u32));
-        }
+    pub fn cdc_table_backfill_actor_ids(&self) -> MetaResult<HashMap<u32, HashSet<u32>>> {
+        let guard = self.env.shared_actor_info.read_guard();
+        let job_id_actor_ids = guard
+            .iter_over_fragments()
+            .filter(|(_, fragment)| {
+                fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::StreamCdcScan)
+            })
+            .map(|(_, fragment)| {
+                let job_id = fragment.job_id as u32;
+                let actor_ids: HashSet<u32> = fragment.actors.keys().copied().collect();
+                (job_id, actor_ids)
+            })
+            .into_group_map()
+            .into_iter()
+            .map(|(job_id, actor_ids_vec)| {
+                let actor_ids = actor_ids_vec.into_iter().flatten().collect();
+                (job_id, actor_ids)
+            })
+            .collect();
+
         Ok(job_id_actor_ids)
     }
 
@@ -919,20 +927,6 @@ impl CatalogController {
         Ok(actor_infos)
     }
 
-    pub async fn list_source_actors(&self) -> MetaResult<Vec<(ActorId, FragmentId)>> {
-        let inner = self.inner.read().await;
-
-        let source_actors: Vec<(ActorId, FragmentId)> = Actor::find()
-            .select_only()
-            .filter(actor::Column::Splits.is_not_null())
-            .columns([actor::Column::ActorId, actor::Column::FragmentId])
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        Ok(source_actors)
-    }
-
     pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
         let guard = self.env.shared_actor_info.read_guard();
         guard
@@ -1025,19 +1019,22 @@ impl CatalogController {
         let (sink_ids, _): (Vec<_>, Vec<_>) = sink_id_names.iter().cloned().unzip();
         let sink_name_mapping: HashMap<SinkId, String> = sink_id_names.into_iter().collect();
 
-        let actor_with_type: Vec<(ActorId, SinkId)> = Actor::find()
-            .select_only()
-            .column(actor::Column::ActorId)
-            .column(fragment::Column::JobId)
-            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-            .filter(
-                fragment::Column::JobId
-                    .is_in(sink_ids)
-                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Sink)),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let actor_with_type: Vec<(ActorId, ObjectId)> = {
+            let info = self.env.shared_actor_infos().read_guard();
+
+            info.iter_over_fragments()
+                .filter(|(_, fragment)| {
+                    sink_ids.contains(&fragment.job_id)
+                        && fragment.fragment_type_mask.contains(FragmentTypeFlag::Sink)
+                })
+                .flat_map(|(_, fragment)| {
+                    fragment
+                        .actors
+                        .keys()
+                        .map(move |actor_id| (*actor_id as _, fragment.job_id as _))
+                })
+                .collect()
+        };
 
         let mut sink_actor_mapping = HashMap::new();
         for (actor_id, sink_id) in actor_with_type {
