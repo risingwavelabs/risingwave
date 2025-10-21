@@ -10,7 +10,7 @@ repository = { workspace = true }
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
 clap = { workspace = true }
-console = "0.15"
+console = "0.16"
 dialoguer = "0.12"
 enum-iterator = "2"
 fs-err = "3.1.0"

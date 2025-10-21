@@ -2584,19 +2584,6 @@ checksum = "510ca239cf13b7f8d16a2b48f263de7b4f8c566f0af58d901031473c76afb1e3"
 
 [[package]]
 name = "console"
-version = "0.15.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "054ccb5b10f9f2cbf51eb355ca1d05c2d279ce1804688d0db74b4733a5aeafd8"
-dependencies = [
- "encode_unicode",
- "libc",
- "once_cell",
- "unicode-width 0.2.0",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "console"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b430743a6eb14e9764d4260d4c0d8123087d504eeb9c48f2b2a5e810dd369df4"
@@ -4724,7 +4711,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25f104b501bf2364e78d0d3974cbc774f738f5865306ed128e1e0d7499c0ad96"
 dependencies = [
- "console 0.16.1",
+ "console",
  "shell-words",
  "tempfile",
  "zeroize",
@@ -6984,14 +6971,14 @@ checksum = "c40411d0e5c63ef1323c3d09ce5ec6d84d71531e18daed0743fccea279d7deb6"
 
 [[package]]
 name = "indicatif"
-version = "0.17.11"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
+checksum = "70a646d946d06bedbbc4cac4c218acf4bbf2d87757a784857025f4d447e4e1cd"
 dependencies = [
- "console 0.15.11",
- "number_prefix",
+ "console",
  "portable-atomic",
  "unicode-width 0.2.0",
+ "unit-prefix",
  "web-time",
 ]
 
@@ -11130,7 +11117,7 @@ version = "2.7.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "console 0.15.11",
+ "console",
  "fs-err",
  "gcloud-pubsub",
  "glob",
@@ -11162,7 +11149,7 @@ version = "2.7.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
- "console 0.15.11",
+ "console",
  "dialoguer",
  "enum-iterator",
  "fs-err",
@@ -11338,7 +11325,7 @@ name = "risingwave_cmd_all"
 version = "2.7.0-alpha"
 dependencies = [
  "clap",
- "console 0.15.11",
+ "console",
  "const-str",
  "expect-test",
  "home",
@@ -12649,7 +12636,7 @@ name = "risingwave_rt"
 version = "2.7.0-alpha"
 dependencies = [
  "await-tree",
- "console 0.15.11",
+ "console",
  "console-subscriber",
  "either",
  "fastrace",
@@ -12684,7 +12671,7 @@ dependencies = [
  "async-trait",
  "cfg-or-panic",
  "clap",
- "console 0.15.11",
+ "console",
  "expect-test",
  "fail",
  "futures",
@@ -12733,7 +12720,7 @@ name = "risingwave_sqlparser"
 version = "2.7.0-alpha"
 dependencies = [
  "anyhow",
- "console 0.15.11",
+ "console",
  "itertools 0.14.0",
  "libtest-mimic",
  "matches",
@@ -12756,7 +12743,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "console 0.15.11",
+ "console",
  "expect-test",
  "itertools 0.14.0",
  "libtest-mimic",
@@ -15097,7 +15084,7 @@ dependencies = [
  "getrandom 0.3.1",
  "once_cell",
  "rustix 1.0.3",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -16151,6 +16138,12 @@ name = "unindent"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7de7d73e1754487cb58364ee906a499937a0dfabd86bcb980fa99ec8c8fa2ce"
+
+[[package]]
+name = "unit-prefix"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "323402cff2dd658f39ca17c789b502021b3f18707c91cdf22e3838e1b4023817"
 
 [[package]]
 name = "unsafe-libyaml"
