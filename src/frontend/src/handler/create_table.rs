@@ -59,6 +59,7 @@ use risingwave_sqlparser::ast::{
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
+use thiserror_ext::AsReport;
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
 use super::{RwPgResponse, alter_streaming_rate_limit};
