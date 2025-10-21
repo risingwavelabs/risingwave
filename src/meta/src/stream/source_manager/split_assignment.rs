@@ -339,10 +339,6 @@ impl SourceManagerCore {
                         enable_adaptive: handle.enable_adaptive_splits,
                     },
                 ) {
-                    println!(
-                        "xxk fragment {}, assignment {:?}",
-                        fragment_id, new_assignment
-                    );
                     split_assignment.insert(fragment_id, new_assignment);
                 }
             }

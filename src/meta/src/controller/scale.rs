@@ -286,14 +286,6 @@ pub async fn render_jobs<C>(
 where
     C: ConnectionTrait,
 {
-    let jobs: HashMap<_, _> = StreamingJob::find()
-        .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
-        .all(txn)
-        .await?
-        .into_iter()
-        .map(|job| (job.job_id, job))
-        .collect();
-
     let excluded_fragments_query = FragmentRelation::find()
         .select_only()
         .column(fragment_relation::Column::TargetFragmentId)
@@ -314,19 +306,37 @@ where
 
     let ensembles = find_fragment_no_shuffle_dags_detailed(txn, &fragments).await?;
 
-    let related_fragment_ids: HashSet<_> = ensembles
-        .iter()
-        .flat_map(|graph| graph.components.iter().cloned())
-        .collect();
-
     let fragments = Fragment::find()
-        .filter(fragment::Column::FragmentId.is_in(related_fragment_ids.clone()))
+        .filter(
+            fragment::Column::FragmentId.is_in(
+                ensembles
+                    .iter()
+                    .flat_map(|graph| graph.components.iter())
+                    .cloned()
+                    .collect_vec(),
+            ),
+        )
         .all(txn)
         .await?;
 
     let fragment_map: HashMap<_, _> = fragments
         .into_iter()
         .map(|fragment| (fragment.fragment_id, fragment))
+        .collect();
+
+    let job_ids = fragment_map
+        .values()
+        .map(|fragment| fragment.job_id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect_vec();
+
+    let jobs: HashMap<_, _> = StreamingJob::find()
+        .filter(streaming_job::Column::JobId.is_in(job_ids))
+        .all(txn)
+        .await?
+        .into_iter()
+        .map(|job| (job.job_id, job))
         .collect();
 
     let fragments = render_no_shuffle_ensembles(
@@ -365,6 +375,49 @@ where
 {
     if ensembles.is_empty() {
         return Ok(HashMap::new());
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        // Debug-only assertions to catch inconsistent ensemble metadata early.
+        debug_assert!(
+            ensembles
+                .iter()
+                .all(|ensemble| ensemble.entries.is_subset(&ensemble.components)),
+            "entries must be subset of components"
+        );
+
+        let fragment_ids: Vec<_> = ensembles
+            .iter()
+            .flat_map(|ensemble| ensemble.components.iter())
+            .collect();
+
+        let missing_fragments: Vec<_> = fragment_ids
+            .iter()
+            .filter(|fragment_id| !fragment_map.contains_key(fragment_id))
+            .collect();
+
+        debug_assert!(
+            missing_fragments.is_empty(),
+            "missing fragments in fragment_map: {:?}",
+            missing_fragments
+        );
+
+        let missing_jobs: Vec<ObjectId> = fragment_ids
+            .iter()
+            .filter_map(|fragment_id| {
+                fragment_map
+                    .get(fragment_id)
+                    .map(|fragment| fragment.job_id)
+            })
+            .filter(|jid| !jobs.contains_key(jid))
+            .collect();
+
+        debug_assert!(
+            missing_jobs.is_empty(),
+            "missing jobs for fragments' job_id: {:?}",
+            missing_jobs
+        );
     }
 
     let (fragment_source_ids, fragment_splits) =
