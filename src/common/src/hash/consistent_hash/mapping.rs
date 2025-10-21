@@ -126,7 +126,7 @@ pub trait VnodeMappingItem {
     type Item: Copy + Ord + Hash + Debug;
 }
 
-/// Exapnded mapping from virtual nodes to items, essentially a vector of items and can be indexed
+/// Expanded mapping from virtual nodes to items, essentially a vector of items and can be indexed
 /// by virtual nodes.
 pub type ExpandedMapping<T> = Vec<<T as VnodeMappingItem>::Item>;
 

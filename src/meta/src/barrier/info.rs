@@ -677,6 +677,7 @@ impl InflightDatabaseInfo {
                 | Command::ConnectorPropsChange(_)
                 | Command::StartFragmentBackfill { .. }
                 | Command::Refresh { .. }
+                | Command::ListFinish { .. }
                 | Command::LoadFinish { .. } => {
                     return None;
                 }

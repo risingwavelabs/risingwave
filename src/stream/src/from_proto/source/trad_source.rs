@@ -122,7 +122,7 @@ pub fn create_source_desc_builder(
         // passed via `StreamSource` so null pk may be emitted to downstream.
         //
         // TODO: use the correct information to fill in pk_dicies.
-        // We should consdier add back the "pk_column_ids" field removed by #8841 in
+        // We should consider add back the "pk_column_ids" field removed by #8841 in
         // StreamSource
         params.info.pk_indices.clone(),
     )
@@ -214,6 +214,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     IcebergListExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
+                        source
+                            .downstream_columns
+                            .as_ref()
+                            .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,

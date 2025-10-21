@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
-use super::utils::{Distill, childless_record, scan_ranges_as_strs, to_pb_time_travel_as_of};
+use super::utils::{Distill, childless_record, scan_ranges_as_strs, to_batch_query_epoch};
 use super::{BatchPlanRef as PlanRef, ExprRewritable, PlanBase, ToDistributedBatch, generic};
 use crate::catalog::ColumnId;
 use crate::error::Result;
@@ -194,7 +194,7 @@ impl TryToBatchPb for BatchSeqScan {
             vnode_bitmap: None,
             ordered: !self.order().is_any(),
             limit: *self.limit(),
-            as_of: to_pb_time_travel_as_of(&self.as_of)?,
+            query_epoch: to_batch_query_epoch(&self.as_of)?,
         }))
     }
 }

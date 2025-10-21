@@ -20,7 +20,7 @@ use crate::catalog::system_catalog::rw_catalog::rw_types::read_rw_types;
 use crate::error::Result;
 
 /// The catalog `pg_type` stores information about data types.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-type.html`
 
 // TODO: Make it a view atop of `rw_types` to reduce code duplication of the
 // `read` function, while reserving the property that `oid` acts as the

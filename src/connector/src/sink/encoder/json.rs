@@ -169,7 +169,7 @@ impl RowEncoder for JsonEncoder {
         Ok(if let Some(param) = &self.kafka_connect {
             json_converter_with_schema(
                 Value::Object(mappings),
-                param.schema_name.to_owned(),
+                param.schema_name.clone(),
                 col_indices.into_iter().map(|i| &self.schema[i]),
             )
         } else {

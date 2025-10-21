@@ -128,7 +128,8 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
         )
         .to_owned();
 
-    let common_table_expr = CommonTableExpression::new()
+    let mut common_table_expr = CommonTableExpression::new();
+    common_table_expr
         .query(
             base_query
                 .union(UnionType::All, belonged_obj_query)
@@ -136,8 +137,7 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
                 .to_owned(),
         )
         .column(cte_return_alias.clone())
-        .table_name(cte_alias.clone())
-        .to_owned();
+        .table_name(cte_alias.clone());
 
     SelectStatement::new()
         .distinct()
@@ -160,7 +160,6 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
                 .cte(common_table_expr)
                 .to_owned(),
         )
-        .to_owned()
 }
 
 /// This function will construct a query using recursive cte to find if dependent objects are already relying on the target table.
@@ -238,14 +237,14 @@ pub fn construct_sink_cycle_check_query(
         )
         .to_owned();
 
-    let common_table_expr = CommonTableExpression::new()
+    let mut common_table_expr = CommonTableExpression::new();
+    common_table_expr
         .query(base_query.union(UnionType::All, cte_referencing).to_owned())
         .columns([
             object_dependency::Column::Oid,
             object_dependency::Column::UsedBy,
         ])
-        .table_name(cte_alias.clone())
-        .to_owned();
+        .table_name(cte_alias.clone());
 
     SelectStatement::new()
         .expr(Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy)).count())
@@ -261,7 +260,6 @@ pub fn construct_sink_cycle_check_query(
                 .cte(common_table_expr)
                 .to_owned(),
         )
-        .to_owned()
 }
 
 #[derive(Clone, DerivePartialModel, FromQueryResult, Debug)]
@@ -919,14 +917,14 @@ pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery 
         )
         .to_owned();
 
-    let common_table_expr = CommonTableExpression::new()
+    let mut common_table_expr = CommonTableExpression::new();
+    common_table_expr
         .query(base_query.union(UnionType::All, cte_referencing).to_owned())
         .columns([
             cte_return_privilege_alias.clone(),
             cte_return_user_alias.clone(),
         ])
-        .table_name(cte_alias.clone())
-        .to_owned();
+        .table_name(cte_alias.clone());
 
     SelectStatement::new()
         .columns([cte_return_privilege_alias, cte_return_user_alias])
@@ -938,7 +936,6 @@ pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery 
                 .cte(common_table_expr)
                 .to_owned(),
         )
-        .to_owned()
 }
 
 pub async fn get_internal_tables_by_id<C>(job_id: ObjectId, db: &C) -> MetaResult<Vec<TableId>>
@@ -2037,7 +2034,7 @@ pub fn filter_workers_by_resource_group(
                 .map(|node_label| node_label.as_str() == resource_group)
                 .unwrap_or(false)
         })
-        .map(|(id, _)| (*id as WorkerId))
+        .map(|(id, _)| *id as WorkerId)
         .collect()
 }
 

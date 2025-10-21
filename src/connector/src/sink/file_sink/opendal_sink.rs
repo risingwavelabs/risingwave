@@ -282,7 +282,7 @@ impl OpenDalSinkWriter {
 
 /// Private methods related to batching.
 impl OpenDalSinkWriter {
-    /// Method for judging whether batch condiction is met.
+    /// Method for judging whether batch condition is met.
     fn can_commit(&self) -> bool {
         self.duration_seconds_since_writer_created() >= self.batching_strategy.rollover_seconds
             || self.current_bached_row_num >= self.batching_strategy.max_row_count

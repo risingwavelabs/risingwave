@@ -91,6 +91,7 @@ impl CreatingStreamingJobControl {
         let backfill_order_state = BackfillOrderState::new(
             info.fragment_backfill_ordering.clone(),
             &info.stream_job_fragments,
+            info.locality_fragment_state_table_mapping.clone(),
         );
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             [(

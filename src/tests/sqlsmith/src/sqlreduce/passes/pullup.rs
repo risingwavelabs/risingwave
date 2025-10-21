@@ -54,12 +54,12 @@ impl Transform for BinaryOperatorPullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[i]
+                if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[*i]
                     && let Expr::BinaryOp { right, .. } = expr
                 {
                     *expr = *right.clone();
@@ -112,12 +112,12 @@ impl Transform for CasePullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[i]
+                if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[*i]
                     && let Expr::Case { results, .. } = expr
                 {
                     *expr = results[0].clone();
@@ -166,12 +166,12 @@ impl Transform for RowPullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[i]
+                if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[*i]
                     && let Expr::Row(elements) = expr
                 {
                     *expr = Expr::Row(vec![elements[0].clone()]);
@@ -218,12 +218,12 @@ impl Transform for ArrayPullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Some(query) = extract_query_mut(ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[i]
+                if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[*i]
                     && let Expr::Array(array) = expr
                     && let Some(elem) = array.elem.first()
                 {
@@ -273,7 +273,7 @@ impl Transform for SetOperationPullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
+    fn apply_on(&self, ast: Ast, reduction_points: &[usize]) -> Ast {
         let mut new_ast = ast.clone();
         if let Some(query) = extract_query_mut(&mut new_ast)
             && let SetExpr::SetOperation { left, right, .. } = &mut query.body
@@ -308,7 +308,7 @@ mod tests {
         let reduction_points = BinaryOperatorPullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0]);
 
-        let new_ast = BinaryOperatorPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = BinaryOperatorPullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT 3;")[0].clone());
     }
 
@@ -319,7 +319,7 @@ mod tests {
         let reduction_points = BinaryOperatorPullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0, 1]);
 
-        let new_ast = BinaryOperatorPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = BinaryOperatorPullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT 3, 6;")[0].clone());
     }
 
@@ -330,7 +330,7 @@ mod tests {
         let reduction_points = CasePullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0]);
 
-        let new_ast = CasePullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = CasePullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
     }
 
@@ -341,7 +341,7 @@ mod tests {
         let reduction_points = RowPullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0]);
 
-        let new_ast = RowPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = RowPullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT ROW(1);")[0].clone());
     }
 
@@ -352,7 +352,7 @@ mod tests {
         let reduction_points = RowPullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0, 1]);
 
-        let new_ast = RowPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = RowPullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT ROW(1), ROW(4);")[0].clone());
     }
 
@@ -363,7 +363,7 @@ mod tests {
         let reduction_points = ArrayPullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0]);
 
-        let new_ast = ArrayPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = ArrayPullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT ARRAY[1];")[0].clone());
     }
 
@@ -374,7 +374,7 @@ mod tests {
         let reduction_points = ArrayPullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0, 1]);
 
-        let new_ast = ArrayPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = ArrayPullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT ARRAY[1], ARRAY[4];")[0].clone());
     }
 
@@ -385,7 +385,7 @@ mod tests {
         let reduction_points = CasePullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0]);
 
-        let new_ast = CasePullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = CasePullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
     }
 
@@ -396,7 +396,7 @@ mod tests {
         let reduction_points = SetOperationPullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0, 1]);
 
-        let new_ast = SetOperationPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = SetOperationPullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
     }
 
@@ -407,7 +407,7 @@ mod tests {
         let reduction_points = SetOperationPullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0, 1]);
 
-        let new_ast = SetOperationPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = SetOperationPullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
     }
 
@@ -418,7 +418,7 @@ mod tests {
         let reduction_points = SetOperationPullup.get_reduction_points(ast[0].clone());
         assert_eq!(reduction_points, vec![0, 1]);
 
-        let new_ast = SetOperationPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        let new_ast = SetOperationPullup.apply_on(ast[0].clone(), &reduction_points);
         assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
     }
 }

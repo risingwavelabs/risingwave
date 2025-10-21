@@ -505,7 +505,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             GLOBAL_ERROR_METRICS.user_source_error.report([
                                 "SourceReaderError".to_owned(),
                                 self.source_id.to_string(),
-                                self.source_name.to_owned(),
+                                self.source_name.clone(),
                                 self.actor_ctx.fragment_id.to_string(),
                             ]);
 
@@ -1058,10 +1058,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         states: &mut BackfillStates,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
-        let target_splits: HashSet<SplitId> = target_splits
-            .into_iter()
-            .map(|split| (split.id()))
-            .collect();
+        let target_splits: HashSet<SplitId> =
+            target_splits.into_iter().map(|split| split.id()).collect();
 
         let mut split_changed = false;
         let mut newly_added_splits = vec![];
