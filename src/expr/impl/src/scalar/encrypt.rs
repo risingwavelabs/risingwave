@@ -217,7 +217,7 @@ pub enum PgpError {
 /// Options are parsed from a comma-separated string format: "key1=value1,key2=value2"
 #[derive(Debug, Clone)]
 pub struct PgpOptions {
-    /// Compression algorithm (0=none, 1=zip, 2=zlib)
+    /// Compression algorithm (0=none, 1=zip, 2=zlib, 3=bzip2)
     pub compress_algo: Option<CompressionAlgorithm>,
     /// Cipher algorithm (aes128, aes192, aes256, 3des)
     pub cipher_algo: Option<SymmetricAlgorithm>,
@@ -304,10 +304,11 @@ impl PgpOptions {
 
             match key {
                 "compress-algo" => {
-                    opts.compress_algo = Some(match value {
-                        "0" => CompressionAlgorithm::Uncompressed,
-                        "1" => CompressionAlgorithm::Zip,
-                        "2" => CompressionAlgorithm::Zlib,
+                    opts.compress_algo = Some(match value.to_lowercase().as_str() {
+                        "0" | "none" => CompressionAlgorithm::Uncompressed,
+                        "1" | "zip" => CompressionAlgorithm::Zip,
+                        "2" | "zlib" => CompressionAlgorithm::Zlib,
+                        "3" | "bzip2" => CompressionAlgorithm::BZip2,
                         _ => {
                             return Err(PgpError::InvalidOption(format!(
                                 "Invalid compress-algo: {}",
@@ -498,9 +499,18 @@ fn pgp_sym_encrypt_internal(
 
     let mut sink = Vec::new();
 
-    // TODO: Implement compression support
-    // For now, we'll skip compression and implement it later when we have the correct API
-    let message = Message::new(&mut sink);
+    // Apply compression if specified
+    let message = if let Some(compress_algo) = opts.compress_algo {
+        if compress_algo != CompressionAlgorithm::Uncompressed {
+            Compressor::new(Message::new(&mut sink))
+                .algo(compress_algo)
+                .build()?
+        } else {
+            Message::new(&mut sink)
+        }
+    } else {
+        Message::new(&mut sink)
+    };
 
     // Encrypt with password using SKESK (Symmetric-Key Encrypted Session Key)
     let cipher_algo = opts.cipher_algo.unwrap_or(SymmetricAlgorithm::AES128);
@@ -658,9 +668,18 @@ fn pgp_pub_encrypt_internal(
 
     let mut sink = Vec::new();
 
-    // TODO: Implement compression support
-    // For now, we'll skip compression and implement it later when we have the correct API
-    let message = Message::new(&mut sink);
+    // Apply compression if specified
+    let message = if let Some(compress_algo) = opts.compress_algo {
+        if compress_algo != CompressionAlgorithm::Uncompressed {
+            Compressor::new(Message::new(&mut sink))
+                .algo(compress_algo)
+                .build()?
+        } else {
+            Message::new(&mut sink)
+        }
+    } else {
+        Message::new(&mut sink)
+    };
 
     // Encrypt with public key
     let cipher_algo = opts.cipher_algo.unwrap_or(SymmetricAlgorithm::AES128);

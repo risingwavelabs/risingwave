@@ -2147,6 +2147,8 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db26bf1f092fd5e05b5ab3be2f290915aeb6f3f20c4e9f86ce0f07f336c2412f"
 dependencies = [
+ "bzip2 0.4.4",
+ "flate2",
  "libc",
 ]
 
@@ -14069,6 +14071,7 @@ dependencies = [
  "block-padding",
  "blowfish",
  "buffered-reader",
+ "bzip2 0.4.4",
  "camellia",
  "cast5",
  "cfb-mode",
@@ -14083,6 +14086,7 @@ dependencies = [
  "ecdsa 0.16.9",
  "ed25519",
  "ed25519-dalek",
+ "flate2",
  "getrandom 0.2.11",
  "idea",
  "idna",

@@ -13,11 +13,29 @@ SELECT pgp_sym_decrypt(pgp_sym_encrypt('test data'::bytea, 'password', 'cipher-a
 ----
 \x746573742064617461
 
-# Test pgp_sym_encrypt with compress-algo option
+# Test pgp_sym_encrypt with compress-algo=0 (no compression)
 query T
-SELECT pgp_sym_decrypt(pgp_sym_encrypt('compressed data'::bytea, 'secret', 'compress-algo=1'), 'secret');
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('uncompressed data'::bytea, 'secret', 'compress-algo=0'), 'secret');
 ----
-\x636f6d707265737365642064617461
+\x756e636f6d707265737365642064617461
+
+# Test pgp_sym_encrypt with compress-algo=1 (ZIP compression)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('zip compressed data'::bytea, 'secret', 'compress-algo=1'), 'secret');
+----
+\x7a697020636f6d707265737365642064617461
+
+# Test pgp_sym_encrypt with compress-algo=2 (ZLIB compression)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('zlib compressed data'::bytea, 'secret', 'compress-algo=2'), 'secret');
+----
+\x7a6c696220636f6d707265737365642064617461
+
+# Test pgp_sym_encrypt with compress-algo=3 (BZIP2 compression)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('bzip2 compressed data'::bytea, 'secret', 'compress-algo=3'), 'secret');
+----
+\x627a69703220636f6d707265737365642064617461
 
 # Test pgp_sym_encrypt with s2k-count option
 query T
@@ -74,6 +92,34 @@ SELECT pgp_sym_encrypt('data'::bytea, 'password', 'invalid-option=value');
 # Test pgp_sym_encrypt with invalid compress-algo should fail
 statement error
 SELECT pgp_sym_encrypt('data'::bytea, 'password', 'compress-algo=5');
+
+# Test pgp_sym_encrypt with compress-algo=none (should work like compress-algo=0)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('none compression'::bytea, 'secret', 'compress-algo=none'), 'secret');
+----
+\x6e6f6e6520636f6d7072657373696f6e
+
+# Test pgp_sym_encrypt with compress-algo=zip (should work like compress-algo=1)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('zip compression'::bytea, 'secret', 'compress-algo=zip'), 'secret');
+----
+\x7a697020636f6d7072657373696f6e
+
+# Test pgp_sym_encrypt with compress-algo=zlib (should work like compress-algo=2)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('zlib compression'::bytea, 'secret', 'compress-algo=zlib'), 'secret');
+----
+\x7a6c696220636f6d7072657373696f6e
+
+# Test pgp_sym_encrypt with compress-algo=bzip2 (should work like compress-algo=3)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('bzip2 compression'::bytea, 'secret', 'compress-algo=bzip2'), 'secret');
+----
+\x627a69703220636f6d7072657373696f6e
+
+# Test pgp_sym_encrypt with invalid compress-algo name should fail
+statement error
+SELECT pgp_sym_encrypt('data'::bytea, 'password', 'compress-algo=invalid');
 
 # Test pgp_sym_encrypt with invalid s2k-count should fail
 statement error
