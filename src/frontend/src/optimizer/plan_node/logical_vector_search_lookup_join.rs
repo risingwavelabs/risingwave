@@ -20,7 +20,6 @@ use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::aggregate::{AggType, PbAggKind};
-use risingwave_pb::catalog::vector_index_info;
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
 
@@ -394,16 +393,8 @@ impl ToBatch for LogicalVectorSearchLookupJoin {
             )
             && non_covered_table_cols_idx.is_empty()
         {
-            let hnsw_ef_search = match index.vector_index_info.config.as_ref().unwrap() {
-                vector_index_info::Config::Flat(_) => None,
-                vector_index_info::Config::HnswFlat(_) => Some(
-                    self.core
-                        .ctx()
-                        .session_ctx()
-                        .config()
-                        .batch_hnsw_ef_search(),
-                ),
-            };
+            let hnsw_ef_search =
+                index.resolve_hnsw_ef_search(&self.core.ctx().session_ctx().config());
             let info_output_indices = primary_table_col_in_output
                 .iter()
                 .map(|(covered, idx_in_index_info_columns)| {

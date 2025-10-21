@@ -23,7 +23,6 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::catalog::vector_index_info;
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
 
@@ -324,9 +323,6 @@ impl LogicalVectorSearch {
 
     fn as_vector_table_scan(&self) -> Option<(&LogicalScan, ExprImpl, &ExprImpl)> {
         let scan = self.core.input.as_logical_scan()?;
-        if !scan.predicate().always_true() {
-            return None;
-        }
         let left_const = (self.core.left.only_literal_and_func(), &self.core.left);
         let right_const = (self.core.right.only_literal_and_func(), &self.core.right);
         let (vector_column_expr, vector_expr) = match (left_const, right_const) {
@@ -376,6 +372,9 @@ impl LogicalVectorSearch {
         Vec<usize>,
         Vec<(bool, usize)>,
     )> {
+        if !scan.predicate().always_true() {
+            return None;
+        }
         if !scan.vector_indexes().is_empty() {
             let primary_table_cols_idx = output_indices
                 .iter()
@@ -450,16 +449,8 @@ impl ToBatch for LogicalVectorSearch {
                     self.core.ctx(),
                 ))
                 .into();
-                let hnsw_ef_search = match index.vector_index_info.config.as_ref().unwrap() {
-                    vector_index_info::Config::Flat(_) => None,
-                    vector_index_info::Config::HnswFlat(_) => Some(
-                        self.core
-                            .ctx()
-                            .session_ctx()
-                            .config()
-                            .batch_hnsw_ef_search(),
-                    ),
-                };
+                let hnsw_ef_search =
+                    index.resolve_hnsw_ef_search(&self.core.ctx().session_ctx().config());
                 let info_column_desc = index.info_column_desc();
                 let core = VectorIndexLookupJoin {
                     input: literal_vector_input,
