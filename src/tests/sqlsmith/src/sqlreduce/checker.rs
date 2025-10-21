@@ -151,7 +151,7 @@ pub async fn run_query(client: &mut Client, query: &str, restore_cmd: &str) -> (
                     }
                 }
             } else if e.as_db_error().is_some() {
-                tracing::error!("Compute panic detected, waiting for recovery");
+                tracing::info!("Compute panic detected, waiting for recovery");
                 if let Err(err) = wait_for_recovery(client).await {
                     tracing::error!("RW failed to recover after compute panic: {:?}", err);
                 } else {
