@@ -371,9 +371,16 @@ pub struct InflightSubscriptionInfo {
 }
 
 #[derive(Clone, Debug)]
+pub enum SubscriberType {
+    Subscription(u64),
+    SnapshotBackfill,
+}
+
+#[derive(Clone, Debug)]
 pub struct InflightStreamingJobInfo {
     pub job_id: TableId,
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+    pub subscribers: HashMap<u32, SubscriberType>,
 }
 
 impl InflightStreamingJobInfo {
@@ -440,6 +447,54 @@ impl InflightDatabaseInfo {
             .fragment_infos
             .get(&fragment_id)
             .expect("should exist")
+    }
+
+    pub fn fragment_subscribers(&self, fragment_id: FragmentId) -> impl Iterator<Item = u32> + '_ {
+        let job_id = self.fragment_location[&fragment_id];
+        self.jobs[&job_id].subscribers.keys().copied()
+    }
+
+    pub fn job_subscribers(&self, job_id: TableId) -> impl Iterator<Item = u32> + '_ {
+        self.jobs[&job_id].subscribers.keys().copied()
+    }
+
+    pub fn max_subscription_retention(&self) -> HashMap<TableId, u64> {
+        self.jobs
+            .iter()
+            .filter_map(|(job_id, info)| {
+                info.subscribers
+                    .values()
+                    .filter_map(|subscriber| match subscriber {
+                        SubscriberType::Subscription(retention) => Some(*retention),
+                        SubscriberType::SnapshotBackfill => None,
+                    })
+                    .max()
+                    .map(|max_subscription| (*job_id, max_subscription))
+            })
+            .collect()
+    }
+
+    pub fn register_subscriber(
+        &mut self,
+        job_id: TableId,
+        subscriber_id: u32,
+        subscriber: SubscriberType,
+    ) {
+        self.jobs
+            .get_mut(&job_id)
+            .expect("should exist")
+            .subscribers
+            .try_insert(subscriber_id, subscriber)
+            .expect("non duplicate");
+    }
+
+    pub fn unregister_subscriber(&mut self, job_id: TableId, subscriber_id: u32) {
+        self.jobs
+            .get_mut(&job_id)
+            .expect("should exist")
+            .subscribers
+            .remove(&subscriber_id)
+            .expect("should exist");
     }
 
     fn fragment_mut(&mut self, fragment_id: FragmentId) -> (&mut InflightFragmentInfo, TableId) {
@@ -531,6 +586,7 @@ impl InflightDatabaseInfo {
                                 .or_insert_with(|| InflightStreamingJobInfo {
                                     job_id,
                                     fragment_infos: Default::default(),
+                                    subscribers: Default::default(),
                                 });
                         if !is_existing {
                             shared_actor_writer.upsert([(&info, job_id)]);

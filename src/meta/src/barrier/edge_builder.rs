@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
@@ -50,12 +50,14 @@ impl FragmentEdgeBuildResult {
             Item = (
                 FragmentId,
                 &StreamNode,
-                impl Iterator<Item = (&StreamActor, WorkerId)> + '_,
+                impl Iterator<Item = (&StreamActor, WorkerId)>,
+                impl IntoIterator<Item = u32>,
             ),
         >,
     ) -> StreamJobActorsToCreate {
         let mut actors_to_create = StreamJobActorsToCreate::default();
-        for (fragment_id, node, actors) in actors {
+        for (fragment_id, node, actors, subscriber_ids) in actors {
+            let subscriber_ids: HashSet<_> = subscriber_ids.into_iter().collect();
             for (actor, worker_id) in actors {
                 let upstreams = self
                     .upstreams
@@ -71,7 +73,7 @@ impl FragmentEdgeBuildResult {
                     .entry(worker_id)
                     .or_default()
                     .entry(fragment_id)
-                    .or_insert_with(|| (node.clone(), vec![]))
+                    .or_insert_with(|| (node.clone(), vec![], subscriber_ids.clone()))
                     .1
                     .push((actor.clone(), upstreams, dispatchers))
             }

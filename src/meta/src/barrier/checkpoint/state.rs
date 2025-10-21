@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::Epoch;
 
 use crate::barrier::info::{
-    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, InflightSubscriptionInfo,
-    SharedActorInfos,
+    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, SharedActorInfos, SubscriberType,
 };
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 
@@ -38,8 +37,6 @@ pub(crate) struct BarrierWorkerState {
     /// Inflight running actors info.
     pub(super) inflight_graph_info: InflightDatabaseInfo,
 
-    pub(super) inflight_subscription_info: InflightSubscriptionInfo,
-
     /// Whether the cluster is paused.
     is_paused: bool,
 }
@@ -50,7 +47,6 @@ impl BarrierWorkerState {
             in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
             pending_non_checkpoint_barriers: vec![],
             inflight_graph_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
-            inflight_subscription_info: InflightSubscriptionInfo::default(),
             is_paused: false,
         }
     }
@@ -60,7 +56,6 @@ impl BarrierWorkerState {
         shared_actor_infos: SharedActorInfos,
         in_flight_prev_epoch: TracedEpoch,
         jobs: impl Iterator<Item = InflightStreamingJobInfo>,
-        inflight_subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
     ) -> Self {
         Self {
@@ -71,7 +66,6 @@ impl BarrierWorkerState {
                 jobs,
                 shared_actor_infos,
             ),
-            inflight_subscription_info,
             is_paused,
         }
     }
@@ -133,13 +127,13 @@ impl BarrierWorkerState {
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
     ///
-    /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_is_paused`)
+    /// Return (`graph_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_is_paused`)
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
     ) -> (
         InflightDatabaseInfo,
-        InflightSubscriptionInfo,
+        HashMap<TableId, u64>,
         HashSet<TableId>,
         HashSet<TableId>,
         bool,
@@ -157,12 +151,21 @@ impl BarrierWorkerState {
         } else {
             None
         };
-        if let Some(command) = &command {
-            self.inflight_subscription_info.pre_apply(command);
+
+        if let Some(Command::CreateSubscription {
+            subscription_id,
+            upstream_mv_table_id,
+            retention_second,
+        }) = &command
+        {
+            self.inflight_graph_info.register_subscriber(
+                *upstream_mv_table_id,
+                *subscription_id,
+                SubscriberType::Subscription(*retention_second),
+            );
         }
 
         let info = self.inflight_graph_info.clone();
-        let subscription_info = self.inflight_subscription_info.clone();
 
         if let Some(fragment_changes) = fragment_changes {
             self.inflight_graph_info.post_apply(&fragment_changes);
@@ -178,8 +181,13 @@ impl BarrierWorkerState {
             }
         }
 
-        if let Some(command) = command {
-            self.inflight_subscription_info.post_apply(command);
+        if let Some(Command::DropSubscription {
+            subscription_id,
+            upstream_mv_table_id,
+        }) = &command
+        {
+            self.inflight_graph_info
+                .unregister_subscriber(*upstream_mv_table_id, *subscription_id);
         }
 
         let prev_is_paused = self.is_paused();
@@ -192,7 +200,7 @@ impl BarrierWorkerState {
 
         (
             info,
-            subscription_info,
+            self.inflight_graph_info.max_subscription_retention(),
             table_ids_to_commit,
             jobs_to_wait,
             prev_is_paused,

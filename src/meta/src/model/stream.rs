@@ -337,8 +337,10 @@ impl StreamJobFragments {
     }
 }
 
-pub type StreamJobActorsToCreate =
-    HashMap<WorkerId, HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>)>>;
+pub type StreamJobActorsToCreate = HashMap<
+    WorkerId,
+    HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>, HashSet<u32>)>,
+>;
 
 impl StreamJobFragments {
     /// Create a new `TableFragments` with state of `Initial`, with other fields empty.

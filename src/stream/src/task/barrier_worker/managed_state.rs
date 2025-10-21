@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::LazyCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{Future, pending, poll_fn};
@@ -84,7 +83,6 @@ struct BarrierState {
 }
 
 use risingwave_common::must_match;
-use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use risingwave_pb::stream_service::streaming_control_stream_request::{
@@ -308,8 +306,6 @@ pub(crate) struct PartialGraphManagedBarrierState {
 
     prev_barrier_table_ids: Option<(EpochPair, HashSet<TableId>)>,
 
-    mv_depended_subscriptions: HashMap<TableId, HashSet<u32>>,
-
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     ///
     /// The process of progress reporting is as follows:
@@ -352,7 +348,6 @@ impl PartialGraphManagedBarrierState {
         Self {
             epoch_barrier_state_map: Default::default(),
             prev_barrier_table_ids: None,
-            mv_depended_subscriptions: Default::default(),
             create_mview_progress: Default::default(),
             list_finished_source_ids: Default::default(),
             load_finished_source_ids: Default::default(),
@@ -648,9 +643,10 @@ impl DatabaseManagedBarrierState {
             graph_states: initial_partial_graphs
                 .into_iter()
                 .map(|graph| {
-                    let mut state = PartialGraphManagedBarrierState::new(&actor_manager);
-                    state.add_subscriptions(graph.subscriptions);
-                    (PartialGraphId::new(graph.partial_graph_id), state)
+                    (
+                        PartialGraphId::new(graph.partial_graph_id),
+                        PartialGraphManagedBarrierState::new(&actor_manager),
+                    )
                 })
                 .collect(),
             table_ids: Default::default(),
@@ -724,59 +720,6 @@ impl DatabaseManagedBarrierState {
     }
 }
 
-impl PartialGraphManagedBarrierState {
-    pub(super) fn add_subscriptions(&mut self, subscriptions: Vec<SubscriptionUpstreamInfo>) {
-        for subscription_to_add in subscriptions {
-            if !self
-                .mv_depended_subscriptions
-                .entry(TableId::new(subscription_to_add.upstream_mv_table_id))
-                .or_default()
-                .insert(subscription_to_add.subscriber_id)
-            {
-                if cfg!(debug_assertions) {
-                    panic!("add an existing subscription: {:?}", subscription_to_add);
-                }
-                warn!(?subscription_to_add, "add an existing subscription");
-            }
-        }
-    }
-
-    pub(super) fn remove_subscriptions(&mut self, subscriptions: Vec<SubscriptionUpstreamInfo>) {
-        for subscription_to_remove in subscriptions {
-            let upstream_table_id = TableId::new(subscription_to_remove.upstream_mv_table_id);
-            let Some(subscribers) = self.mv_depended_subscriptions.get_mut(&upstream_table_id)
-            else {
-                if cfg!(debug_assertions) {
-                    panic!(
-                        "unable to find upstream mv table to remove: {:?}",
-                        subscription_to_remove
-                    );
-                }
-                warn!(
-                    ?subscription_to_remove,
-                    "unable to find upstream mv table to remove"
-                );
-                continue;
-            };
-            if !subscribers.remove(&subscription_to_remove.subscriber_id) {
-                if cfg!(debug_assertions) {
-                    panic!(
-                        "unable to find subscriber to remove: {:?}",
-                        subscription_to_remove
-                    );
-                }
-                warn!(
-                    ?subscription_to_remove,
-                    "unable to find subscriber to remove"
-                );
-            }
-            if subscribers.is_empty() {
-                self.mv_depended_subscriptions.remove(&upstream_table_id);
-            }
-        }
-    }
-}
-
 impl DatabaseManagedBarrierState {
     pub(super) fn transform_to_issued(
         &mut self,
@@ -795,9 +738,6 @@ impl DatabaseManagedBarrierState {
             .get_mut(&partial_graph_id)
             .expect("should exist");
 
-        graph_state.add_subscriptions(request.subscriptions_to_add);
-        graph_state.remove_subscriptions(request.subscriptions_to_remove);
-
         let table_ids =
             HashSet::from_iter(request.table_ids_to_sync.iter().cloned().map(TableId::new));
         self.table_ids.extend(table_ids.iter().cloned());
@@ -809,8 +749,6 @@ impl DatabaseManagedBarrierState {
         );
 
         let mut new_actors = HashSet::new();
-        let subscriptions =
-            LazyCell::new(|| Arc::new(graph_state.mv_depended_subscriptions.clone()));
         for (node, fragment_id, actor) in
             request
                 .actors_to_build
@@ -838,7 +776,6 @@ impl DatabaseManagedBarrierState {
                 actor,
                 fragment_id,
                 node,
-                (*subscriptions).clone(),
                 self.local_barrier_manager.clone(),
                 new_output_request_rx,
             );
