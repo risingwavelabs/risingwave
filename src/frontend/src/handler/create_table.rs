@@ -2110,7 +2110,7 @@ pub async fn create_iceberg_engine_table(
                 tracing::error!(
                     "failed to drop iceberg table {} after create iceberg engine table failed: {}",
                     table_identifier,
-                    err
+                    err.as_report()
                 );
             });
         res?
