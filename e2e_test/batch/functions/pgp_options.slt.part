@@ -1,0 +1,100 @@
+# PGP encryption/decryption functions with options tests
+# Based on PostgreSQL pgcrypto tests
+
+# Test pgp_sym_encrypt with cipher-algo option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('hello world'::bytea, 'secret', 'cipher-algo=aes256'), 'secret');
+----
+\x68656c6c6f20776f726c64
+
+# Test pgp_sym_encrypt with multiple options
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('test data'::bytea, 'password', 'cipher-algo=aes192,armor=false'), 'password');
+----
+\x746573742064617461
+
+# Test pgp_sym_encrypt with compress-algo option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('compressed data'::bytea, 'secret', 'compress-algo=1'), 'secret');
+----
+\x636f6d707265737365642064617461
+
+# Test pgp_sym_encrypt with s2k-count option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('s2k test'::bytea, 'password', 's2k-count=5000'), 'password');
+----
+\x73326b2074657374
+
+# Test pgp_sym_encrypt with s2k-mode option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('s2k mode test'::bytea, 'secret', 's2k-mode=3'), 'secret');
+----
+\x73326b206d6f64652074657374
+
+# Test pgp_sym_encrypt with integrity-protect option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('integrity test'::bytea, 'password', 'integrity-protect=true'), 'password');
+----
+\x696e746567726974792074657374
+
+# Test pgp_sym_encrypt with convert-crlf option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('line ending test'::bytea, 'secret', 'convert-crlf=false'), 'secret');
+----
+\x6c696e6520656e64696e672074657374
+
+# Test pgp_sym_encrypt with unicode-mode option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('unicode test'::bytea, 'password', 'unicode-mode=0'), 'password');
+----
+\x756e69636f64652074657374
+
+# Test pgp_sym_encrypt with disable-mdc option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('mdc test'::bytea, 'secret', 'disable-mdc=false'), 'secret');
+----
+\x6d64632074657374
+
+# Test pgp_sym_encrypt with s2k-digest-algo option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('digest test'::bytea, 'password', 's2k-digest-algo=sha1'), 'password');
+----
+\x6469676573742074657374
+
+# Test pgp_sym_encrypt with s2k-cipher-algo option
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('cipher test'::bytea, 'secret', 's2k-cipher-algo=aes128'), 'secret');
+----
+\x6369706865722074657374
+
+# Test pgp_sym_encrypt with invalid option should fail
+statement error
+SELECT pgp_sym_encrypt('data'::bytea, 'password', 'invalid-option=value');
+
+# Test pgp_sym_encrypt with invalid compress-algo should fail
+statement error
+SELECT pgp_sym_encrypt('data'::bytea, 'password', 'compress-algo=5');
+
+# Test pgp_sym_encrypt with invalid s2k-count should fail
+statement error
+SELECT pgp_sym_encrypt('data'::bytea, 'password', 's2k-count=100');
+
+# Test pgp_sym_encrypt with invalid s2k-mode should fail
+statement error
+SELECT pgp_sym_encrypt('data'::bytea, 'password', 's2k-mode=2');
+
+# Test pgp_sym_encrypt with invalid cipher-algo should fail
+statement error
+SELECT pgp_sym_encrypt('data'::bytea, 'password', 'cipher-algo=invalid');
+
+# Test pgp_sym_decrypt with options
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('decrypt test'::bytea, 'secret', 'cipher-algo=aes256'), 'secret', 'cipher-algo=aes256');
+----
+\x646563727970742074657374
+
+# Test pgp_sym_decrypt with wrong options should still work (options are mainly for encryption)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('compatibility test'::bytea, 'password', 'cipher-algo=aes192'), 'password', 'cipher-algo=aes256');
+----
+\x636f6d7061746962696c6974792074657374

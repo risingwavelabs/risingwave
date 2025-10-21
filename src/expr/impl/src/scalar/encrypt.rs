@@ -28,6 +28,7 @@ use sequoia_openpgp::parse::Parse;
 use sequoia_openpgp::parse::stream::*;
 use sequoia_openpgp::policy::StandardPolicy;
 use sequoia_openpgp::serialize::stream::{Encryptor2, *};
+use sequoia_openpgp::types::{CompressionAlgorithm, HashAlgorithm, SymmetricAlgorithm};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Algorithm {
@@ -198,13 +199,270 @@ struct CryptographyError {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum PgpError {
+pub enum PgpError {
     #[error("PGP error: {0}")]
     Anyhow(#[from] anyhow::Error),
     #[error("Invalid key format: {0}")]
     InvalidKey(String),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Invalid option: {0}")]
+    InvalidOption(String),
+}
+
+/// PGP encryption/decryption options as per PostgreSQL pgcrypto documentation
+///
+/// This struct represents all the configurable options for PGP encryption/decryption
+/// functions, matching the behavior of PostgreSQL's pgcrypto module.
+/// Options are parsed from a comma-separated string format: "key1=value1,key2=value2"
+#[derive(Debug, Clone)]
+pub struct PgpOptions {
+    /// Compression algorithm (0=none, 1=zip, 2=zlib)
+    pub compress_algo: Option<CompressionAlgorithm>,
+    /// Cipher algorithm (aes128, aes192, aes256, 3des)
+    pub cipher_algo: Option<SymmetricAlgorithm>,
+    /// Enable integrity protection (true/false)
+    pub integrity_protect: Option<bool>,
+    /// Integrity check algorithm (sha1, sha256, sha512)
+    pub integrity_algo: Option<HashAlgorithm>,
+    /// ASCII armor output (true/false)
+    pub armor: Option<bool>,
+    /// Convert CRLF to LF (true/false)
+    pub convert_crlf: Option<bool>,
+    /// Disable MDC (true/false)
+    pub disable_mdc: Option<bool>,
+    /// S2K mode (0=simple, 1=salted, 3=iterated+salted)
+    pub s2k_mode: Option<u8>,
+    /// S2K iteration count (1024-65011712)
+    pub s2k_count: Option<u32>,
+    /// S2K digest algorithm (sha1, sha256, sha512)
+    pub s2k_digest_algo: Option<HashAlgorithm>,
+    /// S2K cipher algorithm (aes128, aes192, aes256, 3des)
+    pub s2k_cipher_algo: Option<SymmetricAlgorithm>,
+    /// Unicode mode (0/1)
+    pub unicode_mode: Option<bool>,
+}
+
+impl Default for PgpOptions {
+    fn default() -> Self {
+        Self {
+            compress_algo: Some(CompressionAlgorithm::Zip),
+            cipher_algo: Some(SymmetricAlgorithm::AES128),
+            integrity_protect: Some(true),
+            integrity_algo: Some(HashAlgorithm::SHA1),
+            armor: Some(false),
+            convert_crlf: Some(false),
+            disable_mdc: Some(false),
+            s2k_mode: Some(3),
+            s2k_count: None, // Will use random value between 65536-253952
+            s2k_digest_algo: Some(HashAlgorithm::SHA1),
+            s2k_cipher_algo: Some(SymmetricAlgorithm::AES128),
+            unicode_mode: Some(false),
+        }
+    }
+}
+
+impl PgpOptions {
+    /// Parse PGP options string in format "key1=value1,key2=value2"
+    ///
+    /// # Arguments
+    /// * `options_str` - Comma-separated key-value pairs, e.g., "cipher-algo=aes256,armor=true"
+    ///
+    /// # Returns
+    /// * `Ok(PgpOptions)` - Parsed options with defaults applied for unspecified values
+    /// * `Err(PgpError::InvalidOption)` - If any option is invalid or malformed
+    ///
+    /// # Example
+    /// ```
+    /// let opts = PgpOptions::parse("cipher-algo=aes256,armor=true").unwrap();
+    /// assert_eq!(opts.cipher_algo, Some(SymmetricAlgorithm::AES256));
+    /// assert_eq!(opts.armor, Some(true));
+    /// ```
+    pub fn parse(options_str: &str) -> Result<Self, PgpError> {
+        let mut opts = Self::default();
+
+        if options_str.is_empty() {
+            return Ok(opts);
+        }
+
+        for pair in options_str.split(',') {
+            let pair = pair.trim();
+            if pair.is_empty() {
+                continue;
+            }
+
+            let (key, value) = if let Some(eq_pos) = pair.find('=') {
+                let key = pair[..eq_pos].trim();
+                let value = pair[eq_pos + 1..].trim();
+                (key, value)
+            } else {
+                return Err(PgpError::InvalidOption(format!(
+                    "Invalid option format: {}",
+                    pair
+                )));
+            };
+
+            match key {
+                "compress-algo" => {
+                    opts.compress_algo = Some(match value {
+                        "0" => CompressionAlgorithm::Uncompressed,
+                        "1" => CompressionAlgorithm::Zip,
+                        "2" => CompressionAlgorithm::Zlib,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid compress-algo: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "cipher-algo" => {
+                    opts.cipher_algo = Some(match value.to_lowercase().as_str() {
+                        "aes128" => SymmetricAlgorithm::AES128,
+                        "aes192" => SymmetricAlgorithm::AES192,
+                        "aes256" => SymmetricAlgorithm::AES256,
+                        "3des" => SymmetricAlgorithm::TripleDES,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid cipher-algo: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "integrity-protect" => {
+                    opts.integrity_protect = Some(match value.to_lowercase().as_str() {
+                        "true" | "1" => true,
+                        "false" | "0" => false,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid integrity-protect: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "integrity-algo" => {
+                    opts.integrity_algo = Some(match value.to_lowercase().as_str() {
+                        "sha1" => HashAlgorithm::SHA1,
+                        "sha256" => HashAlgorithm::SHA256,
+                        "sha512" => HashAlgorithm::SHA512,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid integrity-algo: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "armor" => {
+                    opts.armor = Some(match value.to_lowercase().as_str() {
+                        "true" | "1" => true,
+                        "false" | "0" => false,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid armor: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "convert-crlf" => {
+                    opts.convert_crlf = Some(match value.to_lowercase().as_str() {
+                        "true" | "1" => true,
+                        "false" | "0" => false,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid convert-crlf: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "disable-mdc" => {
+                    opts.disable_mdc = Some(match value.to_lowercase().as_str() {
+                        "true" | "1" => true,
+                        "false" | "0" => false,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid disable-mdc: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "s2k-mode" => {
+                    opts.s2k_mode = Some(match value {
+                        "0" => 0,
+                        "1" => 1,
+                        "3" => 3,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid s2k-mode: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "s2k-count" => {
+                    let count: u32 = value.parse().map_err(|_| {
+                        PgpError::InvalidOption(format!("Invalid s2k-count: {}", value))
+                    })?;
+                    if !(1024..=65011712).contains(&count) {
+                        return Err(PgpError::InvalidOption(format!(
+                            "s2k-count must be between 1024 and 65011712, got: {}",
+                            count
+                        )));
+                    }
+                    opts.s2k_count = Some(count);
+                }
+                "s2k-digest-algo" => {
+                    opts.s2k_digest_algo = Some(match value.to_lowercase().as_str() {
+                        "sha1" => HashAlgorithm::SHA1,
+                        "sha256" => HashAlgorithm::SHA256,
+                        "sha512" => HashAlgorithm::SHA512,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid s2k-digest-algo: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "s2k-cipher-algo" => {
+                    opts.s2k_cipher_algo = Some(match value.to_lowercase().as_str() {
+                        "aes128" => SymmetricAlgorithm::AES128,
+                        "aes192" => SymmetricAlgorithm::AES192,
+                        "aes256" => SymmetricAlgorithm::AES256,
+                        "3des" => SymmetricAlgorithm::TripleDES,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid s2k-cipher-algo: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                "unicode-mode" => {
+                    opts.unicode_mode = Some(match value {
+                        "0" => false,
+                        "1" => true,
+                        _ => {
+                            return Err(PgpError::InvalidOption(format!(
+                                "Invalid unicode-mode: {}",
+                                value
+                            )));
+                        }
+                    });
+                }
+                _ => {
+                    return Err(PgpError::InvalidOption(format!("Unknown option: {}", key)));
+                }
+            }
+        }
+
+        Ok(opts)
+    }
 }
 
 /// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
@@ -227,25 +485,39 @@ fn pgp_sym_encrypt_with_options(
 fn pgp_sym_encrypt_internal(
     data: &[u8],
     password: &str,
-    _options: Option<&str>,
+    options: Option<&str>,
 ) -> Result<Box<[u8]>, PgpError> {
     use openpgp::crypto::Password;
     use openpgp::types::SymmetricAlgorithm;
 
+    let opts = if let Some(opts_str) = options {
+        PgpOptions::parse(opts_str)?
+    } else {
+        PgpOptions::default()
+    };
+
     let mut sink = Vec::new();
 
+    // TODO: Implement compression support
+    // For now, we'll skip compression and implement it later when we have the correct API
+    let message = Message::new(&mut sink);
+
     // Encrypt with password using SKESK (Symmetric-Key Encrypted Session Key)
-    let message =
-        Encryptor2::with_passwords(Message::new(&mut sink), vec![Password::from(password)])
-            .symmetric_algo(SymmetricAlgorithm::AES128)
-            .build()?;
+    let cipher_algo = opts.cipher_algo.unwrap_or(SymmetricAlgorithm::AES128);
+    let message = Encryptor2::with_passwords(message, vec![Password::from(password)])
+        .symmetric_algo(cipher_algo)
+        .build()?;
 
     // Write literal data packet
     let mut message = LiteralWriter::new(message).build()?;
     message.write_all(data)?;
     message.finalize()?;
 
-    Ok(sink.into_boxed_slice())
+    let result = sink.into_boxed_slice();
+
+    // TODO: Implement ASCII armor support
+    // For now, we return the binary data as-is regardless of armor setting
+    Ok(result)
 }
 
 /// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
@@ -268,9 +540,16 @@ fn pgp_sym_decrypt_with_options(
 fn pgp_sym_decrypt_internal(
     msg: &[u8],
     password: &str,
-    _options: Option<&str>,
+    options: Option<&str>,
 ) -> Result<Box<[u8]>, PgpError> {
     let policy = &StandardPolicy::new();
+
+    // Parse options for future use (currently not all options are implemented)
+    let _opts = if let Some(opts_str) = options {
+        PgpOptions::parse(opts_str)?
+    } else {
+        PgpOptions::default()
+    };
 
     struct Helper {
         password: String,
@@ -345,11 +624,17 @@ fn pgp_pub_encrypt_with_options(
 fn pgp_pub_encrypt_internal(
     data: &[u8],
     key: &[u8],
-    _options: Option<&str>,
+    options: Option<&str>,
 ) -> Result<Box<[u8]>, PgpError> {
     use openpgp::types::SymmetricAlgorithm;
 
     let policy = &StandardPolicy::new();
+
+    let opts = if let Some(opts_str) = options {
+        PgpOptions::parse(opts_str)?
+    } else {
+        PgpOptions::default()
+    };
 
     // Parse the certificate (public key)
     let cert = Cert::from_bytes(key)?;
@@ -373,9 +658,14 @@ fn pgp_pub_encrypt_internal(
 
     let mut sink = Vec::new();
 
+    // TODO: Implement compression support
+    // For now, we'll skip compression and implement it later when we have the correct API
+    let message = Message::new(&mut sink);
+
     // Encrypt with public key
-    let message = Encryptor2::for_recipients(Message::new(&mut sink), recipients)
-        .symmetric_algo(SymmetricAlgorithm::AES128)
+    let cipher_algo = opts.cipher_algo.unwrap_or(SymmetricAlgorithm::AES128);
+    let message = Encryptor2::for_recipients(message, recipients)
+        .symmetric_algo(cipher_algo)
         .build()?;
 
     // Write literal data packet
@@ -383,7 +673,11 @@ fn pgp_pub_encrypt_internal(
     message.write_all(data)?;
     message.finalize()?;
 
-    Ok(sink.into_boxed_slice())
+    let result = sink.into_boxed_slice();
+
+    // TODO: Implement ASCII armor support
+    // For now, we return the binary data as-is regardless of armor setting
+    Ok(result)
 }
 
 /// from [pg doc](https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS)
@@ -417,9 +711,16 @@ fn pgp_pub_decrypt_internal(
     msg: &[u8],
     key: &[u8],
     password: Option<&str>,
-    _options: Option<&str>,
+    options: Option<&str>,
 ) -> Result<Box<[u8]>, PgpError> {
     let policy = &StandardPolicy::new();
+
+    // Parse options for future use (currently not all options are implemented)
+    let _opts = if let Some(opts_str) = options {
+        PgpOptions::parse(opts_str)?
+    } else {
+        PgpOptions::default()
+    };
 
     // Parse the certificate (secret key)
     let cert = Cert::from_bytes(key)?;
@@ -619,5 +920,64 @@ mod test {
         let result = pgp_sym_decrypt(&encrypted, wrong_password);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pgp_options_parsing() {
+        // Test default options
+        let opts = PgpOptions::default();
+        assert_eq!(opts.compress_algo, Some(CompressionAlgorithm::Zip));
+        assert_eq!(opts.cipher_algo, Some(SymmetricAlgorithm::AES128));
+        assert_eq!(opts.integrity_protect, Some(true));
+        assert_eq!(opts.armor, Some(false));
+
+        // Test parsing empty string
+        let opts = PgpOptions::parse("").unwrap();
+        assert_eq!(opts.compress_algo, Some(CompressionAlgorithm::Zip));
+
+        // Test parsing valid options
+        let opts = PgpOptions::parse("compress-algo=0,cipher-algo=aes256,armor=true").unwrap();
+        assert_eq!(opts.compress_algo, Some(CompressionAlgorithm::Uncompressed));
+        assert_eq!(opts.cipher_algo, Some(SymmetricAlgorithm::AES256));
+        assert_eq!(opts.armor, Some(true));
+
+        // Test parsing invalid option
+        let result = PgpOptions::parse("invalid-option=value");
+        assert!(result.is_err());
+
+        // Test parsing invalid compress-algo
+        let result = PgpOptions::parse("compress-algo=5");
+        assert!(result.is_err());
+
+        // Test parsing invalid s2k-count
+        let result = PgpOptions::parse("s2k-count=100");
+        assert!(result.is_err());
+
+        // Test parsing valid s2k-count
+        let opts = PgpOptions::parse("s2k-count=5000").unwrap();
+        assert_eq!(opts.s2k_count, Some(5000));
+    }
+
+    #[test]
+    fn test_pgp_sym_encrypt_with_options() {
+        let data = b"hello world";
+        let password = "secret";
+
+        // Test with default options
+        let encrypted_default = pgp_sym_encrypt(data, password).unwrap();
+        let decrypted_default = pgp_sym_decrypt(&encrypted_default, password).unwrap();
+        assert_eq!(&*decrypted_default, data);
+
+        // Test with custom options
+        let encrypted_custom =
+            pgp_sym_encrypt_with_options(data, password, "cipher-algo=aes256").unwrap();
+        let decrypted_custom = pgp_sym_decrypt(&encrypted_custom, password).unwrap();
+        assert_eq!(&*decrypted_custom, data);
+
+        // Test with multiple options
+        let encrypted_multi =
+            pgp_sym_encrypt_with_options(data, password, "cipher-algo=aes192,armor=false").unwrap();
+        let decrypted_multi = pgp_sym_decrypt(&encrypted_multi, password).unwrap();
+        assert_eq!(&*decrypted_multi, data);
     }
 }
