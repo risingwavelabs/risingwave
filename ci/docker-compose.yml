@@ -130,6 +130,25 @@ services:
       - KAFKA_CFG_LISTENER_NAME_BROKER_PLAIN_SASL_JAAS_CONFIG=org.apache.kafka.common.security.plain.PlainLoginModule required username="dev1" password="rw," user_dev1="rw";
       - KAFKA_CFG_LISTENER_NAME_CONTROLLER_PLAIN_SASL_JAAS_CONFIG=org.apache.kafka.common.security.plain.PlainLoginModule required username="dev1" password="rw" user_dev1="rw";
 
+  rabbitmq-server:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+      - "1883:1883"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - ./rabbitmq-conf/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq-conf/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./rabbitmq-conf/advanced.config:/etc/rabbitmq/advanced.config:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   source-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
@@ -147,6 +166,7 @@ services:
       - vault-server
       - message_queue_sasl_1
       - message_queue_sasl_2
+      - rabbitmq-server
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s

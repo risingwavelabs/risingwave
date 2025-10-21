@@ -2318,7 +2318,7 @@ pub fn build_upstream_sink_info(
     Ok(UpstreamSinkInfo {
         sink_id: sink.id as _,
         sink_fragment_id: sink_fragment_id as _,
-        sink_output_fields: sink_output_fields.clone(),
+        sink_output_fields,
         sink_original_target_columns: sink.get_original_target_columns().clone(),
         project_exprs,
         new_sink_downstream: new_downstream_relation,

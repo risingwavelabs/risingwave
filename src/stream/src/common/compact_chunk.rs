@@ -304,6 +304,7 @@ impl StreamChunkCompactor {
                     latest.set_vis(false);
                 } else if prev.same_chunk(latest) && prev.index() + 1 == latest.index() {
                     // TODO(st1page): use next_one check in bitmap
+                    // Rows in this tuple have same key, thus it's safe to use `Update` op here.
                     prev.set_op(Op::UpdateDelete);
                     latest.set_op(Op::UpdateInsert);
                 }

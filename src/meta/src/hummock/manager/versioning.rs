@@ -599,7 +599,7 @@ mod tests {
 
         set_level_0_max_sst_count_threshold_for_group_1(&mut target_groups, 100);
         let new_write_limits =
-            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+            calc_new_write_limits(target_groups, origin_snapshot.clone(), &version);
 
         assert_eq!(
             new_write_limits, origin_snapshot,

@@ -37,7 +37,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
             ),
             split_id: msg.topic.into(),
             meta: SourceMeta::Pulsar(PulsarMeta {
-                schema_version: msg.payload.metadata.schema_version.clone(),
+                schema_version: msg.payload.metadata.schema_version,
             }),
         }
     }

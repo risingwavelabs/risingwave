@@ -253,7 +253,7 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 Some((command, notifiers)),
                 checkpoint,
-                span.clone(),
+                span,
                 control_stream_manager,
                 &self.hummock_version_stats,
             )
@@ -277,7 +277,7 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 None,
                 checkpoint,
-                span.clone(),
+                span,
                 control_stream_manager,
                 &self.hummock_version_stats,
             )
@@ -862,6 +862,8 @@ impl DatabaseCheckpointControl {
                     .iter()
                     .flat_map(|resp| &resp.list_finished_source_ids)
                     .cloned()
+                    .collect::<HashSet<_>>() // deduplicate
+                    .into_iter()
                     .collect();
                 if !list_finished_source_ids.is_empty() {
                     // Add list_finished_source_ids to the task for processing
@@ -876,6 +878,8 @@ impl DatabaseCheckpointControl {
                     .iter()
                     .flat_map(|resp| &resp.load_finished_source_ids)
                     .cloned()
+                    .collect::<HashSet<_>>() // deduplicate
+                    .into_iter()
                     .collect();
                 if !load_finished_source_ids.is_empty() {
                     // Add load_finished_source_ids to the task for processing
@@ -890,6 +894,8 @@ impl DatabaseCheckpointControl {
                     .iter()
                     .flat_map(|resp| &resp.refresh_finished_tables)
                     .cloned()
+                    .collect::<HashSet<_>>() // deduplicate
+                    .into_iter()
                     .collect();
                 if !refresh_finished_table_ids.is_empty() {
                     // Add refresh_finished_table_ids to the task for processing
@@ -1241,7 +1247,7 @@ impl DatabaseCheckpointControl {
         let command_ctx = CommandContext::new(
             barrier_info,
             pre_applied_subscription_info,
-            table_ids_to_commit.clone(),
+            table_ids_to_commit,
             command,
             span,
         );

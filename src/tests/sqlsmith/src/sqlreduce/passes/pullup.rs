@@ -273,26 +273,25 @@ impl Transform for SetOperationPullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: Ast, reduction_points: &[usize]) -> Ast {
-        let mut new_ast = ast.clone();
-        if let Some(query) = extract_query_mut(&mut new_ast)
+    fn apply_on(&self, mut ast: Ast, reduction_points: &[usize]) -> Ast {
+        if let Some(query) = extract_query_mut(&mut ast)
             && let SetExpr::SetOperation { left, right, .. } = &mut query.body
         {
             if reduction_points.contains(&0) {
                 // left
-                new_ast = Statement::Query(Box::new(Query {
+                ast = Statement::Query(Box::new(Query {
                     body: *left.clone(),
                     ..query.clone()
                 }));
             } else if reduction_points.contains(&1) {
                 // right
-                new_ast = Statement::Query(Box::new(Query {
+                ast = Statement::Query(Box::new(Query {
                     body: *right.clone(),
                     ..query.clone()
                 }));
             }
         }
-        new_ast
+        ast
     }
 }
 
