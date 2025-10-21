@@ -29,6 +29,7 @@ use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry,
@@ -944,33 +945,13 @@ pub async fn refresh_system_param_info_metrics(
     system_params_controller: &SystemParamsControllerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) {
-    use risingwave_common::system_param::{
-        BACKUP_STORAGE_URL_KEY, LICENSE_KEY_KEY, STATE_STORE_KEY, system_params_to_kv,
-    };
-
-    fn redact_value_by_name(name: &str, value: &str) -> String {
-        // Replace sensitive values entirely with *** to avoid leaking secrets.
-        if name == LICENSE_KEY_KEY || name == STATE_STORE_KEY || name == BACKUP_STORAGE_URL_KEY {
-            return "***".to_owned();
-        }
-        value.to_owned()
-    }
-
-    let params = system_params_controller.get_pb_params().await;
-    let kvs = match system_params_to_kv(&params) {
-        Ok(kv) => kv,
-        Err(e) => {
-            tracing::warn!("failed to convert system params to kv: {}", e);
-            vec![]
-        }
-    };
+    let params_info = system_params_controller.get_params().await.get_all();
 
     meta_metrics.system_param_info.reset();
-    for (name, value) in kvs {
-        let value = redact_value_by_name(&name, &value);
+    for info in params_info {
         meta_metrics
             .system_param_info
-            .with_label_values(&[&name, &value])
+            .with_label_values(&[info.name, &info.value])
             .set(1);
     }
 }
