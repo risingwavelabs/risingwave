@@ -70,6 +70,8 @@ pub(super) struct CompleteBarrierTask {
             Vec<(TableId, u64)>,
         ),
     >,
+    /// Source IDs that have finished listing data and need `ListFinish` commands
+    pub(super) list_finished_source_ids: Vec<u32>,
     /// Source IDs that have finished loading data and need `LoadFinish` commands
     pub(super) load_finished_source_ids: Vec<u32>,
     /// Table IDs that have finished materialize refresh and need completion signaling
@@ -107,6 +109,18 @@ impl CompleteBarrierTask {
                 .barrier_wait_commit_latency
                 .start_timer();
             let version_stats = context.commit_epoch(self.commit_info).await?;
+
+            // Handle list finished source IDs for refreshable batch sources
+            // Spawn this asynchronously to avoid deadlock during barrier collection
+            //
+            // This step is for fs-like refreshable-batch sources, which need to list the data first finishing loading. It guarantees finishing listing before loading.
+            // The other sources can skip this step.
+
+            if !self.list_finished_source_ids.is_empty() {
+                context
+                    .handle_list_finished_source_ids(self.list_finished_source_ids.clone())
+                    .await?;
+            }
 
             // Handle load finished source IDs for refreshable batch sources
             // Spawn this asynchronously to avoid deadlock during barrier collection

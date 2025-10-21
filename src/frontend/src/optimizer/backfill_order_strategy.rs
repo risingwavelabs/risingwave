@@ -348,7 +348,7 @@ mod common {
                 if let Some((relation_id, _schema_name)) = result? {
                     return Ok(relation_id);
                 }
-                Err(CatalogError::NotFound("table", rel_name.to_owned()).into())
+                Err(CatalogError::NotFound("table", rel_name.clone()).into())
             }
         }
     }

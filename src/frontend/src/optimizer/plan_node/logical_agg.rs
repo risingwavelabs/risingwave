@@ -157,7 +157,7 @@ impl LogicalAgg {
         local_group_key.insert(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
         let local_agg = new_stream_hash_agg(
-            Agg::new(core.agg_calls.to_vec(), local_group_key, project.into()),
+            Agg::new(core.agg_calls.clone(), local_group_key, project.into()),
             Some(vnode_col_idx),
         )?;
         // Global group key excludes vnode.
@@ -1193,7 +1193,7 @@ impl PlanTreeNodeUnary<Logical> for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Agg::new(self.agg_calls().to_vec(), self.group_key().clone(), input)
+        Agg::new(self.agg_calls().clone(), self.group_key().clone(), input)
             .with_grouping_sets(self.grouping_sets().clone())
             .with_enable_two_phase(self.core().enable_two_phase)
             .into()
@@ -1574,7 +1574,7 @@ mod tests {
             .unwrap();
 
             let logical_agg = plan.as_logical_agg().unwrap();
-            let agg_calls = logical_agg.agg_calls().to_vec();
+            let agg_calls = logical_agg.agg_calls().clone();
             let group_key = logical_agg.group_key().clone();
 
             (exprs, agg_calls, group_key)

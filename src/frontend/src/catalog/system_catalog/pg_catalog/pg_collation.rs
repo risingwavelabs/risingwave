@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// Mapping from sql name to system locale groups.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-collation.html`].
+/// Reference: `https://www.postgresql.org/docs/current/catalog-pg-collation.html`.
 #[system_catalog(view, "pg_catalog.pg_collation")]
 #[derive(Fields)]
 struct PgCollation {

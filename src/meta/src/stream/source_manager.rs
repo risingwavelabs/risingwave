@@ -22,7 +22,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::panic_if_debug;
@@ -278,21 +277,6 @@ impl SourceManagerCore {
             }
         }
     }
-
-    async fn update_source_splits(&self, source_id: SourceId) -> MetaResult<()> {
-        let handle_ref = self.managed_sources.get(&source_id).unwrap();
-
-        let discovered_splits = handle_ref.splits.lock().await.splits.clone();
-
-        if let Some(splits) = discovered_splits {
-            let source_splits =
-                HashMap::from([(source_id as _, splits.into_values().collect_vec())]);
-            self.metadata_manager
-                .update_source_splits(&source_splits)
-                .await?;
-        }
-        Ok(())
-    }
 }
 
 impl SourceManager {
@@ -421,12 +405,7 @@ impl SourceManager {
             .await
             .context("failed to create source worker")?;
 
-        let enable_adaptive_splits = handle.enable_adaptive_splits;
         core.managed_sources.insert(source_id, handle);
-
-        if !enable_adaptive_splits {
-            core.update_source_splits(source_id).await?;
-        }
 
         Ok(())
     }
@@ -443,12 +422,7 @@ impl SourceManager {
             return Ok(());
         }
 
-        let enable_adaptive_splits = handle.enable_adaptive_splits;
         core.managed_sources.insert(source_id, handle);
-
-        if !enable_adaptive_splits {
-            core.update_source_splits(source_id).await?;
-        }
 
         Ok(())
     }
@@ -511,7 +485,7 @@ impl SourceManager {
     }
 }
 
-#[derive(strum::Display)]
+#[derive(strum::Display, Debug)]
 pub enum SourceChange {
     /// `CREATE SOURCE` (shared), or `CREATE MV`.
     /// This is applied after the job is successfully created (`post_collect` barrier).

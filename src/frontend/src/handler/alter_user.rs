@@ -216,7 +216,7 @@ pub async fn handle_alter_user(
 
         let session_user = user_reader
             .get_user_by_name(&session.user_name())
-            .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_owned()))?;
+            .ok_or_else(|| CatalogError::NotFound("user", session.user_name()))?;
 
         match stmt.mode {
             risingwave_sqlparser::ast::AlterUserMode::Options(options) => {

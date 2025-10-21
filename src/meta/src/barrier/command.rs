@@ -50,8 +50,8 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
-    LoadFinishMutation, PauseMutation, PbSinkAddColumns, PbUpstreamSinkInfo, ResumeMutation,
-    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumns, PbUpstreamSinkInfo,
+    ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -228,6 +228,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub streaming_job: StreamingJob,
     pub fragment_backfill_ordering: FragmentBackfillOrder,
     pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+    pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
 }
 
 impl StreamJobFragments {
@@ -407,6 +408,10 @@ pub enum Command {
         table_id: TableId,
         associated_source_id: TableId,
     },
+    ListFinish {
+        table_id: TableId,
+        associated_source_id: TableId,
+    },
     LoadFinish {
         table_id: TableId,
         associated_source_id: TableId,
@@ -455,6 +460,14 @@ impl std::fmt::Display for Command {
             } => write!(
                 f,
                 "Refresh: {} (source: {})",
+                table_id, associated_source_id
+            ),
+            Command::ListFinish {
+                table_id,
+                associated_source_id,
+            } => write!(
+                f,
+                "ListFinish: {} (source: {})",
                 table_id, associated_source_id
             ),
             Command::LoadFinish {
@@ -610,6 +623,7 @@ impl Command {
             Command::ConnectorPropsChange(_) => None,
             Command::StartFragmentBackfill { .. } => None,
             Command::Refresh { .. } => None, // Refresh doesn't change fragment structure
+            Command::ListFinish { .. } => None, // ListFinish doesn't change fragment structure
             Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
         }
     }
@@ -1332,6 +1346,12 @@ impl Command {
                     associated_source_id: associated_source_id.table_id,
                 },
             )),
+            Command::ListFinish {
+                table_id: _,
+                associated_source_id,
+            } => Some(Mutation::ListFinish(ListFinishMutation {
+                associated_source_id: associated_source_id.table_id,
+            })),
             Command::LoadFinish {
                 table_id: _,
                 associated_source_id,

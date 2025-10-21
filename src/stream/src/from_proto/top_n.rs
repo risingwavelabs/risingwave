@@ -51,8 +51,8 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
             .collect();
 
         macro_rules! build {
-            ($excutor:ident, $with_ties:literal) => {
-                Ok($excutor::<_, $with_ties>::new(
+            ($executor:ident, $with_ties:literal) => {
+                Ok($executor::<_, $with_ties>::new(
                     input,
                     params.actor_context,
                     params.info.schema.clone(),

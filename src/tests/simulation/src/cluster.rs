@@ -338,6 +338,11 @@ default_parallelism = {default_parallelism}
             ..Default::default()
         }
     }
+
+    /// Returns the total number of cores for streaming compute nodes.
+    pub fn total_streaming_cores(&self) -> u32 {
+        (self.compute_nodes * self.compute_node_cores) as u32
+    }
 }
 
 /// A risingwave cluster.
@@ -665,7 +670,7 @@ impl Cluster {
         let rand_nodes = worker_nodes
             .iter()
             .choose_multiple(&mut rand::rng(), n)
-            .to_vec();
+            .clone();
         Ok(rand_nodes.iter().cloned().cloned().collect_vec())
     }
 

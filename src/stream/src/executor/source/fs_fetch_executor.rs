@@ -275,7 +275,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         "File source fetch error".to_owned(),
                         core.source_id.to_string(),
-                        core.source_name.to_owned(),
+                        core.source_name.clone(),
                         self.actor_ctx.fragment_id.to_string(),
                     ]);
                     splits_on_fetch = 0;

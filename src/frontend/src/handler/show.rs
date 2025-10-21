@@ -792,7 +792,7 @@ pub async fn handle_show_object(
                 let session_id = format!("{}", s.id().0);
                 let user = s.user_name();
                 let host = format!("{}", s.peer_addr());
-                let database = s.database().to_owned();
+                let database = s.database().clone();
 
                 s.get_cursor_manager()
                     .iter_subscription_cursors(

@@ -31,14 +31,13 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, Fragment as FragmentModel, FragmentRelation, FragmentSplits, Sink, SourceSplits,
-    StreamingJob,
+    Actor, Fragment as FragmentModel, FragmentRelation, FragmentSplits, Sink, StreamingJob,
 };
 use risingwave_meta_model::{
     ActorId, ConnectorSplits, DatabaseId, DispatcherType, ExprContext, FragmentId, I32Array,
     JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
     VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, fragment_splits, object,
-    sink, source, source_splits, streaming_job, table,
+    sink, source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{ExprTrait, OnConflict, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
@@ -1805,37 +1804,6 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
         has_table_been_migrated(&txn, table_id).await
-    }
-
-    pub async fn update_source_splits(
-        &self,
-        source_splits: &HashMap<SourceId, Vec<SplitImpl>>,
-    ) -> MetaResult<()> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-
-        let models: Vec<source_splits::ActiveModel> = source_splits
-            .iter()
-            .map(|(source_id, splits)| source_splits::ActiveModel {
-                source_id: Set(*source_id as _),
-                splits: Set(Some(ConnectorSplits::from(&PbConnectorSplits {
-                    splits: splits.iter().map(Into::into).collect_vec(),
-                }))),
-            })
-            .collect();
-
-        SourceSplits::insert_many(models)
-            .on_conflict(
-                OnConflict::column(source_splits::Column::SourceId)
-                    .update_column(source_splits::Column::Splits)
-                    .to_owned(),
-            )
-            .exec(&txn)
-            .await?;
-
-        txn.commit().await?;
-
-        Ok(())
     }
 
     pub async fn update_fragment_splits(
