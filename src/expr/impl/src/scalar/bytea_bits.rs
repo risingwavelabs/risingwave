@@ -141,3 +141,23 @@ pub fn bit_count(bytes: &[u8]) -> i64 {
     }
     ans.into()
 }
+
+/// Reverses the bytes in the binary string.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// SELECT reverse('\x1234567890'::bytea);
+/// ----
+/// \x9078563412
+/// ```
+#[function("reverse(bytea) -> bytea")]
+pub fn reverse_bytea(bytes: &[u8]) -> Box<[u8]> {
+    bytes
+        .iter()
+        .rev()
+        .copied()
+        .collect::<Vec<_>>()
+        .into_boxed_slice()
+}
