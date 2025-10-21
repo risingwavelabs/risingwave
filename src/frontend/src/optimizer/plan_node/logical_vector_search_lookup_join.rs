@@ -22,6 +22,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::plan_common::JoinType;
+use risingwave_sqlparser::ast::AsOf;
 
 use crate::OptimizerContextRef;
 use crate::expr::{CorrelatedInputRef, ExprDisplay, ExprImpl, ExprType, FunctionCall};
@@ -301,8 +302,12 @@ impl ToStream for LogicalVectorSearchLookupJoin {
         ))
     }
 
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> crate::error::Result<StreamPlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         if let Some(core) = self.to_vector_index_lookup_join(|plan| plan.to_stream(ctx))? {
+            if !matches!(&core.as_of, Some(AsOf::ProcessTime)) {
+                bail!("streaming vector index lookup join must be proctime temporal join");
+
+            }
             return Ok(StreamVectorIndexLookupJoin::new(core)?.into());
         }
         bail!("LogicalVectorSearchLookupJoin should use proper vector index in streaming job")
