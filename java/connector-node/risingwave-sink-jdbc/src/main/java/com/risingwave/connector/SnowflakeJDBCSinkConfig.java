@@ -219,7 +219,7 @@ public class SnowflakeJDBCSinkConfig extends JDBCSinkConfig {
             PKCS8EncryptedPrivateKeyInfo encryptedInfo = (PKCS8EncryptedPrivateKeyInfo) parsed;
             if (passphrase == null || passphrase.isEmpty()) {
                 throw new GeneralSecurityException(
-                        "Encrypted private key provided but privateKeyPassphrase is missing");
+                        "Encrypted private key provided but 'private_key_file_pwd' is missing");
             }
             InputDecryptorProvider decryptorProvider =
                     new JceOpenSSLPKCS8DecryptorProviderBuilder().build(passphrase.toCharArray());

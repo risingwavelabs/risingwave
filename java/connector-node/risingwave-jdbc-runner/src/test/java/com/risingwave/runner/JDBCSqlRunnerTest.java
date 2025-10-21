@@ -18,6 +18,7 @@ package com.risingwave.runner;
 
 import static org.junit.Assert.assertNotNull;
 
+import com.risingwave.connector.SnowflakeJDBCSinkConfig;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -39,7 +40,7 @@ public class JDBCSqlRunnerTest {
     @Test
     public void loadPrivateKeyFromPem_unencrypted() throws Exception {
         String testPem = loadTestPem();
-        PrivateKey key = JDBCSqlRunner.loadPrivateKeyFromPem(testPem, null);
+        PrivateKey key = SnowflakeJDBCSinkConfig.loadPrivateKeyFromPem(testPem, null);
         assertNotNull(key);
     }
 }

@@ -28,10 +28,6 @@ import org.slf4j.LoggerFactory;
 public class JDBCSqlRunner {
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSqlRunner.class);
 
-    public static void executeSql(String fullUrl, String[] sqls) throws Exception {
-        executeSqlWithProps(fullUrl, sqls, null, null);
-    }
-
     public static void executeSqlWithProps(
             String fullUrl, String[] sqls, String[] propKeys, String[] propValues)
             throws Exception {
@@ -57,11 +53,9 @@ public class JDBCSqlRunner {
             connection.setAutoCommit(false);
             LOG.info("[JDBCRunner] Transaction started, auto-commit disabled");
             Statement stmt = connection.createStatement();
-            if (sqls != null) {
-                for (int i = 0; i < sqls.length; i++) {
-                    String sql = sqls[i];
-                    int result = stmt.executeUpdate(sql);
-                }
+            for (int i = 0; i < sqls.length; i++) {
+                String sql = sqls[i];
+                int result = stmt.executeUpdate(sql);
             }
             connection.commit();
             LOG.info("[JDBCRunner] Transaction committed successfully, SQL statements executed");

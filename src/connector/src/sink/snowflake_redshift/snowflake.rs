@@ -158,8 +158,8 @@ impl SnowflakeV2Config {
 
         let mut connection_properties: Vec<(String, String)> = vec![("user".to_owned(), username)];
 
-        // auth_method is guaranteed to be set by from_btreemap
-        match self.auth_method.as_deref().unwrap_or(AUTH_METHOD_PASSWORD) {
+        // auth_method is guaranteed to be Some after validation in from_btreemap
+        match self.auth_method.as_deref().unwrap() {
             AUTH_METHOD_PASSWORD => {
                 // password is guaranteed to exist by from_btreemap validation
                 connection_properties.push(("password".to_owned(), self.password.clone().unwrap()));
@@ -278,10 +278,9 @@ impl SnowflakeV2Config {
                     (true, false, false) => AUTH_METHOD_PASSWORD.to_owned(),
                     (false, true, false) => AUTH_METHOD_KEY_PAIR_FILE.to_owned(),
                     (false, false, true) => AUTH_METHOD_KEY_PAIR_OBJECT.to_owned(),
-                    (false, true, true) => AUTH_METHOD_KEY_PAIR_OBJECT.to_owned(),
-                    (true, true, _) | (true, _, true) => {
+                    (true, true, _) | (true, _, true) | (false, true, true) => {
                         return Err(SinkError::Config(anyhow!(
-                            "ambiguous auth: both password and key-pair options provided; remove one or set `auth.method`"
+                            "ambiguous auth: multiple auth options provided; remove one or set `auth.method`"
                         )));
                     }
                     _ => {
