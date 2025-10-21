@@ -2618,9 +2618,9 @@ dependencies = [
 
 [[package]]
 name = "const-currying"
-version = "0.0.4"
+version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a16ff120e0b2d07fdcfda1cc2c1c72b76d3b2fe7cc5ec82bf7b42769b2e73c"
+checksum = "321048713fc9074418a026c1e11afdeea760171c1a9e23f1a30969ebb96ae319"
 dependencies = [
  "auto_enums",
  "darling 0.20.11",
