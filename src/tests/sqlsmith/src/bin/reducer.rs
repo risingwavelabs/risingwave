@@ -59,8 +59,8 @@ async fn main() {
             panic!("Failed to restore RW");
         }
         Err(err) => {
-            tracing::error!("Failed to execute restore command: {}", err);
-            panic!("Failed to execute restore command: {}", err);
+            tracing::error!("Failed to execute restore command: {}", err.as_report());
+            panic!("Failed to execute restore command: {}", err.as_report());
         }
     }
 
