@@ -42,7 +42,8 @@ use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
 use crate::controller::scale::{
-    RenderedGraph, WorkerInfo, find_fragment_no_shuffle_dags_detailed, render_jobs,
+    FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
+    find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
 };
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
@@ -424,6 +425,104 @@ impl ScaleController {
         Ok(command)
     }
 
+    pub async fn reschedule_fragment_inplace(
+        &self,
+        policy: HashMap<risingwave_meta_model::FragmentId, ParallelismPolicy>,
+        workers: HashMap<WorkerId, PbWorkerNode>,
+    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if policy.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let fragment_id_list = policy.keys().copied().collect_vec();
+
+        let existing_fragment_ids: HashSet<_> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::FragmentId.is_in(fragment_id_list.clone()))
+            .into_tuple::<risingwave_meta_model::FragmentId>()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .collect();
+
+        if let Some(missing_fragment_id) = fragment_id_list
+            .iter()
+            .find(|fragment_id| !existing_fragment_ids.contains(fragment_id))
+        {
+            return Err(MetaError::catalog_id_not_found(
+                "fragment",
+                *missing_fragment_id,
+            ));
+        }
+
+        let mut target_ensembles = vec![];
+
+        for ensemble in find_fragment_no_shuffle_dags_detailed(&txn, &fragment_id_list).await? {
+            let entry_fragment_ids = ensemble.entry_fragments().collect_vec();
+
+            let parallelisms = entry_fragment_ids
+                .iter()
+                .filter_map(|fragment_id| policy.get(fragment_id))
+                .dedup()
+                .collect_vec();
+
+            let parallelism = match parallelisms.as_slice() {
+                [] => {
+                    bail!(
+                        "no reschedule policy specified for fragments in the no-shuffle ensemble: {:?}",
+                        entry_fragment_ids
+                    );
+                }
+                [policy] => &policy.parallelism,
+                _ => {
+                    bail!(
+                        "conflicting reschedule policies for fragments in the same no-shuffle ensemble: {:?}",
+                        parallelisms
+                            .iter()
+                            .map(|policy| &policy.parallelism)
+                            .collect_vec()
+                    );
+                }
+            };
+
+            for fragment_id in entry_fragment_ids {
+                let fragment = fragment::ActiveModel {
+                    fragment_id: Set(fragment_id),
+                    parallelism: Set(Some(parallelism.clone())),
+                    ..Default::default()
+                };
+                fragment.update(&txn).await?;
+            }
+
+            target_ensembles.push(ensemble);
+        }
+
+        let workers = workers
+            .into_iter()
+            .map(|(id, worker)| {
+                (
+                    id,
+                    WorkerInfo {
+                        weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
+                )
+            })
+            .collect();
+
+        let command = self
+            .rerender_fragment_inner(&txn, target_ensembles, workers)
+            .await?;
+
+        txn.commit().await?;
+
+        Ok(command)
+    }
+
     async fn rerender(
         &self,
         jobs: HashSet<ObjectId>,
@@ -431,6 +530,35 @@ impl ScaleController {
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         self.rerender_inner(&inner.db, jobs, workers).await
+    }
+
+    async fn rerender_fragment_inner(
+        &self,
+        txn: &impl ConnectionTrait,
+        ensembles: Vec<NoShuffleEnsemble>,
+        workers: BTreeMap<WorkerId, WorkerInfo>,
+    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if ensembles.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let adaptive_parallelism_strategy = {
+            let system_params_reader = self.env.system_params_reader().await;
+            system_params_reader.adaptive_parallelism_strategy()
+        };
+
+        let id_gen = self.env.id_gen_manager();
+
+        let RenderedGraph { fragments, .. } = render_fragments(
+            txn,
+            id_gen,
+            ensembles,
+            workers,
+            adaptive_parallelism_strategy,
+        )
+        .await?;
+
+        self.build_reschedule_commands(txn, fragments).await
     }
 
     async fn rerender_inner(
@@ -446,10 +574,20 @@ impl ScaleController {
 
         let id_gen = self.env.id_gen_manager();
 
-        let RenderedGraph {
-            fragments: render_result,
-            ..
-        } = render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy).await?;
+        let RenderedGraph { fragments, .. } =
+            render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy).await?;
+
+        self.build_reschedule_commands(txn, fragments).await
+    }
+
+    async fn build_reschedule_commands(
+        &self,
+        txn: &impl ConnectionTrait,
+        render_result: FragmentRenderMap,
+    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if render_result.is_empty() {
+            return Ok(HashMap::new());
+        }
 
         // for (db, jobs) in &render_result {
         //     println!("\tdb: {db}");
@@ -492,8 +630,7 @@ impl ScaleController {
             .filter(fragment_relation::Column::TargetFragmentId.is_in(fragment_ids.clone()))
             .into_tuple()
             .all(txn)
-            .await
-            .unwrap();
+            .await?;
 
         let downstreams = FragmentRelation::find()
             .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids.clone()))
@@ -557,15 +694,17 @@ impl ScaleController {
             all_related_fragment_ids
                 .iter()
                 .map(|&fragment_id| {
-                    (
-                        fragment_id,
-                        read_guard
-                            .get_fragment(fragment_id as FragmentId)
-                            .cloned()
-                            .unwrap(),
-                    )
+                    read_guard
+                        .get_fragment(fragment_id as FragmentId)
+                        .cloned()
+                        .map(|fragment| (fragment_id, fragment))
+                        .ok_or_else(|| {
+                            MetaError::from(anyhow!(
+                                "previous fragment info for {fragment_id} not found"
+                            ))
+                        })
                 })
-                .collect()
+                .collect::<MetaResult<_>>()?
         };
 
         let all_rendered_fragments: HashMap<_, _> = render_result
@@ -606,13 +745,22 @@ impl ScaleController {
                     .copied()
                     .chain(downstream_fragments.keys().copied())
                     .map(|fragment_id| {
-                        let fragment = all_prev_fragments.get(&(fragment_id as i32)).unwrap();
-                        (
-                            fragment_id,
-                            fragment.actors.keys().copied().collect::<HashSet<_>>(),
-                        )
+                        all_prev_fragments
+                            .get(&(fragment_id as i32))
+                            .map(|fragment| {
+                                (
+                                    fragment_id,
+                                    fragment.actors.keys().copied().collect::<HashSet<_>>(),
+                                )
+                            })
+                            .ok_or_else(|| {
+                                MetaError::from(anyhow!(
+                                    "fragment {} not found in previous state",
+                                    fragment_id
+                                ))
+                            })
                     })
-                    .collect();
+                    .collect::<MetaResult<_>>()?;
 
                 all_fragment_actors.extend(fragment_actors);
 
@@ -629,7 +777,12 @@ impl ScaleController {
                             None => {
                                 let external_fragment = all_prev_fragments
                                     .get(&(*downstream_fragment_id as i32))
-                                    .unwrap();
+                                    .ok_or_else(|| {
+                                        MetaError::from(anyhow!(
+                                            "fragment {} not found in previous state",
+                                            downstream_fragment_id
+                                        ))
+                                    })?;
 
                                 external_fragment
                                     .actors
@@ -658,7 +811,13 @@ impl ScaleController {
                             *fragment_id as FragmentId,
                             *downstream_fragment_id as FragmentId,
                         ))
-                        .expect("downstream relation should exist");
+                        .ok_or_else(|| {
+                            MetaError::from(anyhow!(
+                                "downstream relation missing for {} -> {}",
+                                fragment_id,
+                                downstream_fragment_id
+                            ))
+                        })?;
 
                     let pb_mapping = PbDispatchOutputMapping {
                         indices: output_indices.into_u32_array(),
@@ -684,7 +843,12 @@ impl ScaleController {
                     }
                 }
 
-                let prev_fragment = all_prev_fragments.get(&{ *fragment_id }).unwrap();
+                let prev_fragment = all_prev_fragments.get(&{ *fragment_id }).ok_or_else(|| {
+                    MetaError::from(anyhow!(
+                        "fragment {} not found in previous state",
+                        fragment_id
+                    ))
+                })?;
 
                 let reschedule = self.diff_fragment(
                     prev_fragment,
@@ -710,7 +874,7 @@ impl ScaleController {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParallelismPolicy {
     pub parallelism: StreamingParallelism,
 }

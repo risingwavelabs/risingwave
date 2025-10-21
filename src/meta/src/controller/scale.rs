@@ -284,7 +284,7 @@ pub async fn load_fragment_info<C>(
     database_id: Option<DatabaseId>,
     worker_nodes: &ActiveStreamingWorkerNodes,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+) -> MetaResult<FragmentRenderMap>
 where
     C: ConnectionTrait,
 {
@@ -345,11 +345,109 @@ pub struct WorkerInfo {
     pub resource_group: Option<String>,
 }
 
+pub type FragmentRenderMap =
+    HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>;
+
+#[derive(Default)]
 pub struct RenderedGraph {
-    pub fragments: HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>,
+    pub fragments: FragmentRenderMap,
     pub ensembles: Vec<NoShuffleEnsemble>,
 }
 
+impl RenderedGraph {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+}
+
+/// Fragment-scoped rendering entry point used by operational tooling.
+/// It validates that the requested fragments are roots of their no-shuffle ensembles,
+/// resolves only the metadata required for those components, and then reuses the shared
+/// rendering pipeline to materialize actor assignments.
+pub async fn render_fragments<C>(
+    txn: &C,
+    id_gen: &IdGeneratorManagerRef,
+    ensembles: Vec<NoShuffleEnsemble>,
+    workers: BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+) -> MetaResult<RenderedGraph>
+where
+    C: ConnectionTrait,
+{
+    if ensembles.is_empty() {
+        return Ok(RenderedGraph::empty());
+    }
+
+    let required_fragment_ids: HashSet<_> = ensembles
+        .iter()
+        .flat_map(|ensemble| ensemble.components.iter().copied())
+        .collect();
+
+    let fragment_models = Fragment::find()
+        .filter(fragment::Column::FragmentId.is_in(required_fragment_ids.iter().copied()))
+        .all(txn)
+        .await?;
+
+    let found_fragment_ids: HashSet<_> = fragment_models
+        .iter()
+        .map(|fragment| fragment.fragment_id)
+        .collect();
+
+    if found_fragment_ids.len() != required_fragment_ids.len() {
+        let missing = required_fragment_ids
+            .difference(&found_fragment_ids)
+            .copied()
+            .collect_vec();
+        return Err(anyhow!("fragments {:?} not found", missing).into());
+    }
+
+    let fragment_map: HashMap<_, _> = fragment_models
+        .into_iter()
+        .map(|fragment| (fragment.fragment_id, fragment))
+        .collect();
+
+    let job_ids: HashSet<_> = fragment_map
+        .values()
+        .map(|fragment| fragment.job_id)
+        .collect();
+
+    if job_ids.is_empty() {
+        return Ok(RenderedGraph::empty());
+    }
+
+    let jobs: HashMap<_, _> = StreamingJob::find()
+        .filter(streaming_job::Column::JobId.is_in(job_ids.iter().copied().collect_vec()))
+        .all(txn)
+        .await?
+        .into_iter()
+        .map(|job| (job.job_id, job))
+        .collect();
+
+    let found_job_ids: HashSet<_> = jobs.keys().copied().collect();
+    if found_job_ids.len() != job_ids.len() {
+        let missing = job_ids.difference(&found_job_ids).copied().collect_vec();
+        return Err(anyhow!("streaming jobs {:?} not found", missing).into());
+    }
+
+    let fragments = render_no_shuffle_ensembles(
+        txn,
+        id_gen,
+        &ensembles,
+        &fragment_map,
+        &jobs,
+        &workers,
+        adaptive_parallelism_strategy,
+    )
+    .await?;
+
+    Ok(RenderedGraph {
+        fragments,
+        ensembles,
+    })
+}
+
+/// Job-scoped rendering entry point that walks every no-shuffle root belonging to the
+/// provided streaming jobs before delegating to the shared rendering backend.
 pub async fn render_jobs<C>(
     txn: &C,
     id_gen: &IdGeneratorManagerRef,
@@ -398,19 +496,60 @@ where
         .all(txn)
         .await?;
 
-    let mut fragment_map: HashMap<_, _> = fragments
+    let fragment_map: HashMap<_, _> = fragments
         .into_iter()
         .map(|fragment| (fragment.fragment_id, fragment))
         .collect();
 
+    let fragments = render_no_shuffle_ensembles(
+        txn,
+        id_gen,
+        &ensembles,
+        &fragment_map,
+        &jobs,
+        &workers,
+        adaptive_parallelism_strategy,
+    )
+    .await?;
+
+    Ok(RenderedGraph {
+        fragments,
+        ensembles,
+    })
+}
+
+/// Core rendering routine that consumes no-shuffle ensembles and produces
+/// `InflightFragmentInfo`s by:
+///   * determining the eligible worker pools and effective parallelism,
+///   * generating actor→worker assignments plus vnode bitmaps and source splits,
+///   * grouping the rendered fragments by database and streaming job.
+async fn render_no_shuffle_ensembles<C>(
+    txn: &C,
+    id_gen: &IdGeneratorManagerRef,
+    ensembles: &[NoShuffleEnsemble],
+    fragment_map: &HashMap<FragmentId, fragment::Model>,
+    jobs: &HashMap<ObjectId, streaming_job::Model>,
+    workers: &BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+) -> MetaResult<FragmentRenderMap>
+where
+    C: ConnectionTrait,
+{
+    if ensembles.is_empty() {
+        return Ok(HashMap::new());
+    }
+
     let (fragment_source_ids, fragment_splits) =
-        resolve_source_fragments(txn, &fragment_map).await?;
+        resolve_source_fragments(txn, fragment_map).await?;
+
+    let job_ids = jobs.keys().copied().collect_vec();
 
     let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
         .select_only()
         .column(streaming_job::Column::JobId)
         .column(object::Column::DatabaseId)
         .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+        .filter(streaming_job::Column::JobId.is_in(job_ids))
         .into_tuple()
         .all(txn)
         .await?
@@ -428,15 +567,12 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
-    let mut all_fragments: HashMap<
-        DatabaseId,
-        HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
-    > = HashMap::new();
+    let mut all_fragments: FragmentRenderMap = HashMap::new();
 
     for NoShuffleEnsemble {
         entries,
         components,
-    } in &ensembles
+    } in ensembles
     {
         tracing::debug!("rendering ensemble entries {:?}", entries);
 
@@ -444,6 +580,18 @@ where
             .iter()
             .map(|fragment_id| fragment_map.get(fragment_id).unwrap())
             .collect_vec();
+
+        let entry_fragment_parallelism = entry_fragments
+            .iter()
+            .map(|fragment| fragment.parallelism.clone())
+            .dedup()
+            .exactly_one()
+            .map_err(|_| {
+                anyhow!(
+                    "entry fragments {:?} have inconsistent parallelism settings",
+                    entries.iter().copied().collect_vec()
+                )
+            })?;
 
         let (job_id, vnode_count) = entry_fragments
             .iter()
@@ -485,23 +633,26 @@ where
 
         let total_parallelism = available_workers.values().map(|w| w.get()).sum::<usize>();
 
-        let actual_parallelism = match job.parallelism {
-            StreamingParallelism::Custom | StreamingParallelism::Adaptive => {
+        let actual_parallelism = match entry_fragment_parallelism
+            .as_ref()
+            .unwrap_or(&job.parallelism)
+        {
+            StreamingParallelism::Adaptive | StreamingParallelism::Custom => {
                 adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
             }
-            StreamingParallelism::Fixed(n) => n,
+            StreamingParallelism::Fixed(n) => *n,
         }
-        .min(job.max_parallelism as usize) // limit max parallelism
-        .min(vnode_count); // limit vnode count
+        .min(vnode_count);
 
         tracing::debug!(
-            "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {}",
+            "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {} fragment_override {:?}",
             job_id,
             actual_parallelism,
             job.parallelism,
             total_parallelism,
             job.max_parallelism,
-            vnode_count
+            vnode_count,
+            entry_fragment_parallelism
         );
 
         let assigner = AssignerBuilder::new(job_id).build();
@@ -544,8 +695,6 @@ where
 
                 let splits: BTreeMap<_, _> = splits.into_iter().map(|s| (s.id(), s)).collect();
 
-                println!("xxk source_id {} prev splits {:?}", source_id, splits);
-
                 let fragment_splits = crate::stream::source_manager::reassign_splits(
                     entry_fragment_id as u32,
                     empty_actor_splits,
@@ -558,16 +707,16 @@ where
             None => (HashMap::new(), None),
         };
 
-        for fragment_id in components {
-            let fragment::Model {
+        for component_fragment_id in components {
+            let &fragment::Model {
                 fragment_id,
                 job_id,
                 fragment_type_mask,
                 distribution_type,
-                stream_node,
-                state_table_ids,
+                ref stream_node,
+                ref state_table_ids,
                 ..
-            } = fragment_map.remove(fragment_id).unwrap();
+            } = fragment_map.get(component_fragment_id).unwrap();
 
             let actor_id_base =
                 id_gen.generate_interval::<{ IdCategory::Actor }>(actors.len() as u64) as u32;
@@ -598,11 +747,6 @@ where
                         vec![]
                     };
 
-                    println!(
-                        "xxk fragment {} actor {} splits {:?}",
-                        fragment_id, actor_id, splits
-                    );
-
                     (
                         actor_id,
                         InflightActorInfo {
@@ -622,9 +766,9 @@ where
                 nodes: stream_node.to_protobuf(),
                 actors,
                 state_table_ids: state_table_ids
-                    .into_inner()
-                    .into_iter()
-                    .map(|id| catalog::TableId::new(id as u32))
+                    .inner_ref()
+                    .iter()
+                    .map(|id| catalog::TableId::new(*id as _))
                     .collect(),
             };
 
@@ -641,10 +785,7 @@ where
         }
     }
 
-    Ok(RenderedGraph {
-        fragments: all_fragments,
-        ensembles,
-    })
+    Ok(all_fragments)
 }
 
 async fn resolve_source_fragments<C>(
@@ -722,7 +863,7 @@ pub struct ActorGraph<'a> {
     pub locations: &'a HashMap<ActorId, WorkerId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoShuffleEnsemble {
     entries: HashSet<FragmentId>,
     components: HashSet<FragmentId>,
@@ -731,6 +872,18 @@ pub struct NoShuffleEnsemble {
 impl NoShuffleEnsemble {
     pub fn fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
         self.components.iter().cloned()
+    }
+
+    pub fn entry_fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.entries.iter().copied()
+    }
+
+    pub fn component_fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.components.iter().copied()
+    }
+
+    pub fn contains_entry(&self, fragment_id: &FragmentId) -> bool {
+        self.entries.contains(fragment_id)
     }
 }
 

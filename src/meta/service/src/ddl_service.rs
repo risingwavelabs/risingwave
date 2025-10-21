@@ -26,9 +26,10 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
+use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy};
-use risingwave_meta::{MetaResult, bail_unavailable};
+use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::{ObjectId, StreamingParallelism};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
@@ -982,20 +983,28 @@ impl DdlService for DdlServiceImpl {
 
     async fn alter_cdc_table_backfill_parallelism(
         &self,
-        _request: Request<AlterCdcTableBackfillParallelismRequest>,
+        request: Request<AlterCdcTableBackfillParallelismRequest>,
     ) -> Result<Response<AlterCdcTableBackfillParallelismResponse>, Status> {
-        // let req = request.into_inner();
-        // let job_id = req.get_table_id();
-        // let parallelism = *req.get_parallelism()?;
-        // self.ddl_controller
-        //     .reschedule_cdc_table_backfill(
-        //         job_id,
-        //         JobRescheduleTarget {
-        //             parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
-        //             resource_group: JobResourceGroupTarget::Keep,
-        //         },
-        //     )
-        //     .await?;
+        let req = request.into_inner();
+        let job_id = req.get_table_id();
+        let parallelism = *req.get_parallelism()?;
+
+        let table_parallelism = ModelTableParallelism::from(parallelism);
+        let streaming_parallelism = match table_parallelism {
+            ModelTableParallelism::Fixed(n) => StreamingParallelism::Fixed(n),
+            _ => bail_invalid_parameter!(
+                "CDC table backfill parallelism must be set to a fixed value"
+            ),
+        };
+
+        self.ddl_controller
+            .reschedule_cdc_table_backfill(
+                job_id,
+                ReschedulePolicy::Parallelism(ParallelismPolicy {
+                    parallelism: streaming_parallelism,
+                }),
+            )
+            .await?;
         Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
     }
 
