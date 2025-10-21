@@ -215,3 +215,19 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         *is_list_finished.write() = true;
     }
 }
+
+impl<S: StateStore> Execute for BatchIcebergListExecutor<S> {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.into_stream().boxed()
+    }
+}
+
+impl<S: StateStore> Debug for BatchIcebergListExecutor<S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BatchIcebergListExecutor")
+            .field("source_id", &self.stream_source_core.source_id)
+            .field("column_ids", &self.stream_source_core.column_ids)
+            .field("downstream_columns", &self.downstream_columns)
+            .finish()
+    }
+}
