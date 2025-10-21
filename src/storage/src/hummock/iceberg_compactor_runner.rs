@@ -359,6 +359,16 @@ impl IcebergCompactorRunner {
         let compact_task = async move {
             // Phase 1: Planning
             let compaction_type = Self::get_compaction_type(self.task_type);
+
+            let grouping_strategy = match self.iceberg_config.write_mode.as_str() {
+                "copy_on_write" => iceberg_compaction_core::config::GroupingStrategy::Noop,
+                _ => iceberg_compaction_core::config::GroupingStrategy::BinPack(
+                    iceberg_compaction_core::config::BinPackConfig::new(
+                        32 * 1024 * 1024, // 32MB
+                    ),
+                ),
+            };
+
             let planning_config = CompactionPlanningConfigBuilder::default()
                 .max_parallelism(self.config.max_parallelism as usize)
                 .min_size_per_partition(self.config.min_size_per_partition)
@@ -371,11 +381,7 @@ impl IcebergCompactorRunner {
                 )
                 .small_file_threshold(self.config.small_file_threshold)
                 .max_task_total_size(self.config.max_task_total_size)
-                .grouping_strategy(iceberg_compaction_core::config::GroupingStrategy::BinPack(
-                    iceberg_compaction_core::config::BinPackConfig::new(
-                        32 * 1024 * 1024, // 32MB
-                    ),
-                ))
+                .grouping_strategy(grouping_strategy)
                 .build()
                 .unwrap_or_else(|e| {
                     panic!(

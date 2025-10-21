@@ -107,11 +107,11 @@ pub async fn handle_vacuum(
             .meta_client()
             .compact_iceberg_table(sink_id)
             .await?;
-        // session
-        //     .env()
-        //     .meta_client()
-        //     .expire_iceberg_table_snapshots(sink_id)
-        //     .await?;
+        session
+            .env()
+            .meta_client()
+            .expire_iceberg_table_snapshots(sink_id)
+            .await?;
     } else {
         // Regular VACUUM: only expire snapshots
         session
