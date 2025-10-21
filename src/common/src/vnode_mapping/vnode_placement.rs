@@ -286,7 +286,7 @@ mod tests {
         let score = count_same_vnode_mapping(&re_worker_mapping_2, &re_worker_mapping);
         assert!(score >= 5);
 
-        let mut property = serving_property.clone();
+        let mut property = serving_property;
         property.parallelism = 60;
         let worker_3 = WorkerNode {
             id: 3,

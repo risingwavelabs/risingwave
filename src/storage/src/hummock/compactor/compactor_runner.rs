@@ -247,7 +247,7 @@ impl CompactorRunner {
             let skip_watermark_iter = PkPrefixSkipWatermarkIterator::new(
                 MonitoredCompactorIterator::new(
                     MergeIterator::for_compactor(table_iters),
-                    task_progress.clone(),
+                    task_progress,
                 ),
                 PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
                     self.compact_task.pk_prefix_table_watermarks.clone(),

@@ -68,7 +68,7 @@ impl TableFunctionToInternalBackfillProgressRule {
                 Field::new("current_row_count", DataType::Int64),
                 Field::new("min_epoch", DataType::Int64),
             ];
-            let plan = LogicalValues::new(vec![], Schema::new(fields), ctx.clone());
+            let plan = LogicalValues::new(vec![], Schema::new(fields), ctx);
             return Ok(plan.into());
         }
 
@@ -86,7 +86,7 @@ impl TableFunctionToInternalBackfillProgressRule {
     }
 
     fn build_scan(ctx: Rc<OptimizerContext>, table: Arc<TableCatalog>) -> LogicalScan {
-        LogicalScan::create(table, ctx.clone(), None)
+        LogicalScan::create(table, ctx, None)
     }
 
     fn build_agg(backfill_info: &BackfillInfo, scan: LogicalScan) -> anyhow::Result<PlanRef> {
