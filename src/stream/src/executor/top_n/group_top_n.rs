@@ -234,7 +234,7 @@ where
         for staging in stagings.into_values() {
             for res in staging.into_deserialized_changes(&deserializer) {
                 let record = res?;
-                let _none = chunk_builder.append_record_eliminate_noop_update(record);
+                let _none = chunk_builder.append_record(record);
             }
         }
         Ok(chunk_builder.take())
