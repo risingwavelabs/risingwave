@@ -684,15 +684,6 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
-                //   let state = self
-                //                     .metadata_manager.get_job_state_by_id(&id)
-                //                     .await?;
-                //                 if state == PbState::Created {
-                //                     Err(MetaError::invalid_parameter(format!(
-                //                         "streaming job {} is already created",
-                //                         id
-                //                     )))?;
-                //                 }
 
                 let cancel_command = self
                     .metadata_manager

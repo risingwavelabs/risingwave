@@ -1862,11 +1862,6 @@ impl DdlController {
             .await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
 
-        //   let old_internal_table_ids = self
-        //             .metadata_manager
-        //             .list_job_internal_table_ids_by_id(&id.into())
-        //             .await?;
-
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;
         if let Some(to_remove_source_id) = drop_table_associated_source_id {
