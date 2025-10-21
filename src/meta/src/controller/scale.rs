@@ -123,7 +123,7 @@ fn construct_no_shuffle_traverse_query_helper(
             Expr::col((FragmentRelation, fragment_relation::Column::DispatcherType))
                 .eq(DispatcherType::NoShuffle),
         )
-        .and_where(Expr::col(compared_column.clone()).is_in(fragment_ids.clone()))
+        .and_where(Expr::col(compared_column.clone()).is_in(fragment_ids))
         .to_owned();
 
     let cte_referencing = SelectStatement::new()
@@ -162,7 +162,7 @@ fn construct_no_shuffle_traverse_query_helper(
         .column(fragment_relation::Column::DispatcherType)
         .column(fragment_relation::Column::TargetFragmentId)
         .distinct()
-        .from(cte_alias.clone())
+        .from(cte_alias)
         .to_owned()
         .with(
             WithClause::new()

@@ -100,7 +100,7 @@ impl LocalStreamManager {
             risingwave_storage::hummock::utils::disable_sanity_check();
         }
 
-        let await_tree_reg = await_tree_config.clone().map(await_tree::Registry::new);
+        let await_tree_reg = await_tree_config.map(await_tree::Registry::new);
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
 

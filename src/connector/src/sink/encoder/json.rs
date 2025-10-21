@@ -723,7 +723,7 @@ mod tests {
         let json_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Jsonb,
-                ..mock_field.clone()
+                ..mock_field
             },
             Some(ScalarImpl::Jsonb(JsonbVal::from(json!([1, 2, 3]))).as_scalar_ref_impl()),
             &encode_jsonb_obj_config,

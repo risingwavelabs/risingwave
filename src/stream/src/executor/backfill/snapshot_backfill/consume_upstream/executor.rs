@@ -182,7 +182,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                     post_commit.post_yield_barrier(update_vnode_bitmap).await?
                 {
                     drop(stream);
-                    upstream_table.update_vnode_bitmap(new_vnode_bitmap.clone());
+                    upstream_table.update_vnode_bitmap(new_vnode_bitmap);
                     // recreate the stream on update vnode bitmap
                     stream = ConsumeUpstreamStream::new(
                         progress_state.latest_progress(),

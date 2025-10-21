@@ -342,7 +342,7 @@ impl IcebergCompactionManager {
 
     pub async fn load_iceberg_config(&self, sink_id: &SinkId) -> MetaResult<IcebergConfig> {
         let sink_param = self.get_sink_param(sink_id).await?;
-        let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties.clone())?;
+        let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties)?;
         Ok(iceberg_config)
     }
 

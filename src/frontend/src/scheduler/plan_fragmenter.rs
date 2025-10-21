@@ -1149,7 +1149,7 @@ impl BatchPlanFragmenter {
     ) -> SchedulerResult<()> {
         match node.node_type() {
             BatchPlanNodeType::BatchExchange => {
-                self.visit_exchange(node.clone(), builder, parent_exec_node)?;
+                self.visit_exchange(node, builder, parent_exec_node)?;
             }
             _ => {
                 let mut execution_plan_node = ExecutionPlanNode::try_from(node.clone())?;
@@ -1279,7 +1279,7 @@ impl BatchPlanFragmenter {
 
         if let Some(batch_file_scan) = node.as_batch_file_scan() {
             return Ok(Some(FileScanInfo {
-                file_location: batch_file_scan.core.file_location().clone(),
+                file_location: batch_file_scan.core.file_location(),
             }));
         }
 

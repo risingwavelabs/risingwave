@@ -862,7 +862,7 @@ impl TestCase {
 
         'sink: {
             if self.expected_outputs.contains(&TestType::SinkPlan) {
-                let plan_root = plan_root.clone();
+                let plan_root = plan_root;
                 let sink_name = "sink_test";
                 let mut options = BTreeMap::new();
                 options.insert("connector".to_owned(), "blackhole".to_owned());

@@ -1003,7 +1003,7 @@ impl Command {
                         };
                         HashMap::from([(
                             new_sink_downstream.downstream_fragment_id,
-                            new_upstream_sink.clone(),
+                            new_upstream_sink,
                         )])
                     } else {
                         HashMap::new()

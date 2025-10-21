@@ -226,8 +226,7 @@ metrics_level = "Disabled"
 [meta]
 default_parallelism = {default_parallelism}
 "#
-            )
-            .to_owned();
+            );
             file.write_all(config_data.as_bytes())
                 .expect("failed to write config file");
             file.into_temp_path()
