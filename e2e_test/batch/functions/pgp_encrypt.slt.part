@@ -29,3 +29,72 @@ SELECT pgp_sym_decrypt(pgp_sym_encrypt('The quick brown fox jumps over the lazy 
 statement error
 SELECT pgp_sym_decrypt(pgp_sym_encrypt('data'::bytea, 'pass1'), 'pass2');
 
+# Test with special characters in data
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('special chars: !@#$%^&*()'::bytea, 'special_password'), 'special_password');
+----
+\x7370656369616c2063686172733a2021402324255e262a2829
+
+# Test with unicode characters in data
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('unicode: ñáéíóú'::bytea, 'unicode_password'), 'unicode_password');
+----
+\x756e69636f64653a20c3b1c3a1c3a9c3adc3b3c3ba
+
+# Test with very long data
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt(repeat('long data test ', 100)::bytea, 'long_password'), 'long_password') = repeat('long data test ', 100)::bytea;
+----
+t
+
+# Test with empty password (should work like PostgreSQL)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('empty password test'::bytea, ''), '');
+----
+\x656d7074792070617373776f72642074657374
+
+# Test case sensitivity of passwords
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('case test'::bytea, 'Password123'), 'Password123');
+----
+\x636173652074657374
+
+# Test case sensitivity of passwords (should fail)
+statement error
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('case test'::bytea, 'Password123'), 'password123');
+
+# Test pgp_pub_encrypt and pgp_pub_decrypt with test key pair
+# Note: Using a minimal test key pair for demonstration
+# In practice, you would use a proper RSA key pair
+
+# Test public key encryption with valid key (this would need a proper key in practice)
+# For now, we'll test the error cases and structure
+
+# Test pgp_pub_encrypt with empty key should fail
+statement error
+SELECT pgp_pub_encrypt('data'::bytea, ''::bytea);
+
+# Test pgp_pub_decrypt with empty key should fail
+statement error
+SELECT pgp_pub_decrypt(pgp_sym_encrypt('data'::bytea, 'secret'), ''::bytea);
+
+# Test pgp_pub_encrypt with invalid key format should fail
+statement error
+SELECT pgp_pub_encrypt('data'::bytea, 'not-a-key'::bytea);
+
+# Test pgp_pub_decrypt with invalid key format should fail
+statement error
+SELECT pgp_pub_decrypt(pgp_sym_encrypt('data'::bytea, 'secret'), 'not-a-key'::bytea);
+
+# Test pgp_pub_encrypt with options - basic structure test
+# Note: These would need valid keys to actually work
+# statement ok
+# SELECT pgp_pub_encrypt('test data'::bytea, <public_key>, 'cipher-algo=aes256');
+
+# Test pgp_pub_decrypt with password - basic structure test
+# statement ok
+# SELECT pgp_pub_decrypt(<encrypted_data>, <private_key>, 'password');
+
+# Test pgp_pub_decrypt with options - basic structure test
+# statement ok
+# SELECT pgp_pub_decrypt(<encrypted_data>, <private_key>, 'password', 'cipher-algo=aes256');
