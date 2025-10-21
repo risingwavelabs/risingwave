@@ -12812,7 +12812,7 @@ dependencies = [
  "glob",
  "hytra",
  "iceberg",
- "indexmap 2.10.0",
+ "indexmap 2.12.0",
  "itertools 0.14.0",
  "jsonbb",
  "lru",
