@@ -225,11 +225,11 @@
     - create_correlated_tables_with_column_value_index
   id: correlated_read_without_embedding
   sql: |
-    select 
+    select
       event_id, array(
         select row(id, name, distance)
         from (select id, name, events.embedding <-> items.embedding as distance from items order by distance limit 3)
-      ) as related_info, 
+      ) as related_info,
       time
     from events;
   expected_outputs:
