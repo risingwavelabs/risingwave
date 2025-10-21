@@ -657,6 +657,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 .collect_vec(),
                             &self.schema.data_types(),
                         );
+
+                        tracing::debug!(table_id = %refresh_args.table_id, "yielding to delete chunk: {}", to_delete_chunk.to_pretty());
                         yield Message::Chunk(to_delete_chunk);
                     }
 
@@ -705,7 +707,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     refresh_args.table_id.into(),
                                     staging_table_id,
                                 );
-                                tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
+                                tracing::debug!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
 
                                 *inner_state = MaterializeStreamState::CommitAndYieldBarrier {
                                     barrier,
@@ -738,6 +740,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             },
                         )
                         .await?;
+
+                    tracing::info!(table_id = %refresh_args.table_id, "RefreshEnd: Refresh completed");
 
                     if let Some(ref mut refresh_args) = self.refresh_args {
                         refresh_args.is_refreshing = false;
