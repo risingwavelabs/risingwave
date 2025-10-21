@@ -736,7 +736,10 @@ pub async fn start_service_as_election_leader(
         .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
-        .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
+        .add_service(
+            SinkCoordinationServiceServer::new(sink_coordination_srv)
+                .max_decoding_message_size(usize::MAX),
+        )
         .add_service(
             EventLogServiceServer::new(event_log_srv).max_decoding_message_size(usize::MAX),
         )
