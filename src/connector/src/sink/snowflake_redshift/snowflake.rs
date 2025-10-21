@@ -47,6 +47,11 @@ pub const SNOWFLAKE_SINK_V2: &str = "snowflake_v2";
 pub const SNOWFLAKE_SINK_ROW_ID: &str = "__row_id";
 pub const SNOWFLAKE_SINK_OP: &str = "__op";
 
+const AUTH_METHOD_PASSWORD: &str = "password";
+const AUTH_METHOD_KEY_PAIR_FILE: &str = "key_pair_file";
+const AUTH_METHOD_KEY_PAIR_OBJECT: &str = "key_pair_object";
+const PROP_AUTH_METHOD: &str = "auth.method";
+
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct SnowflakeV2Config {
@@ -81,6 +86,21 @@ pub struct SnowflakeV2Config {
 
     #[serde(rename = "password")]
     pub password: Option<String>,
+
+    // Authentication method control (password | key_pair_file | key_pair_object)
+    #[serde(rename = "auth.method")]
+    pub auth_method: Option<String>,
+
+    // Key-pair authentication via connection Properties (Option 2: file-based)
+    #[serde(rename = "private_key_file")]
+    pub private_key_file: Option<String>,
+
+    #[serde(rename = "private_key_file_pwd")]
+    pub private_key_file_pwd: Option<String>,
+
+    // Key-pair authentication via connection Properties (Option 1: object-based, PEM content)
+    #[serde(rename = "private_key_pem")]
+    pub private_key_pem: Option<String>,
 
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
@@ -121,8 +141,66 @@ fn default_with_s3() -> bool {
 }
 
 impl SnowflakeV2Config {
+    /// Build JDBC Properties for the Snowflake JDBC connection (no URL parameters).
+    /// Returns (`jdbc_url`, `driver_properties`).
+    /// - `driver_properties` are transformed/used by the Java runner and passed to `DriverManager::getConnection(url, props)`
+    ///
+    /// Note: This method assumes the config has been validated by `from_btreemap`.
+    pub fn build_jdbc_connection_properties(&self) -> Result<(String, Vec<(String, String)>)> {
+        let jdbc_url = self
+            .jdbc_url
+            .clone()
+            .ok_or(SinkError::Config(anyhow!("jdbc.url is required")))?;
+        let username = self
+            .username
+            .clone()
+            .ok_or(SinkError::Config(anyhow!("username is required")))?;
+
+        let mut connection_properties: Vec<(String, String)> = vec![("user".to_owned(), username)];
+
+        // auth_method is guaranteed to be set by from_btreemap
+        match self.auth_method.as_deref().unwrap_or(AUTH_METHOD_PASSWORD) {
+            AUTH_METHOD_PASSWORD => {
+                // password is guaranteed to exist by from_btreemap validation
+                connection_properties.push(("password".to_owned(), self.password.clone().unwrap()));
+            }
+            AUTH_METHOD_KEY_PAIR_FILE => {
+                // private_key_file is guaranteed to exist by from_btreemap validation
+                connection_properties.push((
+                    "private_key_file".to_owned(),
+                    self.private_key_file.clone().unwrap(),
+                ));
+                if let Some(pwd) = self.private_key_file_pwd.clone() {
+                    connection_properties.push(("private_key_file_pwd".to_owned(), pwd));
+                }
+            }
+            AUTH_METHOD_KEY_PAIR_OBJECT => {
+                connection_properties.push((
+                    PROP_AUTH_METHOD.to_owned(),
+                    AUTH_METHOD_KEY_PAIR_OBJECT.to_owned(),
+                ));
+                // private_key_pem is guaranteed to exist by from_btreemap validation
+                connection_properties.push((
+                    "private_key_pem".to_owned(),
+                    self.private_key_pem.clone().unwrap(),
+                ));
+                if let Some(pwd) = self.private_key_file_pwd.clone() {
+                    connection_properties.push(("private_key_file_pwd".to_owned(), pwd));
+                }
+            }
+            _ => {
+                // This should never happen since from_btreemap validates auth_method
+                unreachable!(
+                    "Invalid auth_method - should have been caught during config validation"
+                )
+            }
+        }
+
+        Ok((jdbc_url, connection_properties))
+    }
+
     pub fn from_btreemap(properties: &BTreeMap<String, String>) -> Result<Self> {
-        let config =
+        let mut config =
             serde_json::from_value::<SnowflakeV2Config>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
@@ -133,6 +211,88 @@ impl SnowflakeV2Config {
                 SINK_TYPE_UPSERT
             )));
         }
+
+        // Normalize and validate authentication method
+        let has_password = config.password.is_some();
+        let has_file = config.private_key_file.is_some();
+        let has_pem = config.private_key_pem.as_deref().is_some();
+
+        let normalized_auth_method = match config
+            .auth_method
+            .as_deref()
+            .map(|s| s.trim().to_ascii_lowercase())
+        {
+            Some(method) if method == AUTH_METHOD_PASSWORD => {
+                if !has_password {
+                    return Err(SinkError::Config(anyhow!(
+                        "auth.method=password requires `password`"
+                    )));
+                }
+                if has_file || has_pem {
+                    return Err(SinkError::Config(anyhow!(
+                        "auth.method=password must not set `private_key_file`/`private_key_pem`"
+                    )));
+                }
+                AUTH_METHOD_PASSWORD.to_owned()
+            }
+            Some(method) if method == AUTH_METHOD_KEY_PAIR_FILE => {
+                if !has_file {
+                    return Err(SinkError::Config(anyhow!(
+                        "auth.method=key_pair_file requires `private_key_file`"
+                    )));
+                }
+                if has_password {
+                    return Err(SinkError::Config(anyhow!(
+                        "auth.method=key_pair_file must not set `password`"
+                    )));
+                }
+                if has_pem {
+                    return Err(SinkError::Config(anyhow!(
+                        "auth.method=key_pair_file must not set `private_key_pem`"
+                    )));
+                }
+                AUTH_METHOD_KEY_PAIR_FILE.to_owned()
+            }
+            Some(method) if method == AUTH_METHOD_KEY_PAIR_OBJECT => {
+                if !has_pem {
+                    return Err(SinkError::Config(anyhow!(
+                        "auth.method=key_pair_object requires `private_key_pem`"
+                    )));
+                }
+                if has_password {
+                    return Err(SinkError::Config(anyhow!(
+                        "auth.method=key_pair_object must not set `password`"
+                    )));
+                }
+                AUTH_METHOD_KEY_PAIR_OBJECT.to_owned()
+            }
+            Some(other) => {
+                return Err(SinkError::Config(anyhow!(
+                    "invalid auth.method: {} (allowed: password | key_pair_file | key_pair_object)",
+                    other
+                )));
+            }
+            None => {
+                // Infer auth method from supplied fields
+                match (has_password, has_file, has_pem) {
+                    (true, false, false) => AUTH_METHOD_PASSWORD.to_owned(),
+                    (false, true, false) => AUTH_METHOD_KEY_PAIR_FILE.to_owned(),
+                    (false, false, true) => AUTH_METHOD_KEY_PAIR_OBJECT.to_owned(),
+                    (false, true, true) => AUTH_METHOD_KEY_PAIR_OBJECT.to_owned(),
+                    (true, true, _) | (true, _, true) => {
+                        return Err(SinkError::Config(anyhow!(
+                            "ambiguous auth: both password and key-pair options provided; remove one or set `auth.method`"
+                        )));
+                    }
+                    _ => {
+                        return Err(SinkError::Config(anyhow!(
+                            "no authentication configured: set either `password`, or `private_key_file`, or `private_key_pem` (or provide `auth.method`)"
+                        )));
+                    }
+                }
+            }
+        };
+        config.auth_method = Some(normalized_auth_method);
         Ok(config)
     }
 
@@ -166,20 +326,8 @@ impl SnowflakeV2Config {
             ..Default::default()
         };
 
-        let jdbc_url = self
-            .jdbc_url
-            .clone()
-            .ok_or(SinkError::Config(anyhow!("jdbc.url is required")))?;
-        let username = self
-            .username
-            .clone()
-            .ok_or(SinkError::Config(anyhow!("username is required")))?;
-        let password = self
-            .password
-            .clone()
-            .ok_or(SinkError::Config(anyhow!("password is required")))?;
-        let jdbc_url = format!("{}?user={}&password={}", jdbc_url, username, password);
-        let client = JdbcJniClient::new(jdbc_url)?;
+        let (jdbc_url, connection_properties) = self.build_jdbc_connection_properties()?;
+        let client = JdbcJniClient::new_with_props(jdbc_url, connection_properties)?;
 
         if self.with_s3 {
             let stage = self
@@ -236,6 +384,9 @@ impl EnforceSecret for SnowflakeV2Config {
         "username",
         "password",
         "jdbc.url",
+        // Key-pair authentication secrets
+        "private_key_file_pwd",
+        "private_key_pem",
     };
 }
 
@@ -483,7 +634,7 @@ impl SnowflakeSinkJdbcWriter {
                 config.snowflake_cdc_table_name.clone().unwrap_or_default()
             )
         };
-        let new_properties = BTreeMap::from([
+        let mut new_properties = BTreeMap::from([
             ("table.name".to_owned(), full_table_name),
             ("connector".to_owned(), "snowflake_v2".to_owned()),
             (
@@ -491,14 +642,6 @@ impl SnowflakeSinkJdbcWriter {
                 config.jdbc_url.clone().unwrap_or_default(),
             ),
             ("type".to_owned(), "append-only".to_owned()),
-            (
-                "user".to_owned(),
-                config.username.clone().unwrap_or_default(),
-            ),
-            (
-                "password".to_owned(),
-                config.password.clone().unwrap_or_default(),
-            ),
             (
                 "primary_key".to_owned(),
                 properties.get("primary_key").cloned().unwrap_or_default(),
@@ -512,6 +655,13 @@ impl SnowflakeSinkJdbcWriter {
                 config.snowflake_database.clone().unwrap_or_default(),
             ),
         ]);
+
+        // Reuse build_jdbc_connection_properties to get driver properties (auth, user, etc.)
+        let (_jdbc_url, connection_properties) = config.build_jdbc_connection_properties()?;
+        for (key, value) in connection_properties {
+            new_properties.insert(key, value);
+        }
+
         param.properties = new_properties;
 
         let jdbc_sink_writer =
@@ -1015,8 +1165,82 @@ END;"#,
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::sink::jdbc_jni_client::normalize_sql;
+
+    fn base_properties() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("type".to_owned(), "append-only".to_owned()),
+            ("jdbc.url".to_owned(), "jdbc:snowflake://account".to_owned()),
+            ("username".to_owned(), "RW_USER".to_owned()),
+        ])
+    }
+
+    #[test]
+    fn test_build_jdbc_props_password() {
+        let mut props = base_properties();
+        props.insert("password".to_owned(), "secret".to_owned());
+        let config = SnowflakeV2Config::from_btreemap(&props).unwrap();
+        let (url, connection_properties) = config.build_jdbc_connection_properties().unwrap();
+        assert_eq!(url, "jdbc:snowflake://account");
+        let map: BTreeMap<_, _> = connection_properties.into_iter().collect();
+        assert_eq!(map.get("user"), Some(&"RW_USER".to_owned()));
+        assert_eq!(map.get("password"), Some(&"secret".to_owned()));
+        assert!(map.get("authenticator").is_none());
+    }
+
+    #[test]
+    fn test_build_jdbc_props_key_pair_file() {
+        let mut props = base_properties();
+        props.insert(
+            "auth.method".to_owned(),
+            AUTH_METHOD_KEY_PAIR_FILE.to_owned(),
+        );
+        props.insert("private_key_file".to_owned(), "/tmp/rsa_key.p8".to_owned());
+        props.insert("private_key_file_pwd".to_owned(), "dummy".to_owned());
+        let config = SnowflakeV2Config::from_btreemap(&props).unwrap();
+        let (url, connection_properties) = config.build_jdbc_connection_properties().unwrap();
+        assert_eq!(url, "jdbc:snowflake://account");
+        let map: BTreeMap<_, _> = connection_properties.into_iter().collect();
+        assert_eq!(map.get("user"), Some(&"RW_USER".to_owned()));
+        assert_eq!(
+            map.get("private_key_file"),
+            Some(&"/tmp/rsa_key.p8".to_owned())
+        );
+        assert_eq!(map.get("private_key_file_pwd"), Some(&"dummy".to_owned()));
+    }
+
+    #[test]
+    fn test_build_jdbc_props_key_pair_object() {
+        let mut props = base_properties();
+        props.insert(
+            "auth.method".to_owned(),
+            AUTH_METHOD_KEY_PAIR_OBJECT.to_owned(),
+        );
+        props.insert(
+            "private_key_pem".to_owned(),
+            "-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----"
+                .to_owned(),
+        );
+        let config = SnowflakeV2Config::from_btreemap(&props).unwrap();
+        let (url, connection_properties) = config.build_jdbc_connection_properties().unwrap();
+        assert_eq!(url, "jdbc:snowflake://account");
+        let map: BTreeMap<_, _> = connection_properties.into_iter().collect();
+        assert_eq!(
+            map.get("private_key_pem"),
+            Some(
+                &"-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----"
+                    .to_owned()
+            )
+        );
+        assert!(map.get("private_key_file").is_none());
+    }
 
     #[test]
     fn test_snowflake_sink_commit_coordinator() {
