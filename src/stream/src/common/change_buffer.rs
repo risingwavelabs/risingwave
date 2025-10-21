@@ -154,11 +154,16 @@ where
             Record::Update { old_row, new_row } => {
                 let old_key = key_fn(&old_row);
                 let new_key = key_fn(&new_row);
+
+                // As long as `ib` is not `Panic`, we still gracefully handle the mismatched key.
                 if old_key != new_key {
                     self.ib
                         .report("inconsistent changes: mismatched key in update");
+                    self.delete(old_key, old_row);
+                    self.insert(new_key, new_row);
+                } else {
+                    self.update(old_key, old_row, new_row);
                 }
-                self.update(old_key, old_row, new_row);
             }
         }
     }
