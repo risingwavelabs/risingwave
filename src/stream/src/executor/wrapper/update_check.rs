@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::once;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
-use risingwave_common::array::Op;
+use risingwave_common::array::stream_record::Record;
+use risingwave_common::row::RowExt;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{ExecutorInfo, Message, MessageStream};
@@ -31,18 +30,27 @@ pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
         let message = message?;
 
         if let Message::Chunk(chunk) = &message {
-            for ((op1, row1), (op2, row2)) in once(None)
-                .chain(chunk.rows().map(Some))
-                .chain(once(None))
-                .map(|r| r.unzip())
-                .tuple_windows()
-            {
-                if (op1.is_none() && op2 == Some(Op::UpdateInsert)) // the first row is U+
-                    || (op1 == Some(Op::UpdateDelete) && op2 != Some(Op::UpdateInsert))
-                {
-                    panic!(
-                        "update check failed on `{}`: expect U+ after  U-:\n first row: {:?}\nsecond row: {:?}",
-                        info.identity, row1, row2,
+            for record in chunk.records() {
+                // `chunk.records()` will check U-/U+ pairing
+                if let Record::Update { old_row, new_row } = record {
+                    let old_pk = old_row.project(&info.pk_indices);
+                    let new_pk = new_row.project(&info.pk_indices);
+                    debug_assert_eq!(
+                        old_pk,
+                        new_pk,
+                        "U- and U+ should have same stream key
+U- row: {}
+U- key: {}
+U+ row: {}
+U+ key: {}
+stream key indices: {:?}
+executor: {}",
+                        old_row.display(),
+                        old_pk.display(),
+                        new_row.display(),
+                        new_pk.display(),
+                        info.pk_indices,
+                        info.identity
                     )
                 }
             }
