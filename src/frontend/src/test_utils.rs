@@ -1281,7 +1281,26 @@ pub static PROTO_FILE_DATA: &str = r#"
     message City {
       string address = 1;
       string zipcode = 2;
-    }"#;
+    }
+    message TestRecordAddNestedColumns {
+      int32 id = 1;
+      CountryExt country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+      string name = 6;
+    }
+    message CountryExt {
+      string address = 1;
+      CityExt city = 2;
+      string zipcode = 3;
+      string name = 4;
+    }
+    message CityExt {
+      string address = 1;
+      string zipcode = 2;
+      string name = 3;
+    }
+    "#;
 
 /// Returns the file.
 /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)

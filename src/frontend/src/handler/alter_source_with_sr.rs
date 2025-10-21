@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use either::Either;
@@ -19,6 +20,7 @@ use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, max_column_id};
+use risingwave_common::types::DataType;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
@@ -70,30 +72,189 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
     })
 }
 
-/// Returns the columns in `columns_a` but not in `columns_b`.
+/// Categorized column changes between two schemas.
+#[derive(Debug)]
+pub struct ColumnChanges {
+    /// Columns that exist in the new schema but not in the old schema.
+    pub added: Vec<ColumnCatalog>,
+    /// Columns that exist in the old schema but not in the new schema.
+    pub dropped: Vec<ColumnCatalog>,
+    /// Columns that exist in both schemas but with incompatible type changes.
+    /// Each tuple is (`old_column`, `new_column`).
+    pub modified: Vec<(ColumnCatalog, ColumnCatalog)>,
+}
+
+/// Checks if `new_type` is backwards compatible with `old_type` according to Protobuf wire-format rules.
 ///
-/// Note:
-/// - The comparison is done by name and data type, without checking `ColumnId`.
-/// - Hidden columns and `INCLUDE ... AS ...` columns are ignored. Because it's only for the special handling of alter sr.
-///   For the newly resolved `columns_from_resolve_source` (created by [`bind_columns_from_source`]), it doesn't contain hidden columns (`_row_id`) and `INCLUDE ... AS ...` columns.
+/// This implements the "binary wire-safe changes" as specified in the Protobuf Language Guide:
+/// <https://protobuf.dev/programming-guides/proto3/#updating>
+///
+/// Key compatibility rules:
+/// - For struct types: new struct can have additional optional fields, but all fields from
+///   the old struct must be present with compatible types
+/// - For simple types: must match exactly
+/// - For list/map types: element types must be recursively compatible
+///
+/// Returns `Ok(())` if compatible, `Err(reason)` if incompatible.
+fn is_backwards_compatible(
+    old_type: &DataType,
+    new_type: &DataType,
+) -> std::result::Result<(), String> {
+    use DataType::*;
+
+    match (old_type, new_type) {
+        // Exact matches for simple types
+        (Boolean, Boolean)
+        | (Int16, Int16)
+        | (Int32, Int32)
+        | (Int64, Int64)
+        | (Float32, Float32)
+        | (Float64, Float64)
+        | (Decimal, Decimal)
+        | (Date, Date)
+        | (Varchar, Varchar)
+        | (Time, Time)
+        | (Timestamp, Timestamp)
+        | (Timestamptz, Timestamptz)
+        | (Interval, Interval)
+        | (Bytea, Bytea)
+        | (Jsonb, Jsonb)
+        | (Serial, Serial)
+        | (Int256, Int256) => Ok(()),
+
+        // Struct type compatibility: new struct can have additional fields
+        (Struct(old_struct), Struct(new_struct)) => {
+            // Build a map of field names to types for efficient lookup
+            let new_fields: HashMap<&str, &DataType> = new_struct.iter().collect();
+
+            // Check that all old fields exist in the new struct with compatible types
+            for (old_field_name, old_field_type) in old_struct.iter() {
+                match new_fields.get(old_field_name) {
+                    Some(new_field_type) => {
+                        // Recursively check field type compatibility
+                        if let Err(reason) = is_backwards_compatible(old_field_type, new_field_type)
+                        {
+                            return Err(format!(
+                                "field '{}' has incompatible type change: {}",
+                                old_field_name, reason
+                            ));
+                        }
+                    }
+                    None => {
+                        return Err(format!(
+                            "field '{}' was removed (type was {})",
+                            old_field_name, old_field_type
+                        ));
+                    }
+                }
+            }
+
+            // Adding new fields is allowed (they are optional in Protobuf)
+            Ok(())
+        }
+
+        // List type compatibility: element types must be compatible
+        (List(old_inner), List(new_inner)) => {
+            is_backwards_compatible(old_inner.elem(), new_inner.elem())
+                .map_err(|reason| format!("list element type incompatible: {}", reason))
+        }
+
+        // Map type compatibility: key and value types must be compatible
+        (Map(old_map), Map(new_map)) => {
+            // Check key type compatibility
+            is_backwards_compatible(old_map.key(), new_map.key())
+                .map_err(|reason| format!("map key type incompatible: {}", reason))?;
+
+            // Check value type compatibility
+            is_backwards_compatible(old_map.value(), new_map.value())
+                .map_err(|reason| format!("map value type incompatible: {}", reason))
+        }
+
+        // Type category mismatch
+        _ => Err(format!(
+            "incompatible type change from {} to {}",
+            old_type, new_type
+        )),
+    }
+}
+
+/// Categorizes column changes between old and new schemas.
+///
+/// This function distinguishes between:
+/// - Added columns: present in new schema but not in old
+/// - Dropped columns: present in old schema but not in new
+/// - Modified columns: present in both but with incompatible type changes
+///
+/// Columns with compatible type changes (e.g., adding optional fields to structs)
+/// are not considered modified.
+///
+/// Notes:
+/// - Hidden columns, `INCLUDE ... AS ...` columns, and generated columns are ignored.
+///   For the newly resolved `columns_from_resolve_source` (created by [`bind_columns_from_source`]),
+///   it doesn't contain hidden columns (`_row_id`) and `INCLUDE ... AS ...` columns.
 ///   This is fragile and we should really refactor it later.
-/// - Generated columns are ignored when calculating dropped columns, because they are defined in SQL and should be preserved during schema refresh.
-/// - Column with the same name but different data type is considered as a different column, i.e., altering the data type of a column
-///   will be treated as dropping the old column and adding a new column. Note that we don't reject here like we do in `ALTER TABLE REFRESH SCHEMA`,
-///   because there's no data persistence (thus compatibility concern) in the source case.
-fn columns_minus(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Vec<ColumnCatalog> {
-    columns_a
+/// - The comparison is done by name and data type compatibility, without checking `ColumnId`.
+fn categorize_column_changes(
+    old_columns: &[ColumnCatalog],
+    new_columns: &[ColumnCatalog],
+) -> ColumnChanges {
+    // Filter out columns we should ignore
+    let old_relevant: Vec<_> = old_columns
         .iter()
-        .filter(|col_a| {
-            !col_a.is_hidden()
-                && !col_a.is_connector_additional_column()
-                && !col_a.is_generated()
-                && !columns_b.iter().any(|col_b| {
-                    col_a.name() == col_b.name() && col_a.data_type() == col_b.data_type()
-                })
+        .filter(|col| {
+            !col.is_hidden() && !col.is_connector_additional_column() && !col.is_generated()
         })
-        .cloned()
-        .collect()
+        .collect();
+
+    let new_relevant: Vec<_> = new_columns
+        .iter()
+        .filter(|col| {
+            !col.is_hidden() && !col.is_connector_additional_column() && !col.is_generated()
+        })
+        .collect();
+
+    // Build maps for efficient lookup
+    let old_by_name: HashMap<&str, &ColumnCatalog> =
+        old_relevant.iter().map(|col| (col.name(), *col)).collect();
+    let new_by_name: HashMap<&str, &ColumnCatalog> =
+        new_relevant.iter().map(|col| (col.name(), *col)).collect();
+
+    let mut added = Vec::new();
+    let mut dropped = Vec::new();
+    let mut modified = Vec::new();
+
+    // Find added and modified columns
+    for new_col in &new_relevant {
+        match old_by_name.get(new_col.name()) {
+            Some(old_col) => {
+                // Column exists in both schemas, check compatibility
+                if let Err(_reason) =
+                    is_backwards_compatible(old_col.data_type(), new_col.data_type())
+                {
+                    // Incompatible change
+                    modified.push(((*old_col).clone(), (*new_col).clone()));
+                }
+                // If compatible, no action needed (includes exact matches and compatible evolutions)
+            }
+            None => {
+                // Column only exists in new schema
+                added.push((*new_col).clone());
+            }
+        }
+    }
+
+    // Find dropped columns
+    for old_col in &old_relevant {
+        if !new_by_name.contains_key(old_col.name()) {
+            dropped.push((*old_col).clone());
+        }
+    }
+
+    ColumnChanges {
+        added,
+        dropped,
+        modified,
+    }
 }
 
 /// Fetch the source catalog.
@@ -149,12 +310,17 @@ pub fn check_format_encode(
     Ok(())
 }
 
-/// Refresh the source registry and get the added/dropped columns.
+/// Refresh the source registry and get the categorized column changes.
+///
+/// Returns:
+/// - `StreamSourceInfo`: The new source info from the schema registry
+/// - `ColumnChanges`: Categorized changes (added, dropped, modified)
+/// - `Vec<ColumnCatalog>`: The complete resolved columns from the schema registry
 pub async fn refresh_sr_and_get_columns_diff(
     original_source: &SourceCatalog,
     format_encode: &FormatEncodeOptions,
     session: &Arc<SessionImpl>,
-) -> Result<(StreamSourceInfo, Vec<ColumnCatalog>, Vec<ColumnCatalog>)> {
+) -> Result<(StreamSourceInfo, ColumnChanges, Vec<ColumnCatalog>)> {
     let mut with_properties = original_source.with_properties.clone();
     validate_compatibility(format_encode, &mut with_properties)?;
 
@@ -174,22 +340,26 @@ pub async fn refresh_sr_and_get_columns_diff(
         unreachable!("source without schema registry is rejected")
     };
 
-    let mut added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
-    // The newly resolved columns' column IDs also starts from 1. They cannot be used directly.
+    let mut changes =
+        categorize_column_changes(&original_source.columns, &columns_from_resolve_source);
+
+    // The newly resolved columns' column IDs also start from 1. They cannot be used directly.
+    // Assign proper column IDs to added columns.
     let mut next_col_id = max_column_id(&original_source.columns).next();
-    for col in &mut added_columns {
+    for col in &mut changes.added {
         col.column_desc.column_id = next_col_id;
         next_col_id = next_col_id.next();
     }
-    let dropped_columns = columns_minus(&original_source.columns, &columns_from_resolve_source);
+
     tracing::debug!(
-        ?added_columns,
-        ?dropped_columns,
+        added_columns = ?changes.added,
+        dropped_columns = ?changes.dropped,
+        modified_columns = ?changes.modified,
         ?columns_from_resolve_source,
         original_source = ?original_source.columns
     );
 
-    Ok((source_info, added_columns, dropped_columns))
+    Ok((source_info, changes, columns_from_resolve_source))
 }
 
 fn get_format_encode_from_source(source: &SourceCatalog) -> Result<FormatEncodeOptions> {
@@ -239,21 +409,60 @@ pub async fn handle_alter_source_with_sr(
         .into());
     }
 
-    let (source_info, added_columns, dropped_columns) =
+    let (source_info, changes, columns_from_resolve_source) =
         refresh_sr_and_get_columns_diff(&source, &format_encode, &session).await?;
 
-    if !dropped_columns.is_empty() {
+    // Check for incompatible changes and provide detailed error messages
+    // Note: changes.modified only contains INCOMPATIBLE changes because
+    // categorize_column_changes filters out compatible ones
+    if !changes.modified.is_empty() {
+        let modified_details = changes
+            .modified
+            .iter()
+            .map(|(old_col, new_col)| {
+                let reason =
+                    is_backwards_compatible(old_col.data_type(), new_col.data_type()).unwrap_err();
+                format!("column '{}': {}", old_col.name(), reason)
+            })
+            .join("; ");
+
+        bail_not_implemented!(
+            "this altering statement contains incompatible type changes, which are not supported: {}",
+            modified_details
+        );
+    }
+
+    if !changes.dropped.is_empty() {
         bail_not_implemented!(
             "this altering statement will drop columns, which is not supported yet: {}",
-            dropped_columns
+            changes
+                .dropped
                 .iter()
-                .map(|col| format!("({}: {})", col.name(), col.data_type()))
+                .map(|col| format!("'{}'", col.name()))
                 .join(", ")
         );
     }
 
     source.info = source_info;
-    source.columns.extend(added_columns);
+
+    // Add new columns to the source
+    source.columns.extend(changes.added);
+
+    // Update existing columns that have compatible type changes (e.g., nested struct evolution).
+    // The columns_from_resolve_source contains the complete new schema from the schema registry.
+    // We update existing columns with evolved types while preserving their column IDs.
+    for resolved_col in columns_from_resolve_source {
+        if let Some(existing_col) = source
+            .columns
+            .iter_mut()
+            .find(|c| c.name() == resolved_col.name())
+        {
+            // Preserve the column ID but update the type
+            let col_id = existing_col.column_desc.column_id;
+            existing_col.column_desc = resolved_col.column_desc;
+            existing_col.column_desc.column_id = col_id;
+        }
+    }
     source.definition = alter_definition_format_encode(
         source.create_sql_ast_purified()?,
         format_encode.row_options.clone(),
@@ -381,6 +590,8 @@ pub mod tests {
                 .contains("the original definition is FORMAT Plain ENCODE Protobuf")
         );
 
+        // Test incompatible type changes - TestRecordAlterType changes id from int32 to string
+        // and zipcode from int64 to int32, which should be rejected with clear error messages
         let sql = format!(
             r#"ALTER SOURCE src FORMAT PLAIN ENCODE PROTOBUF (
                 message = '.test.TestRecordAlterType',
@@ -389,8 +600,17 @@ pub mod tests {
             proto_file.path().to_str().unwrap()
         );
         let res_str = frontend.run_sql(sql).await.unwrap_err().to_string();
-        assert!(res_str.contains("id: integer"));
-        assert!(res_str.contains("zipcode: bigint"));
+        // Should now have clear error messages about incompatible type changes
+        assert!(
+            res_str.contains("incompatible type changes"),
+            "Error message should mention incompatible type changes, got: {}",
+            res_str
+        );
+        assert!(
+            res_str.contains("column 'id'") || res_str.contains("column 'zipcode'"),
+            "Error message should mention the modified columns, got: {}",
+            res_str
+        );
 
         let sql = format!(
             r#"ALTER SOURCE src FORMAT PLAIN ENCODE PROTOBUF (
@@ -411,5 +631,304 @@ pub mod tests {
         assert_eq!(name_column.column_desc.data_type, DataType::Varchar);
 
         expect_test::expect!["CREATE SOURCE src (id INT, country STRUCT<address CHARACTER VARYING, city STRUCT<address CHARACTER VARYING, zipcode CHARACTER VARYING>, zipcode CHARACTER VARYING>, zipcode BIGINT, rate REAL, name CHARACTER VARYING) WITH (connector = 'kafka', topic = 'test-topic', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecordExt', schema.location = 'file://')"].assert_eq(&altered_source.create_sql_purified().replace(proto_file.path().to_str().unwrap(), ""));
+
+        // Test that adding fields to nested structs is properly handled as a compatible change
+        // TestRecordAddNestedColumns uses CountryExt and CityExt which have additional 'name' fields
+        // compared to the original Country and City types. This should be accepted as a
+        // compatible schema evolution since we're only adding optional fields to nested structs.
+        let sql = format!(
+            r#"ALTER SOURCE src FORMAT PLAIN ENCODE PROTOBUF (
+                message = '.test.TestRecordAddNestedColumns',
+                schema.location = 'file://{}'
+            )"#,
+            proto_file.path().to_str().unwrap()
+        );
+
+        // This should succeed because adding fields to nested structs (Country -> CountryExt,
+        // City -> CityExt) is a compatible change according to Protobuf rules
+        frontend.run_sql(sql).await.unwrap();
+
+        let altered_source_nested = get_source();
+
+        // Verify the country column is now a struct with the additional nested fields
+        let country_column = altered_source_nested
+            .columns
+            .iter()
+            .find(|col| col.column_desc.name == "country")
+            .unwrap();
+
+        // It should still be a struct type, but now with the extended nested structure
+        if let DataType::Struct(country_struct) = &country_column.column_desc.data_type {
+            // Country/CountryExt should have: address, city, zipcode, and now 'name'
+            let field_names: Vec<&str> = country_struct.iter().map(|(name, _)| name).collect();
+            assert!(
+                field_names.contains(&"name"),
+                "CountryExt should have 'name' field, got fields: {:?}",
+                field_names
+            );
+
+            // Check that the nested City has also been extended to CityExt with 'name' field
+            let city_field = country_struct.iter().find(|(name, _)| name == &"city");
+            if let Some((_, DataType::Struct(city_struct))) = city_field {
+                let city_field_names: Vec<&str> =
+                    city_struct.iter().map(|(name, _)| name).collect();
+                assert!(
+                    city_field_names.contains(&"name"),
+                    "CityExt should have 'name' field, got fields: {:?}",
+                    city_field_names
+                );
+            } else {
+                panic!("city field should be a struct type");
+            }
+        } else {
+            panic!("country should be a struct type");
+        }
+    }
+
+    #[test]
+    fn test_protobuf_compatibility_simple_types() {
+        use risingwave_common::types::DataType;
+
+        use super::is_backwards_compatible;
+
+        // Exact matches should be compatible
+        assert!(is_backwards_compatible(&DataType::Int32, &DataType::Int32).is_ok());
+        assert!(is_backwards_compatible(&DataType::Varchar, &DataType::Varchar).is_ok());
+        assert!(is_backwards_compatible(&DataType::Boolean, &DataType::Boolean).is_ok());
+
+        // Type changes should be incompatible
+        assert!(is_backwards_compatible(&DataType::Int32, &DataType::Int64).is_err());
+        assert!(is_backwards_compatible(&DataType::Int32, &DataType::Varchar).is_err());
+        assert!(is_backwards_compatible(&DataType::Varchar, &DataType::Int32).is_err());
+    }
+
+    #[test]
+    fn test_protobuf_compatibility_struct_adding_fields() {
+        use risingwave_common::types::{DataType, StructType};
+
+        use super::is_backwards_compatible;
+
+        // Old struct: {a: int32, b: varchar}
+        let old_struct = DataType::Struct(StructType::new([
+            ("a", DataType::Int32),
+            ("b", DataType::Varchar),
+        ]));
+
+        // New struct: {a: int32, b: varchar, c: int64} - adding field c
+        let new_struct_with_extra = DataType::Struct(StructType::new([
+            ("a", DataType::Int32),
+            ("b", DataType::Varchar),
+            ("c", DataType::Int64),
+        ]));
+
+        // Adding fields should be compatible (Protobuf allows this)
+        assert!(
+            is_backwards_compatible(&old_struct, &new_struct_with_extra).is_ok(),
+            "Adding optional fields to struct should be compatible"
+        );
+    }
+
+    #[test]
+    fn test_protobuf_compatibility_struct_removing_fields() {
+        use risingwave_common::types::{DataType, StructType};
+
+        use super::is_backwards_compatible;
+
+        // Old struct: {a: int32, b: varchar, c: int64}
+        let old_struct = DataType::Struct(StructType::new([
+            ("a", DataType::Int32),
+            ("b", DataType::Varchar),
+            ("c", DataType::Int64),
+        ]));
+
+        // New struct: {a: int32, b: varchar} - removed field c
+        let new_struct_missing = DataType::Struct(StructType::new([
+            ("a", DataType::Int32),
+            ("b", DataType::Varchar),
+        ]));
+
+        // Removing fields should be incompatible
+        let result = is_backwards_compatible(&old_struct, &new_struct_missing);
+        assert!(result.is_err(), "Removing fields should be incompatible");
+        assert!(
+            result.unwrap_err().contains("field 'c' was removed"),
+            "Error should mention the removed field"
+        );
+    }
+
+    #[test]
+    fn test_protobuf_compatibility_struct_changing_field_type() {
+        use risingwave_common::types::{DataType, StructType};
+
+        use super::is_backwards_compatible;
+
+        // Old struct: {a: int32, b: varchar}
+        let old_struct = DataType::Struct(StructType::new([
+            ("a", DataType::Int32),
+            ("b", DataType::Varchar),
+        ]));
+
+        // New struct: {a: int64, b: varchar} - changed field a type
+        let new_struct_changed = DataType::Struct(StructType::new([
+            ("a", DataType::Int64),
+            ("b", DataType::Varchar),
+        ]));
+
+        // Changing field types should be incompatible
+        let result = is_backwards_compatible(&old_struct, &new_struct_changed);
+        assert!(
+            result.is_err(),
+            "Changing field types should be incompatible"
+        );
+        assert!(
+            result.unwrap_err().contains("field 'a'"),
+            "Error should mention the changed field"
+        );
+    }
+
+    #[test]
+    fn test_protobuf_compatibility_nested_struct_adding_fields() {
+        use risingwave_common::types::{DataType, StructType};
+
+        use super::is_backwards_compatible;
+
+        // Old struct: {outer: {inner: int32}}
+        let old_inner = DataType::Struct(StructType::new([("inner", DataType::Int32)]));
+        let old_struct = DataType::Struct(StructType::new([("outer", old_inner)]));
+
+        // New struct: {outer: {inner: int32, extra: varchar}} - added field to nested struct
+        let new_inner = DataType::Struct(StructType::new([
+            ("inner", DataType::Int32),
+            ("extra", DataType::Varchar),
+        ]));
+        let new_struct = DataType::Struct(StructType::new([("outer", new_inner)]));
+
+        // Adding fields to nested structs should be compatible
+        assert!(
+            is_backwards_compatible(&old_struct, &new_struct).is_ok(),
+            "Adding fields to nested structs should be compatible"
+        );
+    }
+
+    #[test]
+    fn test_protobuf_compatibility_list_types() {
+        use risingwave_common::types::{DataType, ListType};
+
+        use super::is_backwards_compatible;
+
+        // Same list types should be compatible
+        let old_list = DataType::List(ListType::new(DataType::Int32));
+        let new_list = DataType::List(ListType::new(DataType::Int32));
+        assert!(is_backwards_compatible(&old_list, &new_list).is_ok());
+
+        // Different list element types should be incompatible
+        let old_list_int = DataType::List(ListType::new(DataType::Int32));
+        let new_list_varchar = DataType::List(ListType::new(DataType::Varchar));
+        assert!(is_backwards_compatible(&old_list_int, &new_list_varchar).is_err());
+    }
+
+    #[test]
+    fn test_protobuf_compatibility_list_of_structs_adding_fields() {
+        use risingwave_common::types::{DataType, ListType, StructType};
+
+        use super::is_backwards_compatible;
+
+        // List of structs where struct gains a field
+        let old_struct = DataType::Struct(StructType::new([("a", DataType::Int32)]));
+        let old_list = DataType::List(ListType::new(old_struct));
+
+        let new_struct = DataType::Struct(StructType::new([
+            ("a", DataType::Int32),
+            ("b", DataType::Varchar),
+        ]));
+        let new_list = DataType::List(ListType::new(new_struct));
+
+        // Adding fields to struct elements in list should be compatible
+        assert!(
+            is_backwards_compatible(&old_list, &new_list).is_ok(),
+            "Adding fields to struct elements in list should be compatible"
+        );
+    }
+
+    #[test]
+    fn test_categorize_column_changes() {
+        use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+        use risingwave_common::types::{DataType, StructType};
+
+        use super::categorize_column_changes;
+
+        // Old columns: a (int32), b (varchar), c (struct{x: int32})
+        let old_cols = vec![
+            ColumnCatalog::visible(ColumnDesc::named("a", ColumnId::new(1), DataType::Int32)),
+            ColumnCatalog::visible(ColumnDesc::named("b", ColumnId::new(2), DataType::Varchar)),
+            ColumnCatalog::visible(ColumnDesc::named(
+                "c",
+                ColumnId::new(3),
+                DataType::Struct(StructType::new([("x", DataType::Int32)])),
+            )),
+        ];
+
+        // New columns: a (int32), b (int64), c (struct{x: int32, y: varchar}), d (int64)
+        // - a: unchanged
+        // - b: type changed (incompatible) - varchar to int64
+        // - c: struct gained field (compatible)
+        // - d: new column
+        let new_cols = vec![
+            ColumnCatalog::visible(ColumnDesc::named("a", ColumnId::new(1), DataType::Int32)),
+            ColumnCatalog::visible(ColumnDesc::named("b", ColumnId::new(2), DataType::Int64)),
+            ColumnCatalog::visible(ColumnDesc::named(
+                "c",
+                ColumnId::new(3),
+                DataType::Struct(StructType::new([
+                    ("x", DataType::Int32),
+                    ("y", DataType::Varchar),
+                ])),
+            )),
+            ColumnCatalog::visible(ColumnDesc::named("d", ColumnId::new(4), DataType::Int64)),
+        ];
+
+        let changes = categorize_column_changes(&old_cols, &new_cols);
+
+        // Should have 1 added column (d)
+        assert_eq!(changes.added.len(), 1);
+        assert_eq!(changes.added[0].name(), "d");
+
+        // Should have 0 dropped columns
+        assert_eq!(changes.dropped.len(), 0);
+
+        // Should have 1 modified column (b - type changed incompatibly)
+        assert_eq!(changes.modified.len(), 1);
+        assert_eq!(changes.modified[0].0.name(), "b");
+
+        // Column c should not be in modified (struct field addition is compatible)
+        assert!(!changes.modified.iter().any(|(old, _)| old.name() == "c"));
+    }
+
+    #[test]
+    fn test_categorize_column_changes_with_dropped() {
+        use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+        use risingwave_common::types::DataType;
+
+        use super::categorize_column_changes;
+
+        // Old columns: a, b, c
+        let old_cols = vec![
+            ColumnCatalog::visible(ColumnDesc::named("a", ColumnId::new(1), DataType::Int32)),
+            ColumnCatalog::visible(ColumnDesc::named("b", ColumnId::new(2), DataType::Varchar)),
+            ColumnCatalog::visible(ColumnDesc::named("c", ColumnId::new(3), DataType::Int64)),
+        ];
+
+        // New columns: a, c - dropped b
+        let new_cols = vec![
+            ColumnCatalog::visible(ColumnDesc::named("a", ColumnId::new(1), DataType::Int32)),
+            ColumnCatalog::visible(ColumnDesc::named("c", ColumnId::new(3), DataType::Int64)),
+        ];
+
+        let changes = categorize_column_changes(&old_cols, &new_cols);
+
+        assert_eq!(changes.added.len(), 0);
+        assert_eq!(changes.dropped.len(), 1);
+        assert_eq!(changes.dropped[0].name(), "b");
+        assert_eq!(changes.modified.len(), 0);
     }
 }
