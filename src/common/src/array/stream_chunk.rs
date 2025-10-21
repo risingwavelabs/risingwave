@@ -526,8 +526,9 @@ impl Default for OpRowMutRef<'_> {
         static mut DUMMY_CHUNK_MUT: LazyLock<StreamChunkMut> =
             LazyLock::new(|| StreamChunk::default().into());
 
+        #[allow(clippy::deref_addrof)] // false positive
         OpRowMutRef {
-            c: unsafe { &mut *&raw mut DUMMY_CHUNK_MUT },
+            c: unsafe { &mut *(&raw mut DUMMY_CHUNK_MUT) },
             i: 0,
         }
     }
