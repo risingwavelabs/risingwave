@@ -32,14 +32,9 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array,
     JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
-
-    TableId, UserId, WorkerId, actor, connection, database, fragment, fragment_relation, function,
-    index, object, object_dependency, schema, secret, sink, source, streaming_job, subscription,
-    table, user, user_default_privilege, user_privilege, view,
-
-    VnodeBitmap,
-
-
+    TableId, UserId, VnodeBitmap, WorkerId, connection, database, fragment, fragment_relation,
+    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
+    subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -50,7 +45,9 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::expr::{PbExprNode, expr_node};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
-use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
+use risingwave_pb::meta::{
+    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
+};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
@@ -1440,25 +1437,6 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
         fragment_id: fragment.fragment_id,
         mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
     }
-}
-
-/// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
-pub async fn get_fragment_actor_ids<C>(
-    db: &C,
-    fragment_ids: Vec<FragmentId>,
-) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
-where
-    C: ConnectionTrait,
-{
-    let fragment_actors: Vec<(FragmentId, ActorId)> = Actor::find()
-        .select_only()
-        .columns([actor::Column::FragmentId, actor::Column::ActorId])
-        .filter(actor::Column::FragmentId.is_in(fragment_ids))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    Ok(fragment_actors.into_iter().into_group_map())
 }
 
 pub fn rebuild_fragment_mapping_from_actors(
