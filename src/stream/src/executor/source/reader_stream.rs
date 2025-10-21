@@ -73,11 +73,36 @@ impl StreamReaderBuilder {
 
             // spawn a task to handle schema change event from source parser
             let _join_handle = tokio::task::spawn(async move {
-                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
+                while let Some((mut schema_change, finish_tx)) = schema_change_rx.recv().await {
                     let table_ids = schema_change.table_ids();
                     tracing::info!(
                         target: "auto_schema_change",
                         "recv a schema change event for tables: {:?}", table_ids);
+
+                    // Filter out schema changes for tables that are not managed in RW
+                    // Only keep table changes that exist in table_policies mapping
+                    schema_change.table_changes.retain(|tc| {
+                        let exists = table_policies.contains_key(tc.cdc_table_id.as_str());
+                        if !exists {
+                            tracing::info!(
+                                target: "auto_schema_change",
+                                cdc_table_id = %tc.cdc_table_id,
+                                "Skipping schema change for table not managed in RisingWave (not in table_policies)"
+                            );
+                        }
+                        exists
+                    });
+
+                    // If all table changes were filtered out, skip sending to meta
+                    if schema_change.is_empty() {
+                        tracing::info!(
+                            target: "auto_schema_change",
+                            "All schema changes filtered out, skipping meta call"
+                        );
+                        finish_tx.send(()).unwrap();
+                        continue;
+                    }
+
                     // TODO: retry on rpc error
                     if let Some(ref meta_client) = meta_client {
                         match meta_client
@@ -110,9 +135,7 @@ impl StreamReaderBuilder {
                                 let policy = table_policies
                                     .get(cdc_table_id)
                                     .cloned()
-                                    .unwrap_or_else(|| {
-                                        source_level_policy.clone()
-                                    });
+                                    .unwrap_or_else(|| source_level_policy.clone());
 
                                 match policy {
                                     risingwave_connector::source::cdc::SchemaChangeFailurePolicy::Block => {

@@ -328,8 +328,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                         if let SourceMeta::DebeziumCdc(cdc_meta) = &msg.meta
                             && matches!(cdc_meta.msg_type, CdcMessageType::SchemaChange)
                             && let Some(AccessError::CdcAutoSchemaChangeError {
-                                table_name,
-                                ..
+                                table_name, ..
                             }) = error.0.downcast_ref::<AccessError>()
                         {
                             // This is a CDC auto schema change error, check policy

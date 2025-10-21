@@ -2145,12 +2145,16 @@ impl DdlController {
         let expr_context = stream_ctx.to_expr_context();
 
         // check if performing drop table connector
+        // Note: CDC tables should not trigger drop table connector logic even during replace
         let mut drop_table_associated_source_id = None;
-        if let StreamingJob::Table(None, _, _) = &stream_job {
-            drop_table_associated_source_id = self
-                .metadata_manager
-                .get_table_associated_source_id(id as _)
-                .await?;
+        if let StreamingJob::Table(None, table, _) = &stream_job {
+            // Skip CDC tables: they have associated_source_id but should not drop connector during replace
+            if table.cdc_table_id.is_none() {
+                drop_table_associated_source_id = self
+                    .metadata_manager
+                    .get_table_associated_source_id(id as _)
+                    .await?;
+            }
         }
 
         let old_fragments = self

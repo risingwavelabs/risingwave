@@ -224,7 +224,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 } else {
                     let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
 
-
                     // Parse CDC table schema change policies from source properties
                     let cdc_table_schema_change_policies = source
                         .with_properties
