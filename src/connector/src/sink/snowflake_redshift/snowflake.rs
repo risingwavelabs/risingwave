@@ -1187,7 +1187,7 @@ mod tests {
         let map: BTreeMap<_, _> = connection_properties.into_iter().collect();
         assert_eq!(map.get("user"), Some(&"RW_USER".to_owned()));
         assert_eq!(map.get("password"), Some(&"secret".to_owned()));
-        assert!(map.get("authenticator").is_none());
+        assert!(!map.contains_key("authenticator"));
     }
 
     #[test]
@@ -1238,7 +1238,7 @@ mod tests {
                     .to_owned()
             )
         );
-        assert!(map.get("private_key_file").is_none());
+        assert!(!map.contains_key("private_key_file"));
     }
 
     #[test]
