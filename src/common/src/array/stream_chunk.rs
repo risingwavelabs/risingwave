@@ -533,6 +533,13 @@ impl Default for OpRowMutRef<'_> {
     }
 }
 
+impl PartialEq for OpRowMutRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.row_ref() == other.row_ref()
+    }
+}
+impl Eq for OpRowMutRef<'_> {}
+
 impl<'a> OpRowMutRef<'a> {
     pub fn index(&self) -> usize {
         self.i

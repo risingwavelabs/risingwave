@@ -55,8 +55,8 @@ mod private {
     pub trait Key: Eq + std::hash::Hash {}
     impl<K> Key for K where K: Eq + std::hash::Hash {}
 
-    pub trait Row: Default {}
-    impl<R> Row for R where R: Default {}
+    pub trait Row: Eq + Default {}
+    impl<R> Row for R where R: Eq + Default {}
 }
 
 /// A buffer that accumulates changes and produce compacted changes.
@@ -175,6 +175,17 @@ where
             Op::Delete | Op::UpdateDelete => self.delete(key, row),
         }
     }
+
+    /// Consume the buffer and produce a list of change records.
+    ///
+    /// No-op updates are filtered out.
+    pub fn into_records(self) -> impl Iterator<Item = Record<R>> {
+        self.buffer.into_values().filter(|record| match record {
+            Record::Insert { .. } => true,
+            Record::Delete { .. } => true,
+            Record::Update { old_row, new_row } => old_row != new_row,
+        })
+    }
 }
 
 impl<K, R> ChangeBuffer<K, R> {
@@ -206,19 +217,18 @@ impl<K, R> ChangeBuffer<K, R> {
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()
     }
-
-    /// Consume the buffer and produce a list of change records.
-    pub fn into_records(self) -> impl ExactSizeIterator<Item = Record<R>> {
-        self.buffer.into_values()
-    }
 }
 
-impl<K, R: Row> ChangeBuffer<K, R> {
+impl<K, R> ChangeBuffer<K, R>
+where
+    K: private::Key,
+    R: private::Row + Row,
+{
     /// Consume the buffer and produce a single compacted chunk.
     pub fn into_chunk(self, data_types: Vec<DataType>) -> Option<StreamChunk> {
         let mut builder = StreamChunkBuilder::unlimited(data_types, Some(self.buffer.len()));
         for record in self.into_records() {
-            let none = builder.append_record_eliminate_noop_update(record);
+            let none = builder.append_record(record);
             debug_assert!(none.is_none());
         }
         builder.take()
@@ -229,7 +239,7 @@ impl<K, R: Row> ChangeBuffer<K, R> {
         let mut res = Vec::new();
         let mut builder = StreamChunkBuilder::new(chunk_size, data_types);
         for record in self.into_records() {
-            if let Some(chunk) = builder.append_record_eliminate_noop_update(record) {
+            if let Some(chunk) = builder.append_record(record) {
                 res.push(chunk);
             }
         }
