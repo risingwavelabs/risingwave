@@ -121,6 +121,34 @@ SELECT pgp_sym_decrypt(pgp_sym_encrypt('bzip2 compression'::bytea, 'secret', 'co
 statement error
 SELECT pgp_sym_encrypt('data'::bytea, 'password', 'compress-algo=invalid');
 
+# Test pgp_sym_encrypt with armor=true
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('armored data'::bytea, 'secret', 'armor=true'), 'secret');
+----
+\x61726d6f7265642064617461
+
+# Test pgp_sym_encrypt with armor=false
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('unarmored data'::bytea, 'secret', 'armor=false'), 'secret');
+----
+\x756e61726d6f7265642064617461
+
+# Test pgp_sym_encrypt with armor=1 (should work like armor=true)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('armor test'::bytea, 'secret', 'armor=1'), 'secret');
+----
+\x61726d6f722074657374
+
+# Test pgp_sym_encrypt with armor=0 (should work like armor=false)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('no armor test'::bytea, 'secret', 'armor=0'), 'secret');
+----
+\x6e6f2061726d6f722074657374
+
+# Test pgp_sym_encrypt with invalid armor value should fail
+statement error
+SELECT pgp_sym_encrypt('data'::bytea, 'password', 'armor=invalid');
+
 # Test pgp_sym_encrypt with invalid s2k-count should fail
 statement error
 SELECT pgp_sym_encrypt('data'::bytea, 'password', 's2k-count=100');
@@ -144,3 +172,119 @@ query T
 SELECT pgp_sym_decrypt(pgp_sym_encrypt('compatibility test'::bytea, 'password', 'cipher-algo=aes192'), 'password', 'cipher-algo=aes256');
 ----
 \x636f6d7061746962696c6974792074657374
+
+# Test pgp_sym_encrypt with empty password (should work in PostgreSQL)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('data'::bytea, '', 'cipher-algo=aes256'), '');
+----
+\x64617461
+
+# Test pgp_sym_decrypt with empty message (should work in PostgreSQL)
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt(''::bytea, 'secret'), 'secret');
+----
+\x
+
+# Test pgp_pub_encrypt with empty key should fail
+statement error
+SELECT pgp_pub_encrypt('data'::bytea, ''::bytea);
+
+# Test pgp_pub_decrypt with empty key should fail
+statement error
+SELECT pgp_pub_decrypt(pgp_sym_encrypt('data'::bytea, 'secret'), ''::bytea);
+
+# Test pgp_sym_encrypt with very long password
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('long password test'::bytea, repeat('a', 1000)), repeat('a', 1000));
+----
+\x6c6f6e672070617373776f72642074657374
+
+# Test pgp_sym_encrypt with very long data
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt(repeat('x', 10000)::bytea, 'secret'), 'secret') = repeat('x', 10000)::bytea;
+----
+t
+
+# Test pgp_sym_encrypt with special characters in password
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('special chars'::bytea, 'p@ssw0rd!#$%^&*()'), 'p@ssw0rd!#$%^&*()');
+----
+\x7370656369616c206368617273
+
+# Test pgp_sym_encrypt with unicode characters in password
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('unicode test'::bytea, 'пароль密码'), 'пароль密码');
+----
+\x756e69636f64652074657374
+
+# Test pgp_sym_encrypt with binary data containing null bytes
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('\x000102030405'::bytea, 'secret'), 'secret');
+----
+\x000102030405
+
+# Test pgp_sym_encrypt with all supported cipher algorithms
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('aes128 test'::bytea, 'secret', 'cipher-algo=aes128'), 'secret');
+----
+\x6165733132382074657374
+
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('aes192 test'::bytea, 'secret', 'cipher-algo=aes192'), 'secret');
+----
+\x6165733139322074657374
+
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('aes256 test'::bytea, 'secret', 'cipher-algo=aes256'), 'secret');
+----
+\x6165733235362074657374
+
+# Note: 3DES is not supported by current security policy
+
+# Test pgp_sym_encrypt with all supported s2k modes
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('s2k mode 0'::bytea, 'secret', 's2k-mode=0'), 'secret');
+----
+\x73326b206d6f64652030
+
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('s2k mode 1'::bytea, 'secret', 's2k-mode=1'), 'secret');
+----
+\x73326b206d6f64652031
+
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('s2k mode 3'::bytea, 'secret', 's2k-mode=3'), 'secret');
+----
+\x73326b206d6f64652033
+
+# Test pgp_sym_encrypt with all supported s2k digest algorithms
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('sha1 test'::bytea, 'secret', 's2k-digest-algo=sha1'), 'secret');
+----
+\x736861312074657374
+
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('sha256 test'::bytea, 'secret', 's2k-digest-algo=sha256'), 'secret');
+----
+\x7368613235362074657374
+
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('sha512 test'::bytea, 'secret', 's2k-digest-algo=sha512'), 'secret');
+----
+\x7368613531322074657374
+
+# Test pgp_sym_encrypt with all supported integrity algorithms
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('sha1 integrity'::bytea, 'secret', 'integrity-algo=sha1'), 'secret');
+----
+\x7368613120696e74656772697479
+
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('sha256 integrity'::bytea, 'secret', 'integrity-algo=sha256'), 'secret');
+----
+\x73686132353620696e74656772697479
+
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('sha512 integrity'::bytea, 'secret', 'integrity-algo=sha512'), 'secret');
+----
+\x73686135313220696e74656772697479

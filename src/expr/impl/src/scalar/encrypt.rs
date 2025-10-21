@@ -491,6 +491,8 @@ fn pgp_sym_encrypt_internal(
     use openpgp::crypto::Password;
     use openpgp::types::SymmetricAlgorithm;
 
+    // Note: Empty passwords are allowed in PostgreSQL pgcrypto
+
     let opts = if let Some(opts_str) = options {
         PgpOptions::parse(opts_str)?
     } else {
@@ -512,6 +514,13 @@ fn pgp_sym_encrypt_internal(
         Message::new(&mut sink)
     };
 
+    // Apply ASCII armor if specified
+    let message = if opts.armor.unwrap_or(false) {
+        Armorer::new(message).build()?
+    } else {
+        message
+    };
+
     // Encrypt with password using SKESK (Symmetric-Key Encrypted Session Key)
     let cipher_algo = opts.cipher_algo.unwrap_or(SymmetricAlgorithm::AES128);
     let message = Encryptor2::with_passwords(message, vec![Password::from(password)])
@@ -524,9 +533,6 @@ fn pgp_sym_encrypt_internal(
     message.finalize()?;
 
     let result = sink.into_boxed_slice();
-
-    // TODO: Implement ASCII armor support
-    // For now, we return the binary data as-is regardless of armor setting
     Ok(result)
 }
 
@@ -553,6 +559,8 @@ fn pgp_sym_decrypt_internal(
     options: Option<&str>,
 ) -> Result<Box<[u8]>, PgpError> {
     let policy = &StandardPolicy::new();
+
+    // Note: Empty passwords are allowed in PostgreSQL pgcrypto
 
     // Parse options for future use (currently not all options are implemented)
     let _opts = if let Some(opts_str) = options {
@@ -640,6 +648,13 @@ fn pgp_pub_encrypt_internal(
 
     let policy = &StandardPolicy::new();
 
+    // Validate inputs
+    if key.is_empty() {
+        return Err(PgpError::InvalidKey(
+            "Public key cannot be empty".to_owned(),
+        ));
+    }
+
     let opts = if let Some(opts_str) = options {
         PgpOptions::parse(opts_str)?
     } else {
@@ -647,7 +662,8 @@ fn pgp_pub_encrypt_internal(
     };
 
     // Parse the certificate (public key)
-    let cert = Cert::from_bytes(key)?;
+    let cert = Cert::from_bytes(key)
+        .map_err(|e| PgpError::InvalidKey(format!("Failed to parse public key: {}", e)))?;
 
     // Get encryption-capable keys
     let recipients = cert
@@ -681,6 +697,13 @@ fn pgp_pub_encrypt_internal(
         Message::new(&mut sink)
     };
 
+    // Apply ASCII armor if specified
+    let message = if opts.armor.unwrap_or(false) {
+        Armorer::new(message).build()?
+    } else {
+        message
+    };
+
     // Encrypt with public key
     let cipher_algo = opts.cipher_algo.unwrap_or(SymmetricAlgorithm::AES128);
     let message = Encryptor2::for_recipients(message, recipients)
@@ -693,9 +716,6 @@ fn pgp_pub_encrypt_internal(
     message.finalize()?;
 
     let result = sink.into_boxed_slice();
-
-    // TODO: Implement ASCII armor support
-    // For now, we return the binary data as-is regardless of armor setting
     Ok(result)
 }
 
