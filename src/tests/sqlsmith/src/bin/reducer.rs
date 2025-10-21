@@ -36,10 +36,6 @@ struct Args {
     /// Command to restore RW
     #[clap(long)]
     run_rw_cmd: String,
-
-    /// Reduction mode
-    #[arg(short = 'm', long, default_value = "path-based")]
-    mode: ReductionModeArg,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
