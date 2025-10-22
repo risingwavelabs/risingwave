@@ -70,7 +70,7 @@ google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
-indexmap = { version = "2.12.0", features = ["serde"] }
+indexmap = { workspace = true }
 itertools = { workspace = true }
 jni = { workspace = true }
 maplit = "1.0.2"

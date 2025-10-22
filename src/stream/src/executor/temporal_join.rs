@@ -19,7 +19,6 @@ use either::Either;
 use futures::TryStreamExt;
 use futures::stream::{self, PollNext};
 use itertools::Itertools;
-use lru::DefaultHasher;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{HashKey, NullBitmap};
@@ -107,7 +106,7 @@ struct TemporalSide<K: HashKey, S: StateStore> {
     source: BatchTable<S>,
     table_stream_key_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
-    cache: ManagedLruCache<K, JoinEntry, DefaultHasher>,
+    cache: ManagedLruCache<K, JoinEntry>,
     join_key_data_types: Vec<DataType>,
 }
 
@@ -618,11 +617,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
             "temporal join",
         );
 
-        let cache = ManagedLruCache::unbounded_with_hasher(
-            watermark_sequence,
-            metrics_info,
-            DefaultHasher::default(),
-        );
+        let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
 
         let metrics = metrics.new_temporal_join_metrics(table.table_id(), ctx.id, ctx.fragment_id);
 
